@@ -39,7 +39,8 @@
   "optionalDeps": [
     "audit",
     "sellers",
-    "customers"
+    "customers",
+    "access"
   ],
   "publicApi": [
     {
@@ -2144,7 +2145,7 @@
       "method": "POST",
       "path": "/accounts/{id}/disable",
       "summary": "Disable a staff account (offboarding)",
-      "desc": "Revokes sessions. access consumes identity.account.disabled to end role assignments and flag lead/backup gaps.",
+      "desc": "Revokes sessions and cancels the pending staff invitations the person sent. access consumes identity.account.disabled to end role assignments, cancel the approval requests the person made and flag lead/backup gaps. A Business Owner can be disabled only by another Business Owner (FORBIDDEN), and never the last active one (LAST_BUSINESS_OWNER): access.disableCheck decides.",
       "auth": "staff",
       "permission": "identity.staff-accounts.manage",
       "params": {
@@ -2158,7 +2159,9 @@
       "errors": [
         "ILLEGAL_TRANSITION",
         "SELF_ACTION_NOT_ALLOWED",
-        "STEP_UP_REQUIRED"
+        "STEP_UP_REQUIRED",
+        "FORBIDDEN",
+        "LAST_BUSINESS_OWNER"
       ],
       "audited": true,
       "events": [
@@ -2702,6 +2705,10 @@
     }
   ],
   "errorCodes": {
+    "LAST_BUSINESS_OWNER": {
+      "status": 409,
+      "meaning": "At least one active Business Owner must remain: the last one cannot be disabled (access.disableCheck)."
+    },
     "INVALID_CREDENTIALS": {
       "status": 401,
       "meaning": "Email and password don't match. details.attemptsLeft before a temporary lock of details.lockoutMinutes minutes."

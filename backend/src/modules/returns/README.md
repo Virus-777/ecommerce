@@ -727,12 +727,12 @@ Return policies (platform baseline, seller terms, category exceptions, who pays 
 
 | Field | Type |
 |---|---|
-| kind | `enum(full_refund|partial_refund|replacement|exchange|store_credit)` |
+| kind | `enum(full_refund|partial_refund|replacement|exchange|store_credit|decline)` decline: no refund after a failed inspection (empty_package, wrong_item_returned, damaged_by_customer or not_matching_request, with inspection photos); explanation required; the return closes as rejected (reasonCode failed_inspection) and the customer can ask Marketly to review it |
 | deductions | `RefundDeduction[]?` Required for partial refunds; each with a reason shown to the customer |
 | amount | `Money?` Partial amount; capped at maxRefundable |
 | explanation | `text?` |
 | exchangeVariantId | `uuid?` |
-| reauthToken | `string?` Staff only (admin remedy and revise; sellers leave it out): re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password). Needed when the refund is within the caller's refund limit and above access stepUpAbove (it is approved in the same call), otherwise STEP_UP_REQUIRED and nothing is saved |
+| reauthToken | `string?` Staff only (admin remedy; sellers and revise leave it out): re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password). Needed when the refund is within the caller's refund limit and above access stepUpAbove (it is approved in the same call), otherwise STEP_UP_REQUIRED and nothing is saved |
 
 ### ExceptionInput
 
@@ -986,6 +986,7 @@ stateDiagram-v2
   in_transit --> awaiting_remedy: waiveReturn
   received --> awaiting_remedy: inspect
   awaiting_remedy --> completed: complete
+  awaiting_remedy --> rejected: decline
   rejected --> approved: overturn
   rejected --> awaiting_remedy: overturnWithoutReturn
 ```
@@ -1423,9 +1424,9 @@ Indexes: `(return_id, at)`
 | `orders.item.delivered` | orders | Start the return window for the item (deadline = delivery + effective window) |
 | `orders.item.cancelled` | orders | Mark the item not returnable; cancel any requested return for it |
 | `shipping.shipment.dispatched` | shipping | Return label first scan → return shipment in transit; replacement shipment shipped |
-| `shipping.shipment.delivered` | shipping | Return parcel delivered to the destination; replacement delivered (completes the return) |
+| `shipping.shipment.delivered` | shipping | Return parcel delivered to the destination: the carrier scan marks the return received (inspection clock and its escalation start; a later receive call changes nothing); replacement delivered (completes the return) |
 | `shipping.shipment.exception` | shipping | Flag return or replacement shipment exceptions to the owner |
-| `payments.refund.sent` | payments | Refund request → sent; completes the return when it is the remedy |
+| `payments.refund.sent` | payments | Refund request → sent; completes the return when it is the remedy. Another open return claiming the same units (more than were bought, together with the refunded one) is cancelled with its unused label voided, or noted for the seller once on its way |
 | `payments.refund.failed` | payments | Refund request → failed with the reason; flags the return in the queue |
 | `access.approval.decided` | access | Finish an approval-required refund approval, baseline change or category exception (pending_approval → scheduled or rejected) |
 | `sellers.seller.suspended` | sellers | Open returns of the seller move to platform handling; existing returns stay accessible |

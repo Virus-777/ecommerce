@@ -273,6 +273,27 @@ describe('rule-based holds', () => {
     expect(block.reasons.join(' ')).toContain('Account suspended');
   });
 
+  it('reinstatement after a suspension clears the block, releases its hold and puts held payouts back to pending', async () => {
+    const S = newId();
+    const suspensionId = newId();
+    await credit(S, 12_000);
+    const payoutId = newId();
+    await k.svc.core.repo.insert('payouts', { id: payoutId, ref: `PO-${payoutId.slice(-4)}`, seller_id: S, run_id: newId(), amount: 3_000, currency: 'USD', status: 'pending', destination_id: newId(), requested_on: today(), released_at: null, paid_at: null, failed_at: null, failure_code: null, failure_reason: null, retry_of: null, provider_payout_id: null, bank_reference: null, statement_id: null, holds_withheld: 0, negative_offset: 0, idempotency_key: null });
+    await k.emit('sellers.seller.suspended', { sellerId: S, suspensionId, reasonCode: 'counterfeit', reason: 'Counterfeit listings', reviewDate: plusDays(30), openOrders: 'seller_keeps_fulfilling', appealDeadline: new Date(k.clock.now().getTime() + 14 * DAY).toISOString(), trustReportId: null });
+    expect(await k.svc.core.repo.get('payouts', payoutId)).toMatchObject({ status: 'on_hold', failure_reason: 'Account suspended: Counterfeit listings' });
+
+    // lifting a restriction is not the end of a suspension: nothing changes
+    await k.emit('sellers.seller.reinstated', { sellerId: S, from: 'restricted', to: 'approved', liftedRestrictionId: newId(), endedSuspensionId: null, remainingRestrictionIds: [] });
+    expect((await k.svc.hasPayoutBlock(S)).reasons).toContain('Account suspended: Counterfeit listings');
+
+    await k.emit('sellers.seller.reinstated', { sellerId: S, from: 'suspended', to: 'approved', liftedRestrictionId: null, endedSuspensionId: suspensionId, remainingRestrictionIds: [] });
+    // the test seller has no payout account; only the suspension's block is gone
+    expect((await k.svc.hasPayoutBlock(S)).reasons).toEqual(['No payout account']);
+    expect(await expectLedgerMatches(k, S)).toMatchObject({ held: 0, available: 12_000 });
+    expect(await k.svc.core.repo.get('holds', (await k.svc.core.repo.findOne('holds', { seller_id: S }))!.id)).toMatchObject({ status: 'released' });
+    expect(await k.svc.core.repo.get('payouts', payoutId)).toMatchObject({ status: 'pending', failure_reason: null });
+  });
+
   it('applies the new-seller rule: earnings become available later during the first days', async () => {
     const S = newId();
     await k.emit('sellers.seller.approved', { sellerId: S, applicationId: newId(), storeName: 'New Store', ownerAccountId: newId(), categoryIds: [], returnAddress: { name: 'New Store', line1: '1 Main St', city: 'Portland', region: 'OR', postalCode: '97204', country: 'US' }, returnContact: 'Ana', recommendedHoldDays: null });

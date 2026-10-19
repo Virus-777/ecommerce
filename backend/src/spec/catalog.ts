@@ -1309,6 +1309,10 @@ export interface CatalogPublicApi {
   searchProducts(filter: { q?: string, categoryId?: string, brandId?: string, ownerSellerId?: string, purchasableOnly?: boolean, reviewStates?: string[] }, page: common.PageInput): Promise<common.Page<ProductSummary>>;
   /** Keyset walk over all product ids (ordered by id, limit 1–1000) for index rebuilds; purchasableOnly keeps approved and active products Used by: search. */
   listProductIds(opts: { after?: string, limit: number, purchasableOnly?: boolean, updatedSince?: string }): Promise<{ ids: string[], nextAfter: string | null }>;
+  /** Whether the product's brand lets this seller (null: the Official Store) sell it: nobody sells a blocked brand, official_only is the Official Store's, authorized_list is for the sellers on the brand's list Used by: offers. */
+  brandSellerCheck(productId: string, sellerId: string | null): Promise<{ allowed: boolean, reason: string | null, brandId: string | null }>;
+  /** Ids of a brand's products (offers re-checks their offers on catalog.brand.changed) Used by: offers. */
+  productIdsOfBrand(brandId: string): Promise<string[]>;
   /** Brands by id with status (content brand tiles, advertising brand names, search). Unknown ids are left out Used by: content, advertising, search, graphql. */
   getBrands(brandIds: string[]): Promise<Brand[]>;
   /** Variants by id with product id and title, options, GTIN, shipping weight and dimensions and list price. Unknown ids are left out Used by: offers, inventory, returns, graphql. */
@@ -2117,7 +2121,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => ProductAdmin,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","BRAND_NOT_ACTIVE"],
+    errors: ["ILLEGAL_TRANSITION","BRAND_NOT_ACTIVE","SAME_REVIEWER","BRAND_NOT_AUTHORIZED"],
     audited: true,
     events: ["catalog.product.approved"],
     screens: ["admin/product-review"],
@@ -2569,7 +2573,7 @@ export const spec = defineModuleSpec({
   summary: "What a product is: categories, attributes, brands, products, variants, and the review workflow that decides whether a product may be sold. How a seller sells it (price, stock, condition) belongs to offers.",
   dependsOn: ["media"],
   optionalDeps: ["search","sellers","access","audit","offers","cart","reviews","inventory","reports","orders","returns","support","settings","workqueues"],
-  publicApi: ["getProduct","isPurchasable","snapshotForOrder","getProducts","searchProducts","listProductIds","getBrands","getVariants","getParcels","getCategoryPaths","listCategories","getCategoryBySlug","getBrandBySlug","getProductForSeller","getProductAdmin","listReviewQueue","countProductsForSellers","exportRows"],
+  publicApi: ["getProduct","isPurchasable","snapshotForOrder","getProducts","searchProducts","listProductIds","brandSellerCheck","productIdsOfBrand","getBrands","getVariants","getParcels","getCategoryPaths","listCategories","getCategoryBySlug","getBrandBySlug","getProductForSeller","getProductAdmin","listReviewQueue","countProductsForSellers","exportRows"],
   permissions: [
     {
       "key": "catalog.products.review",
@@ -2791,6 +2795,14 @@ export const spec = defineModuleSpec({
     }
   },
   errorCodes: {
+    "BRAND_NOT_AUTHORIZED": {
+      "status": 409,
+      "meaning": "The brand does not let this seller sell it (blocked, official_only or not on the authorized list): approving the submission or the offer is refused"
+    },
+    "SAME_REVIEWER": {
+      "status": 409,
+      "meaning": "The person who created, edited or submitted an Official Store product cannot approve it."
+    },
     "BRAND_NOT_ACTIVE": {
       "status": 409,
       "meaning": "The product's brand is under review or blocked; decide the brand first"

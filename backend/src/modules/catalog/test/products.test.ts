@@ -294,7 +294,11 @@ describe('Official Store products', () => {
     const sub = await a.admin('POST', `/products/${id}/submit`);
     expect(sub.statusCode, sub.body).toBe(200);
     expect(t.eventsNamed('catalog.product.submitted').map((e) => e.payload)).toContainEqual(expect.objectContaining({ productId: id, ownerSellerId: null, kind: 'new' }));
-    await a.admin('POST', `/products/${id}/approve`, {});
+    // whoever created and submitted it does not approve it
+    const own = await a.admin('POST', `/products/${id}/approve`, {});
+    expect(own.statusCode).toBe(409);
+    expect(own.json().error.code).toBe('SAME_REVIEWER');
+    await a.admin('POST', `/products/${id}/approve`, {}, auth(callers.staff())); // a second person approves
     t.events.length = 0;
     const edit = await a.admin('PATCH', `/products/${id}`, { title: 'Aurora wireless headphones, 2nd gen' });
     expect(edit.statusCode, edit.body).toBe(200);
@@ -309,5 +313,15 @@ describe('Official Store products', () => {
   it('requires the permissions the spec names', async () => {
     const noPerm = auth(callers.staff(['catalog.products.review']));
     expect((await a.admin('POST', '/products', { title: 'x' }, noPerm)).statusCode).toBe(403);
+  });
+});
+
+describe('brand rules at approval', () => {
+  it('does not approve a submission from a seller the brand does not authorize', async () => {
+    const listed = await brand(t, 'Listed Only', { sellingPolicy: 'authorized_list', authorizedSellerIds: [] });
+    const { id } = await sellerProduct(t, newId(), { brandId: listed.id, categoryId: cat.id });
+    const res = await a.admin('POST', `/products/${id}/approve`, {}, auth(callers.staff()));
+    expect(res.statusCode, res.body).toBe(409);
+    expect(res.json().error.code).toBe('BRAND_NOT_AUTHORIZED');
   });
 });

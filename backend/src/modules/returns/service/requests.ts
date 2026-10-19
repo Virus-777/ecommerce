@@ -105,11 +105,12 @@ export class Requests {
       this.core.baselineAt(placed),
       Promise.all(categories.map(async (c) => [c, await this.policies.activeException(c, placed)] as const)).then((x) => new Map(x)),
     ]);
-    const open = rows.length ? await this.core.repo.find('returns', { id: [...new Set(rows.map((r) => r.return_id))], status: ACTIVE_STATUSES }, { orderBy: [['requested_at', 'desc']] }) : [];
+    const open = rows.length ? await this.core.repo.find('returns', { id: [...new Set(rows.map((r) => r.return_id))], status: [...ACTIVE_STATUSES, 'rejected'] }, { orderBy: [['requested_at', 'desc']] }) : [];
     const now = this.core.now();
     return items.map(({ item, group }) => {
-      const ret = open.find((o) => rows.some((r) => r.return_id === o.id && r.order_item_id === item.id));
-      const openReturn = ret ? { id: ret.id, ref: ret.ref } : null;
+      const mine = open.filter((o) => rows.some((r) => r.return_id === o.id && r.order_item_id === item.id));
+      const ret = mine.find((o) => o.status !== 'rejected') ?? mine[0];
+      const openReturn = ret ? { id: ret.id, ref: ret.ref, rejected: ret.status === 'rejected' } : null;
       const verdict = itemVerdict(
         {
           orderItemId: item.id,

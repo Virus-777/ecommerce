@@ -176,7 +176,9 @@ export class ModerationPart {
     const cooldownDays = await this.core.num('reportCooldownDays');
     const fx = await this.core.prepare(new Effects());
     const now = this.core.now();
-    const hide = hideReasons.includes(input.reason);
+    // A report hides content at once only for a shopper's complaint: a seller's report (about a review of its own
+    // products or service) waits for a moderator, and content a moderator kept is not hidden again within the cooldown
+    const hide = hideReasons.includes(input.reason) && by.kind !== 'seller' && !(await this.keptSince(content.type, content.row.id, addDays(now, -cooldownDays)));
 
     const report = await this.core.repo.transaction(async (tx) => {
       let c = (await loadContent(tx, content.type, content.row.id, { forUpdate: true }))!;
@@ -245,6 +247,14 @@ export class ModerationPart {
     fx.emit('reviews.report.created', { reportId: report.id, targetType: report.target_type, targetId: report.target_id, reason: report.reason, reporterKind: report.reporter_kind });
     await this.core.flush(fx, by);
     return (await this.myReports([report]))[0]!;
+  }
+
+  /** Whether a moderator's latest decision on this content was to keep it, made since `since` */
+  private async keptSince(type: string, id: string, since: Date): Promise<boolean> {
+    const items = await this.core.repo.find('moderation_items', { content_type: type, content_id: id });
+    const decisions = (await Promise.all(items.map((i) => this.core.repo.find('moderation_decisions', { moderation_item_id: i.id })))).flat();
+    const last = decisions.sort((a, b) => b.decided_at.getTime() - a.decided_at.getTime())[0];
+    return Boolean(last && last.decision === 'keep' && last.decided_at >= since);
   }
 
   async listReports(reporter: { kind: 'customer' | 'seller'; id: string | null }, page: PageRequest): Promise<common.Page<MyReport>> {

@@ -202,7 +202,7 @@ describe('cart evaluation', () => {
   it("doesn't combine coupons with flash prices unless the coupon says so", () => {
     const flash = campaign({ kind: 'flash_sale', discount: { kind: 'flash_sale' } });
     const l = cartLine(10000, 1);
-    const opts = new Map([[l.lineId, [{ campaign: flash, flash: { dealPrice: 6000, dealStock: 10, claimed: 0, reserved: 0, purchaseLimit: 2, state: 'active' } }]]]);
+    const opts = new Map([[l.lineId, [{ campaign: flash, flash: { dealPrice: 6000, regularPrice: 10000, dealStock: 10, claimed: 0, reserved: 0, purchaseLimit: 2, state: 'active' } }]]]);
     const out = evaluate(input([l], [code(campaign(), 'TWENTY')], { priceOptions: opts }));
     expect(out.lines[0]!.unitPrice.amount).toBe(6000);
     expect(out.lines[0]!.purchaseLimit).toBe(2);
@@ -215,6 +215,18 @@ describe('cart evaluation', () => {
     expect(limited.lines[0]).toMatchObject({ regularUnitPrice: { amount: 10000 }, unitPrice: { amount: 6000 }, discountedQuantity: 2, lineDiscount: { amount: 8000 }, limitExceeded: true, purchaseLimit: 2 });
     expect(limited.holds[0]).toMatchObject({ units: 2, flash: [{ qty: 2 }] });
     expect(over.lines[0]!.discountedQuantity).toBe(3);
+  });
+
+  it('gives no flash price once the offer costs more than the regular price the deal was set with', () => {
+    const flash = campaign({ kind: 'flash_sale', discount: { kind: 'flash_sale' }, ownerKind: 'platform' });
+    const deal = { dealPrice: 5000, regularPrice: 6000, dealStock: 10, claimed: 0, reserved: 0, purchaseLimit: 2, state: 'active' };
+    const raised = cartLine(30000, 1);
+    const out = evaluate(input([raised], [], { priceOptions: new Map([[raised.lineId, [{ campaign: flash, flash: deal }]]]) }));
+    expect(out.lines[0]).toMatchObject({ unitPrice: { amount: 30000 }, lineDiscount: { amount: 0 } });
+    expect(out.totals.platform.amount).toBe(0);
+    const lowered = cartLine(5500, 1);
+    const ok = evaluate(input([lowered], [], { priceOptions: new Map([[lowered.lineId, [{ campaign: flash, flash: deal }]]]) }));
+    expect(ok.lines[0]!.unitPrice.amount).toBe(5000);
   });
 
   it('holds only what the budget allows and rejects a coupon over the remaining budget', () => {

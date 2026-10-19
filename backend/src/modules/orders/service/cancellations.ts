@@ -17,6 +17,8 @@ import { Batch, invalid, notFound, SYSTEM, type Agg, type By, type Core } from '
 import { Views } from './views.js';
 
 type Initiator = 'customer' | 'seller' | 'staff' | 'system';
+/** Support case categories that report a product problem (a returned-to-sender package then refunds its shipping too) */
+const PRODUCT_PROBLEM_CASES = ['item_damaged', 'wrong_item', 'lost_or_damaged'];
 interface Line {
   item: ItemRec;
   quantity: number;
@@ -286,6 +288,42 @@ export class Cancellations {
     return id;
   }
 
+  /**
+   * A package back with its seller (shipping returned_to_sender): its items are refunded like a cancellation after
+   * dispatch (orders.item.cancelled with beforeDispatch false). The shipping they paid is refunded too only when a
+   * product problem was reported for them: a damaged or wrong item case, or a lost_or_damaged exception on the package.
+   */
+  async returnedToSender(tx: OrdersRepository, batch: Batch, agg: Agg, group: GroupRec, items: readonly ItemRec[], shipmentId: string) {
+    if (!items.length) return;
+    const ids = new Set(items.map((i) => i.id));
+    const productProblem = agg.factRows.some(
+      (f) =>
+        (f.kind === 'case' && PRODUCT_PROBLEM_CASES.includes(f.subkind ?? '') && (f.item_ids ?? []).some((id) => ids.has(id))) ||
+        (f.kind === 'delivery_issue' && f.subkind === 'lost_or_damaged' && f.shipment_id === shipmentId),
+    );
+    const shipping = productProblem ? items.reduce((s, i) => s + i.shipping_share, 0) : null;
+    const refund = this.preview(
+      refundLines(
+        items.map((i) => ({ itemId: i.id, title: this.views.title(i), quantity: i.quantity, line: i })),
+        agg.order.currency,
+        shipping,
+      ),
+      agg,
+    );
+    if (refund.total.amount > 0) for (const i of items) await tx.update('order_items', i.id, { refund_status: 'requested' });
+    await this.afterAccepted(tx, batch, agg, group, newId(), items.map((i) => ({ itemId: i.id, quantity: i.quantity })), refund, {
+      initiatedBy: 'system',
+      reasonCode: 'returned_to_sender',
+      trustReportId: null,
+      countsAgainstSeller: false,
+      beforeDispatch: false,
+      label: 'Returned to sender',
+      sellerLabel: 'Package returned to you',
+      detail: `Package ${group.position} went back to the seller${productProblem ? '' : '; shipping is not refunded'}`,
+      reason: null,
+    });
+  }
+
   /** Item events, credit note and timeline for an accepted cancellation */
   private async afterAccepted(
     tx: OrdersRepository,
@@ -293,9 +331,9 @@ export class Cancellations {
     agg: Agg,
     group: GroupRec,
     cancellationId: string,
-    lines: readonly StoredCancellationLine[],
+    lines: readonly Pick<StoredCancellationLine, 'itemId' | 'quantity'>[],
     refund: RefundPreview,
-    o: { initiatedBy: Initiator; reasonCode: string; trustReportId: string | null; countsAgainstSeller: boolean; notifyCustomer?: boolean; label: string; detail: string; reason: string | null },
+    o: { initiatedBy: Initiator; reasonCode: string; trustReportId: string | null; countsAgainstSeller: boolean; beforeDispatch?: boolean; notifyCustomer?: boolean; label: string; sellerLabel?: string; detail: string; reason: string | null },
   ) {
     for (const l of lines) {
       const item = (await tx.get('order_items', l.itemId))!;
@@ -316,7 +354,7 @@ export class Cancellations {
         cancellationId,
         initiatedBy: o.initiatedBy,
         reasonCode: o.reasonCode,
-        beforeDispatch: true,
+        beforeDispatch: o.beforeDispatch ?? true,
         countsAgainstSeller: o.countsAgainstSeller,
         notifyCustomer: o.notifyCustomer ?? true,
         refund: line
@@ -333,7 +371,7 @@ export class Cancellations {
     const refundText = refund.total.amount > 0 ? ` Refund of ${fmt(refund.total.amount, agg.order.currency)} requested to ${refund.destination}; no money has moved yet.` : '';
     await this.core.timeline(tx, agg.order.id, [
       { group_id: group.id, visibility: 'customer', label: o.label, detail: `${o.detail}.${refundText}`, actor: batch.by.actor },
-      { group_id: group.id, visibility: 'seller', label: 'Items cancelled', detail: o.detail, actor: batch.by.actor },
+      { group_id: group.id, visibility: 'seller', label: o.sellerLabel ?? 'Items cancelled', detail: o.detail, actor: batch.by.actor },
       ...(o.reason && batch.by.actor.kind === 'staff' ? [{ group_id: group.id, visibility: 'staff' as const, label: 'Staff cancelled items', detail: o.detail, reason: o.reason, actor: batch.by.actor }] : []),
     ]);
   }

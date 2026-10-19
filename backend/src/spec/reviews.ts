@@ -1465,6 +1465,8 @@ export interface ReviewsDb {
     comment: string | null;
     status: string;
     visible: boolean;
+    /** every item of the package went back: shown, but left out of the seller score */
+    refunded: boolean | null;
     created_at: Date;
     edited_at: Date | null;
   };
@@ -1732,6 +1734,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => Question,
     status: 201,
+    errors: ["REVIEWS_RESTRICTED"],
     events: ["reviews.question.asked"],
     screens: ["store/product"],
     phase: 1,
@@ -1752,6 +1755,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => Answer,
     status: 201,
+    errors: ["REVIEWS_RESTRICTED"],
     events: ["reviews.answer.published"],
     screens: ["store/product"],
     phase: 1,
@@ -1787,7 +1791,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => Answer,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","NOT_FOUND"],
+    errors: ["ILLEGAL_TRANSITION","NOT_FOUND","REVIEWS_RESTRICTED"],
     events: ["reviews.answer.published"],
     screens: ["store/product","account/reviews"],
     phase: 1,
@@ -1808,6 +1812,7 @@ export const endpoints = defineEndpoints({
       helpfulCount: z.number().int(),
     }),
     status: 200,
+    errors: ["REVIEWS_RESTRICTED"],
     screens: ["store/product"],
     phase: 1,
   },
@@ -1818,7 +1823,7 @@ export const endpoints = defineEndpoints({
     auth: "customer",
     scope: "own-customer",
     summary: "Report a review, feedback, question, answer or seller response",
-    desc: "The reporter's name is never shown to the author. The outcome appears under Reports you made.",
+    desc: "The reporter's name is never shown to the author. The outcome appears under Reports you made. A reason in hideOnReportReasons hides the content while it is reviewed, unless a moderator kept it within reportCooldownDays (then it is queued only); a seller's report (sellerReport) never hides content by itself.",
     body: () => ReportInput,
     response: () => MyReport,
     status: 201,
@@ -1940,10 +1945,11 @@ export const endpoints = defineEndpoints({
     auth: "customer",
     scope: "own-customer",
     summary: "Write a product review (or save a draft)",
+    desc: "The seller's own team (sellers.getMemberAccess) cannot review its products (REVIEW_NOT_ELIGIBLE). A returned or refunded item can be reviewed, but not as a verified purchase. After moderation removed the customer's earlier review of the product (since deleted) for proven_fake, payment_for_review or conflict_of_interest, no new one is accepted (REVIEW_NOT_ELIGIBLE); after any other removal the new one is held for a moderator.",
     body: () => ReviewInput,
     response: () => MyReview,
     status: 201,
-    errors: ["REVIEW_NOT_ELIGIBLE","ALREADY_REVIEWED"],
+    errors: ["REVIEW_NOT_ELIGIBLE","ALREADY_REVIEWED","REVIEWS_RESTRICTED"],
     events: ["reviews.review.published"],
     screens: ["account/review"],
     phase: 1,
@@ -1962,7 +1968,7 @@ export const endpoints = defineEndpoints({
     body: () => ReviewUpdateInput,
     response: () => MyReview,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION"],
+    errors: ["ILLEGAL_TRANSITION","REVIEWS_RESTRICTED"],
     events: ["reviews.review.updated"],
     screens: ["account/review","account/reviews"],
     phase: 1,
@@ -1991,11 +1997,11 @@ export const endpoints = defineEndpoints({
     auth: "customer",
     scope: "own-customer",
     summary: "Leave seller feedback for a delivered package (or save a draft)",
-    desc: "draft: true stores it unpublished (status draft) so the review page can save both parts together; submit later with PATCH /me/feedback/{id} and draft: false.",
+    desc: "draft: true stores it unpublished (status draft) so the review page can save both parts together; submit later with PATCH /me/feedback/{id} and draft: false. The seller's own team cannot leave it feedback (REVIEW_NOT_ELIGIBLE). Feedback on a package that all went back (returned or refunded) is shown but left out of the seller score.",
     body: () => FeedbackInput,
     response: () => MyFeedback,
     status: 201,
-    errors: ["FEEDBACK_NOT_YET_AVAILABLE","ALREADY_REVIEWED"],
+    errors: ["FEEDBACK_NOT_YET_AVAILABLE","ALREADY_REVIEWED","REVIEWS_RESTRICTED"],
     events: ["reviews.feedback.published"],
     screens: ["account/review"],
     phase: 1,
@@ -2014,7 +2020,7 @@ export const endpoints = defineEndpoints({
     body: () => FeedbackUpdateInput,
     response: () => MyFeedback,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION"],
+    errors: ["ILLEGAL_TRANSITION","REVIEWS_RESTRICTED"],
     screens: ["account/reviews","account/review"],
     phase: 1,
   },
@@ -3137,6 +3143,10 @@ export const spec = defineModuleSpec({
     }
   },
   errorCodes: {
+    "REVIEWS_RESTRICTED": {
+      "status": 403,
+      "meaning": "The account is suspended, closed or under a reviews restriction: no new or edited reviews, questions, answers, votes or seller feedback (customers.canWriteReviews)."
+    },
     "REVIEW_NOT_ELIGIBLE": {
       "status": 422,
       "meaning": "No delivered purchase of this product by the customer, or the review window has ended."
@@ -3382,12 +3392,14 @@ export const spec = defineModuleSpec({
         "comment",
         "status",
         "visible",
+        "refunded",
         "created_at",
         "edited_at"
       ],
       "nullable": [
         "communication_rating",
         "comment",
+        "refunded",
         "edited_at"
       ],
       "decimal": [],
@@ -3476,6 +3488,12 @@ export const spec = defineModuleSpec({
             },
             "visible": {
               "bsonType": "bool"
+            },
+            "refunded": {
+              "bsonType": [
+                "bool",
+                "null"
+              ]
             },
             "created_at": {
               "bsonType": "date"

@@ -85,7 +85,7 @@ export class StorefrontPart extends Part {
         }
         const f = flashOf.get(`${c.id}:${o.id}`);
         if (c.kind === 'flash_sale' && !f) continue;
-        opts.push({ campaign: c, consentBps, flash: f ? { dealPrice: f.deal_price, dealStock: f.deal_stock, claimed: f.claimed, reserved: f.reserved, purchaseLimit: f.purchase_limit, state: f.state } : null });
+        opts.push({ campaign: c, consentBps, flash: f ? { dealPrice: f.deal_price, regularPrice: f.regular_price, dealStock: f.deal_stock, claimed: f.claimed, reserved: f.reserved, purchaseLimit: f.purchase_limit, state: f.state } : null });
       }
       priceOptions.set(o.id, opts);
     }
@@ -134,7 +134,8 @@ export class StorefrontPart extends Part {
       const honest = ref && priceCampaign && ref.amount > l.unitPrice.amount;
       const wasPrice: common.Money | null = honest ? ref : null;
       const wasPriceRule = honest ? `Lowest price from this seller in the ${days} days before ${dayLabel(priceCampaign.startsAt, priceCampaign.timeZone)}` : null;
-      const flashRow = flashRows.find((f) => f.offer_id === o.id && (byId.get(f.campaign_id)?.kind === 'flash_sale' || upcomingById.has(f.campaign_id)));
+      // no countdown for a deal the offer's raised price keeps from applying (evaluate)
+      const flashRow = flashRows.find((f) => f.offer_id === o.id && o.price.amount <= f.regular_price && (byId.get(f.campaign_id)?.kind === 'flash_sale' || upcomingById.has(f.campaign_id)));
       const flashCampaign = flashRow ? (byId.get(flashRow.campaign_id) ?? upcomingById.get(flashRow.campaign_id)) : undefined;
       return {
         offerId: o.id,
@@ -205,7 +206,7 @@ export class StorefrontPart extends Part {
     const now = this.now();
     const state: FlashSaleBlock['state'] = isRunning(c, now) ? 'live' : c.status === 'scheduled' && c.startsAt.getTime() > now.getTime() ? 'upcoming' : 'ended';
     const secondsLeft = state === 'live' ? Math.max(0, Math.floor((c.endsAt.getTime() - now.getTime()) / 1000)) : state === 'upcoming' ? Math.max(0, Math.floor((c.startsAt.getTime() - now.getTime()) / 1000)) : 0;
-    return { campaignId: c.id, name: c.name, period: periodOf(c), state, secondsLeft, items: await this.parts.campaigns.flashItems(c) };
+    return { campaignId: c.id, name: c.name, period: periodOf(c), state, secondsLeft, items: await this.parts.campaigns.flashItems(c, undefined, { storefront: true }) };
   }
 
   async getFlashSale(campaignId: string): Promise<FlashSaleBlock | null> {

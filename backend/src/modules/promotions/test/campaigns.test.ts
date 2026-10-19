@@ -198,3 +198,70 @@ describe('platform campaigns', () => {
     void OFFICIAL_SELLER;
   });
 });
+
+describe('what Finance confirmed stays confirmed', () => {
+  const flashSale = async (stock = 10) => {
+    const o = k.offer({ sellerId: null, ownerType: 'official', categoryId: HOME, price: USD(5000), stock: 100 });
+    const created = await k.call('POST', `${ADMIN}/campaigns`, k.staff, campaignInput(k.clock, { name: 'Flash check', discount: { kind: 'flash_sale' }, scope: { mode: 'offers', include: [{ kind: 'offer', id: o.id }], exclude: [] } }));
+    const id = created.body.id;
+    const item = (over: Record<string, unknown> = {}) => ({ offerId: o.id, dealPrice: USD(2000), dealStock: stock, purchaseLimit: 2, ...over });
+    expect((await k.call('PUT', `${ADMIN}/campaigns/${id}/flash-items`, k.staff, { items: [item()] })).status).toBe(200);
+    for (const step of ['submit', 'confirm-funding']) expect((await k.call('POST', `${ADMIN}/campaigns/${id}/${step}`, step === 'confirm-funding' ? k.finance : k.staff, {})).status).toBe(200);
+    return { id, o, item, put: (items: unknown[]) => k.call('PUT', `${ADMIN}/campaigns/${id}/flash-items`, k.staff, { items }) };
+  };
+
+  it('sends an approved flash sale back to draft when its items change', async () => {
+    const s = await flashSale();
+    expect((await s.put([s.item({ dealPrice: USD(1) })])).status).toBe(200);
+    expect((await k.call('GET', `${ADMIN}/campaigns/${s.id}`, k.staff)).body.status).toBe('draft');
+    expect(k.audits.at(-1)).toMatchObject({ actionLabel: 'Set flash items (reopened for Finance)' });
+  });
+
+  it('changes a live flash sale only within what Finance confirmed (price no lower, stock and limit no higher, no new offers)', async () => {
+    const s = await flashSale();
+    expect((await k.call('POST', `${ADMIN}/campaigns/${s.id}/schedule`, k.staff, {})).status).toBe(200);
+    await k.svc.startDue();
+    expect((await k.call('GET', `${ADMIN}/campaigns/${s.id}`, k.staff)).body.status).toBe('live');
+    // the audit's change: down to $0.01 with 40 units and a limit of 40
+    const raid = await s.put([s.item({ dealPrice: USD(1), dealStock: 40, purchaseLimit: 40 })]);
+    expect(raid.status).toBe(409);
+    expect(raid.body.error).toMatchObject({ code: 'ILLEGAL_TRANSITION', details: { from: 'live' } });
+    expect(raid.body.error.details.items[0].reason).toMatch(/deal price below the confirmed \$20\.00, deal stock above the confirmed 10, purchase limit above the confirmed 2/);
+    const other = k.offer({ sellerId: null, ownerType: 'official', categoryId: HOME, price: USD(5000), stock: 100 });
+    const added = await s.put([s.item(), { offerId: other.id, dealPrice: USD(4000), dealStock: 1, purchaseLimit: 1 }]);
+    expect(added.body.error.details.items[0].reason).toContain('was not in the sale Finance confirmed');
+    // cheaper for Marketly is fine, and stock can come back up to what was confirmed
+    expect((await s.put([s.item({ dealPrice: USD(2500), dealStock: 4, purchaseLimit: 1 })])).status).toBe(200);
+    expect((await s.put([s.item({ dealPrice: USD(2500), dealStock: 10, purchaseLimit: 1 })])).status).toBe(200);
+    expect((await s.put([s.item({ dealPrice: USD(2500), dealStock: 11, purchaseLimit: 1 })])).status).toBe(409);
+    expect((await k.call('GET', `${ADMIN}/campaigns/${s.id}`, k.staff)).body.status).toBe('live');
+  });
+
+  it('needs a budget for platform-funded campaigns before Finance sees them', async () => {
+    const c = await k.call('POST', `${ADMIN}/campaigns`, k.staff, campaignInput(k.clock, { limits: { perCustomer: 1 } }));
+    const r = await k.call('POST', `${ADMIN}/campaigns/${c.body.id}/submit`, k.staff, {});
+    expect(r.status).toBe(400);
+    expect(r.body.error.details.issues.map((i: any) => i.path)).toContain('limits.budget');
+  });
+
+  it('ignores a budget approval decided in the Approvals Inbox by the campaign’s own creator', async () => {
+    k.authority.set('promotions.budgets.approve', 'approval_required');
+    try {
+      const c = await k.call('POST', `${ADMIN}/campaigns`, k.staff, campaignInput(k.clock, { limits: { budget: USD(5_000_000) } }));
+      const id = c.body.id;
+      await k.call('POST', `${ADMIN}/campaigns/${id}/submit`, k.staff, {});
+      await k.call('POST', `${ADMIN}/campaigns/${id}/confirm-funding`, k.finance, {});
+      const [requestId] = [...k.approvals.entries()].at(-1)!;
+      await k.emit('access.approval.decided', { requestId, ref: 'AP-9', actionKey: 'promotions.budgets.approve', module: 'promotions', target: { type: 'promotion_campaign', id }, outcome: 'approved', decidedBy: c.body.createdBy, approverIds: [], requestedById: crypto.randomUUID() });
+      const after = (await k.call('GET', `${ADMIN}/campaigns/${id}`, k.staff)).body;
+      expect(after.status).toBe('in_review');
+      expect(k.audits.at(-1)).toMatchObject({ action: 'promotions.campaign.funding_approval_ignored' });
+      // the request is closed: another Finance member confirms again, which asks for a new approval
+      const again = await k.call('POST', `${ADMIN}/campaigns/${id}/confirm-funding`, k.finance, {});
+      expect(again.status).toBe(200);
+      expect([...k.approvals.keys()].at(-1)).not.toBe(requestId);
+    } finally {
+      k.authority.delete('promotions.budgets.approve');
+    }
+  });
+});

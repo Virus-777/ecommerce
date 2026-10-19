@@ -36,7 +36,8 @@ describe('stock through the real inventory module', () => {
     const res = await h.call('POST', `/api/seller/orders/orders/${order.groups[0]!.id}/cancel-items`, tokens.seller(sellerId), { items: [{ itemId: item.id, quantity: 1 }], reasonCode: 'damaged_in_storage' }, idem());
     expect(res.status).toBe(201);
     expect(h.named('inventory.reservation.released').some((e) => e.orderId === order.id)).toBe(true);
-    expect((await inv.getAvailability([stock.id]))[stock.id]!.available).toBe(4);
+    // damaged in storage: the seller does not have the unit, so it is written off rather than put back on sale
+    expect((await inv.getAvailability([stock.id]))[stock.id]!.available).toBe(3);
   });
 
   it('inventory allocates from the hold on orders.order.accepted without attachOrder, mapping its lines to the order items', async () => {

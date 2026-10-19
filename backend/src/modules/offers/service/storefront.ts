@@ -597,14 +597,18 @@ export class StorefrontPart extends Part {
     return { ok: changes.length === 0, changes };
   }
 
-  /** Frozen terms for an order item (plan ch. 8). Only an active offer can be bought. */
+  /**
+   * Frozen terms for an order item (plan ch. 8). Only an active offer can be bought, or one that is out of stock:
+   * checkout holds the stock before the order is made, so a hold that took the last units has already moved the
+   * offer to out_of_stock. Inventory guards the quantity, not this check.
+   */
   async snapshotForOrder(offerId: string): Promise<OfferSnapshot> {
     const r = isUuid(offerId) ? await this.repo.get('offers', offerId) : undefined;
     if (!r || r.status === 'draft') throw notFound();
     // effective fulfilment: Marketly's dispatch terms for marketly_service offers; held by the service = not buyable (D5)
     const fulfilment = (await this.core.fulfilment([r])).get(r.id)!;
     const status = shownStatus(r, fulfilment);
-    if (status !== 'active') {
+    if (status !== 'active' && status !== 'out_of_stock') {
       const others = await this.repo.find('offers', { variant_id: r.variant_id, status: 'active' }, { orderBy: [['price_amount', 'asc']], limit: 5 });
       throw this.core.error('OFFER_UNAVAILABLE', 'This offer can no longer be bought', { status, alternatives: others.filter((o) => o.id !== r.id).map((o) => ({ offerId: o.id, price: money(o.price_amount, o.currency) })) });
     }

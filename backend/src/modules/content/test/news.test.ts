@@ -243,3 +243,26 @@ describe('news on the homepage', () => {
     expect(card.cover?.id).toBe(img.id);
   });
 });
+
+describe('the second person stays a second person', () => {
+  it('a colleague touching the draft does not let the writer approve it', async () => {
+    const id = (await h.admin('POST', '/news', post({ title: 'Store hours over the holidays', slug: 'holiday-hours' }), h.staff(writer))).json().post.id as string;
+    // the editor fixes a typo and sends it on; the writer was still the one who wrote it
+    expect((await h.admin('PATCH', `/news/${id}`, post({ title: 'Store hours over the holidays', slug: 'holiday-hours', body: '<p>Fixed a typo.</p>' }), h.staff(editor))).statusCode).toBe(200);
+    expect((await t(id, { action: 'submit' }, editor)).json().status).toBe('in_review');
+    const own = await t(id, { action: 'approve' }, writer);
+    expect(own.json().error.code).toBe('SAME_REVIEWER');
+    expect((await h.admin('GET', `/news/${id}`, undefined, h.staff(writer))).json().canApprove).toBe(false);
+    expect((await t(id, { action: 'approve' }, newId())).json().status).toBe('approved');
+  });
+
+  it('a removed post restored by its writer still needs someone else to approve it', async () => {
+    const id = await publishNew({ title: 'Recall notice', slug: 'recall-notice' });
+    expect((await t(id, { action: 'remove', kind: 'removal', reason: 'Posted too early' })).statusCode).toBe(200);
+    const restored = await t(id, { action: 'restore', reason: 'Ready now' }, writer);
+    expect(restored.statusCode, restored.body).toBe(200);
+    await t(id, { action: 'submit' }, writer);
+    const own = await t(id, { action: 'approve' }, writer);
+    expect(own.json().error?.code, own.body).toBe('SAME_REVIEWER');
+  });
+});

@@ -568,6 +568,20 @@ export class HoldsPart extends Part {
     await this.parts.payouts.holdPendingPayouts(e.sellerId, `Account suspended: ${e.reason}`);
   }
 
+  /**
+   * sellers.seller.reinstated after a suspension: what the suspension stopped goes again. The payout block it set is
+   * cleared, its hold on the available balance is released and the payouts it held go back to pending.
+   */
+  async onSellerReinstated(e: EventPayload<'sellers.seller.reinstated'>) {
+    if (!isUuid(e.sellerId) || e.from !== 'suspended') return;
+    const suspended = (r: string | null | undefined) => Boolean(r?.startsWith('Account suspended'));
+    const acct = await this.repo.findOne('seller_accounts', { seller_id: e.sellerId });
+    if (suspended(acct?.payouts_blocked_reason)) await this.repo.updateWhere('seller_accounts', { seller_id: e.sellerId }, { payouts_blocked_reason: null });
+    const hold = e.endedSuspensionId ? await this.repo.get('holds', detId(`restriction_hold:${e.endedSuspensionId}`)) : undefined;
+    if (hold?.status === 'active') await this.decide(hold.id, 'release', { reason: 'Suspension ended: account reinstated' }, { actor: SYSTEM }, { system: true });
+    await this.parts.payouts.unholdPayouts(e.sellerId, suspended);
+  }
+
   /** Job finance.holds.review-due: holds at their review date go to Finance's queue */
   async reviewDue() {
     const today = this.core.today();

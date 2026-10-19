@@ -15,7 +15,7 @@ afterAll(() => k?.close());
 describe('deals page and coupons', () => {
   it('shows clippable coupons, clips them (applied at checkout) and lists them under My coupons', async () => {
     const o = k.offer({ sellerId: SELLER_A, categoryId: KITCHEN, price: USD(12000) });
-    const camp = await liveCampaign(k, campaignInput(k.clock, { name: 'Kitchen $10', description: '$10 off kitchen', discount: { kind: 'fixed_coupon', amountOff: USD(1000), minSpend: USD(10000) }, limits: { perCustomer: 1 }, deals: { show: true, section: 'coupons' }, terms: 'One use per customer' }));
+    const camp = await liveCampaign(k, campaignInput(k.clock, { name: 'Kitchen $10', description: '$10 off kitchen', discount: { kind: 'fixed_coupon', amountOff: USD(1000), minSpend: USD(10000) }, limits: { budget: USD(100_000), perCustomer: 1 }, deals: { show: true, section: 'coupons' }, terms: 'One use per customer' }));
     const deals = await k.call('GET', `${STORE}/deals`, customer);
     expect(deals.status).toBe(200);
     const card = deals.body.coupons.find((c: any) => c.campaignId === camp.id);

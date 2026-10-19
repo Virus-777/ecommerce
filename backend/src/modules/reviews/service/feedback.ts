@@ -94,12 +94,17 @@ export class FeedbackPart {
   private clampStar = (v: number) => Math.min(5, Math.max(1, Math.round(Number.isFinite(v) ? v : 1)));
 
   async create(who: CustomerWho, input: FeedbackInput): Promise<MyFeedback> {
+    await this.core.assertMayWrite(who);
     if (!who.customerId) throw notFound('Order');
     const customerId = who.customerId;
     const order = isUuid(input.orderId) ? (await this.core.orders([input.orderId])).get(input.orderId) : undefined;
     if (!order || order.contact.customerId !== customerId) throw notFound('Order');
     const pkg = this.core.packageFor(order, input.sellerId);
     if (!pkg) throw notFound('Package');
+    await this.core.assertNotSellerTeam(who, pkg.sellerId, 'feedback');
+    // a package that all went back is a real experience to show, but it does not move the seller's score
+    const items = order.groups.find((g) => g.id === pkg.groupId)?.items ?? [];
+    const refunded = items.length > 0 && items.every((i) => i.state === 'returned' || i.state === 'refunded');
     const state = await this.packageState(customerId, pkg);
     if (state.feedback) throw this.core.ctx.error('ALREADY_REVIEWED', 'You already left feedback for this package. Edit it instead.', { id: state.feedback.id });
     this.assertOpen(pkg, state);
@@ -127,6 +132,7 @@ export class FeedbackPart {
         dispatch_rating: input.dispatchRating,
         communication_rating: input.communicationRating ?? null,
         overall,
+        refunded,
         sentiment: sentimentOf(overall, threshold),
         comment,
         status,
@@ -166,6 +172,7 @@ export class FeedbackPart {
   }
 
   async update(who: CustomerWho, id: string, input: FeedbackUpdateInput): Promise<MyFeedback> {
+    await this.core.assertMayWrite(who);
     const customerId = who.customerId;
     const row = await this.own(customerId, id);
     const from = row.status as MyFeedback['status'];

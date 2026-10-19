@@ -116,6 +116,22 @@ describe('scenario 8: opening advertisement', () => {
     k.clock.advance(-2 * 86_400_000);
   });
 
+  it('the picture and the ad text are one ad: every impression carries both', async () => {
+    // as Admin Center saves a campaign: a phone image without copy, and the ad text as a text creative
+    const pic = await k.call('POST', `${ADMIN}/creatives`, k.staff, { kind: 'image', device: 'phone', placementKey: 'popup', mediaId: k.asset(600, 600).id, link: '/deals' });
+    const text = await k.call('POST', `${ADMIN}/creatives`, k.staff, { kind: 'text', device: 'any', placementKey: 'popup', headline: '$20 off your order over $100', body: 'Enter the code at checkout.', buttonText: 'Start shopping', link: '/collection/new-arrivals' });
+    expect([pic.status, text.status]).toEqual([201, 201]);
+    const popup = await liveCampaign(k, { name: 'Popup with ad text', placementKey: 'popup', pages: ['home'], creativeIds: [pic.body.id, text.body.id], frequencyCap: null });
+    for (let i = 0; i < 4; i++) {
+      const d = await serve(k, { visitorId: visitor(), entry: false, device: 'app' });
+      expect(d.overlay).toMatchObject({ campaignId: popup.id, creativeId: pic.body.id, headline: '$20 off your order over $100', body: 'Enter the code at checkout.', buttonText: 'Start shopping', destination: '/collection/new-arrivals' });
+      expect(d.overlay.image).toBeTruthy();
+    }
+    // no desktop picture: a desktop visitor gets the ad text alone
+    const d = await serve(k, { visitorId: visitor(), entry: false, device: 'desktop' });
+    expect(d.overlay).toMatchObject({ creativeId: text.body.id, headline: '$20 off your order over $100', image: null });
+  });
+
   it('banners rotate evenly at equal priority, in the carousel order', async () => {
     const mk = async (name: string) => {
       const c1 = await creative(k, 'home_banner', 'any', [1200, 300]);

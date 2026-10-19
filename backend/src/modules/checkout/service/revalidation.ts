@@ -94,6 +94,9 @@ export class Revalidator {
         : Promise.resolve({ ok: true, changes: [] as offers.OfferChange[] }),
     ]);
     const purchased = await this.purchasedCounts(session, lines, facts);
+    // a hold kept from a declined attempt already took these units: they count as available to this checkout
+    const held = new Map<string, number>();
+    if (session.stock_reservation_id) for (const l of lines) held.set(l.stock_item_id, (held.get(l.stock_item_id) ?? 0) + l.quantity);
 
     const items: StoredChange[] = [];
     const add = (kind: Change['kind'], line: LineRow | null, o: Partial<Change> & { previous: string; current: string }, apply: StoredChange['apply'] = {}, extra: { alternatives?: AlternativeOffer[]; otherOptions?: boolean } = {}) => {
@@ -139,8 +142,11 @@ export class Revalidator {
         add('offer_ended', l, { previous: 'Available', current: 'No longer available', detail: msg, effectOnTotal: { amount: -value, currency: cur } }, {}, { alternatives: alts() });
         continue;
       }
-      const available = Math.max(0, availability[l.stock_item_id]?.available ?? (offer.status === 'out_of_stock' ? 0 : l.quantity));
-      if (available < 1 || offer.status === 'out_of_stock') {
+      const own = held.get(l.stock_item_id) ?? 0;
+      const soldOut = offer.status === 'out_of_stock' && !own;
+      const free = availability[l.stock_item_id]?.available;
+      const available = Math.max(0, free != null ? free + own : soldOut ? 0 : l.quantity);
+      if (available < 1 || soldOut) {
         add('out_of_stock', l, { previous: `${l.quantity} available`, current: 'Out of stock', availableQuantity: 0, effectOnTotal: { amount: -value, currency: cur } }, { available: 0, maxQuantity: 0 }, { alternatives: alts() });
         continue;
       }

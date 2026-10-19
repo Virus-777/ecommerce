@@ -115,6 +115,7 @@ export class Views {
       price: d.price,
       free: d.free,
       fundedBy: d.fundedBy,
+      platformFunded: d.platformFunded ?? null,
       arrival: { from: ymd(d.arrival?.from) ?? this.core.today(), to: ymd(d.arrival?.to) ?? this.core.today() },
       dispatchBy: d.dispatchBy ? new Date(d.dispatchBy).toISOString() : isoReq(g.dispatch_by),
     };

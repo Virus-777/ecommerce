@@ -1487,14 +1487,14 @@ Indexes: `(at)`
 | Consumes | From | Does |
 |---|---|---|
 | `orders.order.accepted` | orders | Create pending earnings lots and fee charges per seller item (sale, shipping charged, seller-funded discount, fee); Official Store items go to trading_entries |
-| `orders.item.cancelled` | orders | Reverse the lot; apply the cancellation fee treatment |
+| `orders.item.cancelled` | orders | Reverse the lot; apply the cancellation fee treatment. Before dispatch the shipping stays with the seller while the rest of the package ships; once every item of the package is cancelled, the shipping credited with each of its sales (the customer's and Marketly's) is reversed, once per lot. After dispatch the item's refunded shipping is reversed with it |
 | `orders.item.delivered` | orders | Start the availability clock for the item's lot |
 | `payments.payment.captured` | payments | Record collected money for reconciliation (payments vs orders): card amount plus creditAmount (store credit) per capture, including captures with amount 0 for orders or groups paid entirely by store credit; the daily check compares card captures plus credit with the order total less cancelled items, so mixed and credit-only payments are not mismatches |
 | `returns.refund.approved` | returns | Store the funding split (seller, platform, shared) for the refund |
-| `payments.refund.sent` | payments | Post the refund and proportional fee refund to the seller ledger (refund_after_payout when the lot was paid out) or to company trading |
+| `payments.refund.sent` | payments | Post the refund and proportional fee refund to the seller ledger (refund_after_payout when the lot was paid out) or to company trading. The seller is charged its funding share of the refund without the sales tax (Marketly refunds it), plus that share of a Marketly-funded discount it was paid with the sale and of the return shipping the customer paid for a Marketly label (recovered as a platform label cost), so a returned unit nets to zero |
 | `payments.chargeback.opened` | payments | Place a chargeback hold on the seller (fee kept while open per fee treatment) |
 | `payments.chargeback.decided` | payments | won: release the chargeback hold. lost: apply the hold as a chargeback deduction from the seller (or a company trading loss for Official Store orders) and record the fee treatment |
-| `returns.label.created` | returns | Return labels: charge a seller-paid label to the seller, record a platform shipping expense, or nothing when the customer pays (deducted from the refund). Keyed by labelId |
+| `returns.label.created` | returns | Return labels: charge a seller-paid label to the seller, record a platform shipping expense, or a platform label cost when the customer pays (the fee deducted from the refund is recovered from the seller share when the refund is sent). Keyed by labelId |
 | `shipping.label.purchased` | shipping | Outbound and replacement labels: charge seller-bought labels to the seller ledger, record company labels as Official Store shipping expense and platform labels as platform cost. kind = return is ignored (booked from returns.label.created) |
 | `shipping.label.voided` | shipping | Reverse the charge or expense booked for that labelId (any kind) |
 | `shipping.claim.status_changed` | shipping | paid: credit paidAmount to whoever bore the loss (seller ledger or company trading); other statuses are kept for reconciliation |
@@ -1503,6 +1503,7 @@ Indexes: `(at)`
 | `payments.refund.failed` | payments | Mark the refund's stored funding split failed (nothing is posted until payments.refund.sent); on the final attempt list it in the daily reconciliation |
 | `sellers.seller.approved` | sellers | Open the seller account and apply the new-seller hold rule |
 | `sellers.seller.suspended` | sellers | Put the seller's pending payouts on hold with reason restriction (review date from the restriction) |
+| `sellers.seller.reinstated` | sellers | After a suspension (from suspended): clear the payout block it set, release its hold on the available balance (restriction_hold) and put the payouts it held back to pending |
 | `sellers.seller.closed` | sellers | Issue a final statement and schedule the last payout after open obligations |
 | `sellers.payout_account.changed` | sellers | Open a destination review; keep paying the current verified destination |
 | `access.approval.decided` | access | Finish approval-required holds, adjustments, corrections, payout runs, fee rule changes and seller credits (finance.credits.issue: post or reject, publish finance.seller_credit.decided) |

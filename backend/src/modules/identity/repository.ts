@@ -384,6 +384,11 @@ export class IdentityRepository {
     return this.#t.invitations.page({ purpose: f.purpose, ...(f.status ? { status: f.status } : {}) }, page, { column: 'sent_at', direction: 'desc' });
   }
 
+  /** Staff invitations a staff member sent that are still waiting to be accepted */
+  pendingStaffInvitationsBy(accountId: string): Promise<InvitationRow[]> {
+    return this.#t.invitations.find({ purpose: 'staff', status: 'pending', invited_by_kind: 'staff', invited_by_id: accountId });
+  }
+
   /** Pending invitations to the same person and context are revoked when a new one is sent */
   async revokePendingInvitations(sel: { email: string; purpose: InvitationRow['purpose']; contextRef: string | null }, reason: string, at: Date): Promise<void> {
     await this.#t.invitations.updateMany({ email: sel.email, purpose: sel.purpose, status: 'pending', context_ref: sel.contextRef }, { status: 'revoked', revoked_at: at, revoke_reason: reason });

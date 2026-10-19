@@ -281,9 +281,9 @@ export interface ItemFacts {
   /** Change-of-mind window end from orders (delivery + the snapshot window) */
   returnWindowEndsAt: string | null;
   windowDays: number;
-  /** Units in returns that are not cancelled or rejected */
+  /** Units in returns that are not cancelled (a rejected return keeps them) */
   used: number;
-  openReturn: { id: string; ref: string } | null;
+  openReturn: { id: string; ref: string; rejected?: boolean } | null;
 }
 
 export interface ItemVerdict {
@@ -316,6 +316,7 @@ export function itemVerdict(i: ItemFacts, now: Date, faultWindowDays: number, tz
   const left = Math.max(0, i.quantity - i.used);
   const extra = { returnBy, faultReturnBy: fault, changeOfMindReturnBy: changeOfMind };
   if (i.state === 'refunded') return none('already_returned', 'Already refunded', extra);
+  if (left === 0 && i.openReturn?.rejected) return none('return_open', `Return ${i.openReturn.ref} was declined. Ask Marketly to review it instead of starting a new return`, extra);
   if (left === 0) return i.openReturn ? none('return_open', `Return ${i.openReturn.ref} is open`, extra) : none('already_returned', 'Already returned', extra);
   if (now.getTime() > fault.getTime()) return none('window_closed', `The return window closed on ${shortDate(returnBy, tz)}`, extra);
   if (!changeOfMind) return { eligible: true, reason: null, message: `Final sale: returns only if it arrived damaged, defective or wrong, by ${shortDate(fault, tz)}`, quantityReturnable: left, ...extra };

@@ -134,6 +134,17 @@ describe('a line split by a partial cancellation', () => {
     await app.kernel.events.drain();
     expect(await reserved(), 'the cancelled unit is released').toBe(before + 2);
 
+    // out of stock: the seller has none, so the offer is off sale until the seller enters a new count
+    const other = await f.customer('second-buyer@example.com');
+    const blocked = await f.call('POST', '/api/store/cart/cart/items', { token: other.accessToken, body: { offerId: listing.offerId, quantity: 1 } });
+    expect(blocked.body.error?.details?.reason, JSON.stringify(blocked.body)).toBe('out_of_stock');
+    const stock = await f.call('GET', '/api/seller/inventory/stock-items', { token: listing.sellerToken });
+    const row = (stock.body.items as { stockItemId: string; offerId: string | null; available: number }[]).find((i) => i.offerId === listing.offerId)!;
+    expect(row.available).toBe(0);
+    const recount = await f.call('POST', `/api/seller/inventory/stock-items/${row.stockItemId}/adjustments`, { token: listing.sellerToken, body: { newAvailable: 20, reasonCode: 'received_stock' } });
+    expect(recount.status, JSON.stringify(recount.body)).toBeLessThan(300);
+    await app.kernel.events.drain();
+
     // the remaining 2 units are on the split-off line; shipping them takes them out of stock
     const after = await f.call('GET', `/api/store/orders/orders/${orderId}`, { token: c.accessToken });
     const open = (after.body.groups[0].items as { id: string; quantity: number; state: string }[]).find((i) => i.state !== 'cancelled')!;
@@ -146,6 +157,42 @@ describe('a line split by a partial cancellation', () => {
     expect(shipped.status, JSON.stringify(shipped.body)).toBe(201);
     await app.kernel.events.drain();
     expect(await reserved(), 'nothing of the order stays reserved').toBe(before);
+  });
+
+  it('refunds all the shipping of a package cancelled one part at a time, and the seller keeps none of it', async () => {
+    const c = await f.customer('stepwise@example.com');
+    const ready = await readyCheckout(c.accessToken, 2);
+    // standard shipping is free above the threshold: the paid option gives the package a shipping charge
+    const pkg = (await f.call('GET', `/api/store/checkout/sessions/${ready.id}`, { token: c.accessToken })).body.packages[0];
+    const paid = pkg.options.find((o: { price: { amount: number } }) => o.price.amount > 0);
+    const chosen = await f.call('PUT', `/api/store/checkout/sessions/${ready.id}/delivery`, { token: c.accessToken, body: { selections: [{ packageKey: pkg.key, optionId: paid.id }] } });
+    expect(chosen.status, JSON.stringify(chosen.body)).toBe(200);
+    const v = chosen.body as typeof ready;
+    const placed = await f.call('POST', `/api/store/checkout/sessions/${v.id}/place`, { token: c.accessToken, body: placeBody(v), headers: { 'idempotency-key': key() } });
+    await app.kernel.events.drain();
+    const orderId = JSON.stringify(placed.body).match(/"orderId":"([0-9a-f-]{36})"/)![1]!;
+    const order = await f.call('GET', `/api/store/orders/orders/${orderId}`, { token: c.accessToken });
+    const groupId = order.body.groups[0].id as string;
+    expect(order.body.groups[0].totals.shipping.amount, 'the package has a shipping charge').toBeGreaterThan(0);
+    const cancel = async (itemId: string, quantity: number) => {
+      const r = await f.call('POST', `/api/seller/orders/orders/${groupId}/cancel-items`, { token: listing.sellerToken, body: { items: [{ itemId, quantity }], reasonCode: 'pricing_error' }, headers: { 'idempotency-key': key() } });
+      expect(r.status, JSON.stringify(r.body)).toBeLessThan(300);
+      await app.kernel.events.drain();
+    };
+    // one unit first (the package would still ship), then the other: the package never ships
+    await cancel(order.body.groups[0].items[0].id, 1);
+    const after = await f.call('GET', `/api/store/orders/orders/${orderId}`, { token: c.accessToken });
+    await cancel((after.body.groups[0].items as { id: string; state: string }[]).find((i) => i.state !== 'cancelled')!.id, 1);
+    await app.kernel.jobs.runNow('payments.process-refunds');
+    await app.kernel.events.drain();
+
+    const payments = app.kernel.boot.apis.get('payments') as unknown as { remainingRefundable(orderId: string): Promise<{ captured: { amount: number }; refunded: { amount: number }; inFlight: { amount: number } }> };
+    const money = await payments.remainingRefundable(orderId);
+    expect(money.refunded.amount + money.inFlight.amount, 'everything the customer paid goes back').toBe(money.captured.amount);
+    const ledger = await f.call('GET', '/api/seller/finance/ledger?limit=100', { token: listing.sellerToken });
+    const mine = (ledger.body.items as { amount: { amount: number }; reference: { id: string } }[]).filter((e) => e.reference.id === orderId);
+    expect(mine.length).toBeGreaterThan(0);
+    expect(mine.reduce((s, e) => s + e.amount.amount, 0), 'the seller nets nothing on a package it never shipped').toBe(0);
   });
 });
 

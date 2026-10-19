@@ -90,6 +90,27 @@ export class ApplicationsPart extends Part {
     };
   }
 
+  /**
+   * The seller record's copy of what the application says (made at submit). After an information request the
+   * corrected sections are copied again, so a fixed legal name, store name, contact or tax id reaches the seller
+   * (payout account checks compare the holder with the legal name). The slug stays.
+   */
+  private sellerCopy(a: ApplicationRec): Partial<SellerRec> {
+    const { business: b, account: acc, verification: v } = this.sections(a);
+    const out: Partial<SellerRec> = {};
+    const storeName = (b?.storeName || acc?.storeName || '').trim();
+    if (storeName) out.store_name = storeName;
+    if (b?.legalName?.trim()) out.legal_name = b.legalName.trim();
+    if (b?.businessType) out.business_type = b.businessType;
+    if (b) Object.assign(out, { state_of_registration: b.stateOfRegistration || null, registry_number: b.registryNumber ?? null, website: b.website ?? null });
+    if (b?.address) out.business_address = b.address as never;
+    if (b?.phone) out.phone = b.phone;
+    if (acc?.sellerType) out.seller_type = acc.sellerType;
+    if (acc) out.contact = { name: acc.contactName, email: acc.workEmail, phone: acc.contactPhone, supportHours: b?.supportHours ?? null } as never;
+    if (v?.taxIdType && v.taxIdLast4) Object.assign(out, { tax_id_type: v.taxIdType, tax_id_encrypted: Buffer.from(v.taxIdEncrypted ?? '', 'base64'), tax_id_last4: v.taxIdLast4 });
+    return out;
+  }
+
   private async own(accountId: string | null | undefined, id: string, repo: SellersRepository = this.repo, forUpdate = false): Promise<ApplicationRec> {
     const a = isUuid(id) ? await repo.get('applications', id, { forUpdate }) : undefined;
     if (!a || !accountId || a.applicant_account_id !== accountId) throw notFound('Application');
@@ -647,6 +668,8 @@ export class ApplicationsPart extends Part {
       await tx.update('applications', a.id, { state: this.core.step(sellerApplicationMachine, a.state, 'respond') });
       if (a.seller_id) {
         const s = await this.core.seller(a.seller_id, { repo: tx, forUpdate: true });
+        // what was corrected during the request reaches the seller record
+        await tx.update('sellers', s.id, { ...this.sellerCopy((await tx.get('applications', a.id))!), updated_at: now });
         if (s.status === 'information_required') await tx.update('sellers', s.id, { status: this.core.step(sellerAccountStatusMachine, s.status, 'provideInformation'), status_since: now, updated_at: now });
         await this.core.timeline(tx, s.id, { kind: 'information_provided', title: 'Requested information sent', actor: by.actor, ref: a.ref });
       }

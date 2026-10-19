@@ -57,6 +57,7 @@ const seller_feedback = new Schema(
     comment: { type: String, default: null },
     status: { type: String, required: true },
     visible: { type: Boolean, required: true },
+    refunded: { type: Boolean, default: null }, // every item of the package went back: shown, but left out of the seller score
     created_at: { type: Date, required: true },
     edited_at: { type: Date, default: null },
     /** lock-by-write counter (kernel/mongo/table.ts) */

@@ -39,11 +39,15 @@ export class CatalogReview extends CatalogProducts {
   async approve(id: string, note: string | null | undefined, by: By): Promise<ProductAdmin> {
     const row = await this.product(id);
     productReviewMachine.next(row.review_state as never, 'approve');
+    if (!row.owner_seller_id && (await this.wroteSinceDecision(id, by))) throw this.ctx.error('SAME_REVIEWER', 'You created, edited or sent this Official Store product for review; someone else approves it.');
     if (row.brand_id) {
       const brand = await this.repo.getBrand(row.brand_id);
       if (brand && brand.status !== 'active') {
         throw new AppError('BRAND_NOT_ACTIVE', `${brand.name} is ${brand.status === 'blocked' ? 'blocked' : 'under review'}; decide the brand first.`, { brandId: brand.id, status: brand.status });
       }
+      // the brand check blocks approval (the other checks stay advisory): the submitting seller may not sell the brand
+      const check = await this.brandCheck(row);
+      if (check.result === 'fail') throw new AppError('BRAND_NOT_AUTHORIZED', `${check.message}: the product can't be approved for this seller.`, { brandId: brand?.id ?? null });
     }
     return this.decide(id, 'approve', { reason: note?.trim() || null, fields: {} }, by);
   }
@@ -79,6 +83,17 @@ export class CatalogReview extends CatalogProducts {
       by,
     );
     return this.adminView(after, this.staffViewer(by));
+  }
+
+  /** Whether `by` created, edited or submitted the product since its last decision (review_log, newest first) */
+  private async wroteSinceDecision(id: string, by: By): Promise<boolean> {
+    const me = by.actor.id;
+    if (!me) return false;
+    for (const l of (await this.repo.logsOf([id])).reverse()) {
+      if (Object.values(DECISION_LOG).includes(l.action)) return false;
+      if ((l.action === 'created' || l.action === 'edited' || l.action === 'submitted') && l.actor_id === me) return true;
+    }
+    return false;
   }
 
   private async decideTx(id: string, decision: Decision, input: { reason: string | null; fields: Record<string, string> }, by: By) {

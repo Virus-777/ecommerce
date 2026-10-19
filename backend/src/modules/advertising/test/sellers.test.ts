@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { callers } from '../../../testing/app.js';
-import { ADMIN, boot, SELLER, SELLER_A, SELLER_B, track, USD, type Kit } from './helpers.js';
+import { ADMIN, boot, campaignInput, openingCreatives, SELLER, SELLER_A, SELLER_B, track, USD, type Kit } from './helpers.js';
 
 let k: Kit;
 const sellerA = () => callers.seller({ sellerId: SELLER_A });
@@ -153,7 +153,7 @@ describe('seller sponsored campaigns', () => {
       expect(slots[0]?.impression.campaignId).toBe(id);
       tokens.push(slots[0]!.impression.impressionToken);
     }
-    for (const t of tokens) expect((await track(k, [{ impressionToken: t, kind: 'click' }])).status).toBe(202);
+    for (const t of tokens) expect((await track(k, [{ impressionToken: t, kind: 'display' }, { impressionToken: t, kind: 'click' }])).status).toBe(202);
     const view = await k.call('GET', `${SELLER}/campaigns/${id}`, sellerA());
     // $0.35 a click: two clicks fit under $1.00; the third is recorded but not charged
     expect(view.body.spend).toEqual(USD(70));
@@ -173,7 +173,7 @@ describe('seller sponsored campaigns', () => {
       const slots = await k.svc.sponsoredForResults({ page: 'search', query: 'wool throw', visitorId: `p-${i}`, sessionId: `ps-${i}`, device: 'web', organicOfferIds: [], personalizationAllowed: false });
       tokens.push(slots.find((s) => s.impression.campaignId === id)!.impression.impressionToken);
     }
-    const results = await Promise.all(tokens.map((t) => track(k, [{ impressionToken: t, kind: 'click' }])));
+    const results = await Promise.all(tokens.map((t) => track(k, [{ impressionToken: t, kind: 'display' }, { impressionToken: t, kind: 'click' }])));
     expect(results.every((r) => r.status === 202)).toBe(true);
     const view = await k.call('GET', `${ADMIN}/campaigns/${id}`, k.staff);
     expect(view.body.budget).toMatchObject({ spent: USD(70), remaining: USD(0) });
@@ -255,5 +255,93 @@ describe('seller sponsored campaigns', () => {
     const res = await k.call('POST', `${SELLER}/campaigns`, sellerA(), request([k.offer().id]));
     expect(res.status).toBe(403);
     k.restricted.delete(SELLER_A);
+  });
+});
+
+describe('a seller is billed only for ads it asked for', () => {
+  const click = async (offerId: string, n: number) => {
+    const slots = await k.svc.sponsoredForResults({ page: 'search', query: 'boost', visitorId: `vb-${n}`, sessionId: `sb-${n}`, device: 'web', organicOfferIds: [offerId], personalizationAllowed: false });
+    expect((await track(k, [{ impressionToken: slots[0]!.impression.impressionToken, kind: 'display' }, { impressionToken: slots[0]!.impression.impressionToken, kind: 'click' }])).status).toBe(202);
+  };
+
+  it('refuses a billed campaign staff create for a seller; an unbilled one is fine', async () => {
+    const creativeIds = (await openingCreatives(k)).map((c: any) => c.id);
+    const billed = await k.call('POST', `${ADMIN}/campaigns`, k.staff, campaignInput(k, { advertiser: { kind: 'seller', sellerId: SELLER_A }, budget: { billing: 'cpc', rate: USD(35), dailyLimit: USD(100), totalLimit: USD(1000) }, creativeIds }));
+    expect(billed.status).toBe(400);
+    expect(billed.body.error.details.issues.map((i: any) => i.path)).toContain('budget.billing');
+    const free = await k.call('POST', `${ADMIN}/campaigns`, k.staff, campaignInput(k, { advertiser: { kind: 'seller', sellerId: SELLER_A }, budget: { billing: 'none', deliveryCap: 500 }, creativeIds }));
+    expect(free.status, JSON.stringify(free.body)).toBe(201);
+  });
+
+  it('checks the seller may advertise when its request is approved', async () => {
+    const created = await k.call('POST', `${SELLER}/campaigns`, sellerA(), request([k.offer().id], { name: 'Late check' }));
+    const id = created.body.campaign.id;
+    expect((await k.call('POST', `${SELLER}/campaigns/${id}/submit`, sellerA())).status).toBe(200);
+    k.restricted.set(SELLER_A, 'Advertising restricted while a review is open');
+    try {
+      const res = await k.call('POST', `${ADMIN}/campaigns/${id}/approve`, callers.staff(), { role: 'advertising' });
+      expect(res.status).toBe(403);
+    } finally {
+      k.restricted.delete(SELLER_A);
+    }
+  });
+
+  it('never posts a charge of a campaign the seller did not request (made by staff before that was refused)', async () => {
+    const offer = k.offer({ title: 'Boost lamp' });
+    const id = await liveRequest([offer.id], { name: 'Lamp boost' });
+    await click(offer.id, 1);
+    await k.job('advertising.accrue-charges');
+    // as the audit's staff-made campaigns were: billed to the seller without its request
+    await k.svc.core.repo.update('campaigns', id, { origin: 'staff' });
+    k.clock.advance(86_400_000);
+    await k.job('advertising.post-charges');
+    expect(k.adCharges.filter((c) => c.campaignId === id)).toEqual([]);
+    const charges = await k.call('GET', `${ADMIN}/charges?campaignId=${id}`, k.staff);
+    expect(charges.body.items).toEqual([expect.objectContaining({ state: 'voided', reason: 'Not billable: the seller did not request this campaign' })]);
+  });
+});
+
+describe('invalid clicks are not billed', () => {
+  const serveTo = async (offerId: string, query: string, visitor: string) => {
+    const slots = await k.svc.sponsoredForResults({ page: 'search', query, visitorId: visitor, sessionId: `${visitor}-s`, device: 'web', organicOfferIds: [offerId], personalizationAllowed: false });
+    return slots[0]!.impression.impressionToken;
+  };
+  const spend = async (id: string) => (await k.call('GET', `${SELLER}/campaigns/${id}`, sellerA())).body.spend;
+
+  it('bills one visitor once a day however often it clicks, even all at once', async () => {
+    const offer = k.offer({ title: 'Farm target kettle' });
+    const id = await liveRequest([offer.id], { name: 'Kettle boost', dailyLimit: USD(500) });
+    const tokens = await Promise.all(Array.from({ length: 5 }, () => serveTo(offer.id, 'kettle', 'farmer')));
+    const results = await Promise.all(tokens.map((t) => track(k, [{ impressionToken: t, kind: 'display' }, { impressionToken: t, kind: 'click' }])));
+    expect(results.every((r) => r.status === 202)).toBe(true);
+    expect(await spend(id)).toEqual(USD(35));
+    // another visitor is billed; the farmer again the next day
+    const other = await serveTo(offer.id, 'kettle', 'shopper');
+    await track(k, [{ impressionToken: other, kind: 'display' }, { impressionToken: other, kind: 'click' }]);
+    expect(await spend(id)).toEqual(USD(70));
+  });
+
+  it('does not bill a click on an ad that was never displayed', async () => {
+    const offer = k.offer({ title: 'Unseen pan' });
+    const id = await liveRequest([offer.id], { name: 'Pan boost' });
+    const t = await serveTo(offer.id, 'pan', 'blind');
+    expect((await track(k, [{ impressionToken: t, kind: 'click' }])).body).toEqual({ accepted: 1, ignored: 0 });
+    expect(await spend(id)).toEqual(USD(0));
+  });
+
+  it('ignores displays reported after the campaign is paused (no fixed daily fee for them)', async () => {
+    const offer = k.offer({ title: 'Paused mug' });
+    const id = await liveRequest([offer.id], { name: 'Mug days', billing: 'fixed_daily', dailyLimit: USD(1500), totalLimit: USD(15000) });
+    const t = await serveTo(offer.id, 'mug', 'late');
+    expect((await k.call('POST', `${SELLER}/campaigns/${id}/pause`, sellerA(), { reason: 'Out of stock soon' })).status).toBe(200);
+    expect((await track(k, [{ impressionToken: t, kind: 'display' }])).body).toEqual({ accepted: 0, ignored: 1 });
+    await k.job('advertising.accrue-charges');
+    expect((await k.call('GET', `${SELLER}/charges?campaignId=${id}`, sellerA())).body.items).toEqual([]);
+  });
+
+  it('refuses a daily limit below the cost of one click', async () => {
+    const res = await k.call('POST', `${SELLER}/campaigns`, sellerA(), request([k.offer().id], { dailyLimit: USD(10) }));
+    expect(res.status).toBe(400);
+    expect(res.body.error.details.issues.map((i: any) => i.path)).toContain('budget.dailyLimit');
   });
 });

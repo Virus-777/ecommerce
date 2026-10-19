@@ -216,7 +216,7 @@ export class ContentHelp extends ContentHomepage {
     const isAuthor = Boolean(draft?.author_id && viewer?.actor.id && draft.author_id === viewer.actor.id);
     return {
       draftAuthor,
-      canApprove: awaitingReview && !isAuthor,
+      canApprove: awaitingReview && !isAuthor && !(await this.isOwnWork('article', a.id, v, viewer)),
       draftReview: this.draftReviewOut(a, draft),
       article: await this.articleView(a, snap, v),
       status: a.status as Status,
@@ -329,6 +329,7 @@ export class ContentHelp extends ContentHomepage {
     } catch (err) {
       throw this.slugConflictArticle(err, snap.slug);
     }
+    await this.logAction('article', id, 'create', by);
     await this.audit({ action: 'content.help.article.create', actionLabel: 'Created help article', target: { type: 'help_article', id, label: snap.title }, after: snap }, by);
     return this.articleAdmin(row, by);
   }
@@ -356,6 +357,7 @@ export class ContentHelp extends ContentHomepage {
     } catch (err) {
       throw this.slugConflictArticle(err, snap.slug);
     }
+    await this.logAction('article', id, 'edit', by, input.changeNote ?? null);
     await this.audit({ action: 'content.help.article.update', actionLabel: 'Edited help article draft', target: { type: 'help_article', id, label: snap.title }, before: draftSnap ?? this.articleSnapOf(live), after: snap, reason: input.changeNote ?? null }, by);
     return this.articleAdmin(row, by);
   }
@@ -397,7 +399,7 @@ export class ContentHelp extends ContentHomepage {
       case 'requestChanges': {
         const approving = body.action === 'approve';
         if (!approving) requireText(body.reason, 'reason', 'Say what needs to change');
-        if (approving && draft && draft.author_id && draft.author_id === by.actor.id) throw this.ctx.error('SAME_REVIEWER', 'The author cannot approve their own article.');
+        if (approving) await this.assertNotOwnWork('article', id, draft ?? (a.live_version_id ? await this.repo.getVersion(a.live_version_id) : undefined), by, 'article');
         if (status !== 'in_review' && draftReview?.state === 'in_review') {
           // the live article stays live; the author sees why in draftReview.reason
           await this.setArticleDraftReview(a, approving ? { state: 'approved', by: by.actor, at: now.toISOString() } : { state: 'changes_requested', by: by.actor, at: now.toISOString(), reason: body.reason!.trim() });

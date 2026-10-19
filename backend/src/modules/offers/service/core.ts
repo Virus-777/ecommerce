@@ -72,7 +72,7 @@ export interface TransitionSpec {
   /** Sellable quantity read before the transaction: publish / resume / restore land on out_of_stock when 0 */
   available?: number;
   /** makeIneligible: where the hold comes from */
-  source?: { kind: 'restriction' | 'suspension' | 'product' | 'staff' | 'enforcement' | 'fulfillment_service'; id: string | null };
+  source?: { kind: 'restriction' | 'suspension' | 'product' | 'staff' | 'enforcement' | 'fulfillment_service' | 'brand'; id: string | null };
 }
 
 export interface Step {

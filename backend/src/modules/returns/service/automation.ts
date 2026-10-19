@@ -83,14 +83,12 @@ export class Automation {
     if (e.kind === 'return') return this.dropOff(e.shipmentId, e.returnId, e.shippedAt);
     if (e.kind !== 'replacement') return;
     // replacements of a return by return id; case replacements (no return) by order and items
-    const rep = await this.handling.replacementFor(e);
-    if (rep) await this.handling.replacementShipped(rep, e.shipmentId, e.shippedAt);
+    for (const rep of await this.handling.replacementsFor(e)) await this.handling.replacementShipped(rep, e.shipmentId, e.shippedAt);
   }
 
   async onShipmentDelivered(e: EventPayload<'shipping.shipment.delivered'>): Promise<void> {
     if (e.kind === 'replacement') {
-      const rep = await this.handling.replacementFor(e);
-      if (rep) await this.handling.replacementDelivered(rep, e.shipmentId, e.deliveredAt);
+      for (const rep of await this.handling.replacementsFor(e)) await this.handling.replacementDelivered(rep, e.shipmentId, e.deliveredAt);
       return;
     }
     if (e.kind !== 'return') return;
@@ -104,8 +102,16 @@ export class Automation {
         batch.push('returns.return.shipped', { returnId: a.ret.id, ...this.core.refs(a.ret), trackingNumber: sh.tracking_number });
       }
       if (!returnShipmentMachine.can(sh.status as never, 'deliver')) return;
-      await tx.update('return_shipments', sh.id, { status: returnShipmentMachine.next(sh.status as never, 'deliver'), delivered_at: new Date(e.deliveredAt) });
+      const at = new Date(e.deliveredAt);
+      await tx.update('return_shipments', sh.id, { status: returnShipmentMachine.next(sh.status as never, 'deliver'), delivered_at: at });
       await this.core.timeline(tx, a.ret.id, [{ kind: 'shipment_delivered', label: `Delivered to ${a.ret.terms_snapshot.meta.destination.name}`, detail: 'It will be checked in shortly.', visibility: 'customer' }]);
+      // the carrier's delivery scan is the receipt: a return can't wait forever for someone to mark it received,
+      // and the inspection clock (and its escalation) starts from here
+      const ret = (await tx.get('returns', a.ret.id))!;
+      if (!returnMachine.can(ret.status as ReturnStatus, 'receive')) return;
+      await tx.update('returns', ret.id, { status: returnMachine.next(ret.status as ReturnStatus, 'receive'), received_at: at, updated_at: this.core.now() });
+      await this.core.timeline(tx, ret.id, [{ kind: 'received', label: `Return received at ${ret.terms_snapshot.meta.destination.name}`, detail: 'Delivered by the carrier. It will be inspected next.', visibility: 'customer' }]);
+      batch.push('returns.return.received', { returnId: ret.id, ...this.core.refs(ret), ...this.core.recipient(ret), ...this.core.owner(ret), items: this.core.returnedItems(a), receivedAt: at.toISOString() });
     });
   }
 
@@ -303,6 +309,35 @@ export class Automation {
     for await (const batch of this.repo.infoRequestsDue(this.core.now(), this.jobBatchSize)) {
       for (const r of batch) {
         await this.requests.cancel(r.id, 'expire', 'No reply to the question in time', { actor: SYSTEM }).catch((err) => this.core.ctx.log.warn({ err, returnId: r.id }, 'returns: info expiry failed'));
+      }
+    }
+  }
+
+  /**
+   * payments.refund.sent for a return: any other open return of the same order items is closed (one return per unit).
+   * Returns not on their way yet are cancelled and their unused labels voided; one already coming back is left to its
+   * seller and staff, with a note that the units were refunded on the other return.
+   */
+  async closeOverlapping(e: EventPayload<'payments.refund.sent'>): Promise<void> {
+    const rr = (await this.repo.find('refund_requests', { payment_refund_id: e.refundId }))[0] ?? (isUuid(e.originId) ? await this.repo.get('refund_requests', e.originId!) : undefined);
+    if (!rr?.return_id) return;
+    const refunded = await this.repo.get('returns', rr.return_id);
+    const itemIds = [...new Set(e.items.map((i) => i.orderItemId).filter(isUuid))];
+    if (!refunded || !itemIds.length) return;
+    const rows = await this.repo.find('return_items', { order_item_id: itemIds });
+    const candidates = await this.repo.find('returns', { id: [...new Set(rows.map((r) => r.return_id).filter((id) => id !== refunded.id))], status: ACTIVE_STATUSES });
+    // only returns claiming the same units: together with the refunded return they ask for more than was bought
+    // (two returns for different units of one line both stand)
+    const bought = new Map<string, number>();
+    for (const id of itemIds) bought.set(id, (await this.core.quiet('order item', () => this.core.ctx.use('orders').getOrderItem(id)))?.quantity ?? 0);
+    const qty = (returnId: string, itemId: string) => rows.filter((r) => r.return_id === returnId && r.order_item_id === itemId).reduce((n, r) => n + r.quantity, 0);
+    const others = candidates.filter((ret) => itemIds.some((id) => qty(ret.id, id) > 0 && qty(refunded.id, id) + qty(ret.id, id) > (bought.get(id) ?? 0)));
+    const reason = `These items were refunded on return ${refunded.ref}`;
+    for (const ret of others) {
+      if (returnMachine.can(ret.status as ReturnStatus, 'withdraw')) {
+        await this.requests.cancel(ret.id, 'withdraw', reason, { actor: SYSTEM }).catch((err) => this.core.ctx.log.warn({ err, returnId: ret.id }, 'returns: overlapping return not cancelled'));
+      } else {
+        await this.core.timeline(this.repo, ret.id, [{ kind: 'note', label: 'Items already refunded', detail: `${reason}; no second refund is due for them`, visibility: 'seller' }]);
       }
     }
   }

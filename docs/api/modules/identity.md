@@ -3,7 +3,7 @@
 Who someone is and how they prove it: accounts for customers, seller members and staff, credentials, email verification, sessions and refresh tokens for the website and the Android app, password recovery, 2-step verification, signed-in devices, guest sessions and the security activity log.
 
 - **Group:** Platform · **Launch phase:** 1 · **Plan chapters:** 6, 7, 10, 18
-- **Depends on:** nothing · **Optional:** [audit](audit.md), [sellers](sellers.md), [customers](customers.md)
+- **Depends on:** nothing · **Optional:** [audit](audit.md), [sellers](sellers.md), [customers](customers.md), [access](access.md)
 - **Required by:** [access](access.md), [customers](customers.md), [notifications](notifications.md), [sellers](sellers.md)
 
 ## Owns
@@ -923,6 +923,7 @@ Indexes: `(expires_at)`
 
 | Code | Status | Meaning |
 |---|---|---|
+| `LAST_BUSINESS_OWNER` | 409 | At least one active Business Owner must remain: the last one cannot be disabled (access.disableCheck). |
 | `INVALID_CREDENTIALS` | 401 | Email and password don't match. details.attemptsLeft before a temporary lock of details.lockoutMinutes minutes. |
 | `ACCOUNT_LOCKED` | 423 | Sign-in is paused. details.lockedUntil (null = until staff unlock) and details.cause. |
 | `ACCOUNT_DISABLED` | 403 | The account is disabled or closed. |

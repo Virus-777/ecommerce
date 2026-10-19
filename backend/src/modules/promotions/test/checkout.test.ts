@@ -140,7 +140,7 @@ describe('cart evaluation and redemption', () => {
 describe('concurrency: caps hold under parallel checkouts', () => {
   it('never exceeds the usage cap', async () => {
     const o = k.offer({ sellerId: SELLER_A, categoryId: HOME, price: USD(10000) });
-    const camp = await liveCampaign(k, campaignInput(k.clock, { code: 'CAP3', discount: { kind: 'fixed_coupon', amountOff: USD(500) }, limits: { usageCap: 3 } }));
+    const camp = await liveCampaign(k, campaignInput(k.clock, { code: 'CAP3', discount: { kind: 'fixed_coupon', amountOff: USD(500) }, limits: { budget: USD(100_000), usageCap: 3 } }));
     const evs = await Promise.all(Array.from({ length: 10 }, () => cart([line(o, 1)], { codes: ['CAP3'] })));
     expect(evs.every((e) => e.applied.some((a) => a.code === 'CAP3'))).toBe(true);
     const results = await Promise.allSettled(evs.map((e, i) => k.svc.reserveRedemption(e.evaluationId, `cap-${i}`)));
@@ -166,7 +166,7 @@ describe('concurrency: caps hold under parallel checkouts', () => {
 
   it('allows one use per customer even when the same customer checks out twice at once', async () => {
     const o = k.offer({ sellerId: SELLER_A, categoryId: HOME, price: USD(10000) });
-    const camp = await liveCampaign(k, campaignInput(k.clock, { code: 'ONCE', limits: { perCustomer: 1 } }));
+    const camp = await liveCampaign(k, campaignInput(k.clock, { code: 'ONCE', limits: { budget: USD(100_000), perCustomer: 1 } }));
     const customerId = newId();
     const evs = await Promise.all(Array.from({ length: 5 }, () => cart([line(o, 1)], { codes: ['ONCE'], customerId })));
     const results = await Promise.allSettled(evs.map((e, i) => k.svc.reserveRedemption(e.evaluationId, `once-${i}`)));

@@ -87,12 +87,13 @@ export class Placement {
     }
   }
 
-  private async transition(id: string, from: string[], event: Event, patch: Partial<SessionRow> = {}): Promise<{ session: SessionRow; won: boolean }> {
+  private async transition(id: string, from: string[], event: Event, patch: Partial<SessionRow> | ((s: SessionRow) => Partial<SessionRow>) = {}): Promise<{ session: SessionRow; won: boolean }> {
     return this.core.repo.transaction(async (tx) => {
       const s = (await tx.getSession(id, { forUpdate: true }))!;
       if (!from.includes(s.status)) return { session: s, won: false };
       const status = checkoutSessionMachine.next(s.status as Status, event);
-      return { session: await tx.updateSession(id, { ...patch, status, updated_at: this.now() }), won: true };
+      const fields = typeof patch === 'function' ? patch(s) : patch;
+      return { session: await tx.updateSession(id, { ...fields, status, updated_at: this.now() }), won: true };
     });
   }
 
@@ -162,10 +163,15 @@ export class Placement {
     if (quoteVersion !== session.quote_version || expectedTotal.amount !== total.amount || expectedTotal.currency !== total.currency) {
       throw this.core.error('QUOTE_OUTDATED', 'Your order total changed. Check the new total before placing your order.', { quoteVersion: session.quote_version, total });
     }
-    if (session.customer_id) {
-      const can = await this.ctx.use('customers').canPlaceOrders(session.customer_id);
-      if (!can.allowed) throw this.core.error('ORDERING_RESTRICTED', can.reason ?? 'This account cannot place orders right now', { reason: can.reason ?? null });
-    }
+    await this.checkStanding(session);
+  }
+
+  /** The customer may order now: on Place order and on every retry after a decline (a restriction can start in between) */
+  private async checkStanding(session: SessionRow) {
+    const customers = this.ctx.use('customers');
+    const email = this.core.account(session).email;
+    const can = session.customer_id ? await customers.canPlaceOrders(session.customer_id) : email ? await customers.canGuestOrder(email) : { allowed: true };
+    if (!can.allowed) throw this.core.error('ORDERING_RESTRICTED', can.reason ?? 'This account cannot place orders right now', { reason: can.reason ?? null });
   }
 
   /** PAYMENT_ATTEMPTS_EXCEEDED once the session used maxPaymentAttempts (sessions.attempt_count is never reset) */
@@ -249,6 +255,7 @@ export class Placement {
     if (input.quoteVersion !== session.quote_version || input.expectedTotal.amount !== total.amount || input.expectedTotal.currency !== total.currency) {
       throw this.core.error('QUOTE_OUTDATED', 'Your order total changed. Check the new total before paying.', { quoteVersion: session.quote_version, total });
     }
+    await this.checkStanding(session);
     const chosen = await this.validateMethod(session, input.method);
 
     const claimed = await this.core.repo.transaction(async (tx) => {
@@ -528,6 +535,8 @@ export class Placement {
       const idx = q.totals.shippingByPackage.findIndex((s) => s.packageKey === key);
       const t = q.totals.perPackage[idx]!;
       const shares = allocate(t.shipping, pl.map((l) => Math.max(1, l.unit_price * l.quantity)));
+      // a shipping discount Marketly funds is still paid to the seller (finance credits it as shipping)
+      const funding = q.shippingFunding?.[key];
       const now = this.now();
       return {
         key,
@@ -542,7 +551,8 @@ export class Placement {
           service: opt?.methodCode ?? null,
           price: opt ? (opt.free ? m(0, cur) : opt.price) : m(0, cur),
           free: opt ? opt.free || t.shipping.amount === 0 : t.shipping.amount === 0,
-          fundedBy: opt?.fundedBy ?? 'customer',
+          fundedBy: !opt?.free && t.shipping.amount === 0 && funding ? (funding.platform ? 'platform' : 'seller') : (opt?.fundedBy ?? 'customer'),
+          platformFunded: funding?.platform ? m(funding.platform, cur) : null,
           arrival: opt?.arrival ?? { from: now.toISOString().slice(0, 10), to: now.toISOString().slice(0, 10) },
           dispatchBy: opt?.dispatchBy ?? now.toISOString(),
         },
@@ -600,6 +610,15 @@ export class Placement {
     const id = session.id;
     const [lines0, packages] = await Promise.all([this.core.repo.listLines(id), this.core.repo.listPackages(id)]);
     const lines = lines0.filter(included).sort(byLineOrder);
+    // the stock hold can expire while the bank confirms the payment (a long challenge): the units are held again,
+    // or, when they sold meanwhile, an accepted payment is voided instead of making an order nobody can ship.
+    // A pending payment can't be voided before its result is known: its order is made and inventory raises a
+    // manual task when it can't allocate.
+    if (!session.order_id) {
+      const kept = await this.keepStock(session, lines, intent.intentId);
+      if (kept) session = kept;
+      else if (intent.state === 'accepted') return this.stockGone(session, intent.intentId, by);
+    }
     const policyVersions = await this.views.policyVersions();
     const input = this.orderInput(session, lines, packages, intent, policyVersions);
     const order = await this.ctx.use('orders').createOrder(input);
@@ -659,6 +678,42 @@ export class Placement {
     return t.session;
   }
 
+  /** The session's stock hold, alive for the order: kept, or held again after it expired; null when the units are gone */
+  private async keepStock(session: SessionRow, lines: LineRow[], intentId: string): Promise<SessionRow | null> {
+    const inventory = this.ctx.use('inventory');
+    const minutes = Number(await this.ctx.settings.get('stockHoldMinutes')) || 15;
+    const old = session.stock_reservation_id;
+    if (old) {
+      try {
+        await inventory.extendHold(old, new Date(this.now().getTime() + minutes * 60_000).toISOString());
+        return session;
+      } catch (err) {
+        if (!isAppError(err) || err.code !== 'RESERVATION_EXPIRED') throw err;
+      }
+      // past its expiry but not yet released by inventory's job: its units go back first so the new hold can take them
+      await this.core.optional('inventory.releaseHold', () => inventory.releaseHold(old, 'Expired while the payment was confirmed'));
+    }
+    const wanted = new Map<string, number>();
+    for (const l of lines) wanted.set(l.stock_item_id, (wanted.get(l.stock_item_id) ?? 0) + l.quantity);
+    if (!wanted.size) return session;
+    try {
+      const hold = await inventory.hold(`checkout:${session.id}:${intentId}`, [...wanted].map(([stockItemId, quantity]) => ({ stockItemId, quantity })), minutes);
+      await this.core.log(session.id, 'Stock held again', 'The stock hold expired while the payment was being confirmed');
+      return this.core.repo.updateSession(session.id, { stock_reservation_id: hold.id });
+    } catch (err) {
+      if (!isStockError(err)) throw err;
+      return null;
+    }
+  }
+
+  /** The units sold while the bank confirmed the payment: no order, the authorization is voided and the customer can check the items and pay again */
+  private async stockGone(session: SessionRow, intentId: string, by: By): Promise<SessionRow> {
+    await this.core.optional('payments.voidIntent', () => this.ctx.use('payments').voidIntent(intentId, 'Items sold out before the order was made'));
+    if (session.stock_reservation_id) session = await this.core.repo.updateSession(session.id, { stock_reservation_id: null });
+    await this.core.log(session.id, 'Items sold out', 'The stock hold expired while the payment was being confirmed and the units sold meanwhile; the payment was voided');
+    return this.failPayment(session, { code: 'stock_gone', category: 'processing_error', message: 'Some items sold out while your bank was confirming the payment. Nothing was charged.', advice: 'Check the items in your checkout and pay again.', retryable: true }, by);
+  }
+
   /**
    * Declined: no order; lines, choices, coupons and the stock hold are kept until holdUntil. The store credit
    * hold is not: payments releases it with the declined intent, so checkout forgets it (releasing it again is
@@ -667,12 +722,12 @@ export class Placement {
   async failPayment(session: SessionRow, decline: payments.Decline | null, by: By): Promise<SessionRow> {
     const minutes = Number(await this.ctx.settings.get('retryWindowMinutes')) || 30;
     const holdUntil = new Date(this.now().getTime() + minutes * 60_000);
-    const t = await this.transition(session.id, ['placing', 'awaiting_action', 'payment_pending'], 'payment_declined', { hold_until: holdUntil, credit_hold_id: null });
+    // the decline is written with the status: a request that loses the race (the payments event got here first) reads the reason, not a bare failure
+    const t = await this.transition(session.id, ['placing', 'awaiting_action', 'payment_pending'], 'payment_declined', (s) => ({ hold_until: holdUntil, credit_hold_id: null, ...this.core.paymentPatch({ ...this.core.payment(s), intentState: 'failed', decline }) }));
     if (!t.won) return t.session;
     const creditHold = session.credit_hold_id;
     const wallet = this.ctx.tryUse('wallet');
     if (wallet && creditHold) await this.core.optional('wallet.releaseHold', () => wallet.releaseHold(creditHold));
-    await this.savePayment(session.id, { intentState: 'failed', decline });
     if (t.session.stock_reservation_id) {
       await this.core.optional('inventory.extendHold', () => this.ctx.use('inventory').extendHold(t.session.stock_reservation_id!, holdUntil.toISOString()));
     }

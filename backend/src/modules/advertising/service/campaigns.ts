@@ -278,6 +278,8 @@ export class CampaignsPart extends Part {
     const own = advertiserIsOwn(adv.kind);
     const b = input.budget ?? null;
     const billing = own ? 'none' : (b?.billing ?? 'none');
+    // a seller is billed only for ads it asked for itself (its ad request is its consent); staff ads for a seller are unbilled
+    if (o.origin === 'staff' && adv.kind === 'seller' && billing !== 'none') issues.push({ path: 'budget.billing', message: 'A seller pays only for ads it requests itself; a staff campaign for a seller is unbilled (billing none)' });
     const cur = this.core.currency();
     const amount = (m: common.Money | null | undefined, path: string) => {
       if (!m) return null;
@@ -293,6 +295,8 @@ export class CampaignsPart extends Part {
       if (!dailyLimit) issues.push({ path: 'budget.dailyLimit', message: 'Set a daily spending limit' });
       if (!totalLimit) issues.push({ path: 'budget.totalLimit', message: 'Set a total spending limit' });
       if (dailyLimit && totalLimit && dailyLimit > totalLimit) issues.push({ path: 'budget.dailyLimit', message: 'The daily limit cannot be above the total limit' });
+      // a limit below one click or the fixed daily fee would deliver for less than the rate (CPM rates are per 1,000 displays)
+      if (billing !== 'cpm' && rate && dailyLimit && dailyLimit < rate) issues.push({ path: 'budget.dailyLimit', message: `The daily limit must cover at least the ${billing === 'fixed_daily' ? 'daily fee' : 'cost of one click'}` });
     }
     const deliveryCap = b?.deliveryCap ?? null;
     if (deliveryCap !== null && (!Number.isInteger(deliveryCap) || deliveryCap < 1)) issues.push({ path: 'budget.deliveryCap', message: 'Whole number of displays, 1 or more' });
@@ -565,7 +569,11 @@ export class CampaignsPart extends Part {
     const body = { ...input, role: await this.campaignRole(row, input.role, by) };
     const slot = stepFor(body.role, row.advertiser_kind);
     if (!slot) throw invalid([{ path: 'role', message: 'Marketing reviews own promotions; seller and brand ads need Content' }], 'This role cannot approve this campaign');
+    // a billed seller request goes live only while paid seller ads are on and the seller may advertise
+    if (row.seller_id && row.origin === 'seller_request' && row.billing !== 'none') await this.core.assertPaidSellerAds(row.seller_id);
     const reviewer = encodeActor(by.actor);
+    // the two review steps are two people besides whoever made the campaign
+    if (row.created_by === reviewer) throw this.ctx.error('SAME_REVIEWER', 'You created this campaign; two other people approve its review steps.');
     const done = await this.repo.transaction(async (tx) => {
       const locked = await tx.get('campaigns', id, { forUpdate: true });
       if (!locked) throw notFound('Campaign');

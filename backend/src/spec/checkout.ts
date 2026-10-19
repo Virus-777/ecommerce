@@ -1589,7 +1589,7 @@ export const endpoints = defineEndpoints({
     body: () => RetryPaymentInput,
     response: () => PlaceOrderResult,
     status: 200,
-    errors: ["RETRY_WINDOW_EXPIRED","QUOTE_OUTDATED","PAYMENT_METHOD_INVALID","PAYMENT_ATTEMPTS_EXCEEDED","INSUFFICIENT_CREDIT","IDEMPOTENCY_KEY_REUSED","ILLEGAL_TRANSITION"],
+    errors: ["ORDERING_RESTRICTED","RETRY_WINDOW_EXPIRED","QUOTE_OUTDATED","PAYMENT_METHOD_INVALID","PAYMENT_ATTEMPTS_EXCEEDED","INSUFFICIENT_CREDIT","IDEMPOTENCY_KEY_REUSED","ILLEGAL_TRANSITION"],
     idempotent: true,
     events: ["checkout.payment.retried","checkout.session.completed"],
     screens: ["store/payment-result"],

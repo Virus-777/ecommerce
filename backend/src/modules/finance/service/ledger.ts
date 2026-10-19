@@ -7,6 +7,7 @@ import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
+import { allocate } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
 import type { LedgerEntry, Reference, RefundImpactPreview, SellerBalances } from '../../../spec/finance.js';
 import type * as orders from '../../../spec/orders.js';
@@ -139,12 +140,14 @@ export class LedgerPart extends Part {
     const splits = new Map<string, { seller: number; platform: number }>();
     for (const item of items) splits.set(item.id, await this.discountSplit(item));
     const cur = this.core.currency();
+    const platformShipping = this.platformShipping(order);
     const out = new Outbox();
     await this.repo.transaction(async (tx) => {
       for (const item of items) {
         const split = splits.get(item.id)!;
+        const shipPaid = platformShipping.get(item.id) ?? 0;
         // category fee rates apply to the product category at purchase (the order item's snapshot)
-        const calc = calculate(rule, { categoryId: item.categoryId ?? null, itemPrice: item.lineSubtotal.amount, sellerDiscount: split.seller, platformDiscount: split.platform, shippingCharged: item.shippingShare.amount }, cur);
+        const calc = calculate(rule, { categoryId: item.categoryId ?? null, itemPrice: item.lineSubtotal.amount, sellerDiscount: split.seller, platformDiscount: split.platform, shippingCharged: item.shippingShare.amount + shipPaid }, cur);
         const lotId = detId(`lot:${item.id}`);
         await tx.insertIfAbsent('earnings_lots', { id: lotId, seller_id: sellerId, order_id: order.id, order_item_id: item.id, state: 'pending', gross: item.lineSubtotal.amount, fee: calc.fee.amount, net: 0, delivered_at: null, available_at: null, payout_id: null });
         const lot = (await tx.findOne('earnings_lots', { order_item_id: item.id }))!;
@@ -158,7 +161,10 @@ export class LedgerPart extends Part {
         ];
         if (rule.platformDiscountsReduceFee) entries.push({ key: `sale_platform_discount:${item.id}`, type: 'seller_discount', amount: -calc.platformDiscount.amount, bucket: 'pending', ref, description: `Marketly-funded discount on ${item.title} (fee rule ${rule.version})`, lotId });
         entries.push(
-          { key: `sale_shipping:${item.id}`, type: 'shipping_charge', amount: calc.shippingCharged.amount, bucket: 'pending', ref, description: `Shipping charged for ${item.title}`, lotId },
+          { key: `sale_shipping:${item.id}`, type: 'shipping_charge', amount: calc.shippingCharged.amount - shipPaid, bucket: 'pending', ref, description: `Shipping charged for ${item.title}`, lotId },
+        );
+        if (shipPaid) entries.push({ key: `sale_shipping_platform:${item.id}`, type: 'shipping_charge', amount: shipPaid, bucket: 'pending', ref, description: `Shipping for ${item.title} paid by Marketly (Marketly-funded shipping discount)`, lotId });
+        entries.push(
           { key: `sale_fee:${item.id}`, type: 'marketplace_fee', amount: -calc.fee.amount, bucket: 'pending', ref, description: `${(calc.rateBps / 100).toString()}% of ${fmt(calc.feeBasis.amount, cur)} ${rule.basis === 'after_seller_discounts' && calc.sellerDiscount.amount ? 'item price after your discount' : 'item price'}${rule.includeShipping ? ' (shipping included)' : ' (shipping excluded)'}`, lotId },
         );
         await this.core.post(tx, sellerId, entries, out);
@@ -192,16 +198,21 @@ export class LedgerPart extends Part {
       const itemAmount = Math.min(e.refund.itemAmount.amount, l.gross);
       if (itemAmount <= 0 && e.refund.shippingRefund.amount <= 0) return;
       const discountPart = prorate(-totals.seller_discount, itemAmount, totals.sale);
-      const reversal = itemAmount - discountPart + Math.min(e.refund.shippingRefund.amount, totals.shipping_charge);
+      // Before dispatch the shipping goes back per package (reverseShipping): the last cancellation refunds the shares
+      // of items cancelled earlier too, which this item's lot never held. After dispatch (a package returned to its
+      // seller) this item's refunded shipping comes off the shipping the customer paid for it.
+      const customerShipping = totals.shipping_charge - ((await tx.findOne('ledger_entries', { source_event_id: `sale_shipping_platform:${l.order_item_id}` }))?.amount ?? 0);
+      const reversal = itemAmount - discountPart + (e.beforeDispatch ? 0 : Math.min(e.refund.shippingRefund.amount, customerShipping));
       const bucket = l.state === 'pending' ? 'pending' : 'available';
       const ref = { kind: 'order' as const, id: e.orderId, label: e.ref };
-      const entries: NewEntry[] = [{ key: `cancel:${e.cancellationId}:${e.itemId}`, type: 'cancellation', amount: -reversal, bucket, ref, description: `Cancelled ${e.quantity} item${e.quantity === 1 ? '' : 's'} before dispatch (${e.reasonCode.replace(/_/g, ' ')})`, lotId: l.id }];
+      const entries: NewEntry[] = [{ key: `cancel:${e.cancellationId}:${e.itemId}`, type: 'cancellation', amount: -reversal, bucket, ref, description: `Cancelled ${e.quantity} item${e.quantity === 1 ? '' : 's'} ${e.beforeDispatch ? 'before dispatch' : 'after dispatch'} (${e.reasonCode.replace(/_/g, ' ')})`, lotId: l.id }];
       const charge = await tx.findOne('fee_charges', { order_item_id: l.order_item_id });
       let feeBack = 0;
-      if (charge && e.beforeDispatch && rule.treatment.cancellationBeforeDispatch === 'no_fee') {
+      // after dispatch (a package returned to sender) the fee follows the returns treatment
+      if (charge && (e.beforeDispatch ? rule.treatment.cancellationBeforeDispatch === 'no_fee' : rule.treatment.returns === 'fee_returned_pro_rata')) {
         feeBack = Math.min(charge.fee - charge.refunded_fee, prorate(charge.fee, itemAmount, totals.sale || l.gross));
         if (itemAmount >= l.gross) feeBack = charge.fee - charge.refunded_fee;
-        entries.push({ key: `cancel_fee:${e.cancellationId}:${e.itemId}`, type: 'fee_refund', amount: feeBack, bucket, ref, description: 'No fee on items cancelled before dispatch', lotId: l.id });
+        entries.push({ key: `cancel_fee:${e.cancellationId}:${e.itemId}`, type: 'fee_refund', amount: feeBack, bucket, ref, description: e.beforeDispatch ? 'No fee on items cancelled before dispatch' : 'Fee refunded on the returned item, in proportion to the refund', lotId: l.id });
       }
       const posted = await this.core.post(tx, l.seller_id, entries, out);
       if (!posted.length) return;
@@ -211,7 +222,52 @@ export class LedgerPart extends Part {
       await tx.update('earnings_lots', l.id, { gross, fee: fresh.fee - feeBack });
       if (gross === 0 && (fresh.state === 'pending' || fresh.state === 'available')) await this.core.moveLot(tx, { ...fresh, gross }, 'reverse', out);
     });
+    if (e.beforeDispatch) await this.reverseShipping(e, out);
     this.core.flush(out);
+  }
+
+  /**
+   * Marketly-funded shipping of each seller package, split over its items by item price like the customer's
+   * shipping at checkout (OrderGroup.delivery.platformFunded)
+   */
+  platformShipping(order: orders.OrderDetail): Map<string, number> {
+    const out = new Map<string, number>();
+    for (const g of order.groups) {
+      const paid = g.delivery?.platformFunded;
+      if (!paid?.amount || !g.items.length) continue;
+      allocate(paid, g.items.map((i) => Math.max(1, i.lineSubtotal.amount))).forEach((m, n) => out.set(g.items[n]!.id, m.amount));
+    }
+    return out;
+  }
+
+  /**
+   * A package cancelled whole before dispatch is never shipped: the customer gets all its shipping back, and the
+   * shipping credited with each of its sales (the customer's share and Marketly's) goes back, once per lot. Items
+   * cancelled while the rest of the package still shipped keep their shipping until then.
+   */
+  async reverseShipping(e: EventPayload<'orders.item.cancelled'>, out: Outbox) {
+    const order = await this.order(e.orderId);
+    const group = order?.groups.find((g) => g.id === e.groupId);
+    if (!group?.items.length || !group.items.every((i) => i.state === 'cancelled')) return;
+    const ref = { kind: 'order' as const, id: e.orderId, label: e.ref };
+    for (const item of group.items) {
+      const lot = await this.lotOf(item.id, order);
+      if (!lot) continue;
+      await this.repo.transaction(async (tx) => {
+        const credited = (kind: string) => tx.findOne('ledger_entries', { source_event_id: `${kind}:${lot.order_item_id}` });
+        const customer = await credited('sale_shipping');
+        const platform = await credited('sale_shipping_platform');
+        if (!customer?.amount && !platform?.amount) return;
+        const l = (await tx.get('earnings_lots', lot.id, { forUpdate: true }))!;
+        // a lot already reversed has moved what it kept to available
+        const pending = l.state === 'pending';
+        const on = { bucket: pending ? ('pending' as const) : ('available' as const), ref, ...(pending || l.state === 'available' ? { lotId: l.id } : {}) };
+        await this.core.post(tx, l.seller_id, [
+          { key: `cancel_shipping:${l.order_item_id}`, type: 'cancellation', amount: -(customer?.amount ?? 0), description: 'Package cancelled before dispatch: shipping refunded to the customer', ...on },
+          { key: `cancel_shipping_platform:${l.order_item_id}`, type: 'cancellation', amount: -(platform?.amount ?? 0), description: 'Package cancelled before dispatch: shipping Marketly paid goes back', ...on },
+        ], out);
+      });
+    }
   }
 
   async feeRuleOf(tx: FinanceRepository, lot: LotRec) {
@@ -296,10 +352,13 @@ export class LedgerPart extends Part {
     const alloc = (await this.repo.findOne('refund_allocations', { payment_refund_id: e.refundId })) ?? (e.originId && isUuid(e.originId) ? await this.repo.findOne('refund_allocations', { refund_request_id: e.originId }) : undefined);
     if (alloc?.applied_at && alloc.payment_refund_id && alloc.payment_refund_id !== e.refundId) return;
     const total = e.items.reduce((s, i) => s + i.amount.amount, 0) || e.amount.amount;
-    const breakdown = (alloc?.breakdown ?? null) as { itemAmount?: common.Money; returnId?: string | null } | null;
+    const breakdown = (alloc?.breakdown ?? null) as { itemAmount?: common.Money; discountShare?: common.Money; returnShippingDeduction?: common.Money; taxRefund?: common.Money | null; returnId?: string | null } | null;
     const label = e.ref;
     const out = new Outbox();
     const order = await this.order(e.orderId);
+    const lines = order ? this.itemsOf(order) : [];
+    // this item's part of a breakdown amount, in proportion to its refund
+    const part = (m: common.Money | null | undefined, amount: number) => (m ? prorate(m.amount, amount, total) : 0);
     for (const item of e.items) {
       if (!item.sellerId) {
         await this.repo.transaction((tx) => this.trading(tx, `return:${e.refundId}:${item.orderItemId}`, { at: new Date(e.sentAt), kind: 'return', amount: item.amount.amount, order_id: e.orderId, order_item_id: item.orderItemId, variant_id: null, ref_kind: 'refund', ref_id: e.refundId }));
@@ -308,6 +367,8 @@ export class LedgerPart extends Part {
       const sellerCharge = alloc ? prorate(alloc.seller_share, item.amount.amount, total) : item.amount.amount;
       const platformCharge = item.amount.amount - sellerCharge;
       const lot = await this.lotOf(item.orderItemId, order);
+      const line = lines.find((i) => i.id === item.orderItemId);
+      const split = line ? await this.discountSplit(line) : { seller: 0, platform: 0 };
       await this.repo.transaction(async (tx) => {
         if (platformCharge > 0) await this.platformCost(tx, `platform_refund:${e.refundId}:${item.orderItemId}`, { at: new Date(e.sentAt), kind: 'refund', amount: platformCharge, order_id: e.orderId, order_item_id: item.orderItemId, ref_kind: 'refund', ref_id: e.refundId });
         const l = lot ? await tx.get('earnings_lots', lot.id, { forUpdate: true }) : undefined;
@@ -317,25 +378,37 @@ export class LedgerPart extends Part {
           return;
         }
         const totals = await this.lotTotals(tx, l.id);
-        const itemShare = breakdown?.itemAmount ? prorate(breakdown.itemAmount.amount, item.amount.amount, total) : item.amount.amount;
+        const rule = await this.core.ruleModel(await this.feeRuleOf(tx, l), tx);
+        const tax = part(breakdown?.taxRefund, item.amount.amount);
+        const itemShare = breakdown?.itemAmount ? part(breakdown.itemAmount, item.amount.amount) - tax : item.amount.amount;
         const itemAmount = Math.min(l.gross, Math.max(0, itemShare));
+        // The seller's share of the refund is charged as if the seller paid all of it back, without the parts that
+        // were never the seller's: sales tax is Marketly's to refund, while a Marketly-funded discount the seller was
+        // paid and the return shipping the customer paid for a Marketly label go back to Marketly.
+        const fromSeller = (n: number) => prorate(n, sellerCharge, item.amount.amount);
+        const taxNotCharged = fromSeller(tax);
+        const platformDiscount = rule.platformDiscountsReduceFee ? 0 : fromSeller(prorate(part(breakdown?.discountShare, item.amount.amount), split.platform, split.seller + split.platform));
+        const returnShipping = fromSeller(part(breakdown?.returnShippingDeduction, item.amount.amount));
         const payout = l.payout_id ? await tx.get('payouts', l.payout_id) : undefined;
         const afterPayout = l.state === 'paid_out' || (l.state === 'in_payout' && Boolean(payout && ['processing', 'paid'].includes(payout.status)));
         const full = itemAmount >= l.gross;
         const bucket = l.state === 'pending' ? 'pending' : 'available';
+        const type = afterPayout ? 'refund_after_payout' : 'refund';
+        const cur = e.amount.currency;
         const entries: NewEntry[] = [
           {
             key: `refund:${e.refundId}:${item.orderItemId}`,
-            type: afterPayout ? 'refund_after_payout' : 'refund',
-            amount: -sellerCharge,
+            type,
+            amount: -(sellerCharge - taxNotCharged),
             bucket,
             ref,
-            description: `${item.title} · ${full ? 'full' : 'partial'} refund${afterPayout ? ` after payout${payout ? ` (paid out in ${payout.ref})` : ''}` : ''}${platformCharge > 0 ? `; ${fmt(platformCharge, e.amount.currency)} funded by Marketly` : ''}`,
+            description: `${item.title} · ${full ? 'full' : 'partial'} refund${afterPayout ? ` after payout${payout ? ` (paid out in ${payout.ref})` : ''}` : ''}${platformCharge > 0 ? `; ${fmt(platformCharge, cur)} funded by Marketly` : ''}${taxNotCharged > 0 ? `; ${fmt(taxNotCharged, cur)} sales tax refunded by Marketly` : ''}`,
             lotId: l.id,
           },
         ];
+        if (platformDiscount) entries.push({ key: `refund_platform_discount:${e.refundId}:${item.orderItemId}`, type, amount: -platformDiscount, bucket, ref, description: `Marketly-funded discount on ${item.title}, paid to you with the sale, back to Marketly`, lotId: l.id });
+        if (returnShipping) entries.push({ key: `refund_return_shipping:${e.refundId}:${item.orderItemId}`, type, amount: -returnShipping, bucket, ref, description: 'Return shipping the customer paid, for the Marketly return label', lotId: l.id });
         const charge = await tx.findOne('fee_charges', { order_item_id: l.order_item_id });
-        const rule = await this.core.ruleModel(await this.feeRuleOf(tx, l), tx);
         let feeBack = 0;
         if (charge && rule.treatment.returns === 'fee_returned_pro_rata') {
           feeBack = full ? charge.fee - charge.refunded_fee : Math.min(charge.fee - charge.refunded_fee, prorate(charge.fee, itemAmount, totals.sale || l.gross));
@@ -343,6 +416,8 @@ export class LedgerPart extends Part {
         }
         const posted = await this.core.post(tx, l.seller_id, entries, out);
         if (!posted.length) return;
+        // the customer's return shipping pays for the label Marketly bought (booked from returns.label.created)
+        if (returnShipping) await this.platformCost(tx, `return_shipping:${e.refundId}:${item.orderItemId}`, { at: new Date(e.sentAt), kind: 'label', amount: -returnShipping, order_id: e.orderId, order_item_id: item.orderItemId, ref_kind: 'refund', ref_id: e.refundId });
         if (charge && feeBack) await tx.update('fee_charges', charge.id, { refunded_fee: charge.refunded_fee + feeBack, status: charge.refunded_fee + feeBack >= charge.fee ? 'reversed' : charge.status });
         const fresh = (await tx.get('earnings_lots', l.id))!;
         const gross = Math.max(0, fresh.gross - itemAmount);
@@ -381,7 +456,8 @@ export class LedgerPart extends Part {
 
   async onReturnLabel(e: EventPayload<'returns.label.created'>) {
     const at = this.now();
-    if (e.paidBy === 'customer') return; // deducted from the refund by returns
+    // a label the customer pays for is bought by Marketly; the fee deducted from the refund is recovered when it is sent
+    if (e.paidBy === 'customer' && e.ownerType !== 'official') return void (await this.repo.transaction((tx) => this.platformCost(tx, `label:${e.labelId}`, { at, kind: 'label', amount: e.cost.amount, order_id: e.orderId, ref_kind: 'label', ref_id: e.labelId })));
     if (e.paidBy === 'seller' && e.sellerId) return this.chargeLabel({ labelId: e.labelId, sellerId: e.sellerId, cost: e.cost.amount, ref: { kind: 'return', id: e.returnId }, description: 'Prepaid return label' });
     // an Official Store return label is company trading; one the platform pays on a seller's order is a platform cost
     if (e.ownerType === 'official') await this.repo.transaction((tx) => this.trading(tx, `label:${e.labelId}`, { at, kind: 'shipping_expense', amount: e.cost.amount, order_id: e.orderId, order_item_id: null, variant_id: null, ref_kind: 'return_label', ref_id: e.labelId }));
@@ -789,7 +865,7 @@ export class LedgerPart extends Part {
    */
   async bookedRefundImpact(paymentRefundId: string, orderItemIds: string[]): Promise<{ sellerEarningsChange: common.Money; feeReturned: common.Money; afterPayout: boolean; note: string } | null> {
     if (!isUuid(paymentRefundId) || !orderItemIds.length) return null;
-    const keys = orderItemIds.flatMap((id) => [`refund:${paymentRefundId}:${id}`, `refund_fee:${paymentRefundId}:${id}`]);
+    const keys = orderItemIds.flatMap((id) => ['refund', 'refund_fee', 'refund_platform_discount', 'refund_return_shipping'].map((k) => `${k}:${paymentRefundId}:${id}`));
     const rows = await this.repo.find('ledger_entries', { source_event_id: keys });
     if (!rows.length) {
       const alloc = await this.repo.findOne('refund_allocations', { payment_refund_id: paymentRefundId });

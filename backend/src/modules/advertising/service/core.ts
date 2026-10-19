@@ -322,6 +322,14 @@ export class Core {
     };
   }
 
+  /** A seller can be billed for ads only while paid seller advertising is on and the seller may advertise */
+  async assertPaidSellerAds(sellerId: string): Promise<void> {
+    const rules = await this.rules();
+    if (!rules.paidSellerAdsEnabled) throw this.ctx.error('PAID_ADS_DISABLED', 'Paid seller advertising is not enabled yet.');
+    const can = await this.optional('sellers', (s) => s.canSell(sellerId, { activity: 'advertising' }));
+    if (can && !can.allowed) throw new AppError('FORBIDDEN', can.reason ?? 'Advertising is restricted for this account', { restrictionId: can.restrictionId ?? null, appealRoute: can.appealRoute ?? null });
+  }
+
   /** Rules in force now: the highest approved version whose effective time has come */
   async rules(): Promise<GlobalRules> {
     const t = Date.now();

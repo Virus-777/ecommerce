@@ -19,6 +19,9 @@ export const VOID_ACTION = 'advertising.charges.void';
 export const CHARGE_TARGET = 'ad_charge';
 const BASIS: Record<string, AdCharge['basis']> = { cpc: 'clicks', cpm: 'displays', fixed_daily: 'fixed_day' };
 const PAID_BILLING = ['cpc', 'cpm', 'fixed_daily'];
+/** A seller is charged only for a paid campaign it requested itself (its consent) */
+const billable = (c: Pick<CampaignRec, 'billing' | 'origin'>) => PAID_BILLING.includes(c.billing) && c.origin === 'seller_request';
+const NOT_REQUESTED = 'Not billable: the seller did not request this campaign';
 
 export class BillingPart extends Part {
   /* ---------------------------------------------------------------- views */
@@ -83,7 +86,7 @@ export class BillingPart extends Part {
   async accrueDay(campaignId: string, day: string): Promise<ChargeRec | null> {
     const span = this.core.span(day, day);
     const pre = await this.repo.get('campaigns', campaignId);
-    if (!pre?.seller_id || !PAID_BILLING.includes(pre.billing) || pre.rate === null) return null;
+    if (!pre?.seller_id || !billable(pre) || pre.rate === null) return null;
     if (pre.starts_at && pre.starts_at.getTime() >= span.to.getTime()) return null;
     const counted = pre.billing === 'cpc' ? await this.repo.clickBilling(campaignId, span) : null;
     const displays = pre.billing === 'cpc' ? 0 : await this.repo.displaysIn(campaignId, span);
@@ -148,6 +151,8 @@ export class BillingPart extends Part {
     await this.accrueAll();
     const finance = this.ctx.tryUse('finance');
     if (!finance) return;
+    // nothing reaches a seller's ledger while paid seller ads are off; the charges wait, accrued
+    const paidAdsOn = (await this.core.rules()).paidSellerAdsEnabled;
     const today = this.core.today();
     const due = await this.repo.find('ad_charges', { state: 'accrued', day: { op: '<', value: today } }, { orderBy: [['day', 'asc']], limit: 2000 });
     const campaigns = new Map(
@@ -161,6 +166,12 @@ export class BillingPart extends Part {
     for (const ch of due) {
       const c = campaigns.get(ch.campaign_id);
       try {
+        // charges of a campaign the seller never requested (made by staff before billing them was refused) never post
+        if (!c || !billable(c)) {
+          await this.apply(ch.id, NOT_REQUESTED, { actor: SYSTEM }, null);
+          continue;
+        }
+        if (!paidAdsOn) continue;
         const entry = await finance.recordAdCharge({
           sellerId: ch.seller_id,
           campaignId: ch.campaign_id,

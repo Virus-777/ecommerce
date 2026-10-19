@@ -235,12 +235,13 @@ export class ReturnsRepository {
   async usedQuantities(orderItemIds: string[]): Promise<Map<string, number>> {
     const out = new Map<string, number>();
     if (!orderItemIds.length) return out;
-    // units in returns that are not cancelled or rejected (join on the return)
+    // units in returns that are not cancelled (join on the return): a rejected return keeps its units, the customer
+    // asks Marketly to review it instead of opening another return for them
     const rows = await this.#t('return_items').aggregate<{ _id: string; n: unknown }>([
       { $match: { order_item_id: { $in: orderItemIds } } },
       { $lookup: { from: this.#returns.name, localField: 'return_id', foreignField: '_id', as: 'r' } },
       { $addFields: { return_status: { $arrayElemAt: ['$r.status', 0] } } },
-      { $match: { return_status: { $nin: ['cancelled', 'rejected', null] } } },
+      { $match: { return_status: { $nin: ['cancelled', null] } } },
       { $group: { _id: '$order_item_id', n: { $sum: '$quantity' } } },
     ]);
     for (const r of rows) out.set(r._id, Number(r.n ?? 0));

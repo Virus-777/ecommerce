@@ -387,22 +387,29 @@ export class ServingPart extends Part {
 
   /* ---------------------------------------------------------------- impressions */
 
-  private creativeFor(e: Entry, device: string): CreativeRec | undefined {
+  /**
+   * The creatives of one impression: a picture (image or video) for the viewer's device and the campaign's ad
+   * text (a text creative), each rotating evenly among its own kind. They are one ad, never alternatives:
+   * Admin Center and Seller Center save the ad text next to the pictures, so every impression carries both.
+   */
+  private creativesFor(e: Entry, device: string): { visual?: CreativeRec; text?: CreativeRec } {
     const cls = deviceClass(device);
     const fit = e.creatives.filter((c) => c.device === cls || c.device === 'any');
-    if (!fit.length) return undefined;
-    return fit[this.turn(`creative:${e.m.row.id}`) % fit.length];
+    const pick = (list: CreativeRec[], kind: string) => (list.length ? list[this.turn(`creative:${kind}:${e.m.row.id}`) % list.length] : undefined);
+    return { visual: pick(fit.filter((c) => c.kind !== 'text'), 'visual'), text: pick(fit.filter((c) => c.kind === 'text'), 'text') };
   }
 
   private impression(e: Entry, v: Viewer, req: ServeRequest | null, offer?: OfferInfo, preview = false): AdImpression | null {
     const r = e.m.row;
     const key = e.m.placement.key;
-    const creative = this.creativeFor(e, v.device);
+    const { visual, text } = this.creativesFor(e, v.device);
+    // the picture is what was shown (reports count it); the ad text's copy wins, a picture's own copy fills in
+    const creative = visual ?? text;
     if (!creative && !offer) return null;
     const nowS = Math.floor(this.now().getTime() / 1000);
     const claims: ImpressionClaims = { i: newId(), c: r.id, k: creative?.id ?? r.id, p: key, v: v.keys, s: v.sessionId, u: v.customerId, g: v.page, d: v.device, t: nowS, e: nowS + TOKEN_TTL_S };
     const dismissible = e.m.dismissal.mode !== 'not_dismissible';
-    const mediaRef = creative?.media_id ? (e.media.get(creative.media_id) ?? null) : null;
+    const mediaRef = visual?.media_id ? (e.media.get(visual.media_id) ?? null) : null;
     const tz = r.time_zone || this.core.tz();
     const promotedOffer: PromotedOfferCard | null = offer
       ? {
@@ -426,13 +433,13 @@ export class ServingPart extends Part {
       sellerName: r.seller_id ? (offer?.sellerName ?? e.sellerName) : null,
       advertiserLogo: null,
       eyebrow: OVERLAY_KEYS.includes(key) ? (e.promo?.name ?? null) : null,
-      headline: creative?.headline ?? offer?.title ?? r.name,
-      body: creative?.body ?? null,
-      buttonText: creative?.button_text ?? (offer ? 'View product' : 'Shop now'),
+      headline: text?.headline ?? visual?.headline ?? offer?.title ?? r.name,
+      body: text?.body ?? visual?.body ?? null,
+      buttonText: text?.button_text ?? visual?.button_text ?? (offer ? 'View product' : 'Shop now'),
       secondaryText: key === 'opening_fullscreen' ? `Continue to ${req?.page === 'home' || !req ? 'home page' : 'the page'}` : key === 'popup' ? 'No thanks' : null,
-      image: creative?.kind === 'image' ? mediaRef : (offer?.image ?? null),
-      video: creative?.kind === 'video' ? mediaRef : null,
-      destination: creative?.link ?? (offer ? `/product/${offer.productId}?offer=${offer.offer.id}` : (e.m.destination?.url ?? '/')),
+      image: visual?.kind === 'image' ? mediaRef : (offer?.image ?? null),
+      video: visual?.kind === 'video' ? mediaRef : null,
+      destination: text?.link ?? visual?.link ?? (offer ? `/product/${offer.productId}?offer=${offer.offer.id}` : (e.m.destination?.url ?? '/')),
       dismissible,
       closeLabel: dismissible ? 'Close' : null,
       footnote: footnoteFor(key, r.ends_at, e.m.cap ?? { label: '' }, tz),
@@ -473,7 +480,8 @@ export class ServingPart extends Part {
    */
   async track(events: TrackEvent[]): Promise<{ accepted: number; ignored: number }> {
     const nowMs = this.now().getTime();
-    const checked = (events ?? []).map((ev) => ({ ev, check: verifyImpression(ev.impressionToken, this.core.secret, nowMs) }));
+    // displays first: a click in the same batch as its display is billable
+    const checked = (events ?? []).map((ev) => ({ ev, check: verifyImpression(ev.impressionToken, this.core.secret, nowMs) })).sort((a, b) => Number(b.ev.kind === 'display') - Number(a.ev.kind === 'display'));
     const bad = checked.find((c) => !c.check.ok && c.check.reason !== 'expired');
     if (bad) throw this.ctx.error('INVALID_IMPRESSION_TOKEN', 'An impression token is missing or was tampered with.');
     let accepted = 0;
@@ -495,6 +503,11 @@ export class ServingPart extends Part {
         continue;
       }
       const kind = ev.kind;
+      // a display reported once the campaign stopped (paused, finished) is not delivery: it would bill a fixed daily fee
+      if (kind === 'display' && campaign.status !== 'live') {
+        ignored++;
+        continue;
+      }
       const dedupeKind = kind === 'close' ? 'dismiss' : kind;
       const id = eventId(c.i, dedupeKind);
       const now = this.now();
@@ -526,8 +539,8 @@ export class ServingPart extends Part {
         const rules = await this.core.rules();
         const until = suppressionUntil(campaign.dismissal as never, campaign.ends_at, now, rules.dismissStopsForSession);
         if (until) await this.repo.recordDismissal(c.v, c.c, c.s, until, now);
-      } else if (kind === 'click' && campaign.billing === 'cpc' && campaign.seller_id && campaign.status === 'live') {
-        await this.chargeClick(id, campaign);
+      } else if (kind === 'click' && campaign.billing === 'cpc' && campaign.seller_id && campaign.origin === 'seller_request' && campaign.status === 'live') {
+        if (await this.billableClick(c, now)) await this.chargeClick(id, campaign);
       }
     }
     return { accepted, ignored };
@@ -543,6 +556,20 @@ export class ServingPart extends Part {
         if (e) e.displays++;
       })
       .catch(() => undefined);
+  }
+
+  /**
+   * Invalid-click filter: a click is billed only after its ad was displayed (the same impression's display event), and
+   * at most once per visitor (visitor or session key, and the signed-in customer) per campaign per market day.
+   * Other clicks are recorded for reports, unbilled. The day's claim is atomic, so parallel clicks bill once.
+   */
+  private async billableClick(c: ImpressionClaims, now: Date): Promise<boolean> {
+    if (!(await this.repo.get('ad_events', eventId(c.i, 'display')))) return false;
+    const day = this.core.today(now);
+    for (const who of [c.v[0] ?? `s:${c.s}`, ...(c.u ? [`c:${c.u}`] : [])]) {
+      if (!(await this.repo.claim(`billed-click:${c.c}:${day}:${who}`))) return false;
+    }
+    return true;
   }
 
   private async chargeClick(eventId: string, campaign: CampaignRec) {

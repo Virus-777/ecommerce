@@ -592,6 +592,13 @@ export class PayoutsPart extends Part {
     for (const p of await this.repo.find('payouts', { seller_id: sellerId, status: 'pending' })) await this.repo.update('payouts', p.id, { status: this.core.step(payoutMachine, p.status, 'hold'), failure_reason: reason });
   }
 
+  /** Payouts held for a reason that ended (the suspension, on reinstatement) go back to pending */
+  async unholdPayouts(sellerId: string, heldFor: (reason: string | null) => boolean) {
+    for (const p of await this.repo.find('payouts', { seller_id: sellerId, status: 'on_hold' })) {
+      if (heldFor(p.failure_reason)) await this.repo.update('payouts', p.id, { status: this.core.step(payoutMachine, p.status, 'unhold'), failure_reason: null });
+    }
+  }
+
   /* ---------------------------------------------------------------- jobs */
 
   /**

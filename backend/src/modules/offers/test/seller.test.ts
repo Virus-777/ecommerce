@@ -71,21 +71,22 @@ describe('creating and publishing seller offers', () => {
     const dupSku = await post({ variantId: p.variants[1], sellerSku: 'NW-FIRST' });
     expect(dupSku.json().error.code).toBe('DUPLICATE_OFFER');
 
-    // a list price on file backs a list_price was-price
-    const withList = addProduct(h, { specs: { 'List price': '$249.00' } });
-    const ok = await asSeller(h, sellerId, 'POST', '/offers', offerInput(withList.id, withList.variants[0]!, prof, { compareAt: { amount: { amount: 24900, currency: 'USD' }, basis: 'list_price' } }));
-    expect(ok.statusCode, ok.body).toBe(201);
-    expect(ok.json().offer.compareAt).toMatchObject({ verified: true, basis: 'list_price', amount: { amount: 24900 } });
-
-    // G10: the variant's own list price backs a list_price was-price (and wins over the specs)
-    const variantList = addProduct(h, { listPrices: [29900, null], specs: { 'List price': '$199.00' } });
+    // G10: a list price catalog staff set on the variant backs a list_price was-price, up to that price
+    const variantList = addProduct(h, { listPrices: [29900, null], specs: { 'List price': '$399.00' } });
     const wasList = (variantId: string, amount: number) => offerInput(variantList.id, variantId, prof, { compareAt: { amount: { amount, currency: 'USD' }, basis: 'list_price' } });
     const byVariant = await asSeller(h, sellerId, 'POST', '/offers', wasList(variantList.variants[0]!, 29900));
     expect(byVariant.statusCode, byVariant.body).toBe(201);
     expect(byVariant.json().offer.compareAt).toMatchObject({ verified: true, basis: 'list_price', amount: { amount: 29900 } });
-    // the other variant has no list price of its own: the specs apply
-    const above = await asSeller(h, sellerId, 'POST', '/offers', wasList(variantList.variants[1]!, 29900));
-    expect(above.json().error).toMatchObject({ code: 'WAS_PRICE_NOT_VERIFIED', details: { listPrice: { amount: 19900 } } });
+    const higher = await asSeller(h, sellerId, 'POST', '/offers', { ...wasList(variantList.variants[0]!, 30900), condition: 'used_like_new', conditionNotes: 'Opened once', sellerSku: 'NW-LIST-2' });
+    expect(higher.json().error).toMatchObject({ code: 'WAS_PRICE_NOT_VERIFIED', details: { listPrice: { amount: 29900 } } });
+
+    // H15: a list price a seller typed into the specs ("MSRP", "List price") is not evidence for a was-price
+    const fake = await asSeller(h, sellerId, 'POST', '/offers', wasList(variantList.variants[1]!, 39900));
+    expect(fake.statusCode).toBe(400);
+    expect(fake.json().error).toMatchObject({ code: 'WAS_PRICE_NOT_VERIFIED', message: 'There is no manufacturer list price on file for this product' });
+    const msrp = addProduct(h, { specs: { MSRP: '$199' } });
+    const fakeMsrp = await asSeller(h, sellerId, 'POST', '/offers', offerInput(msrp.id, msrp.variants[0]!, prof, { compareAt: { amount: { amount: 19900, currency: 'USD' }, basis: 'list_price' } }));
+    expect(fakeMsrp.json().error.code).toBe('WAS_PRICE_NOT_VERIFIED');
   });
 
   it('refuses restricted sellers and products that cannot be sold', async () => {

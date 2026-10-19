@@ -76,6 +76,21 @@ export class Members {
     return this.core.sortRoles(roles.filter((r) => !r.archived_at)).map(roleRef);
   }
 
+  /**
+   * Whether `byAccountId` may disable `accountId` (identity asks before disabling a staff account): a Business Owner
+   * is disabled only by another Business Owner, and never the last active one (the role would end with the account)
+   */
+  async disableCheck(accountId: string, byAccountId: string | null): Promise<{ allowed: boolean; code: string | null; reason: string | null }> {
+    await this.core.ready();
+    const dir = await loadStaffDirectory(this.core.repo, this.core.now());
+    const role = dir.roleByKey.get(BUSINESS_OWNER);
+    const owners = role ? dir.membersOf(role.id) : [];
+    if (!owners.includes(accountId)) return { allowed: true, code: null, reason: null };
+    if (!byAccountId || !owners.includes(byAccountId)) return { allowed: false, code: 'FORBIDDEN', reason: 'Only a Business Owner can disable a Business Owner' };
+    if (!owners.some((o) => o !== accountId)) return { allowed: false, code: 'LAST_BUSINESS_OWNER', reason: 'At least one active Business Owner must remain' };
+    return { allowed: true, code: null, reason: null };
+  }
+
   /** Everyone holding a role (assignment pickers in workqueues and support) */
   async membersOfRole(roleKey: string): Promise<StaffRef[]> {
     await this.core.ready();

@@ -29,6 +29,8 @@ export interface By {
 }
 
 export const SYSTEM: By = { actor: SYSTEM_ACTOR };
+/** content_log actions that make someone a writer of what goes to review (assertNotOwnWork) */
+const CONTRIBUTING = new Set(['create', 'edit', 'submit', 'restore']);
 
 /** Business validation (the kernel's own schema message is 'Some fields are missing or invalid') */
 export const invalid = (path: string, message: string) => new AppError('VALIDATION_FAILED', message, { issues: [{ path, message }] });
@@ -97,6 +99,27 @@ export class ContentBase {
   /** Publication, schedule, unpublish, correction and removal actions with reasons (content_log) */
   protected async logAction(entity: string, entityId: string, action: string, by: By, reason?: string | null, repo: ContentRepository = this.repo) {
     await repo.log({ id: newId(), entity, entity_id: entityId, action, reason: reason ?? null, actor_kind: by.actor.kind, actor_id: by.actor.id ?? null, at: this.now() });
+  }
+
+  /**
+   * Two-person rule for news, pages and help articles: whoever made the content waiting for approval does not approve
+   * it. That is everyone who created, edited, submitted or restored it since it last went live (content_log), and the
+   * author of the version under review (drafts saved before edits were logged).
+   */
+  protected async assertNotOwnWork(entity: string, entityId: string, version: VersionRow | undefined, by: By, what: string) {
+    if (await this.isOwnWork(entity, entityId, version, by)) throw this.ctx.error('SAME_REVIEWER', `You wrote, edited or sent this ${what} for review; someone else approves it.`);
+  }
+
+  /** Whether `by` made the content waiting for approval (assertNotOwnWork; canApprove on admin views) */
+  protected async isOwnWork(entity: string, entityId: string, version: VersionRow | undefined, by: By | undefined): Promise<boolean> {
+    const me = by?.actor.id;
+    if (!me) return false;
+    if (version?.author_id === me) return true;
+    for (const l of await this.repo.logsOf(entity, entityId)) {
+      if (l.action === 'publish' || l.action === 'publish_scheduled') return false;
+      if (CONTRIBUTING.has(l.action) && l.actor_id === me) return true;
+    }
+    return false;
   }
 
   /** Drops the resolved homepages (content changed, or a product, offer or stock event arrived) */

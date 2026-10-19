@@ -190,9 +190,22 @@ describe('pages and collections', () => {
     const changes = await h.admin('POST', `/pages/${p.summary.id}/approve`, { approve: false, reason: 'Add the company address' });
     expect(changes.json().summary.status).toBe('draft');
     await h.admin('POST', `/pages/${p.summary.id}/submit`);
-    const ok = await h.admin('POST', `/pages/${p.summary.id}/approve`, { approve: true });
+    // someone other than the writer approves
+    const ok = await h.admin('POST', `/pages/${p.summary.id}/approve`, { approve: true }, h.staff(newId()));
     expect(ok.json().summary.status).toBe('approved');
     expect((await h.admin('POST', `/pages/${p.summary.id}/publish`)).json().summary.status).toBe('published');
     expect((await h.store('GET', '/pages/about')).json().kind).toBe('about');
+  });
+});
+
+describe('page review is by someone else', () => {
+  it('the writer of a page cannot approve it', async () => {
+    const writer = newId();
+    const p = (await h.admin('POST', '/pages', pageInput({ title: 'Our story', kind: 'about', slug: 'our-story' }), h.staff(writer))).json();
+    expect(p.summary?.id, JSON.stringify(p)).toBeTruthy();
+    await h.admin('POST', `/pages/${p.summary.id}/submit`, {}, h.staff(writer));
+    const own = await h.admin('POST', `/pages/${p.summary.id}/approve`, { approve: true }, h.staff(writer));
+    expect(own.json().error.code).toBe('SAME_REVIEWER');
+    expect((await h.admin('POST', `/pages/${p.summary.id}/approve`, { approve: true }, h.staff(newId()))).json().summary.status).toBe('approved');
   });
 });

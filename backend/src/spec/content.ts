@@ -2882,6 +2882,7 @@ export const endpoints = defineEndpoints({
     permission: "content.homepage.publish",
     scope: "staff",
     summary: "Restore an earlier layout (creates a new version; nothing is overwritten)",
+    desc: "With content.reviewRequired.section on, publish restores straight to live only a version that was live before; any other version is restored as a draft to send for review (ILLEGAL_TRANSITION, reason review_required).",
     params: () =>
       z.object({
         number: z.coerce.number().int(),
@@ -2892,7 +2893,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => HomepageAdmin,
     status: 200,
-    errors: ["NOT_FOUND"],
+    errors: ["NOT_FOUND","ILLEGAL_TRANSITION"],
     audited: true,
     events: ["content.page.published"],
     screens: ["admin/content"],
@@ -3016,6 +3017,7 @@ export const endpoints = defineEndpoints({
     permission: "content.pages.publish",
     scope: "staff",
     summary: "Approve or request changes",
+    desc: "Approving needs someone who did not create, edit, submit or restore the page since it last went live (SAME_REVIEWER).",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -3026,7 +3028,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => PageAdmin,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION"],
+    errors: ["ILLEGAL_TRANSITION","SAME_REVIEWER"],
     audited: true,
     screens: ["admin/content"],
     phase: 1,
@@ -3343,7 +3345,7 @@ export const endpoints = defineEndpoints({
     permission: "content.help.manage",
     scope: "staff",
     summary: "Submit, approve, request changes, schedule, publish, unpublish or remove an article",
-    desc: "One action endpoint for the Content publication state machine on articles. remove needs kind and reason; schedule needs publishAt; requestChanges needs reason. A live article (published or unpublished) edited with PATCH keeps its status while the new draft is reviewed: submit, approve and requestChanges then act on HelpArticleAdmin.draftReview (in_review → approved or changes_requested; submit again after changes_requested), and publish puts the approved draft live (draftReview becomes null). A published article is not scheduled (it would be offline until then): publish its draft, or unpublish it first.",
+    desc: "One action endpoint for the Content publication state machine on articles. approve needs someone who did not create, edit, submit or restore the article since it last went live (SAME_REVIEWER). remove needs kind and reason; schedule needs publishAt; requestChanges needs reason. A live article (published or unpublished) edited with PATCH keeps its status while the new draft is reviewed: submit, approve and requestChanges then act on HelpArticleAdmin.draftReview (in_review → approved or changes_requested; submit again after changes_requested), and publish puts the approved draft live (draftReview becomes null). A published article is not scheduled (it would be offline until then): publish its draft, or unpublish it first.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -3498,7 +3500,7 @@ export const endpoints = defineEndpoints({
     permissionWhen: [{"if":{"body.action":"approve"},"permission":"content.news.publish"},{"if":{"body.action":"requestChanges"},"permission":"content.news.publish"},{"if":{"body.action":"schedule"},"permission":"content.news.publish"},{"if":{"body.action":"cancelSchedule"},"permission":"content.news.publish"},{"if":{"body.action":"publish"},"permission":"content.news.publish"},{"if":{"body.action":"unpublish"},"permission":"content.news.publish"},{"if":{"body.action":"remove"},"permission":"content.pages.remove"}],
     scope: "staff",
     summary: "Submit, approve, request changes, schedule, publish, unpublish or remove a post",
-    desc: "The Content publication state machine, as for help articles. With content.reviewRequired.news on (default), someone other than the draft's writer approves before it is scheduled or published (SAME_REVIEWER). Approving, scheduling, publishing and unpublishing need content.news.publish; remove needs content.pages.remove, a kind and a reason; requestChanges needs a reason (it also sends back an approved draft). discardDraft drops a live post's unpublished draft; the live post stays as it is.",
+    desc: "The Content publication state machine, as for help articles. With content.reviewRequired.news on (default), someone who did not create, edit, submit or restore the post since it last went live approves (a restored post without a draft is checked against its live version) before it is scheduled or published (SAME_REVIEWER). Approving, scheduling, publishing and unpublishing need content.news.publish; remove needs content.pages.remove, a kind and a reason; requestChanges needs a reason (it also sends back an approved draft). discardDraft drops a live post's unpublished draft; the live post stays as it is.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -4321,7 +4323,7 @@ export const spec = defineModuleSpec({
     },
     "SAME_REVIEWER": {
       "status": 409,
-      "meaning": "The author cannot approve their own article, news post or homepage draft."
+      "meaning": "Whoever created, edited, submitted or restored an article, news post, page or homepage draft since it last went live cannot approve it."
     }
   },
   collections: {

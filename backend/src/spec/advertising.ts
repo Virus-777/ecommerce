@@ -1938,7 +1938,7 @@ export const endpoints = defineEndpoints({
     auth: "shopper",
     scope: "own-customer",
     summary: "Record displays, clicks and dismissals (batched)",
-    desc: "Each event carries the signed impression token from the decision. A dismissal applies the campaign's suppression rule immediately for the visitor. Duplicate events for the same token and kind are ignored. Clicks start the attribution period.",
+    desc: "Each event carries the signed impression token from the decision. A dismissal applies the campaign's suppression rule immediately for the visitor. Duplicate events for the same token and kind are ignored, and so are displays of a campaign that is no longer live. Clicks start the attribution period. A click on a seller's CPC campaign is billed only after the same impression's display was recorded (displays in a batch count first), and at most once per visitor (visitor or session key, and the signed-in customer) per campaign per market day; other clicks are recorded for reports, unbilled.",
     body: () => z.object({
       get events() {
         return z.array(TrackEvent);
@@ -2002,10 +2002,11 @@ export const endpoints = defineEndpoints({
     permission: "advertising.campaigns.manage",
     scope: "staff",
     summary: "Create an ad campaign draft",
+    desc: "A campaign for a seller made by staff is unbilled (budget.billing none, VALIDATION_FAILED otherwise): a seller is billed only for ads it requests itself (seller ad requests are its consent).",
     body: () => AdCampaignInput,
     response: () => AdCampaign,
     status: 201,
-    errors: ["PLACEMENT_DISABLED","PAGE_NOT_ELIGIBLE"],
+    errors: ["PLACEMENT_DISABLED","PAGE_NOT_ELIGIBLE","VALIDATION_FAILED"],
     audited: true,
     screens: ["admin/ad-campaign"],
     phase: 1,
@@ -2124,7 +2125,7 @@ export const endpoints = defineEndpoints({
     permission: "advertising.campaigns.review",
     scope: "staff",
     summary: "Approve one review step (the campaign is approved when all steps are)",
-    desc: "The step is chosen from the caller's access roles (access.rolesOf), not from the request: Advertising (placement, schedule, limits) or Content/Marketing (creative, claims, links). The same person cannot approve two required steps.",
+    desc: "A billed seller request is approved only while paid seller ads are on (PAID_ADS_DISABLED) and the seller may advertise (sellers.canSell, FORBIDDEN). The step is chosen from the caller's access roles (access.rolesOf), not from the request: Advertising (placement, schedule, limits) or Content/Marketing (creative, claims, links). The same person cannot approve two required steps, and the person who created the campaign approves none (SAME_REVIEWER).",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -2135,7 +2136,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => AdCampaign,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","SAME_REVIEWER","FORBIDDEN"],
+    errors: ["ILLEGAL_TRANSITION","SAME_REVIEWER","FORBIDDEN","PAID_ADS_DISABLED"],
     audited: true,
     events: ["advertising.campaign.status_changed"],
     screens: ["admin/ad-campaign","admin/ads"],
@@ -3206,11 +3207,11 @@ export const spec = defineModuleSpec({
     },
     "advertising.accrue-charges": {
       "schedule": "every 15 min",
-      "does": "Accrue billable clicks/displays and fixed daily fees, capped at daily and total limits; stop delivery at the limit"
+      "does": "Accrue billable clicks/displays and fixed daily fees of campaigns the seller requested, capped at daily and total limits; stop delivery at the limit"
     },
     "advertising.post-charges": {
       "schedule": "daily 02:00 market time",
-      "does": "Post the previous day's charges to finance (advertising.charge.posted)"
+      "does": "Post the previous day's charges to finance (advertising.charge.posted), only while paid seller ads are on. A charge of a campaign the seller did not request is voided with the reason instead and never posted"
     },
     "advertising.expire-frequency-state": {
       "schedule": "hourly",
@@ -3296,7 +3297,7 @@ export const spec = defineModuleSpec({
     },
     "SAME_REVIEWER": {
       "status": 409,
-      "meaning": "The same person cannot approve two required review steps."
+      "meaning": "The same person cannot approve two required review steps, and the campaign creator approves none."
     },
     "PROMOTION_NOT_STARTED": {
       "status": 409,

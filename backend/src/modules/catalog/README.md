@@ -951,7 +951,7 @@ Indexes: `pk (brand_id, category_id)`, `(category_id, product_count desc)`
 | `catalog.correction.decided` | Staff accept or decline a correction | `{ suggestionId: uuid, accepted: bool }` | - |
 | `catalog.category.changed` | A category is created, renamed, moved, hidden or its attributes change | `{ categoryId: uuid, change: enum(created|updated|attributes) }` | - |
 | `catalog.brand.requested` | A seller submits a product with a brand that is not listed | `{ brandId: uuid, name: string, sellerId: uuid, productId: uuid }` | - |
-| `catalog.brand.changed` | A brand is created, edited, or its status or selling policy changes | `{ brandId: uuid, change: enum(created|updated|status), status: string, sellingPolicy: string }` | search |
+| `catalog.brand.changed` | A brand is created, edited, or its status or selling policy changes | `{ brandId: uuid, change: enum(created|updated|status), status: string, sellingPolicy: string }` | offers, search |
 
 | Consumes | From | Does |
 |---|---|---|
@@ -978,6 +978,8 @@ Indexes: `pk (brand_id, category_id)`, `(category_id, product_count desc)`
 | getProducts | `(productIds: uuid[]) => ProductRecord[]`<br>Batch read of products in any review state or publication, with purchasable and mergedIntoId (follow it for merged records). Unknown ids are left out; at most 200 ids per call | search, promotions, advertising, content, offers, wishlist, graphql |
 | searchProducts | `(filter: { q?: string, categoryId?: uuid, brandId?: uuid, ownerSellerId?: uuid, purchasableOnly?: bool, reviewStates?: string[] }, page: PageInput) => Page<ProductSummary>`<br>Product pickers in other modules' admin screens (campaign items, content tiles, promotions): q matches title, PRD- ref, model number and GTIN. Not the store search (search module) | promotions, advertising, content, offers |
 | listProductIds | `(opts: { after?: uuid, limit: int, purchasableOnly?: bool, updatedSince?: datetime }) => { ids: uuid[], nextAfter: uuid | null }`<br>Keyset walk over all product ids (ordered by id, limit 1–1000) for index rebuilds; purchasableOnly keeps approved and active products | search |
+| brandSellerCheck | `(productId: uuid, sellerId: uuid | null) => { allowed: bool, reason: string | null, brandId: uuid | null }`<br>Whether the product's brand lets this seller (null: the Official Store) sell it: nobody sells a blocked brand, official_only is the Official Store's, authorized_list is for the sellers on the brand's list | offers |
+| productIdsOfBrand | `(brandId: uuid) => uuid[]`<br>Ids of a brand's products (offers re-checks their offers on catalog.brand.changed) | offers |
 | getBrands | `(brandIds: uuid[]) => Brand[]`<br>Brands by id with status (content brand tiles, advertising brand names, search). Unknown ids are left out | content, advertising, search, graphql |
 | getVariants | `(variantIds: uuid[]) => VariantRef[]`<br>Variants by id with product id and title, options, GTIN, shipping weight and dimensions and list price. Unknown ids are left out | offers, inventory, returns, graphql |
 | getParcels | `(variantIds: uuid[]) => map<VariantParcel | null>`<br>Shipping weight and dimensions of one unit per variant (decision: parcel data lives on the catalog variant). null when the variant has no weight yet; callers fall back to their own default parcel | offers, shipping, cart, checkout |
@@ -1016,6 +1018,8 @@ Checked through the access module (limits per role, second reviewer).
 
 | Code | Status | Meaning |
 |---|---|---|
+| `BRAND_NOT_AUTHORIZED` | 409 | The brand does not let this seller sell it (blocked, official_only or not on the authorized list): approving the submission or the offer is refused |
+| `SAME_REVIEWER` | 409 | The person who created, edited or submitted an Official Store product cannot approve it. |
 | `BRAND_NOT_ACTIVE` | 409 | The product's brand is under review or blocked; decide the brand first |
 | `DATASET_UNAVAILABLE` | 409 | reports refused the export dataset: it is not in the export registry or catalog exports are switched off (raised by reports.requestExport) |
 

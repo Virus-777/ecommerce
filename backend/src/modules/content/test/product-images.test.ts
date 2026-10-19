@@ -52,7 +52,7 @@ describe('product tiles from catalog', () => {
     expect(created.statusCode, created.body).toBe(201);
     const id = created.json().product.id as string;
     expect((await h.call('POST', `/api/admin/catalog/products/${id}/submit`)).statusCode).toBe(200);
-    expect((await h.call('POST', `/api/admin/catalog/products/${id}/approve`, {})).statusCode).toBe(200);
+    expect((await h.call('POST', `/api/admin/catalog/products/${id}/approve`, {}, h.staff(newId()))).statusCode).toBe(200); // a second person approves
 
     // search can't answer: content builds the tile from the catalog product
     const search = h.app.kernel.boot.apis.get('search') as unknown as { getProductCards: (ids: string[]) => Promise<unknown> };

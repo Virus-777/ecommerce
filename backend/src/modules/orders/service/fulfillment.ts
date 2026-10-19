@@ -9,15 +9,34 @@ import type { BulkResult, FulfillmentTask } from '../../../spec/orders.js';
 import { CANCELLABLE, DAY, dateTime, is, isMarketlyService, marketlyFulfils, shortDate, UNSHIPPED, WAREHOUSE_STAGE_ENTRY, WAREHOUSE_STAGE_LABEL } from '../domain/rules.js';
 import type { DispatchChange, GroupRec, ItemRec, ShipmentRec } from '../ports.js';
 import { invalid, notFound, SYSTEM, type Agg, type By, type Core } from './core.js';
+import type { Cancellations } from './cancellations.js';
 import type { Views } from './views.js';
 
 const PREPARING_WAREHOUSE = ['picking', 'picked', 'packing', 'packed'];
 const SHIPPABLE = ['confirmed', 'preparing', 'delayed', 'cancellation_requested'];
 
+/**
+ * The group's shippable lines a shipment line naming itemId stands for: the item, and the lines split off it since.
+ * Two packages of one line recorded before the first reached orders both name it; the first one's split leaves the
+ * units the second carries on a new line.
+ */
+function openParts(items: readonly ItemRec[], groupId: string, itemId: string): ItemRec[] {
+  const out: ItemRec[] = [];
+  const queue = [itemId];
+  for (let id = queue.shift(); id; id = queue.shift()) {
+    const item = items.find((i) => i.id === id && i.group_id === groupId);
+    if (!item) continue;
+    if (SHIPPABLE.includes(item.state)) out.push(item);
+    queue.push(...items.filter((i) => i.split_from_item_id === id).map((i) => i.id));
+  }
+  return out;
+}
+
 export class Fulfillment {
   constructor(
     private readonly core: Core,
     private readonly views: Views,
+    private readonly cancellations: Cancellations,
   ) {}
 
   /** The seller's own group (another seller's → NOT_FOUND) */
@@ -261,14 +280,15 @@ export class Fulfillment {
       const wanted = new Map<string, number>();
       for (const l of e.lines) wanted.set(l.orderItemId, (wanted.get(l.orderItemId) ?? 0) + l.quantity);
       for (const [itemId, qty] of wanted) {
-        const item = agg.items.find((i) => i.id === itemId && i.group_id === e.groupId);
-        if (!item || !SHIPPABLE.includes(item.state)) {
-          this.core.ctx.log.warn({ itemId, shipmentId: e.shipmentId }, 'orders: shipment line for an item that cannot ship');
-          continue;
+        let left = qty;
+        for (const item of openParts(agg.items, e.groupId, itemId)) {
+          if (!left) break;
+          const { part } = await this.core.split(tx, batch, item, Math.min(left, item.quantity), agg.order.currency, 'shipment');
+          await this.core.move(tx, batch, part, 'ship', { patch: { shipment_id: e.shipmentId, state_before_request: null } });
+          shippedIds.push(part.id);
+          left -= part.quantity;
         }
-        const { part } = await this.core.split(tx, batch, item, Math.min(qty, item.quantity), agg.order.currency, 'shipment');
-        await this.core.move(tx, batch, part, 'ship', { patch: { shipment_id: e.shipmentId, state_before_request: null } });
-        shippedIds.push(part.id);
+        if (left === qty) this.core.ctx.log.warn({ itemId, shipmentId: e.shipmentId }, 'orders: shipment line for an item that cannot ship');
       }
       const prev = agg.shipments.find((s) => s.shipment_id === e.shipmentId);
       await tx.upsertShipment(
@@ -294,8 +314,10 @@ export class Fulfillment {
       const prev = agg.shipments.find((s) => s.shipment_id === e.shipmentId);
       await tx.upsertShipment(this.shipmentRow(e, prev, { status: e.to, estimated_arrival: e.estimatedArrival ?? prev?.estimated_arrival ?? null }));
       if (e.to === 'returned_to_sender') {
-        for (const i of agg.items.filter((x) => x.shipment_id === e.shipmentId && x.state === 'shipped')) await this.core.move(tx, batch, i, 'return_to_sender', { reason: 'Returned to sender' });
-        await this.core.timeline(tx, agg.order.id, [{ group_id: e.groupId, visibility: 'customer', label: 'Returned to sender', detail: 'The package went back to the seller. Your refund follows once it arrives.' }]);
+        const back: ItemRec[] = [];
+        for (const i of agg.items.filter((x) => x.shipment_id === e.shipmentId && x.state === 'shipped')) back.push(await this.core.move(tx, batch, i, 'return_to_sender', { reason: 'Returned to sender' }));
+        // the package is back with the seller: refunded like a cancellation (once; a replayed event finds nothing shipped)
+        await this.cancellations.returnedToSender(tx, batch, agg, agg.groups.find((g) => g.id === e.groupId)!, back, e.shipmentId);
       }
     });
   }

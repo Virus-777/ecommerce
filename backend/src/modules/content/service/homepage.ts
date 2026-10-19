@@ -757,6 +757,10 @@ export class ContentHomepage extends ContentPages {
     const reason = requireText(body.reason, 'reason', 'Say why the layout is restored');
     const source = await this.repo.versionByNumber('homepage', HOMEPAGE_ID, number);
     if (!source) throw notFound('Version');
+    // straight back live only to a layout that was live before (it passed review then); any other version is a draft to review
+    if (body.publish && !source.published_at && (await this.reviewRequired()).section) {
+      throw new AppError('ILLEGAL_TRANSITION', `Version ${number} was never live: restore it as a draft and send it for review`, { machine: 'Homepage review', event: 'restore', reason: 'review_required' });
+    }
     const layout = this.layoutOf(source);
     let gone: SectionRow[] = [];
     let published: VersionRow | null = null;

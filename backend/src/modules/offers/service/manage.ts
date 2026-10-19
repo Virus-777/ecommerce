@@ -190,6 +190,12 @@ export class ManagePart extends Part {
     }
   }
 
+  /** The product's brand lets this seller (null: the Official Store) sell it: on create, publish and resume */
+  async checkBrand(productId: string, sellerId: string | null) {
+    const r = await this.parts.enforcement.brandVerdict({ product_id: productId, seller_id: sellerId });
+    if (r && !r.allowed) throw this.core.error('BRAND_NOT_AUTHORIZED', r.reason ?? 'This brand cannot be sold by this seller', { brandId: r.brandId });
+  }
+
   /** A second New offer for the variant, or a SKU in use (sku null: only the New check) */
   async duplicateCheck(o: { ownerType: 'official' | 'seller'; sellerId: string | null; variantId: string; condition: string; sku: string | null; exceptId?: string }) {
     if (o.condition === 'new') {
@@ -218,6 +224,7 @@ export class ManagePart extends Part {
     this.checkSaleEnd(input.saleEndsAt);
     const res = await this.resolveProduct(input.productId, input.variantId, sellerId);
     await this.checkSeller(sellerId, 'new_offers', { categoryId: res.categoryId, condition: input.condition });
+    await this.checkBrand(input.productId, sellerId);
     await this.duplicateCheck({ ownerType: 'seller', sellerId, variantId: input.variantId, condition: input.condition, sku });
     const items = this.conditionAndItems(input.condition, input.conditionNotes, input.missingItems, res.product);
     const b = await this.baseline(sellerId, res.categoryId, input.condition);
@@ -268,6 +275,7 @@ export class ManagePart extends Part {
     this.checkDispatch(input.dispatchBusinessDays);
     await this.checkPurchaseLimit(input.purchaseLimit);
     const res = await this.resolveProduct(input.productId, input.variantId, null);
+    await this.checkBrand(input.productId, null);
     await this.duplicateCheck({ ownerType: 'official', sellerId: null, variantId: input.variantId, condition: input.condition, sku });
     const items = this.conditionAndItems(input.condition, input.conditionNotes, input.missingItems, res.product);
     const b = await this.baseline(null, res.categoryId, input.condition);
@@ -487,6 +495,7 @@ export class ManagePart extends Part {
   }
 
   async publishNow(row: OfferRec, by: By): Promise<OfferRec> {
+    await this.checkBrand(row.product_id, row.seller_id ?? null);
     const available = (await this.core.available([row.stock_item_id])).get(row.stock_item_id) ?? 0;
     const t = await this.core.move(row.id, {
       event: 'publish',
@@ -542,6 +551,7 @@ export class ManagePart extends Part {
   }
 
   async resume(row: OfferRec, by: By): Promise<OfferRec> {
+    await this.checkBrand(row.product_id, row.seller_id ?? null);
     const available = (await this.core.available([row.stock_item_id])).get(row.stock_item_id) ?? 0;
     return (await this.core.move(row.id, { event: 'resume', by, available, reason: null })).after;
   }

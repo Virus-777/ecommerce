@@ -19,6 +19,10 @@ import { validUrl, type Views } from './views.js';
 
 const MAX_HEADLINE = 120;
 const MAX_TEXT = 5000;
+/** Removal reasons after which the author does not post a new review of the product */
+const BANNED_AFTER_REMOVAL = new Set(['proven_fake', 'payment_for_review', 'conflict_of_interest']);
+/** Order item states of a purchase that went back: reviewable, but not a verified purchase */
+const RETURNED = new Set(['returned', 'refunded']);
 
 export interface ItemReviewStatus {
   orderItemId: string;
@@ -117,19 +121,24 @@ export class ReviewsPart {
   }
 
   async create(who: CustomerWho, input: ReviewInput): Promise<MyReview> {
+    await this.core.assertMayWrite(who);
     const customerId = this.requireCustomer(who);
     const { item, open } = await this.eligibleItem(customerId, input.orderItemId);
+    await this.core.assertNotSellerTeam(who, item.sellerId, 'a review');
     const repo = this.core.repo;
     const existing = await repo.findOne('product_reviews', { customer_id: customerId, product_id: item.productId });
     if (existing && existing.status !== 'deleted') throw this.core.ctx.error('ALREADY_REVIEWED', 'You already reviewed this product. Edit your review instead.', { id: existing.id });
     if (!open) throw this.core.ctx.error('REVIEW_NOT_ELIGIBLE', 'The time to review this purchase has ended.');
+    // a review moderation removed and its author deleted since: never back for fake ones, otherwise past a moderator first
+    const removal = existing ? await this.removalOf(existing.id) : null;
+    if (removal && BANNED_AFTER_REMOVAL.has(removal)) throw this.core.ctx.error('REVIEW_NOT_ELIGIBLE', 'Your earlier review of this product was removed, so you can’t post another one.');
     const draft = Boolean(input.draft);
     await this.validate(input, !draft);
     const mediaIds = [...new Set(input.mediaIds ?? [])];
     const id = existing?.id ?? newId();
     const displayName = await this.core.shortNameOf(customerId);
     await this.attachPhotos(id, mediaIds, who, `Review of ${item.title}`);
-    const failures = draft ? [] : reviewChecks(input.headline, input.text);
+    const failures = draft ? [] : [...reviewChecks(input.headline, input.text), ...(removal ? [{ label: `An earlier review of this product was removed by moderation (${removal.replace(/_/g, ' ')})`, reason: 'other' as const }] : [])];
     const status = draft ? 'draft' : productReviewMachine.next(productReviewMachine.next('draft', 'submit'), failures.length ? 'hold' : 'publish');
     const fx = await this.core.prepare(new Effects());
     const now = this.core.now();
@@ -143,7 +152,8 @@ export class ReviewsPart {
       customer_id: customerId,
       display_name: displayName,
       show_name: input.showName,
-      verified: true,
+      // a purchase that went back is still a real experience, but not a verified purchase
+      verified: !RETURNED.has(item.state),
       rating: input.rating,
       headline: input.headline.trim(),
       body: input.text.trim(),
@@ -164,7 +174,7 @@ export class ReviewsPart {
         if (status === 'held') await this.moderation.hold(tx, { type: 'product_review', id }, failures);
         if (status === 'published') {
           await this.core.touchProduct(tx, fx, item.productId);
-          fx.emit('reviews.review.published', { reviewId: id, productId: item.productId, sellerId: item.sellerId, rating: input.rating, verified: true });
+          fx.emit('reviews.review.published', { reviewId: id, productId: item.productId, sellerId: item.sellerId, rating: input.rating, verified: row.verified });
         }
       });
     } catch (err) {
@@ -173,6 +183,14 @@ export class ReviewsPart {
     }
     await this.core.flush(fx, who);
     return this.mine(customerId, id);
+  }
+
+  /** The reason code of the last removal moderation decided on a review, if it was removed */
+  private async removalOf(reviewId: string): Promise<string | null> {
+    const items = await this.core.repo.find('moderation_items', { content_type: 'product_review', content_id: reviewId });
+    const decisions = (await Promise.all(items.map((i) => this.core.repo.find('moderation_decisions', { moderation_item_id: i.id })))).flat();
+    const last = decisions.sort((a, b) => b.decided_at.getTime() - a.decided_at.getTime())[0];
+    return last?.decision === 'remove' ? last.reason_code : null;
   }
 
   private async detach(reviewId: string, mediaIds: readonly string[]) {
@@ -196,6 +214,7 @@ export class ReviewsPart {
    * removal the fixed review waits for a moderator. A draft stays a draft until draft: false.
    */
   async update(who: CustomerWho, id: string, input: ReviewUpdateInput): Promise<MyReview> {
+    await this.core.assertMayWrite(who);
     const customerId = this.requireCustomerFor404(who);
     const row = await this.ownReview(customerId, id);
     const from = row.status as MyReview['status'];
@@ -319,6 +338,7 @@ export class ReviewsPart {
   /* ================================================================ votes */
 
   async vote(who: CustomerWho, input: { targetType: 'product_review' | 'answer'; targetId: string; helpful: boolean }): Promise<{ helpfulCount: number }> {
+    await this.core.assertMayWrite(who);
     const repo = this.core.repo;
     if (!who.customerId) throw notFound('Content');
     const customerId = who.customerId;

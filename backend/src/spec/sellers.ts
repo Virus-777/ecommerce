@@ -4546,14 +4546,14 @@ export const endpoints = defineEndpoints({
     stepUp: {"kind":"reauth","purpose":"seller-closure"},
     scope: "own-seller",
     summary: "Owner asks to close the seller account",
-    desc: "New sales stop at once; the account closes after open orders, returns, cases and the final payout are settled.",
+    desc: "Refused with SELLER_HAS_OPEN_OBLIGATIONS while orders are not shipped, returns or cases are open, or money is pending or held; details.obligations lists them. Otherwise new sales stop at once and finance issues the final statement.",
     body: () => z.object({
       reason: z.string(),
       reauthToken: z.string(),
     }),
     response: () => SellerAccount,
     status: 202,
-    errors: ["STEP_UP_REQUIRED","ILLEGAL_TRANSITION"],
+    errors: ["STEP_UP_REQUIRED","ILLEGAL_TRANSITION","SELLER_HAS_OPEN_OBLIGATIONS"],
     audited: true,
     events: ["sellers.seller.closed"],
     screens: ["seller/store"],
@@ -4815,7 +4815,7 @@ export const endpoints = defineEndpoints({
     permission: "sellers.accounts.close",
     scope: "staff",
     summary: "Close a seller account",
-    desc: "New sales stop; open obligations stay accessible until settled; finance issues the final statement. A closure for another reason than the seller's request always needs a second reviewer: the closure is kept in pending_changes with an access approval request and the call answers 200 with the SellerAccount unchanged, its pendingChange and approval (FORMAT.md, Approval responses); access.approval.decided (approved) applies it, so the caller does not send it again. It never answers APPROVAL_REQUIRED.",
+    desc: "New sales stop; open obligations stay accessible until settled; finance issues the final statement. Refused with SELLER_HAS_OPEN_OBLIGATIONS while orders are not shipped; ship or cancel them first. Every staff closure needs a second reviewer, whatever the reason, and open returns, cases or money are listed in the approval's details.openObligations: the closure is kept in pending_changes with an access approval request and the call answers 200 with the SellerAccount unchanged, its pendingChange and approval (FORMAT.md, Approval responses); access.approval.decided (approved) applies it, so the caller does not send it again. It never answers APPROVAL_REQUIRED.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -4826,7 +4826,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => SellerAccount,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION"],
+    errors: ["ILLEGAL_TRANSITION","SELLER_HAS_OPEN_OBLIGATIONS"],
     audited: true,
     approval: "Approval action sellers.sellers.close. Second reviewer unless the seller requested closure",
     events: ["sellers.seller.closed"],
@@ -6412,6 +6412,10 @@ export const spec = defineModuleSpec({
     "COLLECTION_LIMIT_REACHED": {
       "status": 409,
       "meaning": "maxCollections already exist"
+    },
+    "SELLER_HAS_OPEN_OBLIGATIONS": {
+      "status": 409,
+      "meaning": "Orders, returns, cases or money are still open; details.obligations lists them"
     },
     "LAUNCH_REVIEW_NOT_READY": {
       "status": 409,

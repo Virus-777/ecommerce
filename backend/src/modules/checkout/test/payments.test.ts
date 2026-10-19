@@ -4,6 +4,7 @@
  * Real cart, orders, inventory, promotions, customers and identity; payments and shipping stubbed (helpers.ts).
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { newId } from '../../../kernel/lib/ids.js';
 import { callers } from '../../../testing/app.js';
 import { PORTLAND, STORE, USD, fillCart, key, placeBody, readyCheckout, world, type World } from './helpers.js';
 
@@ -274,5 +275,45 @@ describe('jobs', () => {
     w.clock.advance(8 * 86_400_000);
     await w.app.kernel.jobs.runNow('checkout.purge-idempotency');
     expect(await repo.listPlaceRequests(failing.id)).toEqual([]);
+  });
+});
+
+// the clock moves past the 15-minute stock hold, so these run last and the customer signs in again to finish the challenge
+describe('a bank challenge longer than the stock hold', () => {
+  const signInAgain = async (c: { email: string; password: string }) => (await w.f.signIn({ email: c.email, password: c.password, audience: 'store' })).body.tokens.accessToken as string;
+
+  it('holds the stock again when the hold expired during the challenge', async () => {
+    const kai = await w.f.customer('kai@example.com');
+    const before = await available(w.stock.black);
+    const v = await readyCheckout(w, kai.accessToken, { source: 'buy_now', offerId: w.offers.black, quantity: 1 }, { card: 'tok_3ds' });
+    const res = await w.call('POST', `${STORE}/sessions/${v.id}/place`, kai.accessToken, placeBody(v), { 'idempotency-key': key() });
+    expect(res.body.checkout.status).toBe('awaiting_action');
+    w.clock.advance(20 * 60_000);
+    await w.app.kernel.jobs.runNow('inventory.expire-holds');
+    expect(await available(w.stock.black)).toBe(before); // the expired hold gave the unit back
+    const done = await w.call('POST', `${STORE}/sessions/${v.id}/complete-action`, await signInAgain(kai), { resultToken: 'ok' }, { 'idempotency-key': key() });
+    expect(done.body, JSON.stringify(done.body)).toMatchObject({ outcome: 'accepted', checkout: { status: 'completed' } });
+    expect(await available(w.stock.black)).toBe(before - 1);
+  });
+
+  it('voids the payment instead of overselling when the units sold during the challenge', async () => {
+    const lena = await w.f.customer('lena@example.com');
+    const v = await readyCheckout(w, lena.accessToken, { source: 'buy_now', offerId: w.offers.black, quantity: 1 }, { card: 'tok_3ds' });
+    const res = await w.call('POST', `${STORE}/sessions/${v.id}/place`, lena.accessToken, placeBody(v), { 'idempotency-key': key() });
+    expect(res.body.checkout.status).toBe('awaiting_action');
+    w.clock.advance(20 * 60_000);
+    await w.app.kernel.jobs.runNow('inventory.expire-holds');
+    // the units went to other buyers while the bank challenge was open
+    const left = await available(w.stock.black);
+    const seller = { kind: 'seller' as const, id: w.sellerId };
+    await w.api('inventory').applyBulkQuantities(w.sellerId, [{ stockItemId: w.stock.black, newAvailable: 0 }], newId(), seller);
+    const voided = w.pay.calls.voidIntent.length;
+    const done = await w.call('POST', `${STORE}/sessions/${v.id}/complete-action`, await signInAgain(lena), { resultToken: 'ok' }, { 'idempotency-key': key() });
+    expect(done.status, JSON.stringify(done.body)).toBe(200);
+    expect(done.body).toMatchObject({ outcome: 'payment_failed', orderId: null, checkout: { status: 'payment_failed' } });
+    expect(done.body.checkout.lastPayment.decline.message).toContain('sold out');
+    expect(w.pay.calls.voidIntent).toHaveLength(voided + 1);
+    expect(await available(w.stock.black)).toBe(0);
+    await w.api('inventory').applyBulkQuantities(w.sellerId, [{ stockItemId: w.stock.black, newAvailable: left }], newId(), seller);
   });
 });

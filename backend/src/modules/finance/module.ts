@@ -57,6 +57,7 @@ export default defineModule({
     ctx.events.on("promotions.redemption.reversed", (e) => service.onRedemptionReversedFromPromotions(e.payload, e.id));
     ctx.events.on("sellers.seller.approved", (e) => service.onSellerApprovedFromSellers(e.payload));
     ctx.events.on("sellers.seller.suspended", (e) => service.onSellerSuspendedFromSellers(e.payload));
+    ctx.events.on("sellers.seller.reinstated", (e) => service.onSellerReinstatedFromSellers(e.payload));
     ctx.events.on("sellers.seller.closed", (e) => service.onSellerClosedFromSellers(e.payload));
     ctx.events.on("sellers.payout_account.changed", (e) => service.onPayoutAccountChangedFromSellers(e.payload));
     ctx.events.on("access.approval.decided", (e) => service.onApprovalDecidedFromAccess(e.payload));

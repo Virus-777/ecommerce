@@ -138,7 +138,7 @@ How one seller (or the Official Store) sells one variant in one condition: price
 | Field | Type |
 |---|---|
 | amount | `Money` |
-| basis | `enum(lowest_30_days|list_price)` lowest_30_days: this offer's lowest price in the 30 days before the sale; list_price: manufacturer list price on file |
+| basis | `enum(lowest_30_days|list_price)` lowest_30_days: this offer's lowest price in the 30 days before the sale; list_price: the manufacturer list price catalog staff set on the variant (a list price in seller-entered specs, e.g. MSRP, is not evidence) |
 | verified | `bool` Checked against price history or the list price on file. Unverified was-prices are never shown. |
 | explanation | `string` e.g. 'Was price is the Official Store's lowest price in the 30 days before the sale.' |
 
@@ -199,7 +199,7 @@ How one seller (or the Official Store) sells one variant in one condition: price
 
 | Field | Type |
 |---|---|
-| code | `enum(awaiting_launch_review|seller_restricted|seller_suspended|seller_closed|product_hidden|product_suspended|product_merged|staff_hold|removed_by_staff|ended_by_seller|enforcement|fulfillment_service_suspended)` fulfillment_service_suspended: the seller's Fulfilled by Marketly enrollment is suspended or offboarding, so the offer stops selling (it never switches to seller shipping); restored when the enrollment is reinstated or the SKU leaves the service |
+| code | `enum(awaiting_launch_review|seller_restricted|seller_suspended|seller_closed|product_hidden|product_suspended|product_merged|staff_hold|removed_by_staff|ended_by_seller|enforcement|fulfillment_service_suspended|brand_not_authorized)` fulfillment_service_suspended: the seller's Fulfilled by Marketly enrollment is suspended or offboarding, so the offer stops selling (it never switches to seller shipping); restored when the enrollment is reinstated or the SKU leaves the service |
 | text | `text` |
 | affectedActivity | `string?` For restrictions: what is stopped, e.g. 'Refurbished offers and new listings' |
 | appealRoute | `string?` For restrictions and removals: how to appeal |
@@ -935,7 +935,7 @@ Nothing changes until apply. Only rows marked ready are applied; error rows are 
 | warranty_handled_by | text? |
 | status | text (draft|active|paused|out_of_stock|ineligible|removed) |
 | status_before_ineligible | text? |
-| ineligible_source | jsonb? ({ kind: restriction|suspension|product|staff|fulfillment_service, id }) |
+| ineligible_source | jsonb? ({ kind: restriction|suspension|product|staff|fulfillment_service|brand, id }) |
 | status_reason | jsonb? |
 | publish_on_approval | bool |
 | content_gaps | text[] |
@@ -1113,6 +1113,7 @@ Indexes: `pk (job_id, row_no)`, `(job_id, result, row_no)`
 | `sellers.seller.reinstated` | sellers | restoreEligibility on offers made ineligible by liftedRestrictionId or endedSuspensionId, except offers still covered by remainingRestrictionIds |
 | `sellers.launch_review.decided` | sellers | outcome passed: publish the seller's drafts waiting with publish_on_approval (approved product, complete offer; out_of_stock when available = 0) and clear statusReason awaiting_launch_review. changes_needed: keep them in draft |
 | `sellers.seller.closed` | sellers | Remove all the seller's offers (reason seller_closed) |
+| `catalog.brand.changed` | catalog | A brand blocked, made official_only or authorized_list (or its authorized list changed): the offers on its products the brand no longer allows become Ineligible (brand_not_authorized, ineligible_source brand); offers it allows again come back unless another cause still stops them |
 | `catalog.product.publication_changed` | catalog | Hidden or Suspended → offers Ineligible (product_hidden / product_suspended); Active → restoreEligibility |
 | `catalog.product.approved` | catalog | Publish draft offers with publishOnApproval on that product; refresh content_gaps |
 | `catalog.product.merged` | catalog | Move offers from the duplicate to the kept product, mapping variants by options; unmatched variants are paused and the seller told. Each moved offer's stock item follows it (inventory.updateStockItem with the kept productId / variantId) and its title is refreshed |
@@ -1181,6 +1182,7 @@ Checked through the access module (limits per role, second reviewer).
 
 | Code | Status | Meaning |
 |---|---|---|
+| `BRAND_NOT_AUTHORIZED` | 409 | The product's brand does not let this seller sell it: blocked, official_only (Official Store only) or authorized_list without this seller |
 | `PRODUCT_NOT_PURCHASABLE` | 409 | The product is not approved and Active. Save as draft with publishOnApproval, or wait for review. |
 | `VARIANT_NOT_IN_PRODUCT` | 400 | variantId does not belong to productId |
 | `DUPLICATE_OFFER` | 409 | This seller already has a New offer for this variant, or the seller SKU is in use. details.offerId |

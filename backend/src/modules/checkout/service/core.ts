@@ -147,6 +147,7 @@ export class Core {
       shippability: q.shippability ?? {},
       lineAllocations: q.lineAllocations ?? {},
       shippingDiscounts: q.shippingDiscounts ?? {},
+      shippingFunding: q.shippingFunding ?? {},
       coupons: q.coupons ?? [],
       discounts: q.discounts ?? [],
       tax: q.tax ?? null,

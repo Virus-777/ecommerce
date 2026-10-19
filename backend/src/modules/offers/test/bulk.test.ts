@@ -144,7 +144,7 @@ describe('seller tools', () => {
 
   it('drops a was-price once the sale has ended (nightly check)', async () => {
     const sellerId = addSeller(h);
-    const p = addProduct(h, { specs: { MSRP: '249' } });
+    const p = addProduct(h, { listPrices: [24900] });
     const o = await sellerOffer(h, sellerId, p.id, p.variants[0]!, { compareAt: { amount: { amount: 24900, currency: 'USD' }, basis: 'list_price' }, saleEndsAt: new Date(Date.now() + DAY).toISOString() });
     expect((await h.api.getOffer(o.id))?.compareAt?.verified).toBe(true);
     h.clock.advance(2 * DAY);

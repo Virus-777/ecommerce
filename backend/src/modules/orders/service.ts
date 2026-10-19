@@ -54,7 +54,7 @@ export class OrdersService implements OrdersPublicApi {
     this.reads = new Reads(this.core, this.views);
     this.placement = new Placement(this.core, this.views);
     this.cancellations = new Cancellations(this.core, this.views);
-    this.fulfillment = new Fulfillment(this.core, this.views);
+    this.fulfillment = new Fulfillment(this.core, this.views, this.cancellations);
     this.afterSales = new AfterSales(this.core);
     this.admin = new Admin(this.core, this.views, this.reads);
   }

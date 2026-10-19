@@ -94,9 +94,10 @@ describe('a sponsored product campaign, end to end', () => {
     const slots = await api.sponsoredForResults({ page: 'search', query: 'aurora headphones', visitorId: 'v1', sessionId: 's1', device: 'web', organicOfferIds: [] });
     expect(slots).toEqual([expect.objectContaining({ position: 3, impression: expect.objectContaining({ campaignId, label: 'Sponsored', sellerName: 'Northwind Audio', promotedOffer: expect.objectContaining({ offerId: listing.offerId, price: { amount: 18900, currency: 'USD' } }) }) })]);
 
-    // a visitor clicks the card: $0.35 is charged within the limits
+    // a visitor sees the card and clicks it: $0.35 is charged within the limits
     const visitor = await f.visitor('store');
-    const click = await f.call('POST', '/api/store/advertising/events', { token: visitor, body: { events: [{ impressionToken: slots[0].impression.impressionToken, kind: 'click', at: clock.now().toISOString() }] } });
+    const token = slots[0].impression.impressionToken;
+    const click = await f.call('POST', '/api/store/advertising/events', { token: visitor, body: { events: [{ impressionToken: token, kind: 'display', at: clock.now().toISOString() }, { impressionToken: token, kind: 'click', at: clock.now().toISOString() }] } });
     expect(click.status, JSON.stringify(click.body)).toBe(202);
     const view = await f.call('GET', `/api/seller/advertising/campaigns/${campaignId}`, { token: listing.sellerToken });
     expect(view.body.spend).toEqual({ amount: 35, currency: 'USD' });

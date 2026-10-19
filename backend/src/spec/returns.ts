@@ -1301,19 +1301,20 @@ export const InspectionInput: z.ZodType<InspectionInput> = z.object({
 }).register(common.apiTypes, { id: "returns.InspectionInput" });
 
 export interface RemedyInput {
-  kind: "full_refund" | "partial_refund" | "replacement" | "exchange" | "store_credit";
+  /** decline: no refund after a failed inspection (empty_package, wrong_item_returned, damaged_by_customer or not_matching_request, with inspection photos); explanation required; the return closes as rejected (reasonCode failed_inspection) and the customer can ask Marketly to review it */
+  kind: "full_refund" | "partial_refund" | "replacement" | "exchange" | "store_credit" | "decline";
   /** Required for partial refunds; each with a reason shown to the customer */
   deductions?: RefundDeduction[] | null;
   /** Partial amount; capped at maxRefundable */
   amount?: common.Money | null;
   explanation?: string | null;
   exchangeVariantId?: string | null;
-  /** Staff only (admin remedy and revise; sellers leave it out): re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password). Needed when the refund is within the caller's refund limit and above access stepUpAbove (it is approved in the same call), otherwise STEP_UP_REQUIRED and nothing is saved */
+  /** Staff only (admin remedy; sellers and revise leave it out): re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password). Needed when the refund is within the caller's refund limit and above access stepUpAbove (it is approved in the same call), otherwise STEP_UP_REQUIRED and nothing is saved */
   reauthToken?: string | null;
 }
 
 export const RemedyInput: z.ZodType<RemedyInput> = z.object({
-  kind: z.enum(["full_refund", "partial_refund", "replacement", "exchange", "store_credit"]),
+  kind: z.enum(["full_refund", "partial_refund", "replacement", "exchange", "store_credit", "decline"]).describe("decline: no refund after a failed inspection (empty_package, wrong_item_returned, damaged_by_customer or not_matching_request, with inspection photos); explanation required; the return closes as rejected (reasonCode failed_inspection) and the customer can ask Marketly to review it"),
   get deductions() {
     return z.array(RefundDeduction).nullish();
   },
@@ -1322,7 +1323,7 @@ export const RemedyInput: z.ZodType<RemedyInput> = z.object({
   },
   explanation: z.string().nullish(),
   exchangeVariantId: z.uuid().nullish(),
-  reauthToken: z.string().describe("Staff only (admin remedy and revise; sellers leave it out): re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password). Needed when the refund is within the caller's refund limit and above access stepUpAbove (it is approved in the same call), otherwise STEP_UP_REQUIRED and nothing is saved").nullish(),
+  reauthToken: z.string().describe("Staff only (admin remedy; sellers and revise leave it out): re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password). Needed when the refund is within the caller's refund limit and above access stepUpAbove (it is approved in the same call), otherwise STEP_UP_REQUIRED and nothing is saved").nullish(),
 }).register(common.apiTypes, { id: "returns.RemedyInput" });
 
 export interface ExceptionInput {
@@ -2941,7 +2942,7 @@ export const endpoints = defineEndpoints({
     auth: "shopper",
     scope: "own-customer",
     summary: "Request a return for selected items and quantities",
-    desc: "Re-checks eligibility, splits by seller and returns one ReturnDetail per seller. Official Store returns inside the window may be approved automatically (setting). An exchange must be for another variant of the same product, sold by the same seller (offers.listOwnOffersForProduct) at the same price as the original unit; otherwise EXCHANGE_NOT_ALLOWED (different-price exchanges are phase 4).",
+    desc: "Re-checks eligibility, splits by seller and returns one ReturnDetail per seller. One return per unit: units on an open return, or on a rejected one (the customer asks Marketly to review it instead), cannot be returned again (RETURN_NOT_ELIGIBLE, return_open). Official Store returns inside the window may be approved automatically (setting). An exchange must be for another variant of the same product, sold by the same seller (offers.listOwnOffersForProduct) at the same price as the original unit; otherwise EXCHANGE_NOT_ALLOWED (different-price exchanges are phase 4).",
     body: () => ReturnCreateInput,
     response: () => z.object({
       get returns() {
@@ -3426,7 +3427,7 @@ export const endpoints = defineEndpoints({
     permission: "returns.refunds.issue",
     scope: "own-seller",
     summary: "Confirm the refund (full or partial) or ship a replacement or exchange",
-    desc: "Partial refunds need deductions with reasons. Capped at the remaining refundable amount. The refund is approved by the seller and handed to payments; the customer sees Processing, then Sent. Replacements and exchanges allocate stock through inventory.allocateForOrder (exchanges: same product, same seller, same price, else EXCHANGE_NOT_ALLOWED).",
+    desc: "A replacement covers every returned item, each from its own stock (all or nothing; the return completes once all are shipped, and cancelling one cancels the others not shipped); an exchange is for a single-item return. kind decline closes it without a refund after a failed inspection. Partial refunds need deductions with reasons. Capped at the remaining refundable amount. The refund is approved by the seller and handed to payments; the customer sees Processing, then Sent. Replacements and exchanges allocate stock through inventory.allocateForOrder (exchanges: same product, same seller, same price, else EXCHANGE_NOT_ALLOWED).",
     params: () =>
       z.object({
         id: z.string().describe("Return id or its RT- reference"),
@@ -3849,7 +3850,7 @@ export const endpoints = defineEndpoints({
     permission: "returns.requests.manage",
     scope: "staff",
     summary: "Decide the remedy for an Official Store or platform-handled return",
-    desc: "Refunds: Staff refunds all take one decision path (approval action returns.refunds.approve, access): within the caller's refund limit the refund is approved in the same call and handed to payments, and above access stepUpAbove that needs reauthToken (STEP_UP_REQUIRED otherwise, nothing saved); above the limit, or when the caller has no refund authority (e.g. warehouse staff), it is saved under review with an access approval request routed to the refund approvers (Finance Inbox), and the refund request in the response carries `approval` (FORMAT.md, Approval responses). Once that request is approved the refund is approved and handed to payments. Replacements and exchanges allocate stock (inventory.allocateForOrder, no expiry) and create a replacement shipment. Exchanges: same product, same seller, same price, else EXCHANGE_NOT_ALLOWED.",
+    desc: "A replacement covers every returned item, each from its own stock; kind decline closes the return without a refund after a failed inspection (inspection photos required). Refunds: Staff refunds all take one decision path (approval action returns.refunds.approve, access): within the caller's refund limit the refund is approved in the same call and handed to payments, and above access stepUpAbove that needs reauthToken (STEP_UP_REQUIRED otherwise, nothing saved); above the limit, or when the caller has no refund authority (e.g. warehouse staff), it is saved under review with an access approval request routed to the refund approvers (Finance Inbox), and the refund request in the response carries `approval` (FORMAT.md, Approval responses). Once that request is approved the refund is approved and handed to payments. Replacements and exchanges allocate stock (inventory.allocateForOrder, no expiry) and create a replacement shipment. Exchanges: same product, same seller, same price, else EXCHANGE_NOT_ALLOWED.",
     params: () =>
       z.object({
         id: z.string().describe("Return id or its RT- reference"),
@@ -4007,7 +4008,7 @@ export const endpoints = defineEndpoints({
     permission: "returns.requests.manage",
     scope: "staff",
     summary: "Change a declined refund and resubmit",
-    desc: "The resubmission takes the same decision path as a new staff refund: within the reviser's refund limit approved now (reauthToken in the body above stepUpAbove, else STEP_UP_REQUIRED and nothing changes); otherwise under review with an access approval request for Finance (`approval` in the response).",
+    desc: "A declined request had been waiting for someone else's approval, so the resubmission always goes back under review with an access approval request for the refund approvers (`approval` in the response), filed in the reviser's name: the reviser becomes its proposer and cannot approve it, also within their own refund limit and also after that request lapses (POST /refunds/{id}/approve answers SELF_APPROVAL_NOT_ALLOWED). reauthToken is not used.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -4317,6 +4318,11 @@ export const spec = defineModuleSpec({
           "completed"
         ],
         [
+          "awaiting_remedy",
+          "decline",
+          "rejected"
+        ],
+        [
           "rejected",
           "overturn",
           "approved"
@@ -4568,9 +4574,9 @@ export const spec = defineModuleSpec({
       "orders.item.delivered": "Start the return window for the item (deadline = delivery + effective window)",
       "orders.item.cancelled": "Mark the item not returnable; cancel any requested return for it",
       "shipping.shipment.dispatched": "Return label first scan → return shipment in transit; replacement shipment shipped",
-      "shipping.shipment.delivered": "Return parcel delivered to the destination; replacement delivered (completes the return)",
+      "shipping.shipment.delivered": "Return parcel delivered to the destination: the carrier scan marks the return received (inspection clock and its escalation start; a later receive call changes nothing); replacement delivered (completes the return)",
       "shipping.shipment.exception": "Flag return or replacement shipment exceptions to the owner",
-      "payments.refund.sent": "Refund request → sent; completes the return when it is the remedy",
+      "payments.refund.sent": "Refund request → sent; completes the return when it is the remedy. Another open return claiming the same units (more than were bought, together with the refunded one) is cancelled with its unused label voided, or noted for the seller once on its way",
       "payments.refund.failed": "Refund request → failed with the reason; flags the return in the queue",
       "access.approval.decided": "Finish an approval-required refund approval, baseline change or category exception (pending_approval → scheduled or rejected)",
       "sellers.seller.suspended": "Open returns of the seller move to platform handling; existing returns stay accessible",

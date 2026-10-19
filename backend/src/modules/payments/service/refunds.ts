@@ -340,19 +340,33 @@ export class Refunds {
       }
       const c = await this.caps(tx, e.orderId, locked, paid);
       const cap = c.items.find((i) => i.orderItemId === e.itemId);
-      const amount = Math.min(e.refund.total.amount, cap?.remaining ?? 0, Math.max(0, c.captured - c.sent - c.inFlight));
-      if (!cap || amount <= 0) {
+      if (!cap) {
+        this.core.ctx.log.warn({ orderId: e.orderId, itemId: e.itemId }, 'payments: cancelled item has nothing left to refund');
+        return null;
+      }
+      // The last cancellation of a package refunds its whole shipping, including the shares of items cancelled
+      // earlier (refunded then without shipping): what is above this item's remaining comes from the package's
+      // other items, smallest remaining first, so those shares are what it takes.
+      let left = Math.min(e.refund.total.amount, Math.max(0, c.captured - c.sent - c.inFlight));
+      const items: RefundItemRec[] = [];
+      for (const i of [cap, ...c.items.filter((x) => x.groupId === cap.groupId && x.orderItemId !== e.itemId && x.remaining > 0).sort((a, b) => a.remaining - b.remaining)]) {
+        const part = Math.min(left, i.remaining);
+        if (part <= 0) continue;
+        items.push({ refund_id: '', order_item_id: i.orderItemId, group_id: i.groupId, seller_id: i.sellerId, amount: part });
+        left -= part;
+      }
+      const amount = items.reduce((s, i) => s + i.amount, 0);
+      if (amount <= 0) {
         this.core.ctx.log.warn({ orderId: e.orderId, itemId: e.itemId }, 'payments: cancelled item has nothing left to refund');
         return null;
       }
       if (amount < e.refund.total.amount) this.core.ctx.log.warn({ orderId: e.orderId, itemId: e.itemId, asked: e.refund.total.amount, amount }, 'payments: cancellation refund capped at the remaining amount');
-      const item: RefundItemRec = { refund_id: '', order_item_id: e.itemId, group_id: cap.groupId, seller_id: cap.sellerId, amount };
       const r = await tx.insertIfAbsent(
         'refunds',
         this.newRow({ ref: await this.core.nextRef('RF', tx), orderId: e.orderId, intent: locked, origin: 'cancellation', originId: e.cancellationId, originRef: null, amount, destination: 'original_method', reason, requestedBy: actor, key }),
       );
       if (!r) return null;
-      await tx.insert('refund_items', { ...item, refund_id: r.id });
+      for (const item of items) await tx.insert('refund_items', { ...item, refund_id: r.id });
       await this.log(tx, r.id, null, 'requested', `Started by an item cancellation (${order?.items.get(e.itemId)?.title ?? 'item'})`, actor);
       return r;
     });

@@ -337,7 +337,14 @@ export class Quoter {
       l.tax = 0;
     }
     const shippingDiscounts: Record<string, number> = {};
-    for (const p of ev?.packages ?? []) shippingDiscounts[p.packageId] = Math.min(shippingByKey.get(p.packageId) ?? 0, p.freeShipping ? (shippingByKey.get(p.packageId) ?? 0) : p.shippingDiscount.amount);
+    const shippingFunding: Record<string, { platform: number; seller: number }> = {};
+    for (const p of ev?.packages ?? []) {
+      const discount = Math.min(shippingByKey.get(p.packageId) ?? 0, p.freeShipping ? (shippingByKey.get(p.packageId) ?? 0) : p.shippingDiscount.amount);
+      shippingDiscounts[p.packageId] = discount;
+      // the Marketly part never above the discount actually given
+      const platform = Math.min(discount, p.allocation?.platformPart.amount ?? 0);
+      if (discount > 0) shippingFunding[p.packageId] = { platform, seller: discount - platform };
+    }
 
     // coupons the customer entered (and clipped ones that applied)
     const coupons: CouponResult[] = [];
@@ -452,6 +459,7 @@ export class Quoter {
       ...quote,
       lineAllocations: allocations,
       shippingDiscounts,
+      shippingFunding,
       coupons,
       discounts: totals.discounts,
       tax,

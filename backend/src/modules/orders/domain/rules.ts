@@ -168,9 +168,17 @@ export const effectiveState = (i: { state: string; state_before_request?: string
 
 /* ------------------------------------------------------------------ status derivation */
 
+type StatusItem = { state: string; state_before_request?: string | null; delivered_at?: Date | null };
+
+/** effectiveState, with a line that came back undelivered (returned to sender, or refunded before it arrived) counting as cancelled */
+const statusState = (i: StatusItem): ItemState => {
+  const s = effectiveState(i);
+  return (s === 'returned' || s === 'refunded') && 'delivered_at' in i && !i.delivered_at ? 'cancelled' : s;
+};
+
 /** Group status from its items */
-export function groupStatus(items: readonly { state: string; state_before_request?: string | null }[]): GroupStatus {
-  const states = items.map(effectiveState);
+export function groupStatus(items: readonly StatusItem[]): GroupStatus {
+  const states = items.map(statusState);
   const active = states.filter((s) => s !== 'cancelled');
   if (!active.length) return 'cancelled';
   const unshipped = active.filter((s) => is(UNSHIPPED, s));
@@ -188,11 +196,11 @@ export function groupStatus(items: readonly { state: string; state_before_reques
 }
 
 /** Overall status derived from the items, first match wins (spec notes) */
-export function displayStatus(lifecycle: Lifecycle, items: readonly { state: string; state_before_request?: string | null }[]): DisplayStatus {
-  const states = items.map(effectiveState);
-  if (lifecycle === 'payment_pending' || states.includes('pending_payment')) return 'payment_pending';
+export function displayStatus(lifecycle: Lifecycle, items: readonly StatusItem[]): DisplayStatus {
+  if (lifecycle === 'payment_pending' || items.some((i) => effectiveState(i) === 'pending_payment')) return 'payment_pending';
+  if (items.length && items.every((i) => i.state === 'refunded')) return 'refunded';
+  const states = items.map(statusState);
   if (!states.length || states.every((s) => s === 'cancelled')) return 'cancelled';
-  if (states.every((s) => s === 'refunded')) return 'refunded';
   const remaining = states.filter((s) => s !== 'cancelled');
   const delivered = (s: ItemState) => is(DELIVERED_LIKE, s);
   if (remaining.length < states.length && remaining.every(delivered)) return 'partly_cancelled';

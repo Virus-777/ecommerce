@@ -2213,7 +2213,7 @@ export interface PromotionsDb {
     ineligible_reasons: Json;
     included: boolean;
   };
-  /** Deal price, deal stock and purchase limit per offer in a flash sale */
+  /** Deal price, deal stock and purchase limit per offer in a flash sale. approved_* keep what Finance confirmed (set at confirmFunding): a live or paused sale can only change within them */
   flash_items: {
     id: string;
     campaign_id: string;
@@ -2226,6 +2226,9 @@ export interface PromotionsDb {
     purchase_limit: number;
     state: string;
     sold_out_at: Date | null;
+    approved_deal_price: number | null;
+    approved_deal_stock: number | null;
+    approved_purchase_limit: number | null;
   };
   coupon_codes: {
     id: string;
@@ -3063,7 +3066,7 @@ export const endpoints = defineEndpoints({
     permission: "promotions.campaigns.manage",
     scope: "staff",
     summary: "Set flash sale offers, deal prices, deal stock and purchase limits",
-    desc: "Deal stock cannot exceed the offer's available stock at the time of saving (inventory check). Raising deal stock on a live sale restocks sold-out items.",
+    desc: "Deal stock cannot exceed the offer's available stock at the time of saving (inventory check). Platform and shared sales: any change to an approved or scheduled sale reopens it to draft for a new Finance confirmation; a live or paused sale can only change within what Finance confirmed (deal price no lower, deal stock and purchase limit no higher, no new offers; removing offers is allowed), else ILLEGAL_TRANSITION with details.items. Raising deal stock on a live sale restocks sold-out items, up to the confirmed deal stock.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -3076,7 +3079,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => z.array(FlashItem),
     status: 200,
-    errors: ["OFFER_NOT_ELIGIBLE","INSUFFICIENT_STOCK","CAMPAIGN_LOCKED"],
+    errors: ["OFFER_NOT_ELIGIBLE","INSUFFICIENT_STOCK","CAMPAIGN_LOCKED","ILLEGAL_TRANSITION"],
     audited: true,
     screens: ["admin/promotion-new"],
     phase: 2,
@@ -3106,7 +3109,7 @@ export const endpoints = defineEndpoints({
     permission: "promotions.campaigns.manage",
     scope: "staff",
     summary: "Send to Finance for funding confirmation",
-    desc: "Runs validation (period, scope not empty, funding consistent with seller consent) and builds the funding review checks. Edits lock until Finance decides.",
+    desc: "Runs validation (period, scope not empty, funding consistent with seller consent, a budget for platform and shared funding so every platform cost passes the approval limit) and builds the funding review checks. Edits lock until Finance decides.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -3149,7 +3152,7 @@ export const endpoints = defineEndpoints({
     permission: "promotions.funding.confirm",
     scope: "staff",
     summary: "Finance confirms funding",
-    desc: "A budget above the Marketing limit or above the confirming Finance member's limit raises an approval request (access); the campaign stays in review until it is decided. Separation of duties (G65a): the person who created the campaign or sent it to Finance can't confirm its funding (SAME_REVIEWER).",
+    desc: "A budget above the Marketing limit or above the confirming Finance member's limit raises an approval request (access); the campaign stays in review until it is decided. Separation of duties (G65a): the person who created the campaign or sent it to Finance can't confirm its funding (SAME_REVIEWER), and an approval of the budget request decided by that person in the Approvals Inbox is ignored: the campaign stays in review and the request is closed, so another Finance member confirms again. Platform and shared funding without a budget is refused (VALIDATION_FAILED). Confirming saves the flash items' deal price, deal stock and purchase limit as approved.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -3160,7 +3163,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => Campaign,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","APPROVAL_REQUIRED","SAME_REVIEWER"],
+    errors: ["ILLEGAL_TRANSITION","APPROVAL_REQUIRED","SAME_REVIEWER","VALIDATION_FAILED"],
     audited: true,
     approval: "Approval action promotions.budgets.approve: budget above the Marketing approval limit needs a Finance member whose limit covers it; above that, a second reviewer",
     events: ["promotions.campaign.funding_confirmed"],
@@ -4769,10 +4772,16 @@ export const spec = defineModuleSpec({
         "reserved",
         "purchase_limit",
         "state",
-        "sold_out_at"
+        "sold_out_at",
+        "approved_deal_price",
+        "approved_deal_stock",
+        "approved_purchase_limit"
       ],
       "nullable": [
-        "sold_out_at"
+        "sold_out_at",
+        "approved_deal_price",
+        "approved_deal_stock",
+        "approved_purchase_limit"
       ],
       "decimal": [],
       "binary": [],
@@ -4860,6 +4869,30 @@ export const spec = defineModuleSpec({
             "sold_out_at": {
               "bsonType": [
                 "date",
+                "null"
+              ]
+            },
+            "approved_deal_price": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "approved_deal_stock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "approved_purchase_limit": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
                 "null"
               ]
             }

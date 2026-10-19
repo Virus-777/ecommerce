@@ -43,7 +43,10 @@ export class OpsPart extends Part {
   /* ---------------------------------------------------------------- events */
 
   async onOfferPriceChanged(e: EventPayload<'offers.offer.price_changed'>) {
-    if (e.to.amount <= e.from.amount || !e.sellerId) return;
+    if (e.to.amount <= e.from.amount) return;
+    const key = `${e.offerId}:${e.priceChangeId ?? e.termsVersion}`;
+    await this.flashPriceRaised(e, key);
+    if (!e.sellerId) return;
     const pos = await this.repo.find('participation_offers', { offer_id: e.offerId, included: true });
     if (!pos.length) return;
     const parts = await this.repo.find('participations', { id: pos.map((p) => p.participation_id), state: ['accepted', 'withdrawal_requested'] } as never);
@@ -52,11 +55,26 @@ export class OpsPart extends Part {
       const camp = campaigns.get(p.campaign_id);
       if (!camp || !PUBLISHED.includes(camp.status)) continue;
       const note = `Price raised from ${moneyFull(e.from.amount, e.from.currency)} to ${moneyFull(e.to.amount, e.to.currency)} during the campaign`;
-      const key = `${e.offerId}:${e.priceChangeId ?? e.termsVersion}`;
       if (await this.repo.findOne('campaign_log', { campaign_id: p.campaign_id, action: 'participation.price_raised', reason: key })) continue;
       await this.repo.transaction(async (tx) => {
         await tx.update('participations', p.id, { reason: note, updated_at: this.now() });
         await this.core.log(tx, p.campaign_id, 'participation.price_raised', { actor: SYSTEM }, key, { participationId: p.id, sellerId: p.seller_id, offerId: e.offerId, note });
+      });
+    }
+  }
+
+  /** Flash items whose offer now costs more than the regular price they were set with stop giving the deal price (evaluate): the campaign log says why */
+  private async flashPriceRaised(e: EventPayload<'offers.offer.price_changed'>, key: string) {
+    const items = (await this.repo.find('flash_items', { offer_id: e.offerId, state: ['active', 'sold_out'] })).filter((f) => e.to.amount > f.regular_price);
+    if (!items.length) return;
+    const campaigns = new Map((await this.repo.getMany('campaigns', items.map((f) => f.campaign_id))).map((c) => [c.id, c]));
+    for (const f of items) {
+      const camp = campaigns.get(f.campaign_id);
+      if (!camp || !OPEN.includes(camp.status)) continue;
+      if (await this.repo.findOne('campaign_log', { campaign_id: f.campaign_id, action: 'flash_item.price_raised', reason: key })) continue;
+      const note = `Price raised from ${moneyFull(e.from.amount, e.from.currency)} to ${moneyFull(e.to.amount, e.to.currency)}, above the ${moneyFull(f.regular_price, e.to.currency)} regular price of the deal: the deal price does not apply until the price is back`;
+      await this.repo.transaction(async (tx) => {
+        await this.core.log(tx, f.campaign_id, 'flash_item.price_raised', { actor: SYSTEM }, key, { flashItemId: f.id, sellerId: e.sellerId ?? null, offerId: e.offerId, note });
       });
     }
   }

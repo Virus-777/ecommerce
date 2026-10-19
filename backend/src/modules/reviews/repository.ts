@@ -342,7 +342,8 @@ export class ReviewsRepository {
 
   async recomputeSellerSummary(sellerId: string, since: Date, positiveThreshold: number, now: Date): Promise<SellerSummaryRec> {
     const [a] = await this.#feedback.aggregate<{ n: number; pos: number; neu: number; neg: number; yes: number; ds: number; cs: number; cn: number; os: number }>([
-      { $match: { seller_id: sellerId, status: 'published', visible: true, created_at: { $gte: since } } },
+      // feedback on a package that all went back is shown but not scored
+      { $match: { seller_id: sellerId, status: 'published', visible: true, refunded: { $ne: true }, created_at: { $gte: since } } },
       {
         $group: {
           _id: null,

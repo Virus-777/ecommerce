@@ -31,6 +31,7 @@ import { addDays, arrivalRange, HOUR_MS, DAY_MS, MON_FRI, onOrAfter, type DayRul
 import { labelMachine, shipmentMachine } from '../domain/state-machines.js';
 import { EVENT_LABELS, formatOk, MOVING, normalizeCode, normalizeTracking, pathFor, STEPS, stepOf, statusLabel, trackingUrlOf, type ShipmentStatus, type TrackingCode } from '../domain/tracking.js';
 import { CarrierRefused, CarrierUnreachable, type CarrierRec, type CarrierScan, type LabelRec, type LineRec, type ServiceRec, type ShipmentRec } from '../ports.js';
+import type { ShippingRepository } from '../repository.js';
 import { Batch, byMarketly, fulfilledByOf, invalid, iso, notFound, SYSTEM, type By, type Core, type FulfilledBy } from './core.js';
 import type { Estimates, Owner } from './estimates.js';
 import type { Exceptions } from './exceptions.js';
@@ -239,32 +240,58 @@ export class Shipments {
 
   /* ---------------------------------------------------------------- items and package facts */
 
-  /** Units already on labels that are not handed over yet, per order item */
-  private async pendingUnits(groupId: string, exceptShipmentId?: string): Promise<Map<string, number>> {
-    const waiting = (await this.repo.find('shipments', { group_id: groupId, status: 'label_created', kind: ['outbound', 'replacement'] })).filter((s) => s.id !== exceptShipmentId);
+  /**
+   * Units of the group's live packages that orders has not shipped yet, per order item: labels not handed over, and
+   * dispatches orders has not applied (it learns of them by event, after the commit). Orders marks the items it ships
+   * with the shipment, so a package no item of g points to is still in flight as far as g's open lines know.
+   */
+  private async pendingUnits(repo: ShippingRepository, g: GroupCtx, exceptShipmentId?: string): Promise<Map<string, number>> {
+    const applied = new Set((g.group?.items ?? []).map((i) => i.shipmentId).filter(Boolean));
+    const live = await repo.find('shipments', { group_id: g.task.groupId, kind: ['outbound', 'replacement'], status: { op: '<>', value: 'cancelled' } });
+    const waiting = live.filter((s) => s.id !== exceptShipmentId && !applied.has(s.id));
     const out = new Map<string, number>();
     if (!waiting.length) return out;
-    for (const l of await this.repo.find('shipment_lines', { shipment_id: waiting.map((s) => s.id) })) out.set(l.order_item_id, (out.get(l.order_item_id) ?? 0) + l.quantity);
+    for (const l of await repo.find('shipment_lines', { shipment_id: waiting.map((s) => s.id) })) out.set(l.order_item_id, (out.get(l.order_item_id) ?? 0) + l.quantity);
     return out;
   }
 
-  /** Items belong to the group, are unshipped and the quantities fit (orders.canShipItems plus units on unused labels) */
+  /** The items that do not fit once the units in packages orders has not shipped yet are counted (empty: they fit) */
+  private async overPending(repo: ShippingRepository, g: GroupCtx, items: readonly ShipmentLineInput[], exceptShipmentId?: string): Promise<string[]> {
+    const pending = await this.pendingUnits(repo, g, exceptShipmentId);
+    const wanted = new Map<string, number>();
+    for (const i of items) wanted.set(i.orderItemId, (wanted.get(i.orderItemId) ?? 0) + i.quantity);
+    const problems: string[] = [];
+    for (const [id, qty] of wanted) {
+      const open = g.task.openLines.find((l) => l.orderItemId === id);
+      const waiting = pending.get(id) ?? 0;
+      if (open && waiting && qty + waiting > open.quantityToShip) problems.push(`${open.title}: ${waiting} already in another package, at most ${Math.max(0, open.quantityToShip - waiting)} left to ship`);
+    }
+    return problems;
+  }
+
+  /** Items belong to the group, are unshipped and the quantities fit (orders.canShipItems plus units in packages orders has not shipped yet) */
   async checkItems(g: GroupCtx, items: readonly ShipmentLineInput[], exceptShipmentId?: string) {
     const problems: string[] = [];
     if (!items.length) problems.push('Choose the items in this package');
     const r = items.length ? await this.orders.canShipItems(g.task.groupId, items.map((i) => ({ orderItemId: i.orderItemId, quantity: i.quantity }))) : { ok: false, problems: [] };
     problems.push(...r.problems);
-    if (!problems.length) {
-      const pending = await this.pendingUnits(g.task.groupId, exceptShipmentId);
-      const wanted = new Map<string, number>();
-      for (const i of items) wanted.set(i.orderItemId, (wanted.get(i.orderItemId) ?? 0) + i.quantity);
-      for (const [id, qty] of wanted) {
-        const open = g.task.openLines.find((l) => l.orderItemId === id);
-        const waiting = pending.get(id) ?? 0;
-        if (open && waiting && qty + waiting > open.quantityToShip) problems.push(`${open.title}: ${waiting} already on a label, at most ${Math.max(0, open.quantityToShip - waiting)} left to ship`);
-      }
-    }
+    if (!problems.length) problems.push(...(await this.overPending(this.repo, g, items, exceptShipmentId)));
     if (problems.length) throw this.core.error('ITEMS_NOT_SHIPPABLE', problems[0] ?? 'These items cannot ship', { items: problems });
+  }
+
+  /**
+   * The group's live package with this carrier, tracking number and contents: recording the same package again (a
+   * retry, a double submit) answers with it instead of making a second shipment. Packages without tracking never match.
+   */
+  private async sameRecorded(repo: ShippingRepository, groupId: string, carrierCode: string, tracking: string, items: readonly ShipmentLineInput[]): Promise<ShipmentRec | undefined> {
+    if (!tracking) return undefined;
+    const rows = await repo.find('shipments', { group_id: groupId, carrier_code: carrierCode, tracking_number: tracking, kind: ['outbound', 'replacement'], status: { op: '<>', value: 'cancelled' } });
+    if (!rows.length) return undefined;
+    const key = (pairs: [string, number][]) => JSON.stringify(pairs.sort(([a], [b]) => a.localeCompare(b)));
+    const wanted = new Map<string, number>();
+    for (const i of items) wanted.set(i.orderItemId, (wanted.get(i.orderItemId) ?? 0) + i.quantity);
+    const lines = await repo.find('shipment_lines', { shipment_id: rows.map((s) => s.id) });
+    return rows.find((s) => key(lines.filter((l) => l.shipment_id === s.id).map((l): [string, number] => [l.order_item_id, l.quantity])) === key([...wanted]));
   }
 
   linesOf(g: GroupCtx, items: readonly ShipmentLineInput[], shipmentId: string): LineRec[] {
@@ -407,6 +434,9 @@ export class Shipments {
     // the warehouse records Marketly's packages; the seller never does
     if (source === 'seller') this.core.refuseIfMarketly(g.fulfilledBy);
     if (input.labelId) return this.recordWithLabel(g, input, by);
+    // the same package recorded again (orders may already have shipped its items): the package it made
+    const again = await this.sameRecorded(this.repo, g.task.groupId, input.carrierCode.trim().toLowerCase(), normalizeTracking(input.trackingNumber), input.items);
+    if (again) return this.view(again, by.principal);
     await this.checkItems(g, input.items);
     const carrier = await this.carrierByCode(input.carrierCode);
     if (!carrier || carrier.status !== 'active') throw invalid([{ path: 'carrierCode', message: 'Choose one of the listed carriers' }]);
@@ -430,10 +460,18 @@ export class Shipments {
     const { kind, returnId } = this.kindOf(g, input.items);
     const due = new Date(g.task.dispatchDeadline.dueAt);
     const id = newId();
-    const batch = new Batch(by);
-    const packageNo = await this.nextPackageNo(g.task.orderId);
     const lines = this.linesOf(g, input.items, id);
-    const s = await this.repo.transaction(async (tx) => {
+    let batch = new Batch(by);
+    const recorded = await this.repo.transaction(async (tx) => {
+      // one record at a time per group: a second one waits for this commit, then sees this package (M2: two quick
+      // records of the same unit made two shipments, as orders learns of the first only by event, after the commit)
+      await tx.lock(`record-shipment:${g.task.groupId}`);
+      batch = new Batch(by); // a retried attempt starts its events over
+      const same = await this.sameRecorded(tx, g.task.groupId, carrier.code, tracking, input.items);
+      if (same) return { s: same, made: false };
+      const over = await this.overPending(tx, g, input.items);
+      if (over.length) throw this.core.error('ITEMS_NOT_SHIPPABLE', over[0]!, { items: over });
+      const packageNo = (await tx.count('shipments', { order_id: g.task.orderId, kind: ['outbound', 'replacement'] })) + 1;
       const row = await tx.insert('shipments', {
         id,
         kind,
@@ -473,8 +511,10 @@ export class Shipments {
       this.created(batch, { ...after, status: 'label_created' }, lines, `Shipment ${packageNo}`);
       this.statusChanged(batch, after, 'label_created', after.status, shippedAt);
       this.dispatched(batch, after, lines);
-      return after;
+      return { s: after, made: true };
     });
+    if (!recorded.made) return this.view(recorded.s, by.principal);
+    const s = recorded.s;
     await this.core.flush(batch);
     await this.afterDispatch(s, g);
     if (trackingState !== 'pending') {

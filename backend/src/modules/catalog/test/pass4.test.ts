@@ -5,7 +5,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { spec } from '../../../spec/catalog.js';
 import { schemas } from '../schema.js';
-import { api, brand, category, catalogApp, newId, productInput, sellerProduct, uploadImage, type CatalogTestApp } from './helpers.js';
+import { api, auth, brand, callers, category, catalogApp, newId, productInput, sellerProduct, uploadImage, type CatalogTestApp } from './helpers.js';
 
 const DAY = 86_400_000;
 let t: CatalogTestApp;
@@ -79,7 +79,7 @@ describe('review queue kind', () => {
     const created = await a.admin('POST', '/products', productInput({ brandId, categoryId: cat.id, imageIds: [image] }));
     const id = created.json().product.id;
     expect((await a.admin('POST', `/products/${id}/submit`, {})).statusCode).toBe(200);
-    expect((await a.admin('POST', `/products/${id}/approve`, {})).statusCode).toBe(200);
+    expect((await a.admin('POST', `/products/${id}/approve`, {}, auth(callers.staff()))).statusCode).toBe(200); // a second person approves
     expect((await a.admin('PATCH', `/products/${id}`, { title: 'Orvel Arc speaker, second edition' })).statusCode).toBe(200);
     const changed = (await a.admin('GET', '/review-queue?kind=content_change&limit=100')).json().items;
     expect(changed.map((p: { product: { id: string } }) => p.product.id)).toContain(id);

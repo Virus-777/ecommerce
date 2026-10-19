@@ -78,6 +78,16 @@ export class CustomersService implements CustomersPublicApi {
     return this.profiles.canPlaceOrders(customerId);
   }
 
+  /** False while the account is suspended or closed, or has an active reviews restriction */
+  canWriteReviews(customerId: string): Promise<{ allowed: boolean; reason?: string }> {
+    return this.profiles.canWriteReviews(customerId);
+  }
+
+  /** False when the email belongs to a customer account that cannot place orders (guest checkout) */
+  canGuestOrder(email: string): Promise<{ allowed: boolean; reason?: string }> {
+    return this.profiles.canGuestOrder(email);
+  }
+
   /** False during an active messaging restriction. Replies inside open cases stay allowed (support decides). */
   canSendMessages(customerId: string): Promise<{ allowed: boolean; reason?: string; until?: string }> {
     return this.profiles.canSendMessages(customerId);
