@@ -2110,7 +2110,7 @@ export const endpoints = defineEndpoints({
     stepUp: {"kind":"reauth","purpose":"staff-account"},
     scope: "staff",
     summary: "Disable a staff account (offboarding)",
-    desc: "Revokes sessions. access consumes identity.account.disabled to end role assignments and flag lead/backup gaps.",
+    desc: "Revokes sessions and cancels the pending staff invitations the person sent. access consumes identity.account.disabled to end role assignments, cancel the approval requests the person made and flag lead/backup gaps. A Business Owner can be disabled only by another Business Owner (FORBIDDEN), and never the last active one (LAST_BUSINESS_OWNER): access.disableCheck decides.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -2121,7 +2121,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => AccountAdmin,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","SELF_ACTION_NOT_ALLOWED","STEP_UP_REQUIRED"],
+    errors: ["ILLEGAL_TRANSITION","SELF_ACTION_NOT_ALLOWED","STEP_UP_REQUIRED","FORBIDDEN","LAST_BUSINESS_OWNER"],
     audited: true,
     events: ["identity.account.disabled"],
     screens: ["admin/staff"],
@@ -2258,7 +2258,7 @@ export const spec = defineModuleSpec({
   chapters: [6,7,10,18],
   summary: "Who someone is and how they prove it: accounts for customers, seller members and staff, credentials, email verification, sessions and refresh tokens for the website and the Android app, password recovery, 2-step verification, signed-in devices, guest sessions and the security activity log.",
   dependsOn: [],
-  optionalDeps: ["audit","sellers","customers"],
+  optionalDeps: ["audit","sellers","customers","access"],
   publicApi: ["getAccount","getAccounts","findAccountByEmail","inviteStaff","inviteSellerMember","revokeInvitation","grantSellerContext","revokeSellerContext","revokeSessions","grantGuestOrderAccess","hasGuestOrderAccess","issueOrderLink","closeAccount","sendPasswordReset","startPhoneVerification","verifyReauthToken","accountSecurityOf","consumeReauthToken","releaseReauthToken","revocationsSince","verifyRefreshToken","touchStaffSession"],
   permissions: [
     {

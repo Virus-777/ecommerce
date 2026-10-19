@@ -51,7 +51,7 @@ export class IdentityService implements IdentityPublicApi {
     this.security = new Security(this.core, this.authentication);
     this.invitations = new Invitations(this.core, this.authentication);
     this.guests = new Guests(this.core);
-    this.accounts = new Accounts(this.core, this.security, this.authentication, this.passwords);
+    this.accounts = new Accounts(this.core, this.security, this.authentication, this.passwords, this.invitations);
   }
 
   /** Public API: invite a staff member (access assigns the roles); the pass code comes back only here */

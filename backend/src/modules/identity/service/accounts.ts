@@ -2,7 +2,7 @@
  * Account administration (Admin Center): list and view accounts, lock and unlock, force a password reset, reset
  * 2-step, sign out everywhere, disable and enable staff accounts, account activity; and closing an account.
  */
-import { AppError } from '../../../kernel/errors/index.js';
+import { AppError, isNotImplemented } from '../../../kernel/errors/index.js';
 import { zonedTimeToUtc } from '../../../kernel/lib/clock.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
@@ -17,6 +17,7 @@ import { type Core, type Caller, issue } from './core.js';
 import type { Security } from './security.js';
 import type { Authentication } from './authentication.js';
 import type { Passwords } from './passwords.js';
+import type { Invitations } from './invitations.js';
 
 export class Accounts {
   constructor(
@@ -24,6 +25,7 @@ export class Accounts {
     readonly security: Security,
     readonly authentication: Authentication,
     readonly passwords: Passwords,
+    readonly invitations: Invitations,
   ) {}
 
   /** Staff-realm records need identity.staff-accounts.manage as well (permissionWhen on the target's realm) */
@@ -195,12 +197,25 @@ export class Accounts {
     if (a.realm !== 'staff') throw new AppError('VALIDATION_FAILED', `Only staff accounts can be ${what} here`, issue('params.id', 'not a staff account'));
   }
 
+  /** access.disableCheck, when access is enabled and built (module tests run identity alone) */
+  private async disableCheck(accountId: string, caller: Caller) {
+    try {
+      return await this.core.ctx.tryUse('access')?.disableCheck(accountId, caller.actor.id ?? null);
+    } catch (err) {
+      if (isNotImplemented(err)) return undefined;
+      throw err;
+    }
+  }
+
   /** POST /accounts/{id}/disable (staff accounts) */
   async disableAccount(id: string, reason: string, caller: Caller, can: (p: string) => Promise<boolean>): Promise<AccountAdmin> {
     const now = this.core.now();
     const a = await this.targetAccount(id, can);
     this.staffOnly(a, 'disabled');
     this.notSelf(a, caller);
+    // disabling ends every role: a Business Owner only by another, and never the last one (access decides)
+    const check = await this.disableCheck(a.id, caller);
+    if (check && !check.allowed) throw new AppError(check.code === 'LAST_BUSINESS_OWNER' ? 'LAST_BUSINESS_OWNER' : 'FORBIDDEN', check.reason ?? 'You cannot disable this account');
     const before = await this.accountAdmin(a.id);
     await this.core.repo.transaction(async (repo) => {
       const cur = (await repo.getAccount(a.id, { forUpdate: true }))!;
@@ -210,6 +225,8 @@ export class Accounts {
       await this.core.securityEvent(repo, cur.id, 'account_disabled', 'completed', { actor: caller.actor, reason, client: caller.client });
     });
     this.core.publish('identity.account.disabled', { accountId: a.id, realm: a.realm, reason, by: caller.actor }, caller);
+    // the staff they invited and who have not accepted yet do not get in after they leave
+    await this.invitations.revokeSentBy(a.id, `Inviter's account disabled: ${reason}`, caller);
     const after = await this.accountAdmin(a.id);
     await this.core.audit({ action: 'identity.account.disable', actionLabel: 'Disabled staff account', target: this.auditTarget(a), reason, before: before.account, after: after.account }, caller);
     return after;

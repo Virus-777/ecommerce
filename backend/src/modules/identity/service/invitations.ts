@@ -392,6 +392,13 @@ export class Invitations {
     return this.revokeInvitationCore(invitationId, { reason: input.reason, by: input.by, contextRef: input.contextRef });
   }
 
+  /** The pending staff invitations a staff member sent, cancelled when their account is disabled */
+  async revokeSentBy(accountId: string, reason: string, caller: Caller): Promise<number> {
+    const rows = await this.core.repo.pendingStaffInvitationsBy(accountId);
+    for (const r of rows) await this.revokeInvitationCore(r.id, { reason, by: caller.actor, requestId: caller.requestId, client: caller.client });
+    return rows.length;
+  }
+
   private async revokeInvitationCore(id: string, o: { reason: string; by: common.Actor; contextRef?: string; requestId?: string; client?: ClientInfo }): Promise<Invitation> {
     const now = this.core.now();
     const result = await this.core.repo.transaction(async (repo) => {

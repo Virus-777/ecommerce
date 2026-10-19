@@ -117,6 +117,11 @@ export class AccessService implements AccessPublicApi {
     return this.members.membersOfRole(roleKey);
   }
 
+  /** Whether a staff member may disable an account (Business Owners: only by another, never the last) */
+  disableCheck(accountId: string, byAccountId: string | null): Promise<{ allowed: boolean; code: string | null; reason: string | null }> {
+    return this.members.disableCheck(accountId, byAccountId);
+  }
+
   /**
    * Active staff whose active role assignments grant the permission (the hasPermission rule: own roles plus roles
    * covered with an approved delegation). Disabled or closed accounts are left out; locked ones are shown away.
@@ -209,7 +214,7 @@ export class AccessService implements AccessPublicApi {
     await this.endOpenAssignments(event.accountId, SYSTEM_ACTOR, 'Invitation revoked');
   }
 
-  /** identity.account.disabled: Revoke all role assignments, remove the person as lead/backup, drop them from eligible approvers of open requests, and publish access.coverage.changed with the gap */
+  /** identity.account.disabled: Revoke all role assignments, remove the person as lead/backup, drop them from eligible approvers of open requests, cancel the open requests they made, and publish access.coverage.changed with the gap */
   async onAccountDisabledFromIdentity(event: EventPayload<'identity.account.disabled'>): Promise<void> {
     await this.core.ready();
     const accountId = event.accountId;
@@ -225,15 +230,18 @@ export class AccessService implements AccessPublicApi {
     }
     const nominated = await this.core.repo.findRequests({ statuses: OPEN_REQUEST, nominatedReviewerId: accountId });
     for (const r of nominated) await this.core.repo.updateRequest(r.id, { nominated_reviewer_id: null });
+    // what the person asked for leaves with them: an approver must not grant it after they are gone
+    const requested = await this.core.repo.findRequests({ statuses: OPEN_REQUEST, requestedById: accountId });
+    for (const r of requested) await this.approvals.cancelApproval(r.id, event.by ?? SYSTEM_ACTOR, `${reason} (the requester left)`);
     await this.away.publishCoverageFor(touched);
-    if (open.length || touched.length) {
+    if (open.length || touched.length || requested.length) {
       await this.core.audit(
         {
           action: 'access.staff.disabled',
           actionLabel: 'Removed the roles and cover duties of a disabled account',
           target: { type: 'staff', id: accountId },
-          before: { assignments: open.map((a) => ({ id: a.id, roleId: a.role_id, status: a.status })), coverageRoleIds: touched },
-          after: { assignments: [], coverageRoleIds: [] },
+          before: { assignments: open.map((a) => ({ id: a.id, roleId: a.role_id, status: a.status })), coverageRoleIds: touched, openRequestIds: requested.map((r) => r.id) },
+          after: { assignments: [], coverageRoleIds: [], openRequestIds: [] },
           reason,
         },
         { actor: event.by ?? SYSTEM_ACTOR },
