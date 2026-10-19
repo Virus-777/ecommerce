@@ -27,8 +27,8 @@ export interface DocTexts {
   description: string;
 }
 
-/** A document as the indexer writes it (terms, version and indexed_at are set by the repository) */
-export type DocWrite = Omit<DocRow, 'terms' | 'version' | 'indexed_at'> & { texts: DocTexts };
+/** A document as the indexer writes it (terms, version, indexed_at and the embedded offers are set by the repository) */
+export type DocWrite = Omit<DocRow, 'terms' | 'version' | 'indexed_at' | 'offers'> & { texts: DocTexts };
 
 /* ------------------------------------------------------------------ search engine port */
 

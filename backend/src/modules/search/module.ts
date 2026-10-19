@@ -7,6 +7,7 @@ import { adminRoutes } from './http/admin.js';
 import { selectSearchEngine } from './engine-select.js';
 import { SearchService } from './service.js';
 import { schemas } from './schema.js';
+import { mongoMigrations } from './migrations.js';
 
 /**
  * Search: Finding products: a product index built from catalog, offers, inventory and reviews events; search with misspelling tolerance and corrections, suggestions (queries, categories, brands, stores, products, recent searches), universal and category filters with counts, sorting, sponsored slots from advertising, and guidance for empty or unavailable results.
@@ -18,6 +19,7 @@ export default defineModule({
   spec,
   version: '2.1.1',
   schemas,
+  mongoMigrations,
   register(ctx) {
     // SEARCH_ENGINE: mongo (stemmed words and prefixes over the read model; development and tests) or opensearch (production)
     const { repo, engine } = selectSearchEngine(ctx);
@@ -26,6 +28,9 @@ export default defineModule({
     ctx.provide(service);
     // an engine with its own index: a new or outdated index is filled by a queued full reindex (in the background: never blocks startup)
     if (engine.feed) ctx.afterBoot(() => void service.bootstrapEngineIndex().catch((err) => ctx.log.warn({ err }, 'search: could not check the search engine index')));
+    // documents keep their offers (docs/07): the release before this one may have changed offer rows while the new one
+    // was being installed, so they are copied in again once after each start (in the background)
+    ctx.afterBoot(() => void repo.embedAllOffers().catch((err) => ctx.log.warn({ err }, 'search: could not copy the offers into the search documents')));
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
 

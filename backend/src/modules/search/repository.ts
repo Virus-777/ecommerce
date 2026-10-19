@@ -30,6 +30,82 @@ function canonical(v: unknown): string {
 const sameSearch = (a: { query: string; filters: unknown }, b: { query: string; filters: unknown }) => a.query.toLowerCase() === b.query.toLowerCase() && canonical(a.filters) === canonical(b.filters);
 
 /**
+ * A product's offer as its search document keeps it (`offers`, docs/07-search-speed-plan.md): the search_offers row as
+ * stored (offer id as _id), without product_id. The MongoDB engine reads these instead of joining search_offers.
+ */
+export interface EmbeddedOffer {
+  _id: string;
+  variant_id: string;
+  seller_id: string | null;
+  official: boolean;
+  condition: string;
+  price: number;
+  in_stock: boolean;
+  free_delivery: boolean;
+  dispatch_days: number;
+  featured_eligible: boolean;
+}
+const embedded = (o: OfferRow): EmbeddedOffer => ({
+  _id: o.offer_id,
+  variant_id: o.variant_id,
+  seller_id: o.seller_id ?? null,
+  official: o.official,
+  condition: o.condition,
+  price: Number(o.price),
+  in_stock: o.in_stock,
+  free_delivery: o.free_delivery,
+  dispatch_days: Number(o.dispatch_days),
+  featured_eligible: o.featured_eligible,
+});
+const embeddedList = (rows: readonly OfferRow[]) => rows.map(embedded).sort((a, b) => (a._id < b._id ? -1 : a._id > b._id ? 1 : 0));
+
+/**
+ * Rebuilds every document's `offers` from search_offers in one pass (the migration and a sync after each start: a
+ * release that ran before the column existed may have changed offer rows without it). Same shape as `embedded`.
+ * A document whose offers changed while this ran (a live offer event) keeps them: the new list is written only where
+ * the stored one is still the one read (`_read`).
+ */
+export const EMBED_OFFERS_PIPELINE: readonly Record<string, unknown>[] = [
+  { $lookup: { from: 'search.search_offers', localField: '_id', foreignField: 'product_id', as: 'o' } },
+  {
+    $project: {
+      _read: { $ifNull: ['$offers', null] },
+      offers: {
+        $sortArray: {
+          input: {
+            $map: {
+              input: '$o',
+              as: 'x',
+              in: {
+                _id: '$$x._id',
+                variant_id: '$$x.variant_id',
+                seller_id: { $ifNull: ['$$x.seller_id', null] },
+                official: '$$x.official',
+                condition: '$$x.condition',
+                price: '$$x.price',
+                in_stock: '$$x.in_stock',
+                free_delivery: '$$x.free_delivery',
+                dispatch_days: '$$x.dispatch_days',
+                featured_eligible: '$$x.featured_eligible',
+              },
+            },
+          },
+          sortBy: { _id: 1 },
+        },
+      },
+    },
+  },
+  {
+    $merge: {
+      into: 'search.search_documents',
+      on: '_id',
+      whenMatched: [{ $set: { offers: { $cond: [{ $eq: [{ $ifNull: ['$offers', null] }, '$$new._read'] }, '$$new.offers', '$offers'] } } }],
+      whenNotMatched: 'discard',
+    },
+  },
+];
+
+/**
  * The search module's collections (MongoDB, docs/04-mongodb-migration.md): the read model of the index, one
  * collection per spec table. Documents carry their search terms (text.ts), which the MongoDB engine matches.
  * With OpenSearch, index-feed.ts extends this class to pass every committed document write on to the engine.
@@ -74,24 +150,40 @@ export class SearchRepository {
     return this.#t.docs.getMany([...new Set(ids)]);
   }
 
-  /** Insert or replace a document; `offers` replaces its offer rows (null keeps them) */
+  /** Insert or replace a document; `offers` replaces its offer rows and embedded offers (null keeps them) */
   async upsertDocument(doc: DocWrite, offers: OfferRow[] | null, at: Date): Promise<void> {
-    const { texts, product_id, ...cols } = doc;
+    // embedded offers come from the offer rows only (a document read back and written again must not bring old ones)
+    const { texts, product_id, offers: _embedded, ...cols } = doc as DocWrite & { offers?: unknown };
     // version: 1 for a new document, one more for a replaced one. One atomic upsert with $set and $inc, which the
     // Table helpers do not combine (upsert sets, increment only adds), so through the model
     await this.#t.docs.model.updateOne(
       { _id: product_id },
-      { $set: this.#t.docs.toDoc({ ...cols, terms: termsOf(texts), indexed_at: at }), $inc: { version: 1 } },
+      { $set: this.#t.docs.toDoc({ ...cols, terms: termsOf(texts), indexed_at: at, ...(offers ? { offers: embeddedList(offers) } : {}) }), $inc: { version: 1 } },
       { upsert: true, session: this.#session, runValidators: true },
     );
     if (offers) {
       await this.#t.offers.deleteMany({ product_id });
       if (offers.length) {
-        // an offer moved from another product (merge): its old row goes
+        // an offer moved from another product (merge): its old row goes, and so does that product's embedded copy
+        const moved = await this.#t.offers.find({ offer_id: oneOf(offers.map((o) => o.offer_id)) });
         await this.#t.offers.deleteMany({ offer_id: oneOf(offers.map((o) => o.offer_id)) });
         await this.#t.offers.insertMany(offers);
+        await this.#embedOffers(moved.map((r) => r.product_id));
       }
     }
+  }
+
+  /** Copies the offer rows of these products into their documents' `offers` (after any offer row write) */
+  async #embedOffers(productIds: readonly string[]): Promise<void> {
+    const ids = [...new Set(productIds)];
+    if (!ids.length) return;
+    const rows = await this.#t.offers.find({ product_id: oneOf(ids) });
+    for (const id of ids) await this.#t.docs.updateOne({ product_id: id }, { $set: { offers: embeddedList(rows.filter((r) => r.product_id === id)) } });
+  }
+
+  /** Rebuilds every document's `offers` from the offer rows (EMBED_OFFERS_PIPELINE) */
+  async embedAllOffers(): Promise<void> {
+    await this.#t.docs.aggregate([...EMBED_OFFERS_PIPELINE]);
   }
 
   async deleteDocument(productId: string): Promise<void> {
@@ -113,16 +205,21 @@ export class SearchRepository {
   }
 
   async upsertOfferRow(row: OfferRow): Promise<void> {
+    const before = await this.#t.offers.get(row.offer_id);
     await this.#t.offers.upsert(row);
+    await this.#embedOffers([row.product_id, ...(before ? [before.product_id] : [])]);
   }
 
   async updateOfferRow(offerId: string, patch: Partial<Omit<OfferRow, 'offer_id' | 'product_id'>>): Promise<void> {
     if (!Object.keys(patch).length) return;
-    await this.#t.offers.update(offerId, patch);
+    const row = await this.#t.offers.update(offerId, patch);
+    if (row) await this.#embedOffers([row.product_id]);
   }
 
   async deleteOfferRow(offerId: string): Promise<void> {
+    const row = await this.#t.offers.get(offerId);
     await this.#t.offers.delete(offerId);
+    if (row) await this.#embedOffers([row.product_id]);
   }
 
   async documentIds(f: { categoryIds?: string[]; brandIds?: string[]; sellerIds?: string[]; onSale?: boolean; productIds?: string[] }): Promise<string[]> {

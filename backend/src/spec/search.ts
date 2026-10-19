@@ -1067,6 +1067,8 @@ export interface SearchDb {
     title_norm: string;
     version: number;
     indexed_at: Date;
+    /** the product's offers as search_offers stores them, kept in step by the repository; the MongoDB engine reads them here instead of joining search_offers on every query, docs/07-search-speed-plan.md */
+    offers: Json | null;
     /** rank in best_seller_category_id by sales_30d; null outside the top 100 */
     best_seller_rank: number | null;
     best_seller_category_id: string | null;
@@ -1861,6 +1863,7 @@ export const spec = defineModuleSpec({
         "title_norm",
         "version",
         "indexed_at",
+        "offers",
         "best_seller_rank",
         "best_seller_category_id"
       ],
@@ -1880,6 +1883,7 @@ export const spec = defineModuleSpec({
         "same_day_cutoff",
         "rating",
         "terms",
+        "offers",
         "best_seller_rank",
         "best_seller_category_id"
       ],
@@ -2129,6 +2133,7 @@ export const spec = defineModuleSpec({
             "indexed_at": {
               "bsonType": "date"
             },
+            "offers": {},
             "best_seller_rank": {
               "bsonType": [
                 "int",

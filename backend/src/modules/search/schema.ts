@@ -53,6 +53,7 @@ const search_documents = new Schema(
     title_norm: { type: String, required: true }, // for trigram
     version: { type: Number, required: true, validate: integer },
     indexed_at: { type: Date, required: true },
+    offers: { type: Schema.Types.Mixed, default: null }, // the product's offers as search_offers stores them, kept in step by the repository; the MongoDB engine reads them here instead of joining sea
     best_seller_rank: { type: Number, default: null, validate: integer }, // rank in best_seller_category_id by sales_30d; null outside the top 100
     best_seller_category_id: { type: String, default: null },
     /** lock-by-write counter (kernel/mongo/table.ts) */

@@ -312,6 +312,7 @@
         "rating": "numeric(2,1)?", "rating_count": "int", "sales_30d": "int", "first_listed_at": "timestamptz", "popularity": "numeric",
         "terms": "jsonb? (development engine: stemmed words of the title and brand (weight 1), category (0.4), attributes (0.2) and description (0.1), as [{t, w}])", "title_norm": "text (for trigram)",
         "version": "bigint", "indexed_at": "timestamptz",
+        "offers": "jsonb? (the product's offers as search_offers stores them, kept in step by the repository; the MongoDB engine reads them here instead of joining search_offers on every query, docs/07-search-speed-plan.md)",
         "best_seller_rank": "int? (rank in best_seller_category_id by sales_30d; null outside the top 100)",
         "best_seller_category_id": "uuid?"
       },

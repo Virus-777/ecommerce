@@ -26,7 +26,6 @@ import { stems } from './text.js';
 type Doc = Record<string, any>;
 type Stage = Record<string, unknown>;
 
-const OFFERS = 'search.search_offers';
 const DOCUMENTS = 'search.search_documents';
 const NONE = { _id: { $in: [] } };
 const LN101 = Math.log(101);
@@ -70,22 +69,30 @@ function wordSimilarity(a: string, text: string): number {
   return best;
 }
 
-/** Conditions on an offer row */
-function offerMatch(f: EngineFilters, omit?: FacetOmit): Doc {
-  const c: Doc[] = [];
-  if (omit !== 'seller' && (f.sellerIds?.length || f.official)) c.push({ $or: [...(f.sellerIds?.length ? [{ seller_id: { $in: f.sellerIds } }] : []), ...(f.official ? [{ official: true }] : [])] });
-  if (omit !== 'condition' && f.conditions?.length) c.push({ condition: { $in: f.conditions } });
+/**
+ * Conditions on an offer, each in two forms that must agree: a query on an offer (`$elemMatch` over the document's
+ * embedded offers, which skips documents early) and an expression on `$$o` (`$filter`, which keeps the matching ones).
+ */
+function offerConditions(f: EngineFilters, omit?: FacetOmit): { query: Doc; expr: Doc }[] {
+  const c: { query: Doc; expr: Doc }[] = [];
+  if (omit !== 'seller' && (f.sellerIds?.length || f.official)) {
+    c.push({
+      query: { $or: [...(f.sellerIds?.length ? [{ seller_id: { $in: f.sellerIds } }] : []), ...(f.official ? [{ official: true }] : [])] },
+      expr: { $or: [...(f.sellerIds?.length ? [{ $in: ['$$o.seller_id', f.sellerIds] }] : []), ...(f.official ? [{ $eq: ['$$o.official', true] }] : [])] },
+    });
+  }
+  if (omit !== 'condition' && f.conditions?.length) c.push({ query: { condition: { $in: f.conditions } }, expr: { $in: ['$$o.condition', f.conditions] } });
   if (omit !== 'price') {
-    if (f.priceMin !== undefined) c.push({ price: { $gte: f.priceMin } });
-    if (f.priceMax !== undefined) c.push({ price: { $lte: f.priceMax } });
+    if (f.priceMin !== undefined) c.push({ query: { price: { $gte: f.priceMin } }, expr: { $gte: ['$$o.price', f.priceMin] } });
+    if (f.priceMax !== undefined) c.push({ query: { price: { $lte: f.priceMax } }, expr: { $lte: ['$$o.price', f.priceMax] } });
   }
-  if (omit !== 'availability' && f.inStockOnly) c.push({ in_stock: true });
+  if (omit !== 'availability' && f.inStockOnly) c.push({ query: { in_stock: true }, expr: { $eq: ['$$o.in_stock', true] } });
   if (omit !== 'delivery') {
-    if (f.freeDelivery) c.push({ free_delivery: true });
-    if (f.shipsToday) c.push({ dispatch_days: 0 });
-    if (f.maxDispatchDays !== undefined) c.push({ dispatch_days: { $lte: f.maxDispatchDays } });
+    if (f.freeDelivery) c.push({ query: { free_delivery: true }, expr: { $eq: ['$$o.free_delivery', true] } });
+    if (f.shipsToday) c.push({ query: { dispatch_days: 0 }, expr: { $eq: ['$$o.dispatch_days', 0] } });
+    if (f.maxDispatchDays !== undefined) c.push({ query: { dispatch_days: { $lte: f.maxDispatchDays } }, expr: { $lte: ['$$o.dispatch_days', f.maxDispatchDays] } });
   }
-  return c.length ? { $and: c } : {};
+  return c;
 }
 
 function textMatch(q: EngineQuery): Doc | null {
@@ -120,12 +127,18 @@ function docMatch(q: EngineQuery, omit?: FacetOmit): Doc {
   return c.length ? { $and: c } : {};
 }
 
-/** Documents with their matching offers (m) and the card offer (eo); documents without a matching offer are left out */
-function base(q: EngineQuery, omit?: FacetOmit): Stage[] {
+/**
+ * Documents with their matching offers (m) and the card offer (eo); documents without a matching offer are left out.
+ * The offers come from the document itself (`offers`, kept in step with search_offers by the repository), so there is
+ * no join per document (docs/07-search-speed-plan.md). Exported for the comparison test.
+ */
+export function base(q: EngineQuery, omit?: FacetOmit): Stage[] {
+  const conds = offerConditions(q.filters, omit);
+  const hasOffer = conds.length ? { offers: { $elemMatch: conds.length === 1 ? conds[0]!.query : { $and: conds.map((c) => c.query) } } } : { 'offers.0': { $exists: true } };
+  const doc = docMatch(q, omit);
   return [
-    { $match: docMatch(q, omit) },
-    { $lookup: { from: OFFERS, localField: '_id', foreignField: 'product_id', pipeline: [{ $match: offerMatch(q.filters, omit) }], as: 'm' } },
-    { $match: { 'm.0': { $exists: true } } },
+    { $match: Object.keys(doc).length ? { $and: [doc, hasOffer] } : hasOffer },
+    { $set: { m: conds.length ? { $filter: { input: '$offers', as: 'o', cond: conds.length === 1 ? conds[0]!.expr : { $and: conds.map((c) => c.expr) } } } : '$offers' } },
     {
       $set: {
         matching: { $size: '$m' },
@@ -191,8 +204,8 @@ export function createMongoSearchEngine(store: ModuleStore, terms: TermLookup): 
   const offers = store.table<OfferRow>('search_offers');
   const termRows = store.table<TermRow>('suggestion_terms');
   const agg = <T = Doc>(pipeline: Stage[]) => docs.aggregate<T>(pipeline);
-  /** A stored document as a read-model row (its search terms left out) */
-  const docOut = (d: Doc): DocRow => ({ ...docs.fromDoc(d), terms: null });
+  /** A stored document as a read-model row (its search terms and embedded offers left out) */
+  const docOut = (d: Doc): DocRow => ({ ...docs.fromDoc(d), terms: null, offers: null });
   const count = async (pipeline: Stage[]) => (await agg<{ n: number }>([...pipeline, { $count: 'n' }]))[0]?.n ?? 0;
   const exists = async (match: Doc) => (await agg([{ $match: match }, { $limit: 1 }, { $project: { _id: 1 } }])).length > 0;
 
@@ -244,7 +257,7 @@ export function createMongoSearchEngine(store: ModuleStore, terms: TermLookup): 
       // the count and the page at once (a page of nothing is cheap)
       const [total, found] = await Promise.all([
         count(pipeline),
-        agg([...pipeline, ...scoreStages(q, weights), { $sort: ORDER[sort] }, { $skip: window.offset }, { $limit: window.limit }, { $project: { terms: 0, m: 0 } }]),
+        agg([...pipeline, ...scoreStages(q, weights), { $sort: ORDER[sort] }, { $skip: window.offset }, { $limit: window.limit }, { $project: { terms: 0, m: 0, offers: 0 } }]),
       ]);
       return { hits: total ? found.map(toHit) : [], total };
     },
@@ -407,7 +420,7 @@ export function createMongoSearchEngine(store: ModuleStore, terms: TermLookup): 
         .slice(0, limit)
         .map((d) => d._id as string);
       if (!ids.length) return [];
-      const byId = new Map((await agg([{ $match: { _id: { $in: ids } } }, { $project: { terms: 0 } }])).map((d) => [d._id as string, d]));
+      const byId = new Map((await agg([{ $match: { _id: { $in: ids } } }, { $project: { terms: 0, offers: 0 } }])).map((d) => [d._id as string, d]));
       return ids.flatMap((id) => (byId.has(id) ? [docOut(byId.get(id)!)] : []));
     },
 
@@ -424,7 +437,7 @@ export function createMongoSearchEngine(store: ModuleStore, terms: TermLookup): 
     },
 
     async similar(productId, limit) {
-      const [b] = await agg([{ $match: { _id: productId } }, { $project: { terms: 0 } }]);
+      const [b] = await agg([{ $match: { _id: productId } }, { $project: { terms: 0, offers: 0 } }]);
       if (!b) return [];
       const titleWords = [...new Set(String(b.title_norm).split(/\s+/).filter(Boolean))];
       const related: Doc[] = [
@@ -434,7 +447,7 @@ export function createMongoSearchEngine(store: ModuleStore, terms: TermLookup): 
         ...(titleWords.length ? [{ title_norm: { $regex: `(^| )(${titleWords.map(escapeRegExp).join('|')})( |$)` } }] : []),
       ];
       if (!related.length) return [];
-      const found = await agg([{ $match: { _id: { $ne: productId }, offer_count: { $gt: 0 }, in_stock: true, $or: related } }, { $project: { terms: 0 } }]);
+      const found = await agg([{ $match: { _id: { $ne: productId }, offer_count: { $gt: 0 }, in_stock: true, $or: related } }, { $project: { terms: 0, offers: 0 } }]);
       const overlap = (d: Doc) => (d.category_path_ids ?? []).some((c: string) => (b.category_path_ids ?? []).includes(c));
       return found
         .map((d) => ({ d, s: similarity(d.title_norm, b.title_norm) }))
@@ -500,7 +513,7 @@ export function createMongoSearchEngine(store: ModuleStore, terms: TermLookup): 
         { $set: { _gtin: gtin ? { $in: [gtin, { $ifNull: ['$gtins', []] }] } : false, _starts: { $eq: [{ $indexOfCP: ['$title_norm', norm] }, 0] } } },
         { $sort: { _gtin: -1, _starts: -1, popularity: -1, title: 1 } },
         { $limit: limit },
-        { $project: { terms: 0, _gtin: 0, _starts: 0 } },
+        { $project: { terms: 0, offers: 0, _gtin: 0, _starts: 0 } },
       ]);
       return found.map(docOut);
     },
