@@ -128,7 +128,10 @@ export class Views {
     const p = this.core.payment(row);
     if (!p.intentId || !['payment_pending', 'payment_failed', 'awaiting_action', 'completed', 'placing'].includes(row.status)) return null;
     try {
-      return await this.ctx.use('payments').getIntentStatus(p.intentId, false);
+      const view = await this.ctx.use('payments').getIntentStatus(p.intentId, false);
+      // payments only knows checkout voided the authorization; why (the units sold during the bank check) is checkout's to say
+      if (row.status === 'payment_failed' && p.decline?.code === 'stock_gone') return { ...view, state: 'failed', message: p.decline.message, decline: p.decline, retryAllowed: true };
+      return view;
     } catch (err) {
       if (isAppError(err) && err.code === 'NOT_FOUND') return null;
       throw err;

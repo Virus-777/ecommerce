@@ -600,6 +600,15 @@ export class Placement {
     const id = session.id;
     const [lines0, packages] = await Promise.all([this.core.repo.listLines(id), this.core.repo.listPackages(id)]);
     const lines = lines0.filter(included).sort(byLineOrder);
+    // the stock hold can expire while the bank confirms the payment (a long challenge): the units are held again,
+    // or, when they sold meanwhile, an accepted payment is voided instead of making an order nobody can ship.
+    // A pending payment can't be voided before its result is known: its order is made and inventory raises a
+    // manual task when it can't allocate.
+    if (!session.order_id) {
+      const kept = await this.keepStock(session, lines, intent.intentId);
+      if (kept) session = kept;
+      else if (intent.state === 'accepted') return this.stockGone(session, intent.intentId, by);
+    }
     const policyVersions = await this.views.policyVersions();
     const input = this.orderInput(session, lines, packages, intent, policyVersions);
     const order = await this.ctx.use('orders').createOrder(input);
@@ -657,6 +666,42 @@ export class Placement {
       this.core.publish('checkout.session.completed', { sessionId: id, orderId: order.id, orderRef: order.ref, paymentState: intent.state, total: q.totals.total, guest: account.kind === 'guest', createAccountAfter: account.createAccountAfter, email: account.email! }, by);
     }
     return t.session;
+  }
+
+  /** The session's stock hold, alive for the order: kept, or held again after it expired; null when the units are gone */
+  private async keepStock(session: SessionRow, lines: LineRow[], intentId: string): Promise<SessionRow | null> {
+    const inventory = this.ctx.use('inventory');
+    const minutes = Number(await this.ctx.settings.get('stockHoldMinutes')) || 15;
+    const old = session.stock_reservation_id;
+    if (old) {
+      try {
+        await inventory.extendHold(old, new Date(this.now().getTime() + minutes * 60_000).toISOString());
+        return session;
+      } catch (err) {
+        if (!isAppError(err) || err.code !== 'RESERVATION_EXPIRED') throw err;
+      }
+      // past its expiry but not yet released by inventory's job: its units go back first so the new hold can take them
+      await this.core.optional('inventory.releaseHold', () => inventory.releaseHold(old, 'Expired while the payment was confirmed'));
+    }
+    const wanted = new Map<string, number>();
+    for (const l of lines) wanted.set(l.stock_item_id, (wanted.get(l.stock_item_id) ?? 0) + l.quantity);
+    if (!wanted.size) return session;
+    try {
+      const hold = await inventory.hold(`checkout:${session.id}:${intentId}`, [...wanted].map(([stockItemId, quantity]) => ({ stockItemId, quantity })), minutes);
+      await this.core.log(session.id, 'Stock held again', 'The stock hold expired while the payment was being confirmed');
+      return this.core.repo.updateSession(session.id, { stock_reservation_id: hold.id });
+    } catch (err) {
+      if (!isStockError(err)) throw err;
+      return null;
+    }
+  }
+
+  /** The units sold while the bank confirmed the payment: no order, the authorization is voided and the customer can check the items and pay again */
+  private async stockGone(session: SessionRow, intentId: string, by: By): Promise<SessionRow> {
+    await this.core.optional('payments.voidIntent', () => this.ctx.use('payments').voidIntent(intentId, 'Items sold out before the order was made'));
+    if (session.stock_reservation_id) session = await this.core.repo.updateSession(session.id, { stock_reservation_id: null });
+    await this.core.log(session.id, 'Items sold out', 'The stock hold expired while the payment was being confirmed and the units sold meanwhile; the payment was voided');
+    return this.failPayment(session, { code: 'stock_gone', category: 'processing_error', message: 'Some items sold out while your bank was confirming the payment. Nothing was charged.', advice: 'Check the items in your checkout and pay again.', retryable: true }, by);
   }
 
   /**
