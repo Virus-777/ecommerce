@@ -1938,7 +1938,7 @@ export const endpoints = defineEndpoints({
     auth: "shopper",
     scope: "own-customer",
     summary: "Record displays, clicks and dismissals (batched)",
-    desc: "Each event carries the signed impression token from the decision. A dismissal applies the campaign's suppression rule immediately for the visitor. Duplicate events for the same token and kind are ignored. Clicks start the attribution period.",
+    desc: "Each event carries the signed impression token from the decision. A dismissal applies the campaign's suppression rule immediately for the visitor. Duplicate events for the same token and kind are ignored, and so are displays of a campaign that is no longer live. Clicks start the attribution period. A click on a seller's CPC campaign is billed only after the same impression's display was recorded (displays in a batch count first), and at most once per visitor (visitor or session key, and the signed-in customer) per campaign per market day; other clicks are recorded for reports, unbilled.",
     body: () => z.object({
       get events() {
         return z.array(TrackEvent);

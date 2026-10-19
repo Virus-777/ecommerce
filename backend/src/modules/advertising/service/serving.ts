@@ -473,7 +473,8 @@ export class ServingPart extends Part {
    */
   async track(events: TrackEvent[]): Promise<{ accepted: number; ignored: number }> {
     const nowMs = this.now().getTime();
-    const checked = (events ?? []).map((ev) => ({ ev, check: verifyImpression(ev.impressionToken, this.core.secret, nowMs) }));
+    // displays first: a click in the same batch as its display is billable
+    const checked = (events ?? []).map((ev) => ({ ev, check: verifyImpression(ev.impressionToken, this.core.secret, nowMs) })).sort((a, b) => Number(b.ev.kind === 'display') - Number(a.ev.kind === 'display'));
     const bad = checked.find((c) => !c.check.ok && c.check.reason !== 'expired');
     if (bad) throw this.ctx.error('INVALID_IMPRESSION_TOKEN', 'An impression token is missing or was tampered with.');
     let accepted = 0;
@@ -495,6 +496,11 @@ export class ServingPart extends Part {
         continue;
       }
       const kind = ev.kind;
+      // a display reported once the campaign stopped (paused, finished) is not delivery: it would bill a fixed daily fee
+      if (kind === 'display' && campaign.status !== 'live') {
+        ignored++;
+        continue;
+      }
       const dedupeKind = kind === 'close' ? 'dismiss' : kind;
       const id = eventId(c.i, dedupeKind);
       const now = this.now();
@@ -526,8 +532,8 @@ export class ServingPart extends Part {
         const rules = await this.core.rules();
         const until = suppressionUntil(campaign.dismissal as never, campaign.ends_at, now, rules.dismissStopsForSession);
         if (until) await this.repo.recordDismissal(c.v, c.c, c.s, until, now);
-      } else if (kind === 'click' && campaign.billing === 'cpc' && campaign.seller_id && campaign.status === 'live') {
-        await this.chargeClick(id, campaign);
+      } else if (kind === 'click' && campaign.billing === 'cpc' && campaign.seller_id && campaign.origin === 'seller_request' && campaign.status === 'live') {
+        if (await this.billableClick(c, now)) await this.chargeClick(id, campaign);
       }
     }
     return { accepted, ignored };
@@ -543,6 +549,20 @@ export class ServingPart extends Part {
         if (e) e.displays++;
       })
       .catch(() => undefined);
+  }
+
+  /**
+   * Invalid-click filter: a click is billed only after its ad was displayed (the same impression's display event), and
+   * at most once per visitor (visitor or session key, and the signed-in customer) per campaign per market day.
+   * Other clicks are recorded for reports, unbilled. The day's claim is atomic, so parallel clicks bill once.
+   */
+  private async billableClick(c: ImpressionClaims, now: Date): Promise<boolean> {
+    if (!(await this.repo.get('ad_events', eventId(c.i, 'display')))) return false;
+    const day = this.core.today(now);
+    for (const who of [c.v[0] ?? `s:${c.s}`, ...(c.u ? [`c:${c.u}`] : [])]) {
+      if (!(await this.repo.claim(`billed-click:${c.c}:${day}:${who}`))) return false;
+    }
+    return true;
   }
 
   private async chargeClick(eventId: string, campaign: CampaignRec) {

@@ -295,6 +295,8 @@ export class CampaignsPart extends Part {
       if (!dailyLimit) issues.push({ path: 'budget.dailyLimit', message: 'Set a daily spending limit' });
       if (!totalLimit) issues.push({ path: 'budget.totalLimit', message: 'Set a total spending limit' });
       if (dailyLimit && totalLimit && dailyLimit > totalLimit) issues.push({ path: 'budget.dailyLimit', message: 'The daily limit cannot be above the total limit' });
+      // a limit below one click or the fixed daily fee would deliver for less than the rate (CPM rates are per 1,000 displays)
+      if (billing !== 'cpm' && rate && dailyLimit && dailyLimit < rate) issues.push({ path: 'budget.dailyLimit', message: `The daily limit must cover at least the ${billing === 'fixed_daily' ? 'daily fee' : 'cost of one click'}` });
     }
     const deliveryCap = b?.deliveryCap ?? null;
     if (deliveryCap !== null && (!Number.isInteger(deliveryCap) || deliveryCap < 1)) issues.push({ path: 'budget.deliveryCap', message: 'Whole number of displays, 1 or more' });
