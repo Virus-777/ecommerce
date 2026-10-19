@@ -387,22 +387,29 @@ export class ServingPart extends Part {
 
   /* ---------------------------------------------------------------- impressions */
 
-  private creativeFor(e: Entry, device: string): CreativeRec | undefined {
+  /**
+   * The creatives of one impression: a picture (image or video) for the viewer's device and the campaign's ad
+   * text (a text creative), each rotating evenly among its own kind. They are one ad, never alternatives:
+   * Admin Center and Seller Center save the ad text next to the pictures, so every impression carries both.
+   */
+  private creativesFor(e: Entry, device: string): { visual?: CreativeRec; text?: CreativeRec } {
     const cls = deviceClass(device);
     const fit = e.creatives.filter((c) => c.device === cls || c.device === 'any');
-    if (!fit.length) return undefined;
-    return fit[this.turn(`creative:${e.m.row.id}`) % fit.length];
+    const pick = (list: CreativeRec[], kind: string) => (list.length ? list[this.turn(`creative:${kind}:${e.m.row.id}`) % list.length] : undefined);
+    return { visual: pick(fit.filter((c) => c.kind !== 'text'), 'visual'), text: pick(fit.filter((c) => c.kind === 'text'), 'text') };
   }
 
   private impression(e: Entry, v: Viewer, req: ServeRequest | null, offer?: OfferInfo, preview = false): AdImpression | null {
     const r = e.m.row;
     const key = e.m.placement.key;
-    const creative = this.creativeFor(e, v.device);
+    const { visual, text } = this.creativesFor(e, v.device);
+    // the picture is what was shown (reports count it); the ad text's copy wins, a picture's own copy fills in
+    const creative = visual ?? text;
     if (!creative && !offer) return null;
     const nowS = Math.floor(this.now().getTime() / 1000);
     const claims: ImpressionClaims = { i: newId(), c: r.id, k: creative?.id ?? r.id, p: key, v: v.keys, s: v.sessionId, u: v.customerId, g: v.page, d: v.device, t: nowS, e: nowS + TOKEN_TTL_S };
     const dismissible = e.m.dismissal.mode !== 'not_dismissible';
-    const mediaRef = creative?.media_id ? (e.media.get(creative.media_id) ?? null) : null;
+    const mediaRef = visual?.media_id ? (e.media.get(visual.media_id) ?? null) : null;
     const tz = r.time_zone || this.core.tz();
     const promotedOffer: PromotedOfferCard | null = offer
       ? {
@@ -426,13 +433,13 @@ export class ServingPart extends Part {
       sellerName: r.seller_id ? (offer?.sellerName ?? e.sellerName) : null,
       advertiserLogo: null,
       eyebrow: OVERLAY_KEYS.includes(key) ? (e.promo?.name ?? null) : null,
-      headline: creative?.headline ?? offer?.title ?? r.name,
-      body: creative?.body ?? null,
-      buttonText: creative?.button_text ?? (offer ? 'View product' : 'Shop now'),
+      headline: text?.headline ?? visual?.headline ?? offer?.title ?? r.name,
+      body: text?.body ?? visual?.body ?? null,
+      buttonText: text?.button_text ?? visual?.button_text ?? (offer ? 'View product' : 'Shop now'),
       secondaryText: key === 'opening_fullscreen' ? `Continue to ${req?.page === 'home' || !req ? 'home page' : 'the page'}` : key === 'popup' ? 'No thanks' : null,
-      image: creative?.kind === 'image' ? mediaRef : (offer?.image ?? null),
-      video: creative?.kind === 'video' ? mediaRef : null,
-      destination: creative?.link ?? (offer ? `/product/${offer.productId}?offer=${offer.offer.id}` : (e.m.destination?.url ?? '/')),
+      image: visual?.kind === 'image' ? mediaRef : (offer?.image ?? null),
+      video: visual?.kind === 'video' ? mediaRef : null,
+      destination: text?.link ?? visual?.link ?? (offer ? `/product/${offer.productId}?offer=${offer.offer.id}` : (e.m.destination?.url ?? '/')),
       dismissible,
       closeLabel: dismissible ? 'Close' : null,
       footnote: footnoteFor(key, r.ends_at, e.m.cap ?? { label: '' }, tz),
