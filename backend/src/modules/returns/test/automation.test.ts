@@ -212,6 +212,11 @@ describe('events from other modules', () => {
     d = await detail(m.ret.id, m.sellerId);
     expect(d.detail.shipment.status).toBe('delivered');
     expect(d.detail.shipment.events.map((e: any) => e.label)).toEqual(expect.arrayContaining(['In transit']));
+    // the carrier's delivery scan is the receipt: the return no longer waits for the seller to mark it received
+    expect(d.detail.status).toBe('received');
+    expect(h.named('returns.return.received').find((e) => e.returnId === m.ret.id)).toBeTruthy();
+    // a "mark received" click afterwards changes nothing
+    expect((await h.call('POST', `/api/seller/returns/requests/${m.ret.id}/receive`, m.seller(), {})).status).toBe(200);
   });
 
   it('applies a case decision that refunds without the item coming back', async () => {

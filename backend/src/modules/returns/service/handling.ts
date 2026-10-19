@@ -9,7 +9,7 @@ import { money } from '../../../kernel/lib/money.js';
 import { OFFICIAL_STORE_ID } from '../../../spec/common.js';
 import type * as common from '../../../spec/common.js';
 import type * as offers from '../../../spec/offers.js';
-import type { InspectionDraft, InspectionInput, InspectionQueueRow, RemedyInput, RemedyPreview, RemedyPreviewInput, Replacement, ReturnEvidence } from '../../../spec/returns.js';
+import type { InspectionDraft, InspectionInput, InspectionQueueRow, RemedyInput, RemedyPreview, RemedyPreviewInput, Replacement, ReturnDecision, ReturnEvidence } from '../../../spec/returns.js';
 import { replacementMachine, returnMachine, returnShipmentMachine } from '../domain/state-machines.js';
 import { actorText, draftInspection, human, is, LIVE_REFUND, type ReturnStatus } from '../domain/rules.js';
 import type { ReplacementRec, ReturnRec } from '../ports.js';
@@ -17,6 +17,9 @@ import type { ReturnsRepository } from '../repository.js';
 import { Batch, illegal, invalid, invalidField, notFound, SYSTEM, type Agg, type By, type Core } from './core.js';
 import type { RefundDecision, Refunds } from './refunds.js';
 import type { Views } from './views.js';
+
+/** Inspection outcomes after which a return may be declined without a refund (the parcel was not what was sent) */
+const DECLINABLE = ['empty_package', 'wrong_item_returned', 'damaged_by_customer', 'not_matching_request'];
 
 export class Handling {
   constructor(
@@ -41,6 +44,7 @@ export class Handling {
   async receive(id: string, o: { receivedAt?: string | null; note?: string | null; trackingNumber?: string | null; rescanOk?: boolean }, by: By, agg: Agg): Promise<void> {
     const r = agg.ret;
     if (o.rescanOk && (r.status === 'received' || r.status === 'awaiting_remedy' || r.status === 'completed')) return; // the warehouse scanned it again
+    if (r.status === 'received' && this.core.shipmentOf(agg)?.status === 'delivered') return; // the carrier's delivery scan already received it
     returnMachine.next(r.status as ReturnStatus, 'receive');
     const now = this.core.now();
     const at = o.receivedAt ? new Date(o.receivedAt) : now;
@@ -176,6 +180,7 @@ export class Handling {
     if (mode === 'seller' && r.platform_handling) throw illegal('Marketly is handling this return now', { from: r.status });
     if (mode === 'admin' && r.owner_type === 'seller' && !r.platform_handling) throw illegal('The seller decides the remedy unless Marketly takes over', { from: r.status });
     if (r.status !== 'awaiting_remedy') throw illegal('Inspect the return before deciding the remedy', { from: r.status, allowed: [] });
+    if (input.kind === 'decline') return this.decline(id, input, by, agg, mode);
     const live = agg.refunds.find((x) => is(LIVE_REFUND, x.status));
     // retry of a seller refund whose hand-over did not go through (idempotent endpoint)
     if (live && mode === 'seller' && live.status === 'requested' && live.source === 'seller') {
@@ -217,6 +222,34 @@ export class Handling {
    * at the original unit price (different-price exchanges are phase 4). offers is optional: without it
    * exchanges are refused with REMEDY_NOT_AVAILABLE.
    */
+  /**
+   * No refund after a failed inspection: the return closes as rejected when the inspection shows the parcel was not
+   * what was sent (empty, wrong item, damaged after delivery, not what was requested) with photos as evidence. The
+   * customer is told why and can ask Marketly to review it (escalate; staff can overturn it to a refund).
+   */
+  private async decline(id: string, input: RemedyInput, by: By, agg: Agg, mode: 'seller' | 'admin'): Promise<void> {
+    const why = input.explanation?.trim();
+    if (!why) throw invalidField('explanation', 'Explain to the customer why no refund is due');
+    if (agg.refunds.some((x) => is(LIVE_REFUND, x.status)) || agg.replacements.some((x) => x.status !== 'cancelled')) throw illegal('A refund or replacement is already under way', { from: agg.ret.status });
+    const inspection = this.core.inspectionOf(agg);
+    const outcome = inspection?.condition_outcome ?? null;
+    if (!outcome || !DECLINABLE.includes(outcome)) {
+      throw this.core.error('REMEDY_NOT_AVAILABLE', 'A return is declined only when the inspection found an empty package, a wrong item, damage after delivery or an item that does not match the request', { remedy: 'decline', conditionOutcome: outcome });
+    }
+    if (!((inspection!.media_ids as string[] | null) ?? []).length) throw invalidField('explanation', 'Add inspection photos as evidence before declining the return');
+    const now = this.core.now();
+    const platformDecision = agg.ret.owner_type === 'seller' && mode === 'admin';
+    const decision: ReturnDecision = { kind: 'rejected', reasonCode: 'failed_inspection', explanation: why, decidedBy: by.actor, decidedAt: now.toISOString(), platformDecision };
+    await this.core.write(id, by, async (tx, a, batch) => {
+      const status = returnMachine.next(a.ret.status as ReturnStatus, 'decline');
+      await tx.update('returns', id, { status, decision, updated_at: now });
+      if (a.draft) await tx.remove('inspection_drafts', id);
+      await this.core.timeline(tx, id, [{ kind: 'rejected', label: 'Return declined after inspection', detail: `${why} You can ask Marketly to review this decision.`, visibility: 'customer', actor: by.actor }]);
+      batch.push('returns.return.rejected', { returnId: id, ...this.core.refs(a.ret), ...this.core.recipient(a.ret), ownerType: a.ret.owner_type, sellerId: a.ret.seller_id, reasonCode: 'failed_inspection', platformDecision });
+    });
+    await this.core.audit({ action: 'returns.remedy.decline', actionLabel: `Declined return ${agg.ret.ref} after inspection`, category: 'financial', target: this.target(agg), before: { status: agg.ret.status }, after: { status: 'rejected', conditionOutcome: outcome }, reason: why, visibleToSeller: true }, by);
+  }
+
   async exchangeOffer(o: { ownerType: 'official' | 'seller'; sellerId: string | null; productId: string; unitPrice: number; variantId: string }): Promise<offers.Offer> {
     const api = this.core.ctx.tryUse('offers');
     if (!api) throw this.core.error('REMEDY_NOT_AVAILABLE', 'Exchanges are not available right now; choose a refund instead', { remedy: 'exchange' });
@@ -234,31 +267,41 @@ export class Handling {
     return same;
   }
 
-  /** The stock item (and its offer) a replacement or exchange takes units from */
-  private async source(agg: Agg, input: RemedyInput): Promise<{ variantId: string; stockItemId: string; offerId: string; kind: 'replacement' | 'exchange' }> {
+  /**
+   * What a replacement or exchange sends: one line per returned item, each from its own stock item (a return of
+   * several items is replaced item by item). An exchange swaps one item for another variant, so it takes a
+   * single-item return.
+   */
+  private async sources(agg: Agg, input: RemedyInput): Promise<{ item: Agg['items'][number]; variantId: string; stockItemId: string; offerId: string; kind: 'replacement' | 'exchange' }[]> {
     const r = agg.ret;
-    const item = agg.items[0]!;
     const meta = r.terms_snapshot.meta;
     if (input.kind === 'replacement') {
-      const stockItemId = meta.stockItems?.[item.order_item_id];
-      const offerId = meta.offers?.[item.order_item_id];
-      if (!stockItemId || !offerId) throw this.core.error('REMEDY_NOT_AVAILABLE', 'A replacement is not available for this item', { remedy: 'replacement' });
-      return { variantId: item.variant_id, stockItemId, offerId, kind: 'replacement' };
+      return agg.items.map((item) => {
+        const stockItemId = meta.stockItems?.[item.order_item_id];
+        const offerId = meta.offers?.[item.order_item_id];
+        if (!stockItemId || !offerId) throw this.core.error('REMEDY_NOT_AVAILABLE', `A replacement is not available for ${item.title}`, { remedy: 'replacement', orderItemId: item.order_item_id });
+        return { item, variantId: item.variant_id, stockItemId, offerId, kind: 'replacement' as const };
+      });
     }
+    if (agg.items.length > 1) throw this.core.error('REMEDY_NOT_AVAILABLE', 'An exchange is for one item; replace or refund a return of several items', { remedy: 'exchange' });
+    const item = agg.items[0]!;
     const variantId = input.exchangeVariantId ?? r.exchange_variant_id;
     if (!variantId) throw invalidField('exchangeVariantId', 'Choose the variant to exchange for');
     const offer = await this.exchangeOffer({ ownerType: r.owner_type, sellerId: r.seller_id, productId: item.product_id, unitPrice: item.unit_price, variantId });
-    return { variantId, stockItemId: offer.stockItemId, offerId: offer.id, kind: 'exchange' };
+    return [{ item, variantId, stockItemId: offer.stockItemId, offerId: offer.id, kind: 'exchange' }];
   }
 
-  /** Whether a replacement or exchange can be offered (stock and terms) */
+  /** Whether a replacement or exchange can be offered (stock and terms) for every returned item */
   async checkReplacement(agg: Agg, input: RemedyInput): Promise<void> {
     const remedies = agg.ret.terms_snapshot.terms.remedies;
     if (!remedies.includes(input.kind as 'replacement' | 'exchange')) throw this.core.error('REMEDY_NOT_AVAILABLE', `${human(input.kind)} is not offered for this item`, { remedy: input.kind });
-    const s = await this.source(agg, input);
-    const quantity = agg.items.reduce((n, i) => n + i.quantity, 0);
-    const avail = await this.core.ctx.use('inventory').getAvailability([s.stockItemId]);
-    if ((avail[s.stockItemId]?.available ?? 0) < quantity) throw this.core.error('REMEDY_NOT_AVAILABLE', 'No stock left for a replacement; offer a refund instead', { remedy: input.kind });
+    const lines = await this.sources(agg, input);
+    const wanted = new Map<string, number>();
+    for (const l of lines) wanted.set(l.stockItemId, (wanted.get(l.stockItemId) ?? 0) + l.item.quantity);
+    const avail = await this.core.ctx.use('inventory').getAvailability([...wanted.keys()]);
+    for (const [stockItemId, quantity] of wanted) {
+      if ((avail[stockItemId]?.available ?? 0) < quantity) throw this.core.error('REMEDY_NOT_AVAILABLE', 'No stock left for a replacement; offer a refund instead', { remedy: input.kind });
+    }
   }
 
   /**
@@ -296,40 +339,46 @@ export class Handling {
     const r = agg.ret;
     const remedies = r.terms_snapshot.terms.remedies;
     if (!remedies.includes(input.kind as 'replacement' | 'exchange')) throw this.core.error('REMEDY_NOT_AVAILABLE', `${human(input.kind)} is not offered for this item`, { remedy: input.kind });
-    const s = await this.source(agg, input);
-    const item = agg.items.find((i) => i.variant_id === s.variantId) ?? agg.items[0]!;
-    const quantity = agg.items.reduce((n, i) => n + i.quantity, 0);
-    const replacementId = newId();
-    // one allocation per attempt: a replacement cancelled for lack of stock can be tried again later
-    const reservationId = await this.allocate({ key: `replacement:${r.id}:${agg.replacements.length + 1}`, orderId: r.order_id, orderRef: r.order_ref, kind: s.kind, replacementId, ref: r.ref, stockItemId: s.stockItemId, quantity, orderItemId: item.order_item_id, actor: by.actor });
-    const now = this.core.now();
+    const lines = await this.sources(agg, input);
+    // one allocation per item and attempt (all or nothing): a replacement cancelled for lack of stock can be tried again later
+    const attempt = agg.replacements.length + 1;
+    const planned: { line: (typeof lines)[number]; replacementId: string; reservationId: string }[] = [];
     try {
+      for (const line of lines) {
+        const replacementId = newId();
+        const reservationId = await this.allocate({ key: `replacement:${r.id}:${attempt}:${line.item.order_item_id}`, orderId: r.order_id, orderRef: r.order_ref, kind: line.kind, replacementId, ref: r.ref, stockItemId: line.stockItemId, quantity: line.item.quantity, orderItemId: line.item.order_item_id, actor: by.actor });
+        planned.push({ line, replacementId, reservationId });
+      }
+      const now = this.core.now();
       await this.core.write(r.id, by, async (tx, a, batch) => {
         if (a.replacements.some((x) => x.status !== 'cancelled')) throw illegal('A replacement is already on its way', { from: a.ret.status });
-        await tx.insert('replacements', {
-          id: replacementId,
-          return_id: r.id,
-          case_id: null,
-          order_id: r.order_id,
-          kind: s.kind,
-          status: replacementMachine.next('pending', 'reserve'),
-          order_item_id: item.order_item_id,
-          variant_id: s.variantId,
-          offer_id: s.offerId,
-          quantity,
-          reservation_id: reservationId,
-          shipping_shipment_id: null,
-          cancel_reason: null,
-          idempotency_key: null,
-          created_at: now,
-          shipped_at: null,
-          delivered_at: null,
-        });
-        await this.core.timeline(tx, r.id, [{ kind: 'replacement', label: s.kind === 'exchange' ? 'Exchange on the way' : 'Replacement on the way', detail: `${item.title} × ${quantity}, no charge`, visibility: 'customer', actor: by.actor }]);
-        batch.push('returns.replacement.created', { replacementId, returnId: r.id, caseId: null, orderId: r.order_id, orderRef: r.order_ref, ...this.core.recipient(a.ret), orderItemId: item.order_item_id, ownerType: r.owner_type, sellerId: r.seller_id, variantId: s.variantId, offerId: s.offerId, quantity, kind: s.kind });
+        for (const { line, replacementId, reservationId } of planned) {
+          const { item, kind } = line;
+          await tx.insert('replacements', {
+            id: replacementId,
+            return_id: r.id,
+            case_id: null,
+            order_id: r.order_id,
+            kind,
+            status: replacementMachine.next('pending', 'reserve'),
+            order_item_id: item.order_item_id,
+            variant_id: line.variantId,
+            offer_id: line.offerId,
+            quantity: item.quantity,
+            reservation_id: reservationId,
+            shipping_shipment_id: null,
+            cancel_reason: null,
+            idempotency_key: null,
+            created_at: now,
+            shipped_at: null,
+            delivered_at: null,
+          });
+          await this.core.timeline(tx, r.id, [{ kind: 'replacement', label: kind === 'exchange' ? 'Exchange on the way' : 'Replacement on the way', detail: `${item.title} × ${item.quantity}, no charge`, visibility: 'customer', actor: by.actor }]);
+          batch.push('returns.replacement.created', { replacementId, returnId: r.id, caseId: null, orderId: r.order_id, orderRef: r.order_ref, ...this.core.recipient(a.ret), orderItemId: item.order_item_id, ownerType: r.owner_type, sellerId: r.seller_id, variantId: line.variantId, offerId: line.offerId, quantity: item.quantity, kind });
+        }
       });
     } catch (err) {
-      await this.release(reservationId, 'The replacement could not be recorded');
+      for (const p of planned) await this.release(p.reservationId, 'The replacement could not be recorded');
       throw err;
     }
   }
@@ -504,18 +553,32 @@ export class Handling {
       },
       by,
     );
+    // a return is replaced as a whole: the other items' replacements not shipped yet are cancelled with it, so the
+    // return can take a refund instead
+    if (after.return_id) {
+      const siblings = (await this.core.repo.find('replacements', { return_id: after.return_id })).filter((x) => x.id !== id && (x.status === 'pending' || x.status === 'reserved'));
+      for (const s of siblings) await this.cancelReplacement(s.id, why, by, viewer);
+    }
     return this.replacementView(after);
   }
 
-  /** The live replacement a shipping event is about: by return, or (case replacements) by order and items */
-  async replacementFor(e: { returnId?: string | null; orderId: string; lines: { orderItemId: string }[]; shipmentId: string }): Promise<ReplacementRec | undefined> {
-    const byShipment = isUuid(e.shipmentId) ? (await this.core.repo.find('replacements', { shipping_shipment_id: e.shipmentId }))[0] : undefined;
-    if (byShipment) return byShipment;
-    if (isUuid(e.returnId)) return (await this.core.repo.find('replacements', { return_id: e.returnId }, { orderBy: [['created_at', 'desc']] })).find((x) => x.status !== 'cancelled');
-    if (!isUuid(e.orderId)) return undefined;
+  /**
+   * The live replacements a shipping event is about: the ones already on that shipment, else a return's (the items
+   * the shipment carries; all of them when it names none), else (case replacements) by order and items
+   */
+  async replacementsFor(e: { returnId?: string | null; orderId: string; lines: { orderItemId: string }[]; shipmentId: string }): Promise<ReplacementRec[]> {
+    const byShipment = isUuid(e.shipmentId) ? await this.core.repo.find('replacements', { shipping_shipment_id: e.shipmentId }) : [];
+    if (byShipment.length) return byShipment;
     const items = new Set(e.lines.map((l) => l.orderItemId));
+    if (isUuid(e.returnId)) {
+      const live = (await this.core.repo.find('replacements', { return_id: e.returnId }, { orderBy: [['created_at', 'asc']] })).filter((x) => x.status !== 'cancelled');
+      const carried = live.filter((x) => items.has(x.order_item_id));
+      return carried.length ? carried : items.size ? live.slice(-1) : live;
+    }
+    if (!isUuid(e.orderId)) return [];
     const rows = await this.core.repo.find('replacements', { order_id: e.orderId, return_id: null, status: ['pending', 'reserved', 'shipped'] }, { orderBy: [['created_at', 'asc']] });
-    return rows.find((x) => items.has(x.order_item_id)) ?? (items.size ? undefined : rows[0]);
+    const found = rows.find((x) => items.has(x.order_item_id)) ?? (items.size ? undefined : rows[0]);
+    return found ? [found] : [];
   }
 
   /** shipping.shipment.dispatched for a replacement shipment: shipped; a return awaiting its remedy completes */
@@ -531,7 +594,9 @@ export class Handling {
       await tx.update('replacements', rep.id, { status, shipping_shipment_id: shipmentId, shipped_at: new Date(at) });
       if (!ret) return;
       await this.core.timeline(tx, ret.id, [{ kind: 'replacement_shipped', label: locked.kind === 'exchange' ? 'Exchange shipped' : 'Replacement shipped', visibility: 'customer' }]);
-      if (ret.status === 'awaiting_remedy') {
+      // a return replaced item by item completes once every replacement is on its way
+      const waiting = (await tx.find('replacements', { return_id: ret.id })).filter((x) => x.id !== rep.id && (x.status === 'pending' || x.status === 'reserved'));
+      if (ret.status === 'awaiting_remedy' && !waiting.length) {
         const outcome = locked.kind === 'exchange' ? 'exchanged' : 'replaced';
         const now = this.core.now();
         await tx.update('returns', ret.id, { status: returnMachine.next('awaiting_remedy', 'complete'), completed_at: now, updated_at: now, terms_snapshot: { ...ret.terms_snapshot, meta: { ...ret.terms_snapshot.meta, outcome } } });

@@ -194,8 +194,9 @@ export class ReturnsService implements ReturnsPublicApi {
     return this.automation.onShipmentException(event);
   }
 
-  onRefundSentFromPayments(event: EventPayload<'payments.refund.sent'>): Promise<void> {
-    return this.refunds.onSent(event);
+  async onRefundSentFromPayments(event: EventPayload<'payments.refund.sent'>): Promise<void> {
+    await this.refunds.onSent(event);
+    await this.automation.closeOverlapping(event);
   }
 
   onRefundFailedFromPayments(event: EventPayload<'payments.refund.failed'>): Promise<void> {

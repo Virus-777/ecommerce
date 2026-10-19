@@ -414,7 +414,9 @@ export class Reads {
         .filter((a): a is Agg => !!a)
         .sort((a, b) => b.ret.requested_at.getTime() - a.ret.requested_at.getTime());
       const open = own.find((a) => is(ACTIVE_STATUSES, a.ret.status));
-      const v = itemVerdict({ ...i, used: used.get(i.orderItemId) ?? 0, openReturn: open ? { id: open.ret.id, ref: open.ret.ref } : null }, now, baseline.windowDays, this.core.tz);
+      const declined = open ? undefined : own.find((a) => a.ret.status === 'rejected');
+      const holding = open ?? declined;
+      const v = itemVerdict({ ...i, used: used.get(i.orderItemId) ?? 0, openReturn: holding ? { id: holding.ret.id, ref: holding.ret.ref, rejected: !open } : null }, now, baseline.windowDays, this.core.tz);
       const latest = open ?? own[0];
       return {
         orderItemId: i.orderItemId,

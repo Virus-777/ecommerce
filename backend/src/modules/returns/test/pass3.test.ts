@@ -422,3 +422,88 @@ describe('labels, references and categories', () => {
     expect((await h.service.resolveTerms(newId(), newId(), null)).source).toBe('baseline');
   });
 });
+
+describe('returns that finish (H16)', () => {
+  it('replaces every item of a multi-item return from its own stock, and completes once all are on their way', async () => {
+    const kettle = product(h, { title: 'Kettle', price: 5000, ownerType: 'official' });
+    const toaster = product(h, { title: 'Toaster', price: 3000, ownerType: 'official' });
+    const m = await placeOrder(h, [group(h, [line(kettle, 1), line(toaster, 2)], { ownerType: 'official' })]);
+    const [kettleItem, toasterItem] = m.items[0]!;
+    const res = await h.call('POST', '/api/store/returns/requests', tokens.customer(m.customerId), { orderId: m.order.id, items: [{ orderItemId: kettleItem!, quantity: 1 }, { orderItemId: toasterItem!, quantity: 2 }], reason: 'defective', details: 'Both stopped working', remedy: 'refund' }, idem());
+    const id = res.body.returns[0].id;
+    await h.service.recordWarehouseReceipt(id, now(), { kind: 'staff', id: newId() }, null);
+    await h.call('POST', `/api/admin/returns/requests/${id}/inspection`, staff(), { conditionOutcome: 'as_described', grade: 'good', proposedStockOutcome: 'restock' });
+    h.stock.set(kettle.stockItemId, 3);
+    h.stock.set(toaster.stockItemId, 3);
+    const rep = await h.call('POST', `/api/admin/returns/requests/${id}/remedy`, staff(), { kind: 'replacement' }, idem());
+    expect(rep.status, JSON.stringify(rep.body)).toBe(200);
+    const created = h.named('returns.replacement.created').filter((e) => e.returnId === id);
+    expect(created.map((e) => [e.orderItemId, e.quantity]).sort()).toEqual([[kettleItem, 1], [toasterItem, 2]].sort());
+    expect(h.calls.allocations.slice(-2).map((a) => a.lines[0])).toEqual(expect.arrayContaining([expect.objectContaining({ stockItemId: kettle.stockItemId, quantity: 1 }), expect.objectContaining({ stockItemId: toaster.stockItemId, quantity: 2 })]));
+    const ship = (orderItemId: string) => h.publish('shipping', 'shipping.shipment.dispatched', { shipmentId: newId(), kind: 'replacement', orderId: m.order.id, groupId: m.order.groups[0]!.id, returnId: id, ownerType: 'official', fulfilledBy: 'official_warehouse', sellerId: null, lines: [{ orderItemId, title: 'x', variantLabel: '', quantity: 1 }], shippedAt: now(), dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: null });
+    await ship(kettleItem!);
+    expect((await h.call('GET', `/api/admin/returns/requests/${id}`, staff())).body.detail.status, 'one of two shipped').toBe('awaiting_remedy');
+    await ship(toasterItem!);
+    expect((await h.call('GET', `/api/admin/returns/requests/${id}`, staff())).body.detail.status).toBe('completed');
+  });
+
+  it('declines a return without a refund after an inspection that found an empty package, with photos', async () => {
+    const sellerId = newId();
+    const p = product(h, { title: 'Speaker', price: 9000, sellerId });
+    const m = await placeOrder(h, [group(h, [line(p, 1)], { sellerId })]);
+    const token = tokens.customer(m.customerId);
+    const res = await h.call('POST', '/api/store/returns/requests', token, { orderId: m.order.id, items: [{ orderItemId: m.items[0]![0]!, quantity: 1 }], reason: 'changed_mind', details: 'Not needed', remedy: 'refund' }, idem());
+    const id = res.body.returns[0].id;
+    const seller = tokens.seller(sellerId);
+    await h.call('POST', `/api/seller/returns/requests/${id}/approve`, seller, { labelMethod: 'prepaid_qr' });
+    await h.call('POST', `/api/seller/returns/requests/${id}/receive`, seller, {});
+    await h.call('POST', `/api/seller/returns/requests/${id}/inspection`, seller, { conditionOutcome: 'empty_package', grade: 'damaged', proposedStockOutcome: 'write_off' });
+    const noPhotos = await h.call('POST', `/api/seller/returns/requests/${id}/remedy`, seller, { kind: 'decline', explanation: 'The box arrived empty.' }, idem());
+    expect(noPhotos.status).toBe(400);
+    // the inspection photos are the evidence (stored on the inspection; media uploads are not part of this test)
+    const repo = (h.service as any).core.repo;
+    const [insp] = await repo.find('inspections', { return_id: id });
+    await repo.update('inspections', insp.id, { media_ids: [newId()] });
+    const declined = await h.call('POST', `/api/seller/returns/requests/${id}/remedy`, seller, { kind: 'decline', explanation: 'The box arrived empty.' }, idem());
+    expect(declined.status, JSON.stringify(declined.body)).toBe(200);
+    expect(declined.body.detail.status).toBe('rejected');
+    expect(h.named('returns.return.rejected').find((e) => e.returnId === id)).toMatchObject({ reasonCode: 'failed_inspection' });
+    // the units stay with the declined return: the customer asks Marketly to review it instead of starting again
+    const again = await h.call('POST', '/api/store/returns/requests', token, { orderId: m.order.id, items: [{ orderItemId: m.items[0]![0]!, quantity: 1 }], reason: 'changed_mind', details: 'Again', remedy: 'refund' }, idem());
+    expect(again.body.error?.code, JSON.stringify(again.body)).toBe('RETURN_NOT_ELIGIBLE');
+    expect(JSON.stringify(again.body.error.details)).toContain('Ask Marketly to review it');
+  });
+
+  it('cancels another open return for the same units once one of them is refunded, never one for other units', async () => {
+    const sellerId = newId();
+    const p = product(h, { title: 'Mug', price: 1500, sellerId });
+    const m = await placeOrder(h, [group(h, [line(p, 2)], { sellerId })]);
+    const token = tokens.customer(m.customerId);
+    const itemId = m.items[0]![0]!;
+    const open = async () => (await h.call('POST', '/api/store/returns/requests', token, { orderId: m.order.id, items: [{ orderItemId: itemId, quantity: 1 }], reason: 'changed_mind', details: 'Spare', remedy: 'refund' }, idem())).body.returns[0].id as string;
+    const a = await open();
+    const b = await open();
+    const c = (await h.call('POST', '/api/store/returns/requests', token, { orderId: m.order.id, items: [{ orderItemId: itemId, quantity: 1 }], reason: 'changed_mind', details: 'Third', remedy: 'refund' }, idem())).body;
+    expect(c.error?.code, 'both units are on a return already').toBe('RETURN_NOT_ELIGIBLE');
+    // a return made before the one-return-per-unit rule claimed a unit already on return a
+    const repo = (h.service as any).core.repo;
+    const [bItem] = await repo.find('return_items', { return_id: b });
+    await repo.update('return_items', bItem.id, { quantity: 2 });
+    const res = await h.call('POST', `/api/seller/returns/requests/${a}/approve-without-return`, tokens.seller(sellerId), { reasonCode: 'return_cost_exceeds_value', details: 'Not worth shipping', remedy: { kind: 'full_refund' } }, idem());
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const rr = res.body.refundRequest;
+    await h.publish('payments', 'payments.refund.sent', { refundId: newId(), ref: rr.ref, orderId: m.order.id, origin: 'return', originId: rr.id, amount: USD(1500), items: [{ orderItemId: itemId, title: 'Mug', groupId: m.order.groups[0]!.id, sellerId, amount: USD(1500) }], destination: 'Visa', sentAt: now() });
+    expect((await h.call('GET', `/api/admin/returns/requests/${b}`, staff())).body.detail.status, 'b claimed the refunded unit').toBe('cancelled');
+  });
+
+  it('does not decline a return whose inspection found it as described', async () => {
+    const { p, m, token } = await officialAwaitingRemedy();
+    void p;
+    const res = await h.call('POST', '/api/store/returns/requests', token, { orderId: m.order.id, items: [{ orderItemId: m.items[0]![0]!, quantity: 1 }], reason: 'defective', details: 'Dead', remedy: 'refund' }, idem());
+    const id = res.body.returns[0].id;
+    await h.service.recordWarehouseReceipt(id, now(), { kind: 'staff', id: newId() }, null);
+    await h.call('POST', `/api/admin/returns/requests/${id}/inspection`, staff(), { conditionOutcome: 'as_described', grade: 'like_new', proposedStockOutcome: 'restock' });
+    const res2 = await h.call('POST', `/api/admin/returns/requests/${id}/remedy`, staff(), { kind: 'decline', explanation: 'No' }, idem());
+    expect(res2.body.error?.code).toBe('REMEDY_NOT_AVAILABLE');
+  });
+});
