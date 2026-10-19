@@ -198,9 +198,11 @@ export class LedgerPart extends Part {
       const itemAmount = Math.min(e.refund.itemAmount.amount, l.gross);
       if (itemAmount <= 0 && e.refund.shippingRefund.amount <= 0) return;
       const discountPart = prorate(-totals.seller_discount, itemAmount, totals.sale);
-      // the customer's shipping refund comes off the shipping the customer paid; Marketly's part follows below
+      // Before dispatch the shipping goes back per package (reverseShipping): the last cancellation refunds the shares
+      // of items cancelled earlier too, which this item's lot never held. After dispatch (a package returned to its
+      // seller) this item's refunded shipping comes off the shipping the customer paid for it.
       const customerShipping = totals.shipping_charge - ((await tx.findOne('ledger_entries', { source_event_id: `sale_shipping_platform:${l.order_item_id}` }))?.amount ?? 0);
-      const reversal = itemAmount - discountPart + Math.min(e.refund.shippingRefund.amount, customerShipping);
+      const reversal = itemAmount - discountPart + (e.beforeDispatch ? 0 : Math.min(e.refund.shippingRefund.amount, customerShipping));
       const bucket = l.state === 'pending' ? 'pending' : 'available';
       const ref = { kind: 'order' as const, id: e.orderId, label: e.ref };
       const entries: NewEntry[] = [{ key: `cancel:${e.cancellationId}:${e.itemId}`, type: 'cancellation', amount: -reversal, bucket, ref, description: `Cancelled ${e.quantity} item${e.quantity === 1 ? '' : 's'} ${e.beforeDispatch ? 'before dispatch' : 'after dispatch'} (${e.reasonCode.replace(/_/g, ' ')})`, lotId: l.id }];
@@ -220,7 +222,7 @@ export class LedgerPart extends Part {
       await tx.update('earnings_lots', l.id, { gross, fee: fresh.fee - feeBack });
       if (gross === 0 && (fresh.state === 'pending' || fresh.state === 'available')) await this.core.moveLot(tx, { ...fresh, gross }, 'reverse', out);
     });
-    if (e.beforeDispatch) await this.reversePlatformShipping(e, out);
+    if (e.beforeDispatch) await this.reverseShipping(e, out);
     this.core.flush(out);
   }
 
@@ -239,10 +241,11 @@ export class LedgerPart extends Part {
   }
 
   /**
-   * A package cancelled whole before dispatch is never shipped: the Marketly-funded shipping credited with its sales
-   * goes back, once per lot (as the customer's shipping is refunded only when the whole package is cancelled)
+   * A package cancelled whole before dispatch is never shipped: the customer gets all its shipping back, and the
+   * shipping credited with each of its sales (the customer's share and Marketly's) goes back, once per lot. Items
+   * cancelled while the rest of the package still shipped keep their shipping until then.
    */
-  async reversePlatformShipping(e: EventPayload<'orders.item.cancelled'>, out: Outbox) {
+  async reverseShipping(e: EventPayload<'orders.item.cancelled'>, out: Outbox) {
     const order = await this.order(e.orderId);
     const group = order?.groups.find((g) => g.id === e.groupId);
     if (!group?.items.length || !group.items.every((i) => i.state === 'cancelled')) return;
@@ -251,12 +254,18 @@ export class LedgerPart extends Part {
       const lot = await this.lotOf(item.id, order);
       if (!lot) continue;
       await this.repo.transaction(async (tx) => {
-        const credited = await tx.findOne('ledger_entries', { source_event_id: `sale_shipping_platform:${lot.order_item_id}` });
-        if (!credited?.amount) return;
+        const credited = (kind: string) => tx.findOne('ledger_entries', { source_event_id: `${kind}:${lot.order_item_id}` });
+        const customer = await credited('sale_shipping');
+        const platform = await credited('sale_shipping_platform');
+        if (!customer?.amount && !platform?.amount) return;
         const l = (await tx.get('earnings_lots', lot.id, { forUpdate: true }))!;
         // a lot already reversed has moved what it kept to available
         const pending = l.state === 'pending';
-        await this.core.post(tx, l.seller_id, [{ key: `cancel_shipping_platform:${l.order_item_id}`, type: 'cancellation', amount: -credited.amount, bucket: pending ? 'pending' : 'available', ref, description: 'Package cancelled before dispatch: shipping Marketly paid goes back', ...(pending || l.state === 'available' ? { lotId: l.id } : {}) }], out);
+        const on = { bucket: pending ? ('pending' as const) : ('available' as const), ref, ...(pending || l.state === 'available' ? { lotId: l.id } : {}) };
+        await this.core.post(tx, l.seller_id, [
+          { key: `cancel_shipping:${l.order_item_id}`, type: 'cancellation', amount: -(customer?.amount ?? 0), description: 'Package cancelled before dispatch: shipping refunded to the customer', ...on },
+          { key: `cancel_shipping_platform:${l.order_item_id}`, type: 'cancellation', amount: -(platform?.amount ?? 0), description: 'Package cancelled before dispatch: shipping Marketly paid goes back', ...on },
+        ], out);
       });
     }
   }
