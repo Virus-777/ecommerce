@@ -69,6 +69,7 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | GET | `/api/admin/content/homepage/sections/{id}/products` | Products in a section, resolved with title, seller and stock | staff<br>`content.view` | Page<SectionProductRow> |
 | POST | `/api/admin/content/homepage/sections/{id}/schedule` | Schedule a section (show from / remove at) _(audited)_ | staff<br>`content.homepage.manage` | `{ showFrom: datetime, removeAt: datetime?, timeZone: string }` → `HomeSectionAdmin` |
 | POST | `/api/admin/content/homepage/sections/{id}/remove` | Remove a section (correction or removal, reason required) _(audited)_ | staff<br>`content.homepage.manage` | `{ kind: enum(correction|removal), reason: text, immediately: bool }` → `HomeSectionAdmin` |
+| POST | `/api/admin/content/homepage/sections/{id}/visibility` | Hide a section now, or show it again in the draft _(audited)_ | staff<br>`content.homepage.manage` | `{ hidden: bool }` → `HomeSectionAdmin` |
 | PUT | `/api/admin/content/homepage/order` | Reorder sections in the draft (ad positions move with the layout but stay locked) | staff<br>`content.homepage.manage` | `{ sectionIds: uuid[] }` → `HomepageAdmin` |
 | POST | `/api/admin/content/homepage/preview` | Preview the homepage (draft or live) on desktop or phone at a given time | staff<br>`content.homepage.manage` | `PreviewRequest` → `Homepage` |
 | POST | `/api/admin/content/homepage/submit` | Send the draft layout for review _(audited)_ | staff<br>`content.homepage.manage` | `{ summary: string? }` → `HomepageAdmin` |
@@ -293,6 +294,8 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | adPlacementKey | `string?` |
 | managedIn | `string?` |
 | config | `SectionInput?` |
+| hidden | `bool` Hidden by staff in the draft layout (POST …/visibility) |
+| hiddenLive | `bool` Hidden on the live homepage. Differs from hidden after a section is shown again, until the layout is published |
 | unavailableHidden | `int` Products hidden automatically because they are unavailable |
 | productCount | `int` Products in the section after unavailable ones are hidden, e.g. 12 (the drawer shows the first rows and + 8 more) |
 | updatedAt | `datetime` |
