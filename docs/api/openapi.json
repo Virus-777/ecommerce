@@ -101244,7 +101244,7 @@
           "Admin API · Returns"
         ],
         "summary": "Change a declined refund and resubmit",
-        "description": "The resubmission takes the same decision path as a new staff refund: within the reviser's refund limit approved now (reauthToken in the body above stepUpAbove, else STEP_UP_REQUIRED and nothing changes); otherwise under review with an access approval request for Finance (`approval` in the response).\n\n**Permission:** `returns.requests.manage`\n\n**Approval:** Approval action returns.refunds.approve (see desc)\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `returns.refund.requested`\n\n**Screens:** admin/returns",
+        "description": "A declined request had been waiting for someone else's approval, so the resubmission always goes back under review with an access approval request for the refund approvers (`approval` in the response), filed in the reviser's name: the reviser becomes its proposer and cannot approve it, also within their own refund limit and also after that request lapses (POST /refunds/{id}/approve answers SELF_APPROVAL_NOT_ALLOWED). reauthToken is not used.\n\n**Permission:** `returns.requests.manage`\n\n**Approval:** Approval action returns.refunds.approve (see desc)\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `returns.refund.requested`\n\n**Screens:** admin/returns",
         "security": [
           {
             "bearer": []
@@ -115676,7 +115676,7 @@
           "Seller API · Sellers"
         ],
         "summary": "Owner asks to close the seller account",
-        "description": "New sales stop at once; the account closes after open orders, returns, cases and the final payout are settled.\n\n**Permission:** `sellers.account.close`\n\n**Step-up:** single-use re-auth token in the body (purpose `seller-closure`)\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `sellers.seller.closed`\n\n**Screens:** seller/store",
+        "description": "Refused with SELLER_HAS_OPEN_OBLIGATIONS while orders are not shipped, returns or cases are open, or money is pending or held; details.obligations lists them. Otherwise new sales stop at once and finance issues the final statement.\n\n**Permission:** `sellers.account.close`\n\n**Step-up:** single-use re-auth token in the body (purpose `seller-closure`)\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `sellers.seller.closed`\n\n**Screens:** seller/store",
         "security": [
           {
             "bearer": []
@@ -115746,7 +115746,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nSELLER_HAS_OPEN_OBLIGATIONS: Orders, returns, cases or money are still open; details.obligations lists them",
             "content": {
               "application/json": {
                 "schema": {
@@ -117121,7 +117121,7 @@
           "Admin API · Sellers"
         ],
         "summary": "Close a seller account",
-        "description": "New sales stop; open obligations stay accessible until settled; finance issues the final statement. A closure for another reason than the seller's request always needs a second reviewer: the closure is kept in pending_changes with an access approval request and the call answers 200 with the SellerAccount unchanged, its pendingChange and approval (FORMAT.md, Approval responses); access.approval.decided (approved) applies it, so the caller does not send it again. It never answers APPROVAL_REQUIRED.\n\n**Permission:** `sellers.accounts.close`\n\n**Approval:** Approval action sellers.sellers.close. Second reviewer unless the seller requested closure\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `sellers.seller.closed`\n\n**Screens:** admin/seller",
+        "description": "New sales stop; open obligations stay accessible until settled; finance issues the final statement. Refused with SELLER_HAS_OPEN_OBLIGATIONS while orders are not shipped; ship or cancel them first. Every staff closure needs a second reviewer, whatever the reason, and open returns, cases or money are listed in the approval's details.openObligations: the closure is kept in pending_changes with an access approval request and the call answers 200 with the SellerAccount unchanged, its pendingChange and approval (FORMAT.md, Approval responses); access.approval.decided (approved) applies it, so the caller does not send it again. It never answers APPROVAL_REQUIRED.\n\n**Permission:** `sellers.accounts.close`\n\n**Approval:** Approval action sellers.sellers.close. Second reviewer unless the seller requested closure\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `sellers.seller.closed`\n\n**Screens:** admin/seller",
         "security": [
           {
             "bearer": []
@@ -117219,7 +117219,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nSELLER_HAS_OPEN_OBLIGATIONS: Orders, returns, cases or money are still open; details.obligations lists them",
             "content": {
               "application/json": {
                 "schema": {
@@ -199350,7 +199350,7 @@
               "string",
               "null"
             ],
-            "description": "Staff only (admin remedy and revise; sellers leave it out): re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password). Needed when the refund is within the caller's refund limit and above access stepUpAbove (it is approved in the same call), otherwise STEP_UP_REQUIRED and nothing is saved"
+            "description": "Staff only (admin remedy; sellers and revise leave it out): re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password). Needed when the refund is within the caller's refund limit and above access stepUpAbove (it is approved in the same call), otherwise STEP_UP_REQUIRED and nothing is saved"
           }
         },
         "required": [

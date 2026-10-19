@@ -268,6 +268,10 @@ export class FinanceService implements FinancePublicApi {
     return this.holds.onSellerSuspended(event);
   }
 
+  onSellerReinstatedFromSellers(event: EventPayload<'sellers.seller.reinstated'>) {
+    return this.holds.onSellerReinstated(event);
+  }
+
   async onSellerClosedFromSellers(event: EventPayload<'sellers.seller.closed'>) {
     if (!isUuid(event.sellerId)) return;
     await this.statements.issueFinal(event.sellerId);

@@ -4191,6 +4191,7 @@ export const spec = defineModuleSpec({
       "payments.refund.failed": "Mark the refund's stored funding split failed (nothing is posted until payments.refund.sent); on the final attempt list it in the daily reconciliation",
       "sellers.seller.approved": "Open the seller account and apply the new-seller hold rule",
       "sellers.seller.suspended": "Put the seller's pending payouts on hold with reason restriction (review date from the restriction)",
+      "sellers.seller.reinstated": "After a suspension (from suspended): clear the payout block it set, release its hold on the available balance (restriction_hold) and put the payouts it held back to pending",
       "sellers.seller.closed": "Issue a final statement and schedule the last payout after open obligations",
       "sellers.payout_account.changed": "Open a destination review; keep paying the current verified destination",
       "access.approval.decided": "Finish approval-required holds, adjustments, corrections, payout runs, fee rule changes and seller credits (finance.credits.issue: post or reject, publish finance.seller_credit.decided)",

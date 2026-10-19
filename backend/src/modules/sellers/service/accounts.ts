@@ -581,47 +581,75 @@ export class AccountsPart extends Part {
 
   /* ---------------------------------------------------------------- closure */
 
+  /**
+   * What still has to finish before an account closes: orders not shipped yet, open returns and cases, and money not
+   * settled (pending, held, or an available balance not paid out or owed). Modules that can't answer count as clear.
+   */
+  async closureObligations(sellerId: string): Promise<string[]> {
+    const [orders, returns, cases, balance] = await Promise.all([
+      this.core.optional('orders', 'orders', null, (o) => o.countSellerOrders(sellerId)),
+      this.core.optional('returns', 'returns', null, (r) => r.sellerQueueCounts(sellerId)),
+      this.core.optional('support', 'support', null, (s) => s.sellerCaseStats(sellerId, { from: '2000-01-01', to: this.now().toISOString().slice(0, 10) })),
+      this.core.optional('finance', 'finance', null, (f) => f.getSellerBalances(sellerId)),
+    ]);
+    const out: string[] = [];
+    const unshipped = orders ? orders.new + orders.preparing + orders.fulfilledByMarketly : 0;
+    if (unshipped) out.push(`${unshipped} order${unshipped === 1 ? '' : 's'} not shipped yet: ship or cancel ${unshipped === 1 ? 'it' : 'them'}`);
+    const openReturns = returns ? returns.tabs.requests + returns.tabs.toInspect + returns.tabs.disputes : 0;
+    if (openReturns) out.push(`${openReturns} open return${openReturns === 1 ? '' : 's'}`);
+    if (cases?.open) out.push(`${cases.open} open support case${cases.open === 1 ? '' : 's'}`);
+    if (balance && (balance.pending.amount || balance.held.amount || balance.available.amount)) out.push('a balance not settled yet (pending, held or not paid out)');
+    return out;
+  }
+
   async requestSellerClosure(sellerId: string, reason: string, by: By) {
     if (!reason?.trim()) throw invalid([{ path: 'reason', message: 'Tell us why you are closing the account' }]);
+    const open = await this.closureObligations(sellerId);
+    if (open.length) throw new AppError('SELLER_HAS_OPEN_OBLIGATIONS', `Finish these first: ${open.join('; ')}`, { obligations: open });
     const after = await this.closeNow(sellerId, { reason: reason.trim(), reasonCode: 'seller_request' }, by);
     return this.account(after, null);
   }
 
+  /**
+   * Staff closure always goes to a second reviewer (the seller_request code is the seller's own request, not a way
+   * around the review). Orders not shipped yet block it: staff ship or cancel them first, so no buyer waits on a
+   * closed store. Open returns, cases or money are shown to the reviewers, who may still approve.
+   */
   async closeSeller(sellerId: string, body: { reason: string; reasonCode: 'seller_request' | 'policy' | 'inactive' | 'fraud' | 'other' }, by: By) {
     if (!body.reason?.trim()) throw invalid([{ path: 'reason', message: 'Give the reason for closing' }]);
     const s = await this.core.seller(sellerId);
     if (!sellerAccountStatusMachine.can(s.status as never, 'close' as never)) throw new AppError('ILLEGAL_TRANSITION', `A ${s.status.replace(/_/g, ' ')} seller cannot be closed`, { from: s.status, event: 'close' });
-    if (body.reasonCode !== 'seller_request') {
-      const access = this.ctx.use('access');
-      const check = await access.check(this.core.principalOf(by), 'sellers.sellers.close');
-      if (check.decision === 'denied') throw new AppError('FORBIDDEN', check.reason, { action: 'sellers.sellers.close' });
-      const req = await access.requestApproval({
-        action: 'sellers.sellers.close',
+    const open = await this.closureObligations(sellerId);
+    const unshipped = open.filter((o) => o.includes('not shipped yet'));
+    if (unshipped.length) throw new AppError('SELLER_HAS_OPEN_OBLIGATIONS', `Finish these first: ${unshipped.join('; ')}`, { obligations: open });
+    const access = this.ctx.use('access');
+    const check = await access.check(this.core.principalOf(by), 'sellers.sellers.close');
+    if (check.decision === 'denied') throw new AppError('FORBIDDEN', check.reason, { action: 'sellers.sellers.close' });
+    const req = await access.requestApproval({
+      action: 'sellers.sellers.close',
+      target: { type: 'seller', id: s.id, ref: s.ref, label: s.store_name, sellerId: s.id, screen: 'admin/seller' },
+      summary: `Close the seller account of ${s.store_name}`,
+      details: { reason: body.reason.trim(), reasonCode: body.reasonCode, openObligations: open },
+      reason: body.reason.trim(),
+      requestedBy: this.core.principalOf(by),
+    });
+    const pending = await this.core.savePendingChange({ kind: 'closure', sellerId: s.id, targetId: s.id, approvalRequestId: req.id, payload: { reason: body.reason.trim(), reasonCode: body.reasonCode }, reason: body.reason.trim(), actor: by.actor });
+    await this.core.timeline(this.repo, s.id, { kind: 'closure_requested', title: 'Closure proposed, waiting for a second reviewer', detail: body.reason, visibility: 'staff', actor: by.actor });
+    await this.core.audit(
+      {
+        action: 'sellers.seller.close_request',
+        actionLabel: 'Proposed closing a seller account',
+        category: 'seller_enforcement',
         target: { type: 'seller', id: s.id, ref: s.ref, label: s.store_name, sellerId: s.id, screen: 'admin/seller' },
-        summary: `Close the seller account of ${s.store_name}`,
-        details: { reason: body.reason.trim(), reasonCode: body.reasonCode },
-        reason: body.reason.trim(),
-        requestedBy: this.core.principalOf(by),
-      });
-      const pending = await this.core.savePendingChange({ kind: 'closure', sellerId: s.id, targetId: s.id, approvalRequestId: req.id, payload: { reason: body.reason.trim(), reasonCode: body.reasonCode }, reason: body.reason.trim(), actor: by.actor });
-      await this.core.timeline(this.repo, s.id, { kind: 'closure_requested', title: 'Closure proposed, waiting for a second reviewer', detail: body.reason, visibility: 'staff', actor: by.actor });
-      await this.core.audit(
-        {
-          action: 'sellers.seller.close_request',
-          actionLabel: 'Proposed closing a seller account',
-          category: 'seller_enforcement',
-          target: { type: 'seller', id: s.id, ref: s.ref, label: s.store_name, sellerId: s.id, screen: 'admin/seller' },
-          reason: body.reason,
-          after: { reasonCode: body.reasonCode },
-          approvalRequestId: req.id,
-        },
-        by,
-      );
-      // saved, pending approval: the account unchanged with the closure and its approval (FORMAT.md, Approval responses)
-      const view = await this.account(s, null, [], { staff: true });
-      return { ...view, pendingChange: view.pendingChange ?? map.pendingStaffChange(pending), approval: view.approval ?? (await this.core.approvalInfo(req.id)) };
-    }
-    return this.account(await this.closeNow(sellerId, { reason: body.reason.trim(), reasonCode: body.reasonCode }, by), null, [], { staff: true });
+        reason: body.reason,
+        after: { reasonCode: body.reasonCode },
+        approvalRequestId: req.id,
+      },
+      by,
+    );
+    // saved, pending approval: the account unchanged with the closure and its approval (FORMAT.md, Approval responses)
+    const view = await this.account(s, null, [], { staff: true });
+    return { ...view, pendingChange: view.pendingChange ?? map.pendingStaffChange(pending), approval: view.approval ?? (await this.core.approvalInfo(req.id)) };
   }
 
   /** Close the account: new sales stop, open obligations stay accessible to members and staff */

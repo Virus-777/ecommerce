@@ -2118,7 +2118,7 @@ Indexes: `(email)`, `(state, expires_at)`
 | `sellers.restriction.lifted` | A restriction is lifted, expires or is overturned | `{ sellerId: uuid, restrictionId: uuid, reason: text, trustEnforcementId: uuid? }` | offers, workqueues |
 | `sellers.restriction.evidence_submitted` | A seller uploads documents to resolve a restriction | `{ sellerId: uuid, restrictionId: uuid }` | workqueues |
 | `sellers.seller.suspended` | A suspension takes effect after second review | `{ sellerId: uuid, suspensionId: uuid, reasonCode: string, reason: text, reviewDate: date, openOrders: enum(seller_keeps_fulfilling|cancel_unshipped_and_refund), appealDeadline: datetime, trustReportId: uuid?, trustEnforcementId: uuid? }` | advertising, cart, catalog, content, finance, fulfillment-service, notifications, offers, promotions, returns, search, trust |
-| `sellers.seller.reinstated` | A suspension ends or the last restriction is lifted, so the account is back to approved (or restricted with remaining restrictions) | `{ sellerId: uuid, from: enum(restricted|suspended), to: enum(approved|restricted), liftedRestrictionId: uuid?, endedSuspensionId: uuid?, remainingRestrictionIds: uuid[] }` | catalog, content, fulfillment-service, notifications, offers, search |
+| `sellers.seller.reinstated` | A suspension ends or the last restriction is lifted, so the account is back to approved (or restricted with remaining restrictions) | `{ sellerId: uuid, from: enum(restricted|suspended), to: enum(approved|restricted), liftedRestrictionId: uuid?, endedSuspensionId: uuid?, remainingRestrictionIds: uuid[] }` | catalog, content, finance, fulfillment-service, notifications, offers, search |
 | `sellers.seller.closed` | A seller account closes (seller request, staff, rejection does not use this event) | `{ sellerId: uuid, reasonCode: string, closedBy: Actor }` | content, finance, fulfillment-service, inventory, media, offers, reviews, search |
 | `sellers.warning.issued` | Staff send a warning, or a warn_seller trust enforcement is executed | `{ sellerId: uuid, warningId: uuid, kind: string, title: string, trustEnforcementId: uuid? }` | notifications, trust |
 | `sellers.warning.resolved` | A warning is resolved by staff or withdrawn because its trust enforcement was reversed | `{ sellerId: uuid, warningId: uuid, note: text, trustEnforcementId: uuid? }` | - |
@@ -2241,6 +2241,7 @@ Checked through the access module (limits per role, second reviewer).
 | `PAYOUT_DETAILS_INVALID` | 422 | Routing number invalid, numbers do not match or the provider refused the account |
 | `STORE_NAME_TAKEN` | 409 | Another seller uses this store name |
 | `COLLECTION_LIMIT_REACHED` | 409 | maxCollections already exist |
+| `SELLER_HAS_OPEN_OBLIGATIONS` | 409 | Orders, returns, cases or money are still open; details.obligations lists them |
 | `LAUNCH_REVIEW_NOT_READY` | 409 | Payout verification and a first submission are needed first; details.missing |
 
 ## Background jobs
