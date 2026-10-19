@@ -31,6 +31,8 @@ export interface EvalLine extends CartLineInput {
 
 export interface FlashState {
   dealPrice: number;
+  /** The offer price when the item was set: the deal is judged against it, never against a later, higher price */
+  regularPrice: number;
   dealStock: number;
   claimed: number;
   reserved: number;
@@ -225,6 +227,9 @@ export function evaluate(input: EvalInput): EvalOutput {
       if (c.kind === 'flash_sale') {
         const f = opt.flash;
         if (!f || (f.state !== 'active' && f.state !== 'sold_out')) continue;
+        // a price raised above the one the deal was set with would grow the discount (and a platform's cost)
+        // with it: the deal does not apply until the price is back at or below that regular price
+        if (regular > f.regularPrice) continue;
         const left = f.dealStock - f.claimed - f.reserved - (pendingDeal.get(unitKey) ?? 0);
         if (f.state === 'sold_out' || left <= 0) {
           skip(c, 'deal_sold_out', `The flash deal ${c.name} is sold out. The regular price applies.`);

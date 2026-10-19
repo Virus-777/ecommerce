@@ -168,7 +168,7 @@ export class CheckoutPart extends Part {
         }
         const f = c.kind === 'flash_sale' ? flashOf.get(`${c.id}:${line.offerId}`) : undefined;
         if (c.kind === 'flash_sale' && !f) continue;
-        opts.push({ campaign: c, consentBps, flash: f ? { dealPrice: f.deal_price, dealStock: f.deal_stock, claimed: f.claimed, reserved: f.reserved, purchaseLimit: f.purchase_limit, state: f.state } : null });
+        opts.push({ campaign: c, consentBps, flash: f ? { dealPrice: f.deal_price, regularPrice: f.regular_price, dealStock: f.deal_stock, claimed: f.claimed, reserved: f.reserved, purchaseLimit: f.purchase_limit, state: f.state } : null });
       }
       priceOptions.set(line.lineId, opts);
     }

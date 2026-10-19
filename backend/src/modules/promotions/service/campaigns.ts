@@ -450,7 +450,8 @@ export class CampaignsPart extends Part {
 
   /** Customer price of an offer under a campaign rule */
   campaignPrice(c: CampaignModel, regular: number, flash?: FlashItemRec): number {
-    if (c.kind === 'flash_sale') return flash ? Math.min(regular, flash.deal_price) : regular;
+    // above the price the item was set with the deal does not apply (evaluate)
+    if (c.kind === 'flash_sale') return flash && regular <= flash.regular_price ? Math.min(regular, flash.deal_price) : regular;
     if (c.kind === 'markdown') return regular - markdownOff(c.discount, regular);
     return regular - unitDiscount(c.discount, regular);
   }
@@ -805,13 +806,15 @@ export class CampaignsPart extends Part {
 
   /* ---------------------------------------------------------------- flash items */
 
-  async flashItems(c: CampaignModel, rows?: FlashItemRec[]): Promise<FlashItem[]> {
+  /** o.storefront leaves out items whose offer now costs more than the regular price they were set with: no deal price applies (evaluate) */
+  async flashItems(c: CampaignModel, rows?: FlashItemRec[], o: { storefront?: boolean } = {}): Promise<FlashItem[]> {
     const items = rows ?? (await this.repo.find('flash_items', { campaign_id: c.id }, { orderBy: [['id', 'asc']] }));
     if (!items.length) return [];
     const cards = await this.core.offerCards(items.map((f) => f.offer_id), { withStock: false });
     const out: FlashItem[] = [];
     for (const f of items) {
       const card = cards.get(f.offer_id);
+      if (o.storefront && card && card.offer.price.amount > f.regular_price) continue;
       const cur = card?.offer.price.currency ?? c.currency;
       const taken = f.claimed + f.reserved;
       out.push({
