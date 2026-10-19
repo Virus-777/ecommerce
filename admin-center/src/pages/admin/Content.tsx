@@ -6,7 +6,7 @@ import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, announce, Badge, Breadcrumbs, Button, Card, Drawer, Field, Icon, IconButton, Img, ImageCropper, SegmentedControl, Select, StatusBadge, TableWrap, Textarea, TextInput, type CropWording, type IconName, type ProcessedImage } from '@marketly/web-shared/ui';
+import { Alert, announce, Badge, Breadcrumbs, Button, Card, DateTimeField, Drawer, Field, Icon, IconButton, Img, ImageCropper, SegmentedControl, Select, StatusBadge, TableWrap, Textarea, TextInput, type CropWording, type IconName, type ProcessedImage } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { LoadError, SkeletonLines, dateTime } from '@/app/parts';
 import { flattenTree, type ApiCategory } from './data/categories';
@@ -144,7 +144,7 @@ export default function Content() {
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState<SectionEdit>(editOf());
   const [position, setPosition] = useState(0);
-  const [errs, setErrs] = useState<Partial<Record<'heading' | 'headline' | 'ctaLabel' | 'ctaUrl' | 'categories', string>>>({});
+  const [errs, setErrs] = useState<Partial<Record<'heading' | 'headline' | 'ctaLabel' | 'ctaUrl' | 'categories' | 'from' | 'to', string>>>({});
   const [device, setDevice] = useState<'desktop' | 'phone'>('desktop');
   const [notice, setNotice] = useState<{ tone: 'success' | 'info'; title: string } | null>(null);
 
@@ -160,6 +160,9 @@ export default function Content() {
   // Opening ?view=edit-section directly edits the first editable section.
   const target = editing ?? (open && !adding && editId === null && !draft.heading ? sections.find((s) => !s.locked) : undefined);
   const kind = target?.kind ?? draft.kind;
+  // The API schedules only sections that never went live (draft → scheduled). A live section's Show from and Remove
+  // at are saved with the draft and apply once the layout is published.
+  const canSchedule = !target || target.status === 'draft';
   const categories = useQuery({
     queryKey: ['catalog', 'categories', 'admin'],
     enabled: open && kind === 'category_shortcuts',
@@ -325,7 +328,7 @@ export default function Content() {
     },
     onSuccess: ({ s, mode }) => {
       refresh();
-      flash(mode === 'draft' ? `${s.title}: draft saved` : `${s.title} scheduled: ${s.schedule.label}`);
+      flash(mode === 'draft' ? `${s.title}: saved to the draft layout. Customers see it once the layout is published.` : `${s.title} scheduled: ${s.schedule.label}`);
       close();
     },
   });
@@ -398,15 +401,17 @@ export default function Content() {
       if (!/^(\/(?!\/)|https?:\/\/|mailto:|tel:)/i.test(draft.ctaUrl.trim())) e.ctaUrl = 'Use a store path such as /deals, or a full https:// link.';
     }
     if (kind === 'category_shortcuts' && !draft.categoryIds.length) e.categories = 'Add at least one category.';
+    // wall times in one time zone: the strings compare in time order
+    if (draft.from && draft.to && draft.to <= draft.from) e.to = 'The removal time must be after “Show from”.';
     setErrs(e);
     if (Object.keys(e).length) {
-      document.getElementById(e.heading ? 'ct-head' : e.headline ? 'ct-headline' : e.ctaLabel ? 'ct-cta' : e.ctaUrl ? 'ct-url' : 'ct-addcat')?.focus();
+      document.getElementById(e.heading ? 'ct-head' : e.headline ? 'ct-headline' : e.ctaLabel ? 'ct-cta' : e.ctaUrl ? 'ct-url' : e.categories ? 'ct-addcat' : 'ct-to')?.focus();
       return;
     }
     if (mode === 'schedule' && !draft.from) {
       saveSection.reset();
+      setErrs({ from: 'Enter when the section starts showing, or use Save draft.' });
       document.getElementById('ct-from')?.focus();
-      flash('Enter a “Show from” time to schedule the section.', 'info');
       return;
     }
     saveSection.mutate(mode);
@@ -745,12 +750,20 @@ export default function Content() {
               {target ? 'Remove section' : 'Discard'}
             </Button>
             <span className="grow" />
-            <Button variant="ghost" size="sm" onClick={() => save('draft')} disabled={saveSection.isPending}>
-              Save draft
-            </Button>
-            <Button size="sm" onClick={() => save('schedule')} disabled={saveSection.isPending}>
-              Schedule
-            </Button>
+            {canSchedule ? (
+              <>
+                <Button variant="ghost" size="sm" onClick={() => save('draft')} disabled={saveSection.isPending}>
+                  Save draft
+                </Button>
+                <Button size="sm" onClick={() => save('schedule')} disabled={saveSection.isPending}>
+                  Schedule
+                </Button>
+              </>
+            ) : (
+              <Button size="sm" onClick={() => save('draft')} disabled={saveSection.isPending}>
+                Save changes
+              </Button>
+            )}
           </>
         }
       >
@@ -880,11 +893,11 @@ export default function Content() {
           </div>
         )}
         <div className="ab-form-grid">
-          <Field label="Show from" optional>
-            <TextInput id="ct-from" type="datetime-local" icon="calendar" value={draft.from} onChange={(e) => set('from', e.target.value)} />
+          <Field label="Show from" optional error={errs.from}>
+            <DateTimeField id="ct-from" value={draft.from} error={!!errs.from} placeholder="Right away" onChange={(v) => set('from', v)} />
           </Field>
-          <Field label="Remove at" optional>
-            <TextInput id="ct-to" type="datetime-local" icon="calendar" value={draft.to} onChange={(e) => set('to', e.target.value)} />
+          <Field label="Remove at" optional error={errs.to}>
+            <DateTimeField id="ct-to" value={draft.to} after={draft.from || undefined} error={!!errs.to} placeholder="No end" onChange={(v) => set('to', v)} />
           </Field>
         </div>
         <Field label="Time zone">

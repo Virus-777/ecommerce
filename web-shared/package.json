@@ -25,7 +25,8 @@
   "dependencies": {
     "@tanstack/react-query": "^5.104.2",
     "lucide-react": "^1.55.0",
-    "openapi-fetch": "^0.17.0"
+    "openapi-fetch": "^0.17.0",
+    "react-day-picker": "10.0.2"
   },
   "peerDependencies": {
     "react": "^19.3.0",

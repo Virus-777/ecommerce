@@ -13,5 +13,6 @@ export {
 export { Field, TextInput, Select, Textarea, Checkbox, Radio, Switch, OptionCard, FileDrop } from './Forms';
 export { Dialog, Drawer } from './Overlays';
 export { ImageCropper, type CropWording, type ProcessedImage } from './ImageCropper';
+export { DateTimeField } from './DateTimeField';
 export { LineChart, BarChart, Sparkline, Legend, SplitBar } from './Charts';
 export { announce } from './announce';
