@@ -421,6 +421,11 @@ export function fundingIssues(f: Funding, participation: ParticipationSettings |
   return issues;
 }
 
+/** Platform and shared funding needs a budget, so its platform cost is checked against the approval limits */
+export function budgetIssues(c: Pick<CampaignModel, 'funding' | 'limits'>): Issue[] {
+  return c.funding.owner !== 'seller' && !c.limits.budget ? [{ path: 'limits.budget', message: 'Set a budget: Marketly-funded discounts need one so Finance can check it against the approval limit' }] : [];
+}
+
 export const normalizeCode = (code: string | null | undefined) => {
   const c = code?.trim();
   return c ? c.toUpperCase() : null;

@@ -157,7 +157,7 @@ const participation_offers = new Schema(
 participation_offers.index({"participation_id":1,"offer_id":1}, {"name":"participation_offers_participation_id_offer_id_cc16d0","unique":true});
 participation_offers.index({"offer_id":1}, {"name":"participation_offers_offer_id_959ceb"});
 
-/** Deal price, deal stock and purchase limit per offer in a flash sale */
+/** Deal price, deal stock and purchase limit per offer in a flash sale. approved_* keep what Finance confirmed (set at confirmFunding): a live or paused sale can only change within them */
 const flash_items = new Schema(
   {
     _id: { type: String, required: true }, // id
@@ -171,6 +171,9 @@ const flash_items = new Schema(
     purchase_limit: { type: Number, required: true, validate: integer },
     state: { type: String, required: true },
     sold_out_at: { type: Date, default: null },
+    approved_deal_price: { type: Number, default: null, validate: integer },
+    approved_deal_stock: { type: Number, default: null, validate: integer },
+    approved_purchase_limit: { type: Number, default: null, validate: integer },
     /** lock-by-write counter (kernel/mongo/table.ts) */
     _lock: Number,
   },

@@ -30,6 +30,7 @@ import type {
 } from '../../../spec/promotions.js';
 import { flashItemMachine, promotionCampaignMachine } from '../domain/state-machines.js';
 import {
+  budgetIssues,
   codeIssues,
   discountIssues,
   discountLabel,
@@ -571,6 +572,7 @@ export class CampaignsPart extends Part {
     const next = this.core.step(promotionCampaignMachine, c.status, 'submit');
     const issues: Issue[] = [...periodIssues(c.startsAt, c.endsAt, c.timeZone, this.now()), ...discountIssues(c.discount, { phase3: this.ctx.config.launchPhase >= 3 }), ...fundingIssues(c.funding, c.participation), ...limitIssues(c.limits)];
     if (c.scope.mode !== 'sitewide' && !c.scope.include.length) issues.push({ path: 'scope.include', message: 'The scope is empty' });
+    issues.push(...budgetIssues(c));
     if (c.kind === 'flash_sale' && !(await this.repo.count('flash_items', { campaign_id: id }))) issues.push({ path: 'flashItems', message: 'Add flash items first' });
     if (!issues.length && PRICE_KINDS.includes(c.kind)) {
       const n = await this.rebuildEligible(id);
@@ -599,6 +601,9 @@ export class CampaignsPart extends Part {
     const { row, model: c } = await this.core.campaign(id);
     this.core.step(promotionCampaignMachine, c.status, 'confirmFunding');
     await this.refuseOwnCampaign(row, by);
+    // sent before a budget was required: without one the platform cost can't be checked against any limit
+    const noBudget = budgetIssues(c);
+    if (noBudget.length) throw invalid(noBudget, 'Send the campaign back to Marketing to set a budget');
     const review = (await this.latestReviews([id])).get(id);
     if (review?.approval_request_id && review.state === 'waiting') throw new AppError('APPROVAL_REQUIRED', 'The budget is waiting for approval', { approvalRequestId: review.approval_request_id });
     const platformMax = review?.platform_max ?? 0;
@@ -631,12 +636,17 @@ export class CampaignsPart extends Part {
 
   /** Separation of duties (G65a): whoever created the campaign or last sent it to Finance can't confirm its funding */
   private async refuseOwnCampaign(row: CampaignRec, by: By): Promise<void> {
-    const me = by.actor.id;
-    if (!me) return;
-    const submitted = (await this.repo.find('campaign_log', { campaign_id: row.id, action: 'submitted' }, { orderBy: [['at', 'desc']], limit: 1 }))[0];
-    if (decodeActor(row.created_by)?.id === me || submitted?.actor_id === me) {
+    if (await this.isOwnCampaign(row, by)) {
       throw this.ctx.error('SAME_REVIEWER', 'You created or submitted this campaign: another Finance member confirms its funding');
     }
+  }
+
+  /** Whoever created the campaign or last sent it to Finance */
+  private async isOwnCampaign(row: CampaignRec, by: By): Promise<boolean> {
+    const me = by.actor.id;
+    if (!me) return false;
+    const submitted = (await this.repo.find('campaign_log', { campaign_id: row.id, action: 'submitted' }, { orderBy: [['at', 'desc']], limit: 1 }))[0];
+    return decodeActor(row.created_by)?.id === me || submitted?.actor_id === me;
   }
 
   /** in_review → approved with the review confirmed; publishes funding_confirmed */
@@ -646,6 +656,8 @@ export class CampaignsPart extends Part {
       if (!row) throw notFound('Campaign');
       const status = this.core.step(promotionCampaignMachine, row.status, 'confirmFunding');
       await tx.update('campaigns', id, { status, approval_request_id: null, ...(costCenter ? { cost_center: costCenter } : {}), updated_at: this.now(), version: row.version + 1 });
+      // what Finance confirmed: a live or paused flash sale can only change within it
+      for (const f of await tx.find('flash_items', { campaign_id: id })) await tx.update('flash_items', f.id, { approved_deal_price: f.deal_price, approved_deal_stock: f.deal_stock, approved_purchase_limit: f.purchase_limit });
       const r = (await tx.find('funding_reviews', { campaign_id: id }, { orderBy: [['sent_at', 'desc']], limit: 1 }))[0];
       if (r) await tx.update('funding_reviews', r.id, { state: 'confirmed', reviewer_id: r.reviewer_id ?? by.actor.id ?? null, decided_at: this.now(), comment: comment ?? r.comment });
       await this.core.log(tx, id, 'funding.confirmed', by, comment);
@@ -688,7 +700,16 @@ export class CampaignsPart extends Part {
     const row = await this.repo.get('campaigns', e.target.id);
     if (!row || row.approval_request_id !== e.requestId || row.status !== 'in_review') return;
     const by: By = { actor: e.decidedBy ?? SYSTEM };
-    if (e.outcome === 'approved') {
+    if (e.outcome === 'approved' && (await this.isOwnCampaign(row, by))) {
+      // separation of duties holds in the Approvals Inbox too: the request is closed and the campaign stays in review
+      const note = 'Approved by the person who created or submitted the campaign; another Finance member confirms the funding';
+      await this.repo.transaction(async (tx) => {
+        await tx.update('campaigns', row.id, { approval_request_id: null, updated_at: this.now() });
+        await tx.updateWhere('funding_reviews', { campaign_id: row.id, approval_request_id: e.requestId }, { approval_request_id: null });
+        await this.core.log(tx, row.id, 'funding.approval_ignored', by, note, { approvalRequestId: e.requestId });
+      });
+      await this.audited(row.id, 'promotions.campaign.funding_approval_ignored', 'Budget approval by its own creator or submitter ignored', by, note, e.requestId);
+    } else if (e.outcome === 'approved') {
       await this.finishConfirmation(row.id, by, e.reason ?? null, null);
       await this.audited(row.id, 'promotions.campaign.confirm_funding', 'Budget approved; funding confirmed', by, e.reason, e.requestId);
     } else if (e.outcome === 'rejected') {
@@ -868,8 +889,39 @@ export class CampaignsPart extends Part {
     if (issues.length) throw invalid(issues);
     if (problems.length) throw this.ctx.error('OFFER_NOT_ELIGIBLE', 'Some offers cannot be in this flash sale', { offers: problems });
     if (stockProblems.length) throw this.ctx.error('INSUFFICIENT_STOCK', 'Deal stock is above the available stock', { offers: stockProblems });
+    // a sale Finance confirmed: before it starts any change goes back to Finance; once live it changes only within what was confirmed
+    const reviewed = c.ownerKind !== 'seller';
+    const before = new Map((await this.repo.find('flash_items', { campaign_id: id })).filter((f) => f.state !== 'ended').map((f) => [f.offer_id, f]));
+    if (reviewed && (c.status === 'live' || c.status === 'paused')) {
+      const above = items.flatMap((x) => {
+        const f = before.get(x.offerId);
+        const title = cards.get(x.offerId)!.title;
+        if (!f) return [{ offerId: x.offerId, reason: `${title} was not in the sale Finance confirmed` }];
+        // items confirmed before the approved values were kept: their current values are the ceiling
+        const price = f.approved_deal_price ?? f.deal_price;
+        const stock = f.approved_deal_stock ?? f.deal_stock;
+        const limit = f.approved_purchase_limit ?? f.purchase_limit;
+        const reasons = [
+          ...(x.dealPrice.amount < price ? [`deal price below the confirmed ${moneyFull(price, c.currency)}`] : []),
+          ...(x.dealStock > stock ? [`deal stock above the confirmed ${stock}`] : []),
+          ...(x.purchaseLimit > limit ? [`purchase limit above the confirmed ${limit}`] : []),
+        ];
+        return reasons.length ? [{ offerId: x.offerId, reason: `${title}: ${reasons.join(', ')}` }] : [];
+      });
+      if (above.length) throw new AppError('ILLEGAL_TRANSITION', `A ${c.status} flash sale can only change within what Finance confirmed; end it and create a new one for more`, { from: c.status, items: above });
+    }
+    const changed = items.length !== before.size || items.some((x) => {
+      const f = before.get(x.offerId);
+      return !f || f.deal_price !== x.dealPrice.amount || f.deal_stock !== x.dealStock || f.purchase_limit !== x.purchaseLimit;
+    });
+    const reopen = reviewed && changed && (c.status === 'approved' || c.status === 'scheduled');
     const restocked: string[] = [];
     await this.repo.transaction(async (tx) => {
+      if (reopen) {
+        const row = (await tx.get('campaigns', id, { forUpdate: true }))!;
+        await tx.update('campaigns', id, { status: this.core.step(promotionCampaignMachine, row.status, 'reopen'), approval_request_id: null, updated_at: this.now(), version: row.version + 1 });
+        await this.core.log(tx, id, 'reopened', by, reason ?? null, { fields: ['flashItems'], material: ['flashItems'] });
+      }
       const existing = new Map((await tx.find('flash_items', { campaign_id: id }, { forUpdate: true })).map((f) => [f.offer_id, f]));
       for (const x of items) {
         const card = cards.get(x.offerId)!;
@@ -885,7 +937,7 @@ export class CampaignsPart extends Part {
           await tx.update('flash_items', cur.id, { deal_price: x.dealPrice.amount, regular_price: card.offer.price.amount, deal_stock: x.dealStock, purchase_limit: x.purchaseLimit, state, ...(state === 'active' ? { sold_out_at: null } : {}) });
           existing.delete(x.offerId);
         } else {
-          await tx.insert('flash_items', { id: newId(), campaign_id: id, offer_id: x.offerId, deal_price: x.dealPrice.amount, regular_price: card.offer.price.amount, deal_stock: x.dealStock, claimed: 0, reserved: 0, purchase_limit: x.purchaseLimit, state: 'active', sold_out_at: null });
+          await tx.insert('flash_items', { id: newId(), campaign_id: id, offer_id: x.offerId, deal_price: x.dealPrice.amount, regular_price: card.offer.price.amount, deal_stock: x.dealStock, claimed: 0, reserved: 0, purchase_limit: x.purchaseLimit, state: 'active', sold_out_at: null, approved_deal_price: null, approved_deal_stock: null, approved_purchase_limit: null });
         }
       }
       for (const left of existing.values()) {
@@ -897,7 +949,7 @@ export class CampaignsPart extends Part {
     });
     await this.refreshEligibleQuietly(id);
     const result = await this.flashItems(c);
-    await this.core.audit({ action: 'promotions.flash_items.set', actionLabel: restocked.length ? 'Set flash items (restocked)' : 'Set flash items', category: 'other', target: { type: 'campaign', id, ref: c.ref, label: c.name }, after: items, reason: reason ?? null }, by);
+    await this.core.audit({ action: 'promotions.flash_items.set', actionLabel: reopen ? 'Set flash items (reopened for Finance)' : restocked.length ? 'Set flash items (restocked)' : 'Set flash items', category: 'other', target: { type: 'campaign', id, ref: c.ref, label: c.name }, after: items, reason: reason ?? null }, by);
     return result;
   }
 
