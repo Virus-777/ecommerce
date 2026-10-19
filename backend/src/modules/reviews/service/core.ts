@@ -199,6 +199,13 @@ export class Core {
 
   sellerName = (names: Map<string, string>, id: string) => names.get(sellerKey(id)) ?? (isOfficial(id) ? OFFICIAL_STORE_NAME : 'Marketplace seller');
 
+  /** A customer under a reviews restriction (or suspended) writes no reviews, questions, votes or seller feedback */
+  async assertMayWrite(who: CustomerWho): Promise<void> {
+    if (!who.customerId) return;
+    const can = await this.optional('customers', (c) => c.canWriteReviews(who.customerId!));
+    if (can && !can.allowed) throw this.ctx.error('REVIEWS_RESTRICTED', can.reason ?? 'Reviews are paused on this account');
+  }
+
   /** Customers' full display names (customers, optional) */
   async customerNames(ids: readonly string[]): Promise<Map<string, string>> {
     const out = new Map<string, string>();

@@ -117,6 +117,7 @@ export class ReviewsPart {
   }
 
   async create(who: CustomerWho, input: ReviewInput): Promise<MyReview> {
+    await this.core.assertMayWrite(who);
     const customerId = this.requireCustomer(who);
     const { item, open } = await this.eligibleItem(customerId, input.orderItemId);
     const repo = this.core.repo;
@@ -196,6 +197,7 @@ export class ReviewsPart {
    * removal the fixed review waits for a moderator. A draft stays a draft until draft: false.
    */
   async update(who: CustomerWho, id: string, input: ReviewUpdateInput): Promise<MyReview> {
+    await this.core.assertMayWrite(who);
     const customerId = this.requireCustomerFor404(who);
     const row = await this.ownReview(customerId, id);
     const from = row.status as MyReview['status'];
@@ -319,6 +321,7 @@ export class ReviewsPart {
   /* ================================================================ votes */
 
   async vote(who: CustomerWho, input: { targetType: 'product_review' | 'answer'; targetId: string; helpful: boolean }): Promise<{ helpfulCount: number }> {
+    await this.core.assertMayWrite(who);
     const repo = this.core.repo;
     if (!who.customerId) throw notFound('Content');
     const customerId = who.customerId;

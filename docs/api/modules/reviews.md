@@ -1095,6 +1095,7 @@ Indexes: `(state, due_at)`, `(customer_id)`
 
 | Code | Status | Meaning |
 |---|---|---|
+| `REVIEWS_RESTRICTED` | 403 | The account is suspended, closed or under a reviews restriction: no new or edited reviews, questions, answers, votes or seller feedback (customers.canWriteReviews). |
 | `REVIEW_NOT_ELIGIBLE` | 422 | No delivered purchase of this product by the customer, or the review window has ended. |
 | `ALREADY_REVIEWED` | 409 | The customer already reviewed this product (or left feedback for this package); edit it instead. details.id. |
 | `FEEDBACK_NOT_YET_AVAILABLE` | 422 | Seller feedback opens after the package is delivered. details.availableFrom. |

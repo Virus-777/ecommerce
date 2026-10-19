@@ -63,12 +63,12 @@ export class CustomersRepository {
   /** Customers with their active blocks (a join is two reads: the customers, then their restrictions in force) */
   async #standingsOf(rows: CustomerRow[], now: Date): Promise<CustomerStanding[]> {
     if (!rows.length) return [];
-    const restrictions = await this.#t.restrictions.find({ customer_id: oneOf(rows.map((r) => r.id)), scope: oneOf(['ordering', 'messaging', 'account']), ...inForce(now) });
+    const restrictions = await this.#t.restrictions.find({ customer_id: oneOf(rows.map((r) => r.id)), scope: oneOf(['ordering', 'messaging', 'reviews', 'account']), ...inForce(now) });
     return rows.map((row) => {
       const own = restrictions.filter((r) => r.customer_id === row.id);
       const messaging = own.filter((r) => r.scope === 'messaging' || r.scope === 'account');
       const until = messaging.some((r) => r.ends_at === null) ? null : messaging.reduce<Date | null>((max, r) => (r.ends_at && (!max || r.ends_at > max) ? r.ends_at : max), null);
-      return { row, orderBlock: own.some((r) => r.scope === 'ordering' || r.scope === 'account'), messageBlock: messaging.length > 0, messageBlockUntil: until };
+      return { row, orderBlock: own.some((r) => r.scope === 'ordering' || r.scope === 'account'), messageBlock: messaging.length > 0, messageBlockUntil: until, reviewBlock: own.some((r) => r.scope === 'reviews' || r.scope === 'account') };
     });
   }
 

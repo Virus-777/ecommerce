@@ -163,10 +163,15 @@ export class Placement {
     if (quoteVersion !== session.quote_version || expectedTotal.amount !== total.amount || expectedTotal.currency !== total.currency) {
       throw this.core.error('QUOTE_OUTDATED', 'Your order total changed. Check the new total before placing your order.', { quoteVersion: session.quote_version, total });
     }
-    if (session.customer_id) {
-      const can = await this.ctx.use('customers').canPlaceOrders(session.customer_id);
-      if (!can.allowed) throw this.core.error('ORDERING_RESTRICTED', can.reason ?? 'This account cannot place orders right now', { reason: can.reason ?? null });
-    }
+    await this.checkStanding(session);
+  }
+
+  /** The customer may order now: on Place order and on every retry after a decline (a restriction can start in between) */
+  private async checkStanding(session: SessionRow) {
+    const customers = this.ctx.use('customers');
+    const email = this.core.account(session).email;
+    const can = session.customer_id ? await customers.canPlaceOrders(session.customer_id) : email ? await customers.canGuestOrder(email) : { allowed: true };
+    if (!can.allowed) throw this.core.error('ORDERING_RESTRICTED', can.reason ?? 'This account cannot place orders right now', { reason: can.reason ?? null });
   }
 
   /** PAYMENT_ATTEMPTS_EXCEEDED once the session used maxPaymentAttempts (sessions.attempt_count is never reset) */
@@ -250,6 +255,7 @@ export class Placement {
     if (input.quoteVersion !== session.quote_version || input.expectedTotal.amount !== total.amount || input.expectedTotal.currency !== total.currency) {
       throw this.core.error('QUOTE_OUTDATED', 'Your order total changed. Check the new total before paying.', { quoteVersion: session.quote_version, total });
     }
+    await this.checkStanding(session);
     const chosen = await this.validateMethod(session, input.method);
 
     const claimed = await this.core.repo.transaction(async (tx) => {

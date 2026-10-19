@@ -954,6 +954,10 @@ export interface CustomersPublicApi {
   rememberCheckoutAddress(customerId: string, address: common.Address, label?: string): Promise<SavedAddress>;
   /** False while the account is suspended, closed or has an active ordering restriction Used by: checkout. */
   canPlaceOrders(customerId: string): Promise<{ allowed: boolean, reason?: string }>;
+  /** False while the account is suspended or closed, or has an active reviews (or account) restriction: no new or edited reviews, questions, votes or seller feedback Used by: reviews. */
+  canWriteReviews(customerId: string): Promise<{ allowed: boolean, reason?: string }>;
+  /** False when the email belongs to a customer account that cannot place orders, so guest checkout does not get around an ordering restriction. The reason does not reveal the account Used by: checkout. */
+  canGuestOrder(email: string): Promise<{ allowed: boolean, reason?: string }>;
   /** False during an active messaging restriction. Replies inside open cases stay allowed (support decides). Used by: messaging, reviews. */
   canSendMessages(customerId: string): Promise<{ allowed: boolean, reason?: string, until?: string }>;
   /** Promotional consent per channel plus the personalisation switches (recommendations, recent searches). Essential order messages ignore it. search reads recentSearches before saving a search to the account. Used by: notifications, promotions, advertising, search, checkout. */
@@ -1726,7 +1730,7 @@ export const spec = defineModuleSpec({
   summary: "The customer side of an account: profile, saved addresses, marketing consent, recently viewed products, the Account tab overview, guest order access, data export and account closure, and the staff view of customer accounts with notes and recorded account actions. Credentials, sessions and verification belong to identity.",
   dependsOn: ["identity"],
   optionalDeps: ["orders","returns","support","messaging","wallet","reviews","wishlist","payments","catalog","offers","trust","reports","notifications","access","audit","media","workqueues"],
-  publicApi: ["getCustomer","getCustomerByUserId","getAddressForOrder","rememberCheckoutAddress","canPlaceOrders","canSendMessages","getMarketingConsent","validateAddress","listRecentlyViewed","listRecentlyViewedItems","searchCustomers","exportRows"],
+  publicApi: ["getCustomer","getCustomerByUserId","getAddressForOrder","rememberCheckoutAddress","canPlaceOrders","canWriteReviews","canGuestOrder","canSendMessages","getMarketingConsent","validateAddress","listRecentlyViewed","listRecentlyViewedItems","searchCustomers","exportRows"],
   permissions: [
     {
       "key": "customers.accounts.view",

@@ -65,6 +65,7 @@ export class QaPart {
   }
 
   async ask(who: CustomerWho, productId: string, text: string): Promise<Question> {
+    await this.core.assertMayWrite(who);
     if (!who.customerId) throw notFound('Product');
     const product = isUuid(productId) ? await this.core.product(productId) : null;
     if (!product) throw notFound('Product');
@@ -148,8 +149,9 @@ export class QaPart {
     return this.views.answerOut(row);
   }
 
-  answerAsCustomer(who: CustomerWho, questionId: string, text: string) {
+  async answerAsCustomer(who: CustomerWho, questionId: string, text: string) {
     if (!who.customerId) throw notFound('Question');
+    await this.core.assertMayWrite(who);
     return this.answer(questionId, text, { kind: 'customer', customerId: who.customerId }, who);
   }
 
@@ -203,6 +205,7 @@ export class QaPart {
    * request is fixed and resubmitted for review (resubmit). Only the author's own answers (others: NOT_FOUND).
    */
   async editAnswer(author: { kind: 'customer'; customerId: string } | { kind: 'seller'; sellerId: string }, id: string, text: string, by: By): Promise<Answer> {
+    if (author.kind === 'customer') await this.core.assertMayWrite({ ...by, customerId: author.customerId, accountId: null });
     const repo = this.core.repo;
     const own = (a: AnswerRec | undefined) => !!a && (author.kind === 'customer' ? a.author_kind === 'customer' && a.author_id === author.customerId : a.author_kind === 'seller' && (a.seller_id ?? a.author_id) === author.sellerId);
     const before = isUuid(id) ? await repo.get('answers', id) : undefined;

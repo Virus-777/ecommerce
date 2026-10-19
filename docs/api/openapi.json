@@ -20352,7 +20352,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nORDERING_RESTRICTED: The account cannot place orders now (suspended, closed or restricted). details.reason.",
             "content": {
               "application/json": {
                 "schema": {
@@ -102538,7 +102538,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nREVIEWS_RESTRICTED: The account is suspended, closed or under a reviews restriction: no new or edited reviews, questions, answers, votes or seller feedback (customers.canWriteReviews).",
             "content": {
               "application/json": {
                 "schema": {
@@ -102644,7 +102644,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nREVIEWS_RESTRICTED: The account is suspended, closed or under a reviews restriction: no new or edited reviews, questions, answers, votes or seller feedback (customers.canWriteReviews).",
             "content": {
               "application/json": {
                 "schema": {
@@ -102883,7 +102883,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nREVIEWS_RESTRICTED: The account is suspended, closed or under a reviews restriction: no new or edited reviews, questions, answers, votes or seller feedback (customers.canWriteReviews).",
             "content": {
               "application/json": {
                 "schema": {
@@ -103010,7 +103010,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nREVIEWS_RESTRICTED: The account is suspended, closed or under a reviews restriction: no new or edited reviews, questions, answers, votes or seller feedback (customers.canWriteReviews).",
             "content": {
               "application/json": {
                 "schema": {
@@ -103721,7 +103721,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nREVIEWS_RESTRICTED: The account is suspended, closed or under a reviews restriction: no new or edited reviews, questions, answers, votes or seller feedback (customers.canWriteReviews).",
             "content": {
               "application/json": {
                 "schema": {
@@ -103949,7 +103949,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nREVIEWS_RESTRICTED: The account is suspended, closed or under a reviews restriction: no new or edited reviews, questions, answers, votes or seller feedback (customers.canWriteReviews).",
             "content": {
               "application/json": {
                 "schema": {
@@ -104190,7 +104190,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nREVIEWS_RESTRICTED: The account is suspended, closed or under a reviews restriction: no new or edited reviews, questions, answers, votes or seller feedback (customers.canWriteReviews).",
             "content": {
               "application/json": {
                 "schema": {
@@ -104378,7 +104378,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nREVIEWS_RESTRICTED: The account is suspended, closed or under a reviews restriction: no new or edited reviews, questions, answers, votes or seller feedback (customers.canWriteReviews).",
             "content": {
               "application/json": {
                 "schema": {

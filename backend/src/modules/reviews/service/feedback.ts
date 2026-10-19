@@ -94,6 +94,7 @@ export class FeedbackPart {
   private clampStar = (v: number) => Math.min(5, Math.max(1, Math.round(Number.isFinite(v) ? v : 1)));
 
   async create(who: CustomerWho, input: FeedbackInput): Promise<MyFeedback> {
+    await this.core.assertMayWrite(who);
     if (!who.customerId) throw notFound('Order');
     const customerId = who.customerId;
     const order = isUuid(input.orderId) ? (await this.core.orders([input.orderId])).get(input.orderId) : undefined;
@@ -166,6 +167,7 @@ export class FeedbackPart {
   }
 
   async update(who: CustomerWho, id: string, input: FeedbackUpdateInput): Promise<MyFeedback> {
+    await this.core.assertMayWrite(who);
     const customerId = who.customerId;
     const row = await this.own(customerId, id);
     const from = row.status as MyFeedback['status'];

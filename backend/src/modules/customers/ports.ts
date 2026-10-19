@@ -25,6 +25,8 @@ export interface CustomerStanding {
   /** An active messaging or account restriction; latest end (null = until lifted) */
   messageBlock: boolean;
   messageBlockUntil: Date | null;
+  /** An active reviews or account restriction */
+  reviewBlock: boolean;
 }
 
 export type ViewOwner = { kind: 'customer' | 'guest'; id: string };

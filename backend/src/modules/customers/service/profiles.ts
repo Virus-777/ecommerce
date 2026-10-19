@@ -153,6 +153,30 @@ export class Profiles {
     return { allowed: true };
   }
 
+  /**
+   * False while the account is suspended or closed, or has an active reviews (or account) restriction. Without a
+   * customer record there is no restriction to apply (reviews checks the purchase itself).
+   */
+  async canWriteReviews(customerId: string): Promise<{ allowed: boolean; reason?: string }> {
+    const s = isUuid(customerId) ? await this.core.repo.standingById(customerId, this.core.now()) : undefined;
+    if (!s) return { allowed: true };
+    const st = map.status(s.row);
+    if (st === 'closed') return { allowed: false, reason: 'This account is closed' };
+    if (st === 'suspended') return { allowed: false, reason: 'This account is suspended' };
+    if (s.reviewBlock) return { allowed: false, reason: 'Reviews, questions and feedback are paused on this account' };
+    return { allowed: true };
+  }
+
+  /**
+   * Guest checkout with the email of a customer account that cannot place orders is refused too (otherwise an
+   * ordering restriction is one sign-out away). The reason does not tell a stranger about the account.
+   */
+  async canGuestOrder(email: string): Promise<{ allowed: boolean; reason?: string }> {
+    const c = email?.trim() ? await this.core.repo.findCustomerByEmail(email.trim().toLowerCase()) : undefined;
+    if (!c || (await this.canPlaceOrders(c.id)).allowed) return { allowed: true };
+    return { allowed: false, reason: 'Orders with this email can’t be placed as a guest. Sign in to your account, or contact support.' };
+  }
+
   async getProfile(scope: Scope): Promise<CustomerProfile> {
     return this.profileOf(await this.ownCustomer(scope));
   }
