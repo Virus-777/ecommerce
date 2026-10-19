@@ -1,20 +1,23 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { call, errorMessage, useApi, type components } from '@marketly/web-shared/api';
+import { call, errorMessage, resolveProductImageSpec, uploadMedia, useApi, type components } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, announce, Badge, Breadcrumbs, Button, Card, Drawer, Field, Icon, IconButton, Img, SegmentedControl, Select, StatusBadge, TableWrap, TextInput, type IconName } from '@marketly/web-shared/ui';
+import { Alert, announce, Badge, Breadcrumbs, Button, Card, Drawer, Field, Icon, IconButton, Img, ImageCropper, SegmentedControl, Select, StatusBadge, TableWrap, Textarea, TextInput, type CropWording, type IconName, type ProcessedImage } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { LoadError, SkeletonLines, dateTime } from '@/app/parts';
+import { flattenTree, type ApiCategory } from './data/categories';
 
 // Design: pages/admin/admin-content.html · view "edit-section" = edit drawer for a homepage section.
 // Data: GET /api/admin/content/homepage (sections, draft and review state), /homepage/versions, /pages (campaign
 // pages), /homepage/sections/{id}/products (drawer). Writes: PUT /homepage/order (reorder = draft), POST
 // /homepage/submit | review | publish | discard-draft, /homepage/versions/{n}/restore, POST/PATCH /homepage/sections,
 // /sections/{id}/schedule, /sections/{id}/remove, POST /pages (new campaign page draft), /pages/{id}/publish.
+// The drawer edits what a section holds: banner copy, button and images (uploaded as content_image), the category
+// list (GET /api/admin/catalog/categories) and manual products. Flash deals hold nothing: they come from Promotions.
 // The layout follows the API's review rule: when a review is required the author sends the draft for review and
 // someone else approves it (SAME_REVIEWER) before it is published.
 
@@ -22,6 +25,7 @@ type S = components['schemas'];
 type Section = S['content.HomeSectionAdmin'];
 type SectionInput = S['content.SectionInput'];
 type SourceMode = 'manual' | 'collection' | 'rule';
+type MediaRef = S['MediaRef'];
 
 const KIND: Record<string, { icon: IconName; wire: string }> = {
   campaign_banner: { icon: 'image', wire: 'w-hero' },
@@ -52,13 +56,31 @@ const TIME_ZONES = [
   { value: 'America/New_York', label: 'Eastern Time (ET)' },
 ];
 const OWNER_ROLES = ['Content', 'Marketing', 'Official Store', 'Sellers'];
-const PRODUCT_KINDS = new Set(['featured_products', 'official_highlights', 'new_arrivals', 'popular_products', 'deals']);
+// Same set as the API (content domain rules): deals are filled by Promotions, not by a product source.
+const PRODUCT_KINDS = new Set(['featured_products', 'official_highlights', 'new_arrivals', 'popular_products', 'collection_teaser']);
+// Kinds "Add section" can create here: each one's contents can be filled in the drawer.
+const NEW_KINDS: Array<{ value: SectionInput['kind']; label: string }> = [
+  { value: 'campaign_banner', label: 'Campaign banner' },
+  { value: 'category_shortcuts', label: 'Shop by category' },
+  { value: 'deals', label: 'Flash deals' },
+];
+const MAX_BANNER_IMAGES = 3; // the storefront hero shows three tiles
+const BANNER_SPEC = resolveProductImageSpec({ aspectRatio: '1:1', detailWidth: 800, thumbnailWidth: 320, quality: 85 });
+const BANNER_WORDING: CropWording = { what: 'banner images', place: 'frame the subject', detail: ['Homepage banner', 'the homepage banner'], thumbnail: ['Small screens', 'small screens'] };
 
 interface SectionEdit {
+  kind: string;
   heading: string;
   sub: string;
   source: SourceMode;
   productIds: string[];
+  categoryIds: string[];
+  eyebrow: string;
+  headline: string;
+  body: string;
+  ctaLabel: string;
+  ctaUrl: string;
+  images: MediaRef[];
   /** datetime-local, in tz */
   from: string;
   to: string;
@@ -84,11 +106,20 @@ const isoToWall = (iso: string | null | undefined, tz: string) => {
 const editOf = (s?: Section): SectionEdit => {
   const c = s?.config;
   const tz = c?.timeZone ?? s?.schedule.timeZone ?? TIME_ZONES[0].value;
+  const b = c?.banner;
   return {
+    kind: s?.kind ?? NEW_KINDS[0].value,
     heading: c?.heading ?? s?.title ?? '',
     sub: c?.subheading ?? '',
     source: (c?.productSource?.mode as SourceMode | undefined) ?? 'manual',
     productIds: c?.productSource?.productIds ?? [],
+    categoryIds: c?.categoryIds ?? [],
+    eyebrow: b?.eyebrow ?? '',
+    headline: b?.headline ?? '',
+    body: b?.body ?? '',
+    ctaLabel: b?.primaryCta.label ?? 'Shop now',
+    ctaUrl: b?.primaryCta.url ?? '/deals',
+    images: b?.images ?? [],
     from: isoToWall(c?.showFrom ?? s?.schedule.publishAt, tz),
     to: isoToWall(c?.removeAt ?? s?.schedule.unpublishAt, tz),
     tz,
@@ -110,9 +141,10 @@ export default function Content() {
 
   const [view, setView] = useView<'edit-section'>();
   const [editId, setEditId] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState<SectionEdit>(editOf());
   const [position, setPosition] = useState(0);
-  const [headErr, setHeadErr] = useState('');
+  const [errs, setErrs] = useState<Partial<Record<'heading' | 'headline' | 'ctaLabel' | 'ctaUrl' | 'categories', string>>>({});
   const [device, setDevice] = useState<'desktop' | 'phone'>('desktop');
   const [notice, setNotice] = useState<{ tone: 'success' | 'info'; title: string } | null>(null);
 
@@ -126,7 +158,23 @@ export default function Content() {
   const open = view === 'edit-section';
   const editing = sections.find((s) => s.id === editId);
   // Opening ?view=edit-section directly edits the first editable section.
-  const target = editing ?? (open && editId === null && !draft.heading ? sections.find((s) => !s.locked) : undefined);
+  const target = editing ?? (open && !adding && editId === null && !draft.heading ? sections.find((s) => !s.locked) : undefined);
+  const kind = target?.kind ?? draft.kind;
+  const categories = useQuery({
+    queryKey: ['catalog', 'categories', 'admin'],
+    enabled: open && kind === 'category_shortcuts',
+    queryFn: () => call(api.GET('/api/admin/catalog/categories')),
+  });
+  // "Parent › Child" names, in catalog order
+  const catList = (() => {
+    const flat = flattenTree((categories.data ?? []) as ApiCategory[]);
+    const byId = new Map(flat.map((c) => [c.id, c]));
+    const path = (id: string | null): string => {
+      const c = id ? byId.get(id) : undefined;
+      return c ? (c.parent ? `${path(c.parent)} › ${c.name}` : c.name) : '';
+    };
+    return flat.map((c) => ({ id: c.id, name: path(c.id), visible: c.visible, image: c.image }));
+  })();
   const products = useQuery({
     queryKey: ['content', 'section-products', target?.id],
     enabled: open && !!target && PRODUCT_KINDS.has(target.kind),
@@ -145,7 +193,68 @@ export default function Content() {
   const order = useMutation({
     mutationFn: (ids: string[]) => call(api.PUT('/api/admin/content/homepage/order', { body: { sectionIds: ids } })),
     onSuccess: (d) => qc.setQueryData(['content', 'homepage'], d),
+    // a dropped order is shown at once (see dragFinish); on failure show the server's order again
+    onError: () => void qc.invalidateQueries({ queryKey: ['content', 'homepage'] }),
   });
+
+  // Dragging a section by its handle: the row moves as the pointer passes another row's middle, and dropping saves
+  // the order like the arrows do. Window listeners (not pointer capture) because React moves the row's node.
+  // live.current is the drag as of the last pointer event (a drop can follow a move before React re-renders)
+  const [drag, setDrag] = useState<{ id: string; ids: string[] } | null>(null);
+  const live = useRef(drag);
+  const setLive = (d: typeof drag) => {
+    live.current = d;
+    setDrag(d);
+  };
+  const rowEls = useRef(new Map<string, HTMLDivElement>());
+  const shown = drag ? drag.ids.map((id) => sections.find((s) => s.id === id)).filter((s): s is Section => !!s) : sections;
+  const dragStart = (e: ReactPointerEvent<HTMLElement>, id: string) => {
+    if (e.button !== 0 || order.isPending) return;
+    e.preventDefault();
+    setLive({ id, ids: sections.map((s) => s.id) });
+  };
+  const dragMove = useRef<(y: number) => void>(() => {});
+  dragMove.current = (y) => {
+    const d = live.current;
+    if (!d) return;
+    const others = d.ids.filter((id) => id !== d.id);
+    const at = others.filter((id) => {
+      const r = rowEls.current.get(id)?.getBoundingClientRect();
+      return !!r && r.top + r.height / 2 < y;
+    }).length;
+    const ids = [...others.slice(0, at), d.id, ...others.slice(at)];
+    if (ids.some((id, k) => id !== d.ids[k])) setLive({ ...d, ids });
+  };
+  const dragFinish = useRef<(save: boolean) => void>(() => {});
+  dragFinish.current = (save) => {
+    const d = live.current;
+    if (!d) return;
+    setLive(null);
+    const { id, ids } = d;
+    if (!save || ids.every((x, k) => x === sections[k]?.id)) return;
+    qc.setQueryData(['content', 'homepage'], (d: typeof h) => d && { ...d, sections: d.sections.map((s) => ({ ...s, position: ids.indexOf(s.id) })) });
+    order.mutate(ids);
+    announce(`${sections.find((s) => s.id === id)?.title ?? 'Section'} moved to position ${ids.indexOf(id) + 1}`);
+  };
+  const dragging = drag !== null;
+  useEffect(() => {
+    if (!dragging) return;
+    const move = (e: PointerEvent) => dragMove.current(e.clientY);
+    const up = () => dragFinish.current(true);
+    const cancel = () => dragFinish.current(false);
+    const key = (e: KeyboardEvent) => e.key === 'Escape' && cancel();
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cancel);
+    window.addEventListener('keydown', key);
+    return () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cancel);
+      window.removeEventListener('keydown', key);
+    };
+  }, [dragging]);
+
   const layout = useMutation({
     mutationFn: async (kind: 'submit' | 'publish' | 'approve' | 'discard') => {
       if (kind === 'submit') return call(api.POST('/api/admin/content/homepage/submit', { body: { summary: 'Homepage layout changes' } }));
@@ -181,12 +290,27 @@ export default function Content() {
   const saveSection = useMutation({
     mutationFn: async (mode: 'draft' | 'schedule') => {
       const base = (target?.config ?? {}) as Partial<SectionInput>;
+      const k = (base.kind ?? kind) as SectionInput['kind'];
+      const url = draft.ctaUrl.trim();
       const body: SectionInput = {
         ...base,
-        kind: (base.kind ?? target?.kind ?? 'featured_products') as SectionInput['kind'],
+        kind: k,
         heading: draft.heading.trim(),
         subheading: draft.sub.trim() || null,
-        productSource: base.productSource || !target ? { ...(base.productSource ?? {}), mode: draft.source, productIds: draft.productIds } : base.productSource,
+        productSource: PRODUCT_KINDS.has(k) && (base.productSource || !target) ? { ...(base.productSource ?? {}), mode: draft.source, productIds: draft.productIds } : base.productSource,
+        banner:
+          k === 'campaign_banner'
+            ? {
+                ...(base.banner ?? {}),
+                eyebrow: draft.eyebrow.trim() || null,
+                headline: draft.headline.trim(),
+                body: draft.body.trim() || null,
+                images: draft.images,
+                // the link kind only stays while the link does
+                primaryCta: { label: draft.ctaLabel.trim(), url, kind: base.banner?.primaryCta.url === url ? base.banner.primaryCta.kind : null },
+              }
+            : base.banner,
+        categoryIds: k === 'category_shortcuts' ? draft.categoryIds : base.categoryIds,
         showFrom: draft.from ? wallToIso(draft.from, draft.tz) : null,
         removeAt: draft.to ? wallToIso(draft.to, draft.tz) : null,
         timeZone: draft.tz,
@@ -202,7 +326,7 @@ export default function Content() {
     onSuccess: ({ s, mode }) => {
       refresh();
       flash(mode === 'draft' ? `${s.title}: draft saved` : `${s.title} scheduled: ${s.schedule.label}`);
-      setView('');
+      close();
     },
   });
   const removeSection = useMutation({
@@ -210,8 +334,18 @@ export default function Content() {
     onSuccess: (s) => {
       refresh();
       flash(`${s.title} removed. Restore it from Version history.`);
-      setView('');
+      close();
     },
+  });
+
+  // Hiding takes the section off the store now; showing it again waits for the layout to be published.
+  const visibility = useMutation({
+    mutationFn: ({ s, hidden }: { s: Section; hidden: boolean }) => call(api.POST('/api/admin/content/homepage/sections/{id}/visibility', { params: { path: { id: s.id } }, body: { hidden } })),
+    onSuccess: (s, v) => {
+      refresh();
+      flash(v.hidden ? `${s.title} is hidden from customers now` : `${s.title} will show again once the layout is published`, v.hidden ? 'success' : 'info');
+    },
+    onError: (e, v) => flash(`${v.s.title} wasn’t ${v.hidden ? 'hidden' : 'shown'}: ${errorMessage(e)}`, 'info'),
   });
 
   const move = (i: number, dir: -1 | 1) => {
@@ -225,30 +359,51 @@ export default function Content() {
 
   const openEdit = (s?: Section) => {
     setEditId(s?.id ?? null);
+    setAdding(!s);
     setDraft(editOf(s));
     setPosition(s ? sections.findIndex((x) => x.id === s.id) : sections.length);
-    setHeadErr('');
+    setErrs({});
     saveSection.reset();
     setView('edit-section');
   };
   // Direct ?view=edit-section: fill the drawer from the first editable section once loaded.
-  if (open && editId === null && target && !draft.heading && !saveSection.isPending) {
+  if (open && !adding && editId === null && target && !draft.heading && !saveSection.isPending) {
     setEditId(target.id);
     setDraft(editOf(target));
     setPosition(sections.findIndex((x) => x.id === target.id));
   }
-  const close = () => setView('');
+  const close = () => {
+    setAdding(false);
+    setView('');
+  };
   const set = <K extends keyof SectionEdit>(k: K, v: SectionEdit[K]) => {
     setDraft((d) => ({ ...d, [k]: v }));
-    if (k === 'heading' && v) setHeadErr('');
+    if (k in errs) setErrs((e) => ({ ...e, [k]: undefined }));
+    if (k === 'categoryIds') setErrs((e) => ({ ...e, categories: undefined }));
+  };
+  const moveCat = (i: number, dir: -1 | 1) => {
+    const ids = [...draft.categoryIds];
+    const j = i + dir;
+    if (j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    set('categoryIds', ids);
   };
   const save = (mode: 'draft' | 'schedule') => {
-    if (!draft.heading.trim()) {
-      setHeadErr('Enter a heading.');
+    const e: typeof errs = {};
+    if (!draft.heading.trim()) e.heading = kind === 'campaign_banner' ? 'Enter a name.' : 'Enter a heading.';
+    if (kind === 'campaign_banner') {
+      if (!draft.headline.trim()) e.headline = 'Enter a headline.';
+      if (!draft.ctaLabel.trim()) e.ctaLabel = 'Enter the button text.';
+      // same rule as the API: a store path, or an http(s), mailto or tel link
+      if (!/^(\/(?!\/)|https?:\/\/|mailto:|tel:)/i.test(draft.ctaUrl.trim())) e.ctaUrl = 'Use a store path such as /deals, or a full https:// link.';
+    }
+    if (kind === 'category_shortcuts' && !draft.categoryIds.length) e.categories = 'Add at least one category.';
+    setErrs(e);
+    if (Object.keys(e).length) {
+      document.getElementById(e.heading ? 'ct-head' : e.headline ? 'ct-headline' : e.ctaLabel ? 'ct-cta' : e.ctaUrl ? 'ct-url' : 'ct-addcat')?.focus();
       return;
     }
     if (mode === 'schedule' && !draft.from) {
-      setHeadErr('');
       saveSection.reset();
       document.getElementById('ct-from')?.focus();
       flash('Enter a “Show from” time to schedule the section.', 'info');
@@ -330,7 +485,7 @@ export default function Content() {
               <div className="stack gap-0">
                 <h2 className="h4">Homepage sections</h2>
                 <span className="xs muted">
-                  Shown top to bottom · use arrows to reorder · live version {current}
+                  Shown top to bottom · drag or use arrows to reorder · live version {current}
                   {h?.draftVersion ? ` · draft version ${h.draftVersion}` : ''}
                 </span>
               </div>
@@ -340,16 +495,38 @@ export default function Content() {
                 <SkeletonLines rows={6} />
               </div>
             )}
-            {sections.map((s, i) => (
-              <div key={s.id} className={cx('ab-sec', s.locked && 'is-ad', open && s.id === target?.id && 'is-edit')}>
-                <span className="handle">
-                  <Icon name={s.locked ? 'lock' : 'grip-vertical'} className="ic-sm" />
-                </span>
+            {shown.map((s, i) => (
+              <div
+                key={s.id}
+                ref={(el) => void (el ? rowEls.current.set(s.id, el) : rowEls.current.delete(s.id))}
+                className={cx('ab-sec', s.locked && 'is-ad', open && s.id === target?.id && 'is-edit', drag?.id === s.id && 'is-dragging')}
+              >
+                {canManage && !s.locked ? (
+                  // pointer only: keyboard and screen reader users reorder with the arrow buttons
+                  <span className="handle can-drag" title="Drag to reorder" aria-hidden="true" onPointerDown={(e) => dragStart(e, s.id)}>
+                    <Icon name="grip-vertical" className="ic-sm" />
+                  </span>
+                ) : (
+                  <span className="handle">
+                    <Icon name={s.locked ? 'lock' : 'grip-vertical'} className="ic-sm" />
+                  </span>
+                )}
                 <span className="row gap-2">
                   <span className="xs muted num">{i + 1}</span>
                   <Icon name={kindOf(s.kind).icon} className="ic-sm" />
                   <b className="small">{s.title}</b>
                   {s.locked ? <Badge tone="outline">Ad position</Badge> : <StatusBadge status={STATUS[s.status] ?? s.status} />}
+                  {s.hidden ? (
+                    <Badge tone="outline" icon="eye-off">
+                      Hidden
+                    </Badge>
+                  ) : (
+                    s.hiddenLive && (
+                      <Badge tone="warning" icon="eye-off">
+                        Hidden until published
+                      </Badge>
+                    )
+                  )}
                 </span>
                 <span className="meta">
                   <span>
@@ -372,7 +549,14 @@ export default function Content() {
                     <>
                       {canManage && <IconButton icon="arrow-up" label={`Move ${s.title} up`} disabled={i === 0 || order.isPending} onClick={() => move(i, -1)} />}
                       {canManage && <IconButton icon="arrow-down" label={`Move ${s.title} down`} disabled={i === sections.length - 1 || order.isPending} onClick={() => move(i, 1)} />}
-                      <IconButton icon="eye" label={`Preview ${s.title}`} onClick={() => announce(`${s.title}: ${s.description}`)} />
+                      {canManage && (
+                        <IconButton
+                          icon={s.hidden ? 'eye-off' : 'eye'}
+                          label={s.hidden ? `Show ${s.title}` : `Hide ${s.title}`}
+                          disabled={visibility.isPending}
+                          onClick={() => visibility.mutate({ s, hidden: !s.hidden })}
+                        />
+                      )}
                       {canManage && (
                         <Button variant="ghost" size="sm" to={href('admin/content', 'edit-section')} onClick={(e) => (e.preventDefault(), openEdit(s))}>
                           Edit
@@ -575,13 +759,94 @@ export default function Content() {
             {errorMessage(saveSection.error ?? removeSection.error)}
           </Alert>
         )}
-        <Field label="Heading" error={headErr}>
-          <TextInput id="ct-head" value={draft.heading} error={!!headErr} onChange={(e) => set('heading', e.target.value)} />
-        </Field>
-        <Field label="Subheading" optional>
-          <TextInput id="ct-sub" value={draft.sub} onChange={(e) => set('sub', e.target.value)} />
-        </Field>
-        {(!target || PRODUCT_KINDS.has(target.kind)) && (
+        {!target && (
+          <Field label="Type">
+            <Select id="ct-kind" options={NEW_KINDS} value={draft.kind} onChange={(e) => set('kind', e.target.value)} />
+          </Field>
+        )}
+        {kind === 'campaign_banner' ? (
+          <Field label="Name" hint="Only staff see this name. Customers see the headline." error={errs.heading}>
+            <TextInput id="ct-head" value={draft.heading} error={!!errs.heading} onChange={(e) => set('heading', e.target.value)} />
+          </Field>
+        ) : (
+          <>
+            <Field label="Heading" error={errs.heading}>
+              <TextInput id="ct-head" value={draft.heading} error={!!errs.heading} onChange={(e) => set('heading', e.target.value)} />
+            </Field>
+            <Field label="Subheading" optional>
+              <TextInput id="ct-sub" value={draft.sub} onChange={(e) => set('sub', e.target.value)} />
+            </Field>
+          </>
+        )}
+        {kind === 'campaign_banner' && (
+          <>
+            <Field label="Small line above the headline" optional>
+              <TextInput id="ct-eyebrow" value={draft.eyebrow} placeholder="Ends Sunday" onChange={(e) => set('eyebrow', e.target.value)} />
+            </Field>
+            <Field label="Headline" error={errs.headline}>
+              <TextInput id="ct-headline" value={draft.headline} error={!!errs.headline} onChange={(e) => set('headline', e.target.value)} />
+            </Field>
+            <Field label="Text" optional>
+              <Textarea id="ct-body" rows={3} value={draft.body} onChange={(e) => set('body', e.target.value)} />
+            </Field>
+            <div className="ab-form-grid">
+              <Field label="Button text" error={errs.ctaLabel}>
+                <TextInput id="ct-cta" value={draft.ctaLabel} error={!!errs.ctaLabel} onChange={(e) => set('ctaLabel', e.target.value)} />
+              </Field>
+              <Field label="Button link" hint="A store path such as /deals, or a full https:// link" error={errs.ctaUrl}>
+                <TextInput id="ct-url" value={draft.ctaUrl} error={!!errs.ctaUrl} onChange={(e) => set('ctaUrl', e.target.value)} />
+              </Field>
+            </div>
+            <BannerImages images={draft.images} alt={draft.headline.trim()} onChange={(v) => set('images', v)} />
+            {target?.config?.linkedPromotionId && <span className="xs muted">This banner follows a promotion campaign and hides by itself when the campaign ends.</span>}
+          </>
+        )}
+        {kind === 'category_shortcuts' && (
+          <div className="stack gap-2">
+            <span className="label">Categories ({draft.categoryIds.length})</span>
+            {categories.isPending ? (
+              <SkeletonLines rows={3} />
+            ) : categories.isError ? (
+              <LoadError error={categories.error} onRetry={() => void categories.refetch()} />
+            ) : (
+              <>
+                {draft.categoryIds.length > 0 && (
+                  <ul className="list">
+                    {draft.categoryIds.map((id, i) => {
+                      const c = catList.find((x) => x.id === id);
+                      return (
+                        <li key={id}>
+                          <Img icon="layout-grid" tint="1" className="tiny" src={c?.image?.url} alt="" />
+                          <span className="grow stack gap-0">
+                            <span className="small truncate">{c?.name ?? 'Deleted category'}</span>
+                            {(!c || !c.visible) && <span className="xs muted">Hidden from customers, so it isn’t shown</span>}
+                          </span>
+                          <IconButton icon="arrow-up" label={`Move ${c?.name ?? 'category'} up`} disabled={i === 0} onClick={() => moveCat(i, -1)} />
+                          <IconButton icon="arrow-down" label={`Move ${c?.name ?? 'category'} down`} disabled={i === draft.categoryIds.length - 1} onClick={() => moveCat(i, 1)} />
+                          <IconButton icon="x" label={`Remove ${c?.name ?? 'category'}`} onClick={() => set('categoryIds', draft.categoryIds.filter((x) => x !== id))} />
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+                <Field label="Add a category" error={errs.categories}>
+                  <Select
+                    id="ct-addcat"
+                    value=""
+                    options={[{ value: '', label: 'Choose a category…' }, ...catList.filter((c) => !draft.categoryIds.includes(c.id)).map((c) => ({ value: c.id, label: c.visible ? c.name : `${c.name} (hidden)` }))]}
+                    onChange={(e) => e.target.value && set('categoryIds', [...draft.categoryIds, e.target.value])}
+                  />
+                </Field>
+              </>
+            )}
+          </div>
+        )}
+        {kind === 'deals' && (
+          <Alert tone="info" title="Flash deals fill themselves">
+            This section shows up to 4 flash sales that are live in Promotions. To add or remove deals, start or stop a flash sale in <Link to={href('admin/promotions')}>Promotions</Link>.
+          </Alert>
+        )}
+        {PRODUCT_KINDS.has(kind) && (
           <Field label="Product source" hint={target?.config?.productSource?.rule?.description ?? undefined}>
             <Select id="ct-src" options={SOURCES} value={draft.source} disabled={!!target && draft.source !== 'manual'} onChange={(e) => set('source', e.target.value as SourceMode)} />
           </Field>
@@ -636,5 +901,68 @@ export default function Content() {
         </Alert>
       </Drawer>
     </AdminLayout>
+  );
+}
+
+/** Banner images (up to three, 1 : 1 crop, uploaded as content_image). The API keeps them by id. */
+function BannerImages({ images, alt, onChange }: { images: MediaRef[]; alt: string; onChange: (images: MediaRef[]) => void }) {
+  const { session } = useApi();
+  const input = useRef<HTMLInputElement>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const upload = async (img: ProcessedImage) => {
+    setBusy(true);
+    setError('');
+    try {
+      const asset = await uploadMedia(session, img.file, 'content_image', alt ? { alt } : {});
+      // MediaRef.url must be an absolute URL
+      const url = new URL(asset.url || img.thumbUrl, window.location.origin).href;
+      onChange([...images, { id: asset.id, url, alt: alt || null, width: asset.width ?? BANNER_SPEC.detail.width, height: asset.height ?? BANNER_SPEC.detail.height }]);
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="stack gap-2">
+      <span className="label">
+        Images ({images.length} of {MAX_BANNER_IMAGES})
+      </span>
+      {images.length > 0 && (
+        <ul className="list">
+          {images.map((m, i) => (
+            <li key={m.id}>
+              <Img icon="image" tint="1" className="thumb" src={m.url} alt="" />
+              <span className="grow small">Image {i + 1}</span>
+              <IconButton icon="x" label={`Remove image ${i + 1}`} onClick={() => onChange(images.filter((x) => x.id !== m.id))} />
+            </li>
+          ))}
+        </ul>
+      )}
+      <span className="xs sub">Square, saved at 800 × 800. Without images, the banner shows icons.</span>
+      {images.length < MAX_BANNER_IMAGES && (
+        <div className="row gap-2">
+          <Button variant="secondary" size="sm" icon="upload" onClick={() => input.current?.click()} disabled={busy}>
+            {busy ? 'Uploading…' : 'Add image'}
+          </Button>
+          <input
+            ref={input}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            hidden
+            onChange={(e) => {
+              setFiles([...(e.target.files ?? [])].slice(0, 1));
+              e.target.value = '';
+            }}
+          />
+        </div>
+      )}
+      {error && <span className="xs t-danger-text">{error}</span>}
+      {files.length > 0 && <ImageCropper files={files} spec={BANNER_SPEC} wording={BANNER_WORDING} onProcessed={(img) => void upload(img)} onClose={() => setFiles([])} />}
+    </div>
   );
 }
