@@ -55,7 +55,7 @@ export const OWN_SECTIONS: SectionInfo[] = [
   { key: 'market', title: 'Market', subtitle: 'Country, service region, currency, time zone and language', order: 0 },
   { key: 'support_hours', title: 'Support hours and contacts', subtitle: 'Business hours, closures and contact details used for deadlines and the Help pages', order: 10 },
   { key: 'checkout', title: 'Checkout', subtitle: 'Guest checkout and account offers', order: 20 },
-  { key: 'apps', title: 'Website and Android app', subtitle: 'App versions and maintenance notice', order: 30 },
+  { key: 'apps', title: 'Website and Android app', subtitle: 'Which apps Marketly serves, app versions and maintenance notice', order: 30 },
 ];
 
 /**
@@ -148,6 +148,9 @@ export const BUILT_INS: BuiltIn[] = [
   { key: 'checkout.guestCheckoutEnabled', section: 'checkout', label: 'Guest checkout', description: 'Customers can buy without an account.', valueType: 'bool', default: true, approval: 'business_owner', applyScopes: ['new_only'] },
   { key: 'checkout.offerAccountAfterGuestPurchase', section: 'checkout', label: 'Offer an account after a guest purchase', description: 'The confirmation page offers to create an account with the order email.', valueType: 'bool', default: true, applyScopes: ['new_only'] },
   // apps
+  // which apps Marketly serves and maintains (owner decision 2026-10-18): nothing is removed when one is off
+  { key: 'apps.serveWebsite', section: 'apps', label: 'Serve the website', description: 'The desktop and tablet website is maintained. When off, desktop images are optional for ads (the phone images serve the app and the phone-width website).', valueType: 'bool', default: true, public: true },
+  { key: 'apps.serveAndroidApp', section: 'apps', label: 'Serve the Android app', description: 'The Android app is maintained. Phone images stay required either way: the phone-width website uses them too.', valueType: 'bool', default: true, public: true },
   { key: 'apps.android.minVersionCode', section: 'apps', label: 'Minimum Android version code', description: 'Older apps must update before continuing.', valueType: 'int', default: 1, min: 1 },
   { key: 'apps.android.latestVersionCode', section: 'apps', label: 'Latest Android version code', description: 'Older apps are invited to update.', valueType: 'int', default: 1, min: 1 },
   { key: 'apps.android.latestVersionName', section: 'apps', label: 'Latest Android version name', description: 'Shown in the update prompt, e.g. 1.4.0.', valueType: 'string', default: '1.0.0' },

@@ -255,3 +255,52 @@ describe('approval and lifecycle', () => {
     expect(res.body.desktop.creativeId).not.toBe(res.body.phone.creativeId);
   });
 });
+
+describe('deleting drafts', () => {
+  it('deletes a staff draft that never ran, with the creatives only it used; a campaign that ran is archived instead', async () => {
+    const own = await creative(k, 'home_banner', 'any', [1200, 300], { headline: 'Only in this draft' });
+    const res = await k.call('POST', `${ADMIN}/campaigns`, k.staff, campaignInput(k, { name: 'Draft to delete', placementKey: 'home_banner', creativeIds: [own.id] }));
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const id = res.body.id;
+    const listed = (await k.call('GET', `${ADMIN}/campaigns?limit=100`, k.staff)).body.items.find((x: any) => x.id === id);
+    expect(listed.allowedActions).toContain('delete');
+
+    const del = await k.call('DELETE', `${ADMIN}/campaigns/${id}`, k.staff);
+    expect(del.status, JSON.stringify(del.body)).toBe(204);
+    expect((await k.call('GET', `${ADMIN}/campaigns/${id}`, k.staff)).status).toBe(404);
+    expect((await k.call('GET', `${ADMIN}/creatives?limit=100`, k.staff)).body.items.some((c: any) => c.id === own.id)).toBe(false);
+    expect(k.audits.find((a) => a.action === 'advertising.campaign.delete' && a.target.id === id)).toMatchObject({ before: { name: 'Draft to delete', status: 'draft' } });
+    expect((await k.call('DELETE', `${ADMIN}/campaigns/${id}`, k.staff)).status).toBe(404);
+
+    // not a draft: refused
+    const live = await liveCampaign(k, { name: 'Running banner', placementKey: 'home_banner', creativeIds: [(await creative(k, 'home_banner', 'any', [1200, 300])).id] });
+    const refused = await k.call('DELETE', `${ADMIN}/campaigns/${live.id}`, k.staff);
+    expect(refused.status).toBe(409);
+    expect(refused.body.error.code).toBe('ILLEGAL_TRANSITION');
+  });
+});
+
+describe('served apps (Settings › Website and Android app)', () => {
+  it('without the website, a campaign needs only the phone image; the desktop format stays available', async () => {
+    const placements = async () => (await k.call('GET', `${ADMIN}/placements`, k.staff)).body as any[];
+    expect((await placements()).find((p) => p.key === 'home_banner').requiredDevices).toEqual(['desktop', 'phone']);
+    const phone = await creative(k, 'home_banner', 'phone', [750, 400]);
+    const created = await k.call('POST', `${ADMIN}/campaigns`, k.staff, campaignInput(k, { name: 'Phone only', placementKey: 'home_banner', creativeIds: [phone.id] }));
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const creativesCheck = async () => (await k.call('POST', `${ADMIN}/campaigns/${created.body.id}/check`, k.staff)).body.checks.find((c: any) => c.label === 'Creatives');
+    expect(await creativesCheck()).toMatchObject({ state: 'fail', detail: 'Missing desktop creative' });
+
+    const served = k.svc.core.websiteServed;
+    k.svc.core.websiteServed = async () => false;
+    try {
+      const banner = (await placements()).find((p) => p.key === 'home_banner');
+      expect(banner.requiredDevices).toEqual(['phone']);
+      expect(banner.formats.map((f: any) => f.device)).toEqual(['desktop', 'phone']);
+      expect(await creativesCheck()).toMatchObject({ state: 'ok' });
+      // a desktop image can still be added
+      expect((await creative(k, 'home_banner', 'desktop', [1200, 300])).id).toBeTruthy();
+    } finally {
+      k.svc.core.websiteServed = served;
+    }
+  });
+});

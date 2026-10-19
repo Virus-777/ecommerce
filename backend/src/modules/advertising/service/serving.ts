@@ -192,7 +192,9 @@ export class ServingPart extends Part {
       const list = allowed.filter((e) => e.m.placement.id === p.id);
       if (!list.length) continue;
       const rot = p.rotation as unknown as RotationRule;
-      const max = Math.max(1, Math.min(p.max_per_page ?? 1, rot.maxInRotation ?? p.max_per_page ?? 1));
+      // the smaller of the placement's limits; with none set a carousel shows every eligible ad, others one
+      const limits = [p.max_per_page, rot.maxInRotation].filter((x): x is number => typeof x === 'number' && x > 0);
+      const max = limits.length ? Math.min(...limits) : rot.mode === 'carousel' ? list.length : 1;
       const imps = this.pick(list, p, req.context?.categoryId ?? null, max)
         .map((e) => this.impression(e, viewer, req))
         .filter((x): x is AdImpression => Boolean(x));

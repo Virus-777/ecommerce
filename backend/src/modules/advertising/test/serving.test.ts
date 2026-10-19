@@ -134,6 +134,22 @@ describe('scenario 8: opening advertisement', () => {
     expect(firsts).toEqual(new Set([a.id, b.id]));
   });
 
+  it('the home banner carousel shows every live ad unless staff set a limit', async () => {
+    for (const name of ['Banner 1', 'Banner 2', 'Banner 3', 'Banner 4', 'Banner 5']) {
+      const c1 = await creative(k, 'home_banner', 'any', [1200, 300]);
+      await liveCampaign(k, { name, placementKey: 'home_banner', creativeIds: [c1.id], dismissal: null, frequencyCap: null });
+    }
+    // five live banners: all five, no limit of 3
+    expect((await serve(k, { visitorId: visitor(), slots: ['home_banner'] })).slots.home_banner).toHaveLength(5);
+    const placement = (await k.call('GET', `${ADMIN}/placements`, k.staff)).body.find((p: any) => p.key === 'home_banner');
+    expect(placement).toMatchObject({ maxPerPage: null, rotation: { mode: 'carousel', maxInRotation: null, label: 'Carousel, 6 s each' } });
+    const limited = await k.call('PATCH', `${ADMIN}/placements/${placement.id}`, k.staff, { maxPerPage: 2, reason: 'Two at a time', version: placement.version });
+    expect(limited.status, JSON.stringify(limited.body)).toBe(200);
+    expect((await serve(k, { visitorId: visitor(), slots: ['home_banner'] })).slots.home_banner).toHaveLength(2);
+    await k.call('PATCH', `${ADMIN}/placements/${placement.id}`, k.staff, { maxPerPage: null, reason: 'All again', version: limited.body.version });
+    expect((await serve(k, { visitorId: visitor(), slots: ['home_banner'] })).slots.home_banner).toHaveLength(5);
+  });
+
   it('audience: only data the privacy choices allow; signed-in and region targeting', async () => {
     const c1 = await creative(k, 'home_banner', 'any', [1200, 300]);
     const c = await liveCampaign(k, { name: 'Signed-in CA', placementKey: 'home_banner', creativeIds: [c1.id], audience: { mode: 'selected', regions: ['CA'], visitors: 'all', signIn: 'signed_in', categoryIds: [] } });

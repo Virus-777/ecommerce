@@ -14,7 +14,7 @@ import type * as audit from '../../../spec/audit.js';
 import type * as common from '../../../spec/common.js';
 import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import type * as offers from '../../../spec/offers.js';
-import { DEFAULT_RULES, pagesLabel, type ReviewRole, type RuleValues } from '../domain/rules.js';
+import { DEFAULT_RULES, pagesLabel, requiredDevices, type ReviewRole, type RuleValues } from '../domain/rules.js';
 import type { PlacementRec, RulesRec, Span } from '../ports.js';
 import type { AdvertisingRepository } from '../repository.js';
 import type { BillingPart } from './billing.js';
@@ -262,7 +262,19 @@ export class Core {
     return (await this.placementRows()).find((p) => p.id === id);
   }
 
-  placementView(p: PlacementRec, liveCampaigns = 0): Placement {
+  /** Settings › Website and Android app › Serve the website (apps.serveWebsite): on unless set off */
+  async websiteServed(): Promise<boolean> {
+    const settings = this.ctx.tryUse('settings');
+    if (!settings) return true;
+    try {
+      return (await settings.get<boolean>('apps.serveWebsite')) !== false;
+    } catch (err) {
+      this.ctx.log.warn({ err }, 'advertising: apps.serveWebsite unavailable; desktop images stay required');
+      return true;
+    }
+  }
+
+  placementView(p: PlacementRec, liveCampaigns = 0, websiteServed = true): Placement {
     const eligible = (p.eligible_pages ?? []) as string[];
     return {
       id: p.id,
@@ -275,6 +287,7 @@ export class Core {
       eligiblePages: eligible,
       pagesLabel: pagesLabel(eligible),
       formats: (p.formats ?? []) as never,
+      requiredDevices: requiredDevices((p.formats ?? []) as never, websiteServed),
       frequencyCap: (p.frequency_cap ?? null) as never,
       trigger: (p.trigger ?? null) as never,
       rotation: p.rotation as never,

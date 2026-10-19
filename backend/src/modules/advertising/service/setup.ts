@@ -19,7 +19,8 @@ export class SetupPart extends Part {
   async listPlacements(): Promise<Placement[]> {
     const rows = await this.core.placementRows();
     const live = await this.repo.find('campaigns', { status: 'live' });
-    return rows.map((p) => this.core.placementView(p, live.filter((c) => c.placement_id === p.id).length));
+    const website = await this.core.websiteServed();
+    return rows.map((p) => this.core.placementView(p, live.filter((c) => c.placement_id === p.id).length, website));
   }
 
   async updatePlacement(id: string, patch: PlacementPatch, by: By): Promise<Placement> {
@@ -82,7 +83,7 @@ export class SetupPart extends Part {
       },
       by,
     );
-    return this.core.placementView(after, await this.parts.views.liveCount(id));
+    return this.core.placementView(after, await this.parts.views.liveCount(id), await this.core.websiteServed());
   }
 
   /* ---------------------------------------------------------------- global rules */

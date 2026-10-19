@@ -141,7 +141,8 @@ export class CampaignsPart extends Part {
     const usable = creatives.filter((c) => c.status !== 'rejected');
     if (!creatives.length && m.placement.key !== 'sponsored_product') add('fail', 'Creatives', 'Add at least one creative');
     else if (creatives.length) {
-      const missing = missingDevices((m.placement.formats ?? []) as never, usable.map((c) => c.device));
+      // desktop images are optional while the website is not served (Settings › Serve the website)
+      const missing = missingDevices((m.placement.formats ?? []) as never, usable.map((c) => c.device), await this.core.websiteServed());
       if (missing.length) add('fail', 'Creatives', `Missing ${missing.join(' and ')} creative`);
       else add('ok', 'Creatives', `${creatives.length} creative${creatives.length === 1 ? '' : 's'} for ${m.placement.name}`);
       const rejected = creatives.filter((c) => c.status === 'rejected');
@@ -709,6 +710,49 @@ export class CampaignsPart extends Part {
     if (after.seller_id && after.billing !== 'none') await this.parts.billing.accrueCampaign(after.id).catch((err) => this.ctx.log.warn({ err, campaignId: id }, 'advertising: charges not accrued at finish'));
     if (o.audit) await this.core.audit({ action: 'advertising.campaign.finish', actionLabel: `Finished ${before.ref} early`, target: this.target(before), reason }, by);
     return after;
+  }
+
+  /**
+   * DELETE /campaigns/{id}: a staff draft that never ran goes, with its items, review steps, log and the creatives only
+   * it used (their files released). A campaign that ran keeps its history (finish, then archive); a seller's request
+   * is rejected, not deleted.
+   */
+  async deleteDraft(id: string, by: By): Promise<void> {
+    if (!isUuid(id)) throw notFound('Campaign');
+    const row = await this.repo.get('campaigns', id);
+    if (!row) throw notFound('Campaign');
+    if (row.status !== 'draft') throw new AppError('ILLEGAL_TRANSITION', 'Only a draft can be deleted. Finish a campaign that ran, then archive it.', { from: row.status, event: 'delete' });
+    if (row.origin !== 'staff') throw new AppError('CONFLICT', "This is a seller's request: reject it instead of deleting it");
+    const [events, stats, charges, attributions] = await Promise.all([
+      this.repo.count('ad_events', { campaign_id: id }),
+      this.repo.count('daily_stats', { campaign_id: id }),
+      this.repo.count('ad_charges', { campaign_id: id }),
+      this.repo.count('attributions', { campaign_id: id }),
+    ]);
+    if (events + stats + charges + attributions) throw new AppError('CONFLICT', 'This campaign has delivery history (displays, clicks or charges). Archive it instead.');
+    const links = await this.repo.find('campaign_creatives', { campaign_id: id });
+    // creatives no other campaign uses go with it
+    const own: string[] = [];
+    for (const creativeId of [...new Set(links.map((l) => l.creative_id))]) {
+      const others = (await this.repo.find('campaign_creatives', { creative_id: creativeId })).filter((l) => l.campaign_id !== id);
+      if (!others.length) own.push(creativeId);
+    }
+    const creatives = own.length ? await this.repo.find('creatives', { id: own }) : [];
+    await this.repo.transaction(async (tx) => {
+      for (const table of ['campaign_items', 'campaign_creatives', 'approval_steps', 'campaign_log', 'frequency_state'] as const) await tx.removeWhere(table, { campaign_id: id });
+      if (own.length) await tx.removeWhere('creatives', { id: own });
+      await tx.removeWhere('campaigns', { id });
+    });
+    for (const c of creatives) if (c.media_id) await this.core.optionalMedia((m) => m.detach(c.media_id!, { module: 'advertising', kind: 'ad_creative', refId: c.id }));
+    await this.core.audit(
+      {
+        action: 'advertising.campaign.delete',
+        actionLabel: `Deleted draft ad campaign ${row.ref}`,
+        target: this.target(row),
+        before: { name: row.name, status: row.status, startsAt: row.starts_at, endsAt: row.ends_at, creatives: creatives.map((c) => ({ id: c.id, headline: c.headline, fileName: c.file_name })) },
+      },
+      by,
+    );
   }
 
   async archive(id: string, by: By): Promise<AdCampaign> {

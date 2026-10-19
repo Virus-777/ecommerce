@@ -203,7 +203,7 @@ export class ViewsPart extends Part {
       goal: r.goal,
       owner: owner ?? null,
       linkedPromotion: linked,
-      placement: this.core.placementView(m.placement, await this.liveCount(m.placement.id)),
+      placement: this.core.placementView(m.placement, await this.liveCount(m.placement.id), await this.core.websiteServed()),
       pages: m.pages,
       pageCategoryIds: m.categoryIds,
       audience: m.audience,

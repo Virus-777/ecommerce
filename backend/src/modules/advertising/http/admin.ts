@@ -63,6 +63,10 @@ export const adminRoutes = (service: AdvertisingService) => {
       await c.finish(params.id, 'stopped_early', body.reason?.trim() || 'Finished early by the Advertising team', { actor, requestId, principal }, { audit: true });
       return c.view(params.id);
     },
+    /** DELETE /campaigns/{id}: Delete a draft that never ran */
+    deleteAdCampaign: async ({ params, actor, requestId, principal }) => {
+      await c.deleteDraft(params.id, { actor, requestId, principal });
+    },
     /** POST /campaigns/{id}/archive: Archive a finished or rejected campaign */
     archiveAdCampaign: async ({ params, actor, requestId, principal }) => c.archive(params.id, { actor, requestId, principal }),
     /** POST /campaigns/{id}/renew: Create a new draft from a finished or ending campaign (renew deliberately) */

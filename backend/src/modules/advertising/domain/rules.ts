@@ -113,9 +113,10 @@ export const PLACEMENT_SEEDS: readonly PlacementSeed[] = [
     formats: [fmt('desktop', 1200, 300), fmt('phone', 750, 400)],
     frequencyCap: null,
     trigger: null,
-    rotation: rotation('carousel', { carouselSeconds: 6, maxInRotation: 3, pauseOnHoverAndFocus: true }),
+    // every live ad is in the carousel (owner decision 2026-10-18); staff can still set a limit per placement
+    rotation: rotation('carousel', { carouselSeconds: 6, pauseOnHoverAndFocus: true }),
     dismissal: { mode: 'not_dismissible', label: 'Banners cannot be closed' },
-    maxPerPage: 3,
+    maxPerPage: null,
     positions: null,
     label: 'Ad',
   },
@@ -455,7 +456,7 @@ export function allowedActions(status: string, o: { origin: string; area: 'admin
   }
   switch (status) {
     case 'draft':
-      return ['edit', 'check', 'submit'];
+      return o.origin === 'staff' ? ['edit', 'check', 'submit', 'delete'] : ['edit', 'check', 'submit'];
     case 'in_review':
       return ['review', 'approve', 'request_changes', 'reject'];
     case 'approved':
@@ -606,11 +607,21 @@ export function formatIssues(c: CreativeFacts, formats: readonly CreativeFormat[
   return issues;
 }
 
+/**
+ * Devices a campaign needs an image for: each separate format (an "any" format alone: any). Desktop is left out
+ * while the website is not served (Settings › Serve the website); its format stays available.
+ */
+export function requiredDevices(formats: readonly CreativeFormat[], websiteServed = true): string[] {
+  const devices = [...new Set(formats.map((f) => f.device))];
+  const separate = devices.filter((d) => d !== 'any');
+  if (!separate.length) return devices.length ? ['any'] : [];
+  return separate.filter((d) => websiteServed || d !== 'desktop');
+}
+
 /** Placements with separate desktop and phone formats need a creative for each (an "any" creative covers both) */
-export function missingDevices(formats: readonly CreativeFormat[], devices: readonly string[]): string[] {
-  const needed = [...new Set(formats.map((f) => f.device).filter((d) => d !== 'any'))];
+export function missingDevices(formats: readonly CreativeFormat[], devices: readonly string[], websiteServed = true): string[] {
   if (devices.includes('any')) return [];
-  return needed.filter((d) => !devices.includes(d));
+  return requiredDevices(formats, websiteServed).filter((d) => d !== 'any' && !devices.includes(d));
 }
 
 /** A link is internal (/path) or https; anything else fails */

@@ -6,6 +6,7 @@ import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { AdvertisingRepository } from './repository.js';
 import { AdvertisingService } from './service.js';
+import { mongoMigrations } from './migrations.js';
 import { schemas } from './schema.js';
 
 /**
@@ -18,6 +19,7 @@ export default defineModule({
   spec,
   version: '2.0.0',
   schemas,
+  mongoMigrations,
   async register(ctx) {
     const service = new AdvertisingService({ repo: new AdvertisingRepository(ctx.mongo), ctx });
     // install seed: the launch placements and global rules version 1 (domain/seed.ts)

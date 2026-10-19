@@ -440,6 +440,7 @@ export class SettingsService implements SettingsPublicApi {
         support: s.support,
         checkout: s.checkout,
         features: s.features,
+        channels: s.channels,
         android: {
           ...s.android,
           updateRequired: code != null && code < s.android.minVersionCode,
@@ -497,6 +498,7 @@ export class SettingsService implements SettingsPublicApi {
       maintenance,
       checkout: { guestCheckoutEnabled: Boolean(raw['checkout.guestCheckoutEnabled']), offerAccountAfterGuestPurchase: Boolean(raw['checkout.offerAccountAfterGuestPurchase']) },
       features,
+      channels: { website: raw['apps.serveWebsite'] !== false, android: raw['apps.serveAndroidApp'] !== false },
       android: {
         minVersionCode: Number(raw['apps.android.minVersionCode'] ?? 1),
         latestVersionCode: Number(raw['apps.android.latestVersionCode'] ?? 1),
