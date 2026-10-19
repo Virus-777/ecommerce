@@ -732,7 +732,7 @@ Return policies (platform baseline, seller terms, category exceptions, who pays 
 | amount | `Money?` Partial amount; capped at maxRefundable |
 | explanation | `text?` |
 | exchangeVariantId | `uuid?` |
-| reauthToken | `string?` Staff only (admin remedy and revise; sellers leave it out): re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password). Needed when the refund is within the caller's refund limit and above access stepUpAbove (it is approved in the same call), otherwise STEP_UP_REQUIRED and nothing is saved |
+| reauthToken | `string?` Staff only (admin remedy; sellers and revise leave it out): re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password). Needed when the refund is within the caller's refund limit and above access stepUpAbove (it is approved in the same call), otherwise STEP_UP_REQUIRED and nothing is saved |
 
 ### ExceptionInput
 
