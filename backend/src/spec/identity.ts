@@ -2715,6 +2715,10 @@ export const spec = defineModuleSpec({
     }
   },
   errorCodes: {
+    "LAST_BUSINESS_OWNER": {
+      "status": 409,
+      "meaning": "At least one active Business Owner must remain: the last one cannot be disabled (access.disableCheck)."
+    },
     "INVALID_CREDENTIALS": {
       "status": 401,
       "meaning": "Email and password don't match. details.attemptsLeft before a temporary lock of details.lockoutMinutes minutes."

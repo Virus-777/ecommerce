@@ -197,8 +197,13 @@ export class Accounts {
     if (a.realm !== 'staff') throw new AppError('VALIDATION_FAILED', `Only staff accounts can be ${what} here`, issue('params.id', 'not a staff account'));
   }
 
-  /** access.disableCheck, when access is enabled and built (module tests run identity alone) */
+  /**
+   * access.disableCheck for a signed-in staff member, when access is enabled and built (module tests run identity
+   * alone). The operator tool on the server (npm run staff-link, no principal) can disable anyone, even the last
+   * Business Owner: that is the break-glass path, and a new owner is bootstrapped after it.
+   */
   private async disableCheck(accountId: string, caller: Caller) {
+    if (!caller.principal) return undefined;
     try {
       return await this.core.ctx.tryUse('access')?.disableCheck(accountId, caller.actor.id ?? null);
     } catch (err) {
