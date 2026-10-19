@@ -15,6 +15,23 @@ import type { Views } from './views.js';
 const PREPARING_WAREHOUSE = ['picking', 'picked', 'packing', 'packed'];
 const SHIPPABLE = ['confirmed', 'preparing', 'delayed', 'cancellation_requested'];
 
+/**
+ * The group's shippable lines a shipment line naming itemId stands for: the item, and the lines split off it since.
+ * Two packages of one line recorded before the first reached orders both name it; the first one's split leaves the
+ * units the second carries on a new line.
+ */
+function openParts(items: readonly ItemRec[], groupId: string, itemId: string): ItemRec[] {
+  const out: ItemRec[] = [];
+  const queue = [itemId];
+  for (let id = queue.shift(); id; id = queue.shift()) {
+    const item = items.find((i) => i.id === id && i.group_id === groupId);
+    if (!item) continue;
+    if (SHIPPABLE.includes(item.state)) out.push(item);
+    queue.push(...items.filter((i) => i.split_from_item_id === id).map((i) => i.id));
+  }
+  return out;
+}
+
 export class Fulfillment {
   constructor(
     private readonly core: Core,
@@ -263,14 +280,15 @@ export class Fulfillment {
       const wanted = new Map<string, number>();
       for (const l of e.lines) wanted.set(l.orderItemId, (wanted.get(l.orderItemId) ?? 0) + l.quantity);
       for (const [itemId, qty] of wanted) {
-        const item = agg.items.find((i) => i.id === itemId && i.group_id === e.groupId);
-        if (!item || !SHIPPABLE.includes(item.state)) {
-          this.core.ctx.log.warn({ itemId, shipmentId: e.shipmentId }, 'orders: shipment line for an item that cannot ship');
-          continue;
+        let left = qty;
+        for (const item of openParts(agg.items, e.groupId, itemId)) {
+          if (!left) break;
+          const { part } = await this.core.split(tx, batch, item, Math.min(left, item.quantity), agg.order.currency, 'shipment');
+          await this.core.move(tx, batch, part, 'ship', { patch: { shipment_id: e.shipmentId, state_before_request: null } });
+          shippedIds.push(part.id);
+          left -= part.quantity;
         }
-        const { part } = await this.core.split(tx, batch, item, Math.min(qty, item.quantity), agg.order.currency, 'shipment');
-        await this.core.move(tx, batch, part, 'ship', { patch: { shipment_id: e.shipmentId, state_before_request: null } });
-        shippedIds.push(part.id);
+        if (left === qty) this.core.ctx.log.warn({ itemId, shipmentId: e.shipmentId }, 'orders: shipment line for an item that cannot ship');
       }
       const prev = agg.shipments.find((s) => s.shipment_id === e.shipmentId);
       await tx.upsertShipment(

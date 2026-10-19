@@ -2954,7 +2954,7 @@ export const endpoints = defineEndpoints({
     permission: "shipping.seller-shipments.manage",
     scope: "own-seller",
     summary: "Record a shipment for some or all items of one of the seller's orders",
-    desc: "Checks that the items belong to the seller's group and are unshipped (orders.canShipItems) and the tracking format. Fewer than ordered makes a partial shipment; the rest keeps its deadline. The buyer gets the carrier, tracking and contents.",
+    desc: "Checks that the items belong to the seller's group and are unshipped (orders.canShipItems, counting the units in the group's other packages orders has not shipped yet) and the tracking format. Records of one group are taken one at a time. Fewer than ordered makes a partial shipment; the rest keeps its deadline. Recording the same package again (same carrier, tracking number and items) answers with that package instead of making a second one. The buyer gets the carrier, tracking and contents.",
     body: () => RecordShipmentInput,
     response: () => Shipment,
     status: 201,

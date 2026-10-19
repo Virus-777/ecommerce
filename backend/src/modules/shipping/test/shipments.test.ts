@@ -96,6 +96,48 @@ describe('recording shipments (seller)', () => {
     expect(staff.body.corrections.at(-1).customerNotified).toBe(false);
     expect(h.audits.at(-1)).toMatchObject({ action: 'shipping.tracking.correct', reason: 'Carrier confirmed by phone' });
   });
+
+  it('records one shipment when the same unit is recorded twice at once (M2)', async () => {
+    const o = await sellerOrder(h);
+    const seller = tokens.seller(o.sellerId);
+    const base = { groupId: o.groupId, carrierCode: 'ups', shippedAt: h.clock.now().toISOString(), items: [{ orderItemId: o.lamp.id, quantity: 1 }] };
+    const both = await Promise.all([h.call('POST', `${SELLER}/shipments`, seller, { ...base, trackingNumber: ups() }), h.call('POST', `${SELLER}/shipments`, seller, { ...base, trackingNumber: ups() })]);
+    expect(both.map((r) => r.status).sort()).toEqual([201, 409]);
+    expect(both.find((r) => r.status === 409)!.body.error.code).toBe('ITEMS_NOT_SHIPPABLE');
+    expect((await h.call('GET', `${SELLER}/shipments?groupId=${o.groupId}`, seller)).body.items).toHaveLength(1);
+    expect(h.named('shipping.shipment.dispatched').filter((e) => e.groupId === o.groupId)).toHaveLength(1);
+  });
+
+  it('answers a repeated record of the same package with that package', async () => {
+    const o = await sellerOrder(h);
+    const seller = tokens.seller(o.sellerId);
+    const body = { groupId: o.groupId, carrierCode: 'ups', trackingNumber: ups(), shippedAt: h.clock.now().toISOString(), items: [{ orderItemId: o.lamp.id, quantity: 1 }] };
+    const both = await Promise.all([h.call('POST', `${SELLER}/shipments`, seller, body), h.call('POST', `${SELLER}/shipments`, seller, body)]);
+    expect(both.map((r) => r.status)).toEqual([201, 201]);
+    expect(both[1]!.body.id).toBe(both[0]!.body.id);
+    // a retry once orders has shipped the lamp: still that package, not "already shipped"
+    const retry = await h.call('POST', `${SELLER}/shipments`, seller, body);
+    expect(retry.status).toBe(201);
+    expect(retry.body.id).toBe(both[0]!.body.id);
+    expect((await h.call('GET', `${SELLER}/shipments?groupId=${o.groupId}`, seller)).body.items).toHaveLength(1);
+    expect(h.named('shipping.shipment.dispatched').filter((e) => e.groupId === o.groupId)).toHaveLength(1);
+    // other contents under the same number are another package: the number is taken
+    const other = await h.call('POST', `${SELLER}/shipments`, seller, { ...body, items: [{ orderItemId: o.speaker.id, quantity: 1 }] });
+    expect(other.body.error.code).toBe('TRACKING_ALREADY_USED');
+  });
+
+  it('ships both of two partial packages of one line recorded at once', async () => {
+    const o = await sellerOrder(h);
+    const seller = tokens.seller(o.sellerId);
+    const base = { groupId: o.groupId, carrierCode: 'ups', shippedAt: h.clock.now().toISOString(), items: [{ orderItemId: o.speaker.id, quantity: 1 }] };
+    const both = await Promise.all([h.call('POST', `${SELLER}/shipments`, seller, { ...base, trackingNumber: ups() }), h.call('POST', `${SELLER}/shipments`, seller, { ...base, trackingNumber: ups() })]);
+    expect(both.map((r) => r.status)).toEqual([201, 201]);
+    const list = (await h.call('GET', `${SELLER}/shipments?groupId=${o.groupId}`, seller)).body.items;
+    expect(list.map((s: any) => s.packageLabel).sort()).toEqual(['Shipment 1 of 2', 'Shipment 2 of 2']);
+    const items = (await h.orders.getOrder(o.order.id))!.groups[0]!.items.filter((i) => i.title.startsWith('Pocket'));
+    expect(items.filter((i) => i.state === 'shipped').map((i) => i.shipmentId).sort()).toEqual(both.map((r) => r.body.id).sort());
+    expect(items.filter((i) => i.state !== 'shipped').reduce((n, i) => n + i.quantity, 0)).toBe(o.speaker.quantity - 2);
+  });
 });
 
 describe('carrier tracking (webhooks) and the customer view', () => {

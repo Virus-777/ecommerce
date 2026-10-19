@@ -60,6 +60,11 @@ export class ShippingRepository {
     return this.#wrote(this.store.transaction((tx) => fn(new ShippingRepository(tx, this.#state))));
   }
 
+  /** Serializes transactions on a name (inside a transaction): a second one locking it is retried after this one commits */
+  lock(name: string): Promise<void> {
+    return this.store.lock(name);
+  }
+
   get<T extends TableName>(table: T, id: string, o?: { forUpdate?: boolean }): Promise<Recs[T] | undefined> {
     return this.#t(table).get(id, o);
   }
