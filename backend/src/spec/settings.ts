@@ -192,6 +192,8 @@ export interface AppConfig {
   checkout: CheckoutSettings;
   /** Public feature flags, e.g. { "wishlist": false, "paidSellerAds": false, "externalSignIn": false } */
   features: Record<string, boolean>;
+  /** Which apps Marketly serves (Settings › Website and Android app) */
+  channels: ServedChannels;
   android: AndroidConfig;
   maintenance: MaintenanceNotice;
 }
@@ -209,6 +211,9 @@ export const AppConfig: z.ZodType<AppConfig> = z.object({
     return CheckoutSettings;
   },
   features: z.record(z.string(), z.boolean()).describe("Public feature flags, e.g. { \"wishlist\": false, \"paidSellerAds\": false, \"externalSignIn\": false }"),
+  get channels() {
+    return ServedChannels;
+  },
   get android() {
     return AndroidConfig;
   },
@@ -216,6 +221,18 @@ export const AppConfig: z.ZodType<AppConfig> = z.object({
     return MaintenanceNotice;
   },
 }).register(common.apiTypes, { id: "settings.AppConfig" });
+
+export interface ServedChannels {
+  /** apps.serveWebsite: the desktop and tablet website is maintained */
+  website: boolean;
+  /** apps.serveAndroidApp: the Android app is maintained */
+  android: boolean;
+}
+
+export const ServedChannels: z.ZodType<ServedChannels> = z.object({
+  website: z.boolean().describe("apps.serveWebsite: the desktop and tablet website is maintained"),
+  android: z.boolean().describe("apps.serveAndroidApp: the Android app is maintained"),
+}).register(common.apiTypes, { id: "settings.ServedChannels" });
 
 export interface PublicMarket {
   country: string;

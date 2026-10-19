@@ -153,6 +153,8 @@ export interface Placement {
   eligiblePages: string[];
   pagesLabel: string;
   formats: CreativeFormat[];
+  /** Devices a campaign needs an image for (desktop, phone or any). Without desktop while Settings › Serve the website (apps.serveWebsite) is off; the desktop format stays available */
+  requiredDevices: string[];
   frequencyCap?: FrequencyCap | null;
   trigger?: PopupTrigger | null;
   rotation: RotationRule;
@@ -181,6 +183,7 @@ export const Placement: z.ZodType<Placement> = z.object({
   get formats() {
     return z.array(CreativeFormat);
   },
+  requiredDevices: z.array(z.string()).describe("Devices a campaign needs an image for (desktop, phone or any). Without desktop while Settings › Serve the website (apps.serveWebsite) is off; the desktop format stays available"),
   get frequencyCap() {
     return FrequencyCap.nullish();
   },
@@ -2293,6 +2296,26 @@ export const endpoints = defineEndpoints({
     errors: ["ILLEGAL_TRANSITION"],
     audited: true,
     events: ["advertising.campaign.status_changed"],
+    screens: ["admin/ads"],
+    phase: 1,
+  },
+  deleteAdCampaign: {
+    area: "admin",
+    method: "DELETE",
+    path: "/campaigns/{id}",
+    auth: "staff",
+    permission: "advertising.campaigns.manage",
+    scope: "staff",
+    summary: "Delete a draft that never ran",
+    desc: "Only a staff draft (status draft, never live: no displays, clicks, charges or attributed orders) is deleted, with its items, review steps and log; creatives only it used are deleted too (their files are released). A campaign that ran keeps its history: finish it, then archive it. A seller's request is not deleted here: reject it instead. Audited with the deleted campaign's details.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    response: null,
+    status: 204,
+    errors: ["ILLEGAL_TRANSITION","CONFLICT"],
+    audited: true,
     screens: ["admin/ads"],
     phase: 1,
   },

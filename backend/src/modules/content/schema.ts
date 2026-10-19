@@ -70,7 +70,7 @@ pages.index({"status":1,"unpublish_at":1}, {"name":"pages_status_unpublish_at_c7
 const versions = new Schema(
   {
     _id: { type: String, required: true }, // id
-    entity: { type: String, required: true, enum: ["homepage","page","article"] },
+    entity: { type: String, required: true, enum: ["homepage","page","article","news"] },
     entity_id: { type: String, required: true },
     number: { type: Number, required: true, validate: integer },
     state: { type: String, required: true },
@@ -237,6 +237,52 @@ const navigation = new Schema(
   collectionOptions("content.navigation"),
 );
 
+/** Staff-editable news categories (filter chips in the store) */
+const news_categories = new Schema(
+  {
+    _id: { type: String, required: true }, // id
+    slug: { type: String, required: true },
+    name: { type: String, required: true },
+    icon: { type: String, default: null },
+    position: { type: Number, required: true, validate: integer },
+    visible: { type: Boolean, required: true },
+    previous_slugs: { type: Schema.Types.Mixed }, // old slugs that still filter
+    /** lock-by-write counter (kernel/mongo/table.ts) */
+    _lock: Number,
+  },
+  collectionOptions("content.news_categories"),
+);
+news_categories.index({"slug":1}, {"name":"news_categories_slug_549e08","unique":true});
+
+/** News for customers; content lives in versions (entity news), these columns follow the live version */
+const news_posts = new Schema(
+  {
+    _id: { type: String, required: true }, // id
+    slug: { type: String, required: true },
+    previous_slugs: { type: Schema.Types.Mixed }, // old slugs that still open the post
+    category_id: { type: String, required: true },
+    title: { type: String, required: true },
+    summary: { type: String, required: true },
+    owner_staff_id: { type: String, default: null },
+    status: { type: String, required: true },
+    pinned: { type: Boolean, required: true },
+    pinned_at: { type: Date, default: null },
+    publish_at: { type: Date, default: null },
+    unpublish_at: { type: Date, default: null },
+    archive_at: { type: Date, default: null },
+    published_at: { type: Date, default: null }, // first publication
+    live_version_id: { type: String, default: null },
+    draft_version_id: { type: String, default: null },
+    updated_at: { type: Date, required: true },
+    /** lock-by-write counter (kernel/mongo/table.ts) */
+    _lock: Number,
+  },
+  collectionOptions("content.news_posts"),
+);
+news_posts.index({"slug":1}, {"name":"news_posts_slug_549e08","unique":true});
+news_posts.index({"status":1,"published_at":1}, {"name":"news_posts_status_published_at_c8bf59"});
+news_posts.index({"category_id":1,"status":1}, {"name":"news_posts_category_id_status_da886b"});
+
 /** Publication, schedule, unpublish, correction and removal actions with reasons */
 const content_log = new Schema(
   {
@@ -267,5 +313,7 @@ export const schemas = {
   policy_versions: policy_versions,
   policy_approvals: policy_approvals,
   navigation: navigation,
+  news_categories: news_categories,
+  news_posts: news_posts,
   content_log: content_log,
 };

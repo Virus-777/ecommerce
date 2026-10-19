@@ -71,6 +71,7 @@ Ad placements and their rules, ad campaigns through the full lifecycle, creative
 | POST | `/api/admin/advertising/campaigns/{id}/pause` | Pause immediately (off the site within 1 minute) _(audited)_ | staff<br>`advertising.campaigns.publish` | `{ reason: text? }` → `AdCampaign` |
 | POST | `/api/admin/advertising/campaigns/{id}/resume` | Resume a paused campaign _(audited)_ | staff<br>`advertising.campaigns.publish` | `{ reason: text? }` → `AdCampaign` |
 | POST | `/api/admin/advertising/campaigns/{id}/finish` | Finish a scheduled, live or paused campaign early _(audited)_ | staff<br>`advertising.campaigns.publish` | `{ reason: text? }` → `AdCampaign` |
+| DELETE | `/api/admin/advertising/campaigns/{id}` | Delete a draft that never ran _(audited)_ | staff<br>`advertising.campaigns.manage` | 204 No content |
 | POST | `/api/admin/advertising/campaigns/{id}/archive` | Archive a finished or rejected campaign | staff<br>`advertising.campaigns.manage` | `AdCampaign` |
 | POST | `/api/admin/advertising/campaigns/{id}/renew` | Create a new draft from a finished or ending campaign (renew deliberately) _(audited)_ | staff<br>`advertising.campaigns.manage` | `{ startsAt: datetime, endsAt: datetime }` → `AdCampaign` |
 | GET | `/api/admin/advertising/campaigns/{id}/report` | Displays, clicks, dismissals, spend and attributed purchases by day | staff<br>`advertising.reports.view` | `PerformanceReport` |
@@ -184,6 +185,7 @@ Ad placements and their rules, ad campaigns through the full lifecycle, creative
 | eligiblePages | `string[]` Page types (see notes), e.g. home, category, campaign |
 | pagesLabel | `string` |
 | formats | `CreativeFormat[]` |
+| requiredDevices | `string[]` Devices a campaign needs an image for (desktop, phone or any). Without desktop while Settings › Serve the website (apps.serveWebsite) is off; the desktop format stays available |
 | frequencyCap | `FrequencyCap?` |
 | trigger | `PopupTrigger?` |
 | rotation | `RotationRule` |

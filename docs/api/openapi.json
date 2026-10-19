@@ -34,7 +34,7 @@
     },
     {
       "name": "Store API · Content",
-      "description": "Store content managed by the Content Manager: ordered and scheduled homepage sections, campaign pages and curated collections, Help Center articles and categories, policies with versions and effective dates, the About page and footer links. Every item has an owner, a preview, a publication status and schedule, a version history with restore, and a correction or removal action."
+      "description": "Store content managed by the Content Manager: ordered and scheduled homepage sections, campaign pages and curated collections, Help Center articles and categories, news posts and their categories, policies with versions and effective dates, the About page and footer links. Every item has an owner, a preview, a publication status and schedule, a version history with restore, and a correction or removal action."
     },
     {
       "name": "Store API · Customers",
@@ -126,7 +126,7 @@
     },
     {
       "name": "Seller API · Content",
-      "description": "Store content managed by the Content Manager: ordered and scheduled homepage sections, campaign pages and curated collections, Help Center articles and categories, policies with versions and effective dates, the About page and footer links. Every item has an owner, a preview, a publication status and schedule, a version history with restore, and a correction or removal action."
+      "description": "Store content managed by the Content Manager: ordered and scheduled homepage sections, campaign pages and curated collections, Help Center articles and categories, news posts and their categories, policies with versions and effective dates, the About page and footer links. Every item has an owner, a preview, a publication status and schedule, a version history with restore, and a correction or removal action."
     },
     {
       "name": "Seller API · Finance",
@@ -234,7 +234,7 @@
     },
     {
       "name": "Admin API · Content",
-      "description": "Store content managed by the Content Manager: ordered and scheduled homepage sections, campaign pages and curated collections, Help Center articles and categories, policies with versions and effective dates, the About page and footer links. Every item has an owner, a preview, a publication status and schedule, a version history with restore, and a correction or removal action."
+      "description": "Store content managed by the Content Manager: ordered and scheduled homepage sections, campaign pages and curated collections, Help Center articles and categories, news posts and their categories, policies with versions and effective dates, the About page and footer links. Every item has an owner, a preview, a publication status and schedule, a version history with restore, and a correction or removal action."
     },
     {
       "name": "Admin API · Customers",
@@ -4913,6 +4913,94 @@
         "x-permission": "advertising.campaigns.manage",
         "x-screens": [
           "admin/ad-campaign"
+        ],
+        "x-audited": true,
+        "x-phase": 1
+      },
+      "delete": {
+        "operationId": "advertising.deleteAdCampaign",
+        "tags": [
+          "Admin API · Advertising"
+        ],
+        "summary": "Delete a draft that never ran",
+        "description": "Only a staff draft (status draft, never live: no displays, clicks, charges or attributed orders) is deleted, with its items, review steps and log; creatives only it used are deleted too (their files are released). A campaign that ran keeps its history: finish it, then archive it. A seller's request is not deleted here: reject it instead. Audited with the deleted campaign's details.\n\n**Permission:** `advertising.campaigns.manage`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/ads",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success, no content"
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nCONFLICT: Concurrent change; reload and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "advertising",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "advertising.campaigns.manage",
+        "x-screens": [
+          "admin/ads"
         ],
         "x-audited": true,
         "x-phase": 1
@@ -21020,6 +21108,139 @@
         "x-phase": 1
       }
     },
+    "/api/store/content/campaign-pages": {
+      "get": {
+        "operationId": "content.listCampaignPages",
+        "tags": [
+          "Store API · Content"
+        ],
+        "summary": "Live campaign pages as cards",
+        "description": "Campaign pages (kind campaign) inside their publication window, ending soonest first, then the most recently updated. Used by the Deals tab so phone shoppers can reach campaign pages (the header navigation is website only).\n\n**Screens:** store/deals",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from the previous response. Used by the Android app's infinite scroll.",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Opaque cursor from the previous response. Used by the Android app's infinite scroll."
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "1-based page number. Used by the website's numbered pages.",
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "1-based page number. Used by the website's numbered pages."
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Items per batch, 1–100, default 24",
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "Items per batch, 1–100, default 24"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/content.CampaignPageCard"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Pass as ?cursor= for the next batch (app). Null at the end."
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "totalPages": {
+                      "type": "integer"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "content",
+        "x-area": "store",
+        "x-auth": "visitor",
+        "x-screens": [
+          "store/deals"
+        ],
+        "x-phase": 1
+      }
+    },
     "/api/store/content/pages/{slug}/products": {
       "get": {
         "operationId": "content.listPageProducts",
@@ -21510,6 +21731,366 @@
         "x-screens": [
           "help/center",
           "seller/help"
+        ],
+        "x-phase": 1
+      }
+    },
+    "/api/store/content/news": {
+      "get": {
+        "operationId": "content.listNews",
+        "tags": [
+          "Store API · Content"
+        ],
+        "summary": "News list: pinned first, then newest",
+        "description": "Published posts that are not archived. category is a category slug (old slugs still work). Cursor paging: the phone lazy-loads, the website pages.\n\n**Screens:** store/news",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from the previous response. Used by the Android app's infinite scroll.",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Opaque cursor from the previous response. Used by the Android app's infinite scroll."
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "1-based page number. Used by the website's numbered pages.",
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "1-based page number. Used by the website's numbered pages."
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Items per batch, 1–100, default 24",
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "Items per batch, 1–100, default 24"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/content.NewsCard"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Pass as ?cursor= for the next batch (app). Null at the end."
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "totalPages": {
+                      "type": "integer"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "content",
+        "x-area": "store",
+        "x-auth": "visitor",
+        "x-screens": [
+          "store/news"
+        ],
+        "x-phase": 1
+      }
+    },
+    "/api/store/content/news/categories": {
+      "get": {
+        "operationId": "content.listNewsCategories",
+        "tags": [
+          "Store API · Content"
+        ],
+        "summary": "Visible news categories that have posts, in order",
+        "description": "**Screens:** store/news",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/content.NewsCategory"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "content",
+        "x-area": "store",
+        "x-auth": "visitor",
+        "x-screens": [
+          "store/news"
+        ],
+        "x-phase": 1
+      }
+    },
+    "/api/store/content/news/summary": {
+      "get": {
+        "operationId": "content.getNewsSummary",
+        "tags": [
+          "Store API · Content"
+        ],
+        "summary": "How many posts are listed and when the newest was published",
+        "description": "For the 'new' dot: the app compares latestPublishedAt with the last post the customer opened.\n\n**Screens:** account/overview, store/news",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/content.NewsSummary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "content",
+        "x-area": "store",
+        "x-auth": "visitor",
+        "x-screens": [
+          "account/overview",
+          "store/news"
+        ],
+        "x-phase": 1
+      }
+    },
+    "/api/store/content/news/{slug}": {
+      "get": {
+        "operationId": "content.getNewsPost",
+        "tags": [
+          "Store API · Content"
+        ],
+        "summary": "One news post",
+        "description": "404 unless published (archived posts still open, with archived true). An old slug answers the post; its slug field is the current one.\n\n**Screens:** store/news-post",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/content.NewsPost"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "content",
+        "x-area": "store",
+        "x-auth": "visitor",
+        "x-screens": [
+          "store/news-post"
         ],
         "x-phase": 1
       }
@@ -23189,6 +23770,124 @@
         "x-phase": 1
       }
     },
+    "/api/admin/content/homepage/sections/{id}/visibility": {
+      "post": {
+        "operationId": "content.setHomeSectionVisibility",
+        "tags": [
+          "Admin API · Content"
+        ],
+        "summary": "Hide a section now, or show it again in the draft",
+        "description": "hidden true takes the section off the live homepage at once (a new live version, without review) and keeps it hidden in the draft. hidden false shows it again in the draft only: customers see it once the layout is published. The section keeps its content and schedule either way.\n\n**Permission:** `content.homepage.manage`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `content.page.published`\n\n**Screens:** admin/content",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "hidden": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "hidden"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/content.HomeSectionAdmin"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SECTION_LOCKED: Ad positions are controlled by advertising and cannot be edited here.\nCONFLICT: Concurrent change; reload and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "content",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "content.homepage.manage",
+        "x-screens": [
+          "admin/content"
+        ],
+        "x-events": [
+          "content.page.published"
+        ],
+        "x-audited": true,
+        "x-phase": 1
+      }
+    },
     "/api/admin/content/homepage/order": {
       "put": {
         "operationId": "content.reorderHomeSections",
@@ -23534,7 +24233,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nSAME_REVIEWER: The author cannot approve their own article or homepage draft.",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nSAME_REVIEWER: The author cannot approve their own article, news post or homepage draft.",
             "content": {
               "application/json": {
                 "schema": {
@@ -26566,7 +27265,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nSAME_REVIEWER: The author cannot approve their own article or homepage draft.",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nSAME_REVIEWER: The author cannot approve their own article, news post or homepage draft.",
             "content": {
               "application/json": {
                 "schema": {
@@ -26741,6 +27440,1604 @@
         "x-screens": [
           "admin/help-content"
         ],
+        "x-phase": 1
+      }
+    },
+    "/api/admin/content/news": {
+      "get": {
+        "operationId": "content.listNewsAdmin",
+        "tags": [
+          "Admin API · Content"
+        ],
+        "summary": "News posts for the Admin Center list",
+        "description": "status archived lists posts past their archive time, unpublished or removed; published lists the ones still listed in the store. inReview filters posts (or new drafts) waiting for review.\n\n**Permission:** `content.view`\n\n**Screens:** admin/news",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "draft",
+                "in_review",
+                "scheduled",
+                "published",
+                "archived"
+              ]
+            }
+          },
+          {
+            "name": "categoryId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from the previous response. Used by the Android app's infinite scroll.",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Opaque cursor from the previous response. Used by the Android app's infinite scroll."
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "1-based page number. Used by the website's numbered pages.",
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "1-based page number. Used by the website's numbered pages."
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Items per batch, 1–100, default 24",
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "Items per batch, 1–100, default 24"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/content.NewsAdminSummary"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Pass as ?cursor= for the next batch (app). Null at the end."
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "totalPages": {
+                      "type": "integer"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "content",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "content.view",
+        "x-screens": [
+          "admin/news"
+        ],
+        "x-phase": 1
+      },
+      "post": {
+        "operationId": "content.createNews",
+        "tags": [
+          "Admin API · Content"
+        ],
+        "summary": "Create a news post draft",
+        "description": "**Permission:** `content.news.manage`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/news",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/content.NewsInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/content.NewsAdmin"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SLUG_TAKEN: Another page or article uses this URL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "content",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "content.news.manage",
+        "x-screens": [
+          "admin/news"
+        ],
+        "x-audited": true,
+        "x-phase": 1
+      }
+    },
+    "/api/admin/content/news/counts": {
+      "get": {
+        "operationId": "content.getNewsCounts",
+        "tags": [
+          "Admin API · Content"
+        ],
+        "summary": "Post counts per list tab",
+        "description": "**Permission:** `content.view`\n\n**Screens:** admin/news",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/content.NewsStatusCounts"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "content",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "content.view",
+        "x-screens": [
+          "admin/news"
+        ],
+        "x-phase": 1
+      }
+    },
+    "/api/admin/content/news/{id}": {
+      "get": {
+        "operationId": "content.getNewsAdmin",
+        "tags": [
+          "Admin API · Content"
+        ],
+        "summary": "A news post with status, review and versions",
+        "description": "**Permission:** `content.view`\n\n**Screens:** admin/news",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/content.NewsAdmin"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "content",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "content.view",
+        "x-screens": [
+          "admin/news"
+        ],
+        "x-phase": 1
+      },
+      "patch": {
+        "operationId": "content.updateNews",
+        "tags": [
+          "Admin API · Content"
+        ],
+        "summary": "Edit the post draft",
+        "description": "Editing a live post makes a new draft; the live post stays until the draft is published. A draft in review or approved is frozen until changes are requested.\n\n**Permission:** `content.news.manage`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/news",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/content.NewsInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/content.NewsAdmin"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFLICT: Concurrent change; reload and retry.\nSLUG_TAKEN: Another page or article uses this URL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "content",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "content.news.manage",
+        "x-screens": [
+          "admin/news"
+        ],
+        "x-audited": true,
+        "x-phase": 1
+      }
+    },
+    "/api/admin/content/news/{id}/preview": {
+      "post": {
+        "operationId": "content.previewNews",
+        "tags": [
+          "Admin API · Content"
+        ],
+        "summary": "The post as the store shows it (draft or live)",
+        "description": "**Permission:** `content.view`\n\n**Screens:** admin/news",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "useDraft": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/content.NewsPost"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "content",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "content.view",
+        "x-screens": [
+          "admin/news"
+        ],
+        "x-phase": 1
+      }
+    },
+    "/api/admin/content/news/{id}/transition": {
+      "post": {
+        "operationId": "content.transitionNews",
+        "tags": [
+          "Admin API · Content"
+        ],
+        "summary": "Submit, approve, request changes, schedule, publish, unpublish or remove a post",
+        "description": "The Content publication state machine, as for help articles. With content.reviewRequired.news on (default), someone other than the draft's writer approves before it is scheduled or published (SAME_REVIEWER). Approving, scheduling, publishing and unpublishing need content.news.publish; remove needs content.pages.remove, a kind and a reason; requestChanges needs a reason (it also sends back an approved draft). discardDraft drops a live post's unpublished draft; the live post stays as it is.\n\n**Permission:** `content.news.manage`\n\n**Also needs:** `content.news.publish` when body.action = approve; `content.news.publish` when body.action = requestChanges; `content.news.publish` when body.action = schedule; `content.news.publish` when body.action = cancelSchedule; `content.news.publish` when body.action = publish; `content.news.publish` when body.action = unpublish; `content.pages.remove` when body.action = remove\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `content.news.published`, `content.news.unpublished`, `content.page.removed`\n\n**Screens:** admin/news",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "submit",
+                      "approve",
+                      "requestChanges",
+                      "schedule",
+                      "cancelSchedule",
+                      "publish",
+                      "unpublish",
+                      "remove",
+                      "restore",
+                      "discardDraft"
+                    ]
+                  },
+                  "reason": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "kind": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "enum": [
+                      "correction",
+                      "removal"
+                    ]
+                  },
+                  "publishAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "action"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/content.NewsAdmin"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nSAME_REVIEWER: The author cannot approve their own article, news post or homepage draft.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "content",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "content.news.manage",
+        "x-screens": [
+          "admin/news"
+        ],
+        "x-events": [
+          "content.news.published",
+          "content.news.unpublished",
+          "content.page.removed"
+        ],
+        "x-audited": true,
+        "x-phase": 1,
+        "x-permission-when": [
+          {
+            "if": {
+              "body.action": "approve"
+            },
+            "permission": "content.news.publish"
+          },
+          {
+            "if": {
+              "body.action": "requestChanges"
+            },
+            "permission": "content.news.publish"
+          },
+          {
+            "if": {
+              "body.action": "schedule"
+            },
+            "permission": "content.news.publish"
+          },
+          {
+            "if": {
+              "body.action": "cancelSchedule"
+            },
+            "permission": "content.news.publish"
+          },
+          {
+            "if": {
+              "body.action": "publish"
+            },
+            "permission": "content.news.publish"
+          },
+          {
+            "if": {
+              "body.action": "unpublish"
+            },
+            "permission": "content.news.publish"
+          },
+          {
+            "if": {
+              "body.action": "remove"
+            },
+            "permission": "content.pages.remove"
+          }
+        ]
+      }
+    },
+    "/api/admin/content/news/{id}/pin": {
+      "post": {
+        "operationId": "content.pinNews",
+        "tags": [
+          "Admin API · Content"
+        ],
+        "summary": "Pin or unpin a post",
+        "description": "Pinned posts list first. At most 3 published posts are pinned: pinning a fourth unpins the one pinned longest ago. Takes effect at once (no review).\n\n**Permission:** `content.news.publish`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/news",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "pinned": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "pinned"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/content.NewsAdmin"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "content",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "content.news.publish",
+        "x-screens": [
+          "admin/news"
+        ],
+        "x-audited": true,
+        "x-phase": 1
+      }
+    },
+    "/api/admin/content/news/{id}/versions": {
+      "get": {
+        "operationId": "content.listNewsVersions",
+        "tags": [
+          "Admin API · Content"
+        ],
+        "summary": "Post version history",
+        "description": "**Permission:** `content.view`\n\n**Screens:** admin/news",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from the previous response. Used by the Android app's infinite scroll.",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Opaque cursor from the previous response. Used by the Android app's infinite scroll."
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "1-based page number. Used by the website's numbered pages.",
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "1-based page number. Used by the website's numbered pages."
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Items per batch, 1–100, default 24",
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "Items per batch, 1–100, default 24"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/content.Version"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Pass as ?cursor= for the next batch (app). Null at the end."
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "totalPages": {
+                      "type": "integer"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "content",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "content.view",
+        "x-screens": [
+          "admin/news"
+        ],
+        "x-phase": 1
+      }
+    },
+    "/api/admin/content/news/{id}/versions/{number}/restore": {
+      "post": {
+        "operationId": "content.restoreNewsVersion",
+        "tags": [
+          "Admin API · Content"
+        ],
+        "summary": "Restore an earlier post version as a new draft",
+        "description": "**Permission:** `content.news.manage`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/news",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/content.NewsAdmin"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFLICT: Concurrent change; reload and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "content",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "content.news.manage",
+        "x-screens": [
+          "admin/news"
+        ],
+        "x-audited": true,
+        "x-phase": 1
+      }
+    },
+    "/api/admin/content/news-categories": {
+      "get": {
+        "operationId": "content.listNewsCategoriesAdmin",
+        "tags": [
+          "Admin API · Content"
+        ],
+        "summary": "News categories including hidden ones",
+        "description": "**Permission:** `content.view`\n\n**Screens:** admin/news",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/content.NewsCategory"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "content",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "content.view",
+        "x-screens": [
+          "admin/news"
+        ],
+        "x-phase": 1
+      },
+      "post": {
+        "operationId": "content.createNewsCategory",
+        "tags": [
+          "Admin API · Content"
+        ],
+        "summary": "Add a news category",
+        "description": "**Permission:** `content.news.manage`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/news",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "slug": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "icon": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "visible": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/content.NewsCategory"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SLUG_TAKEN: Another page or article uses this URL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "content",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "content.news.manage",
+        "x-screens": [
+          "admin/news"
+        ],
+        "x-audited": true,
+        "x-phase": 1
+      }
+    },
+    "/api/admin/content/news-categories/{id}": {
+      "patch": {
+        "operationId": "content.updateNewsCategory",
+        "tags": [
+          "Admin API · Content"
+        ],
+        "summary": "Rename, hide or reorder a news category",
+        "description": "Renaming changes the slug; the old slug keeps working as a filter link. Hiding removes its chip; its posts stay listed under All.\n\n**Permission:** `content.news.manage`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/news",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "icon": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "visible": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "position": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/content.NewsCategory"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SLUG_TAKEN: Another page or article uses this URL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "content",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "content.news.manage",
+        "x-screens": [
+          "admin/news"
+        ],
+        "x-audited": true,
+        "x-phase": 1
+      },
+      "delete": {
+        "operationId": "content.deleteNewsCategory",
+        "tags": [
+          "Admin API · Content"
+        ],
+        "summary": "Delete an unused news category",
+        "description": "CONFLICT when any post (in any state but removed) uses it; details.posts names them so they can be moved first.\n\n**Permission:** `content.news.manage`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/news",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success, no content"
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFLICT: Concurrent change; reload and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "content",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "content.news.manage",
+        "x-screens": [
+          "admin/news"
+        ],
+        "x-audited": true,
         "x-phase": 1
       }
     },
@@ -151898,6 +154195,13 @@
               "$ref": "#/components/schemas/advertising.CreativeFormat"
             }
           },
+          "requiredDevices": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Devices a campaign needs an image for (desktop, phone or any). Without desktop while Settings › Serve the website (apps.serveWebsite) is off; the desktop format stays available"
+          },
           "frequencyCap": {
             "anyOf": [
               {
@@ -151980,6 +154284,7 @@
           "eligiblePages",
           "pagesLabel",
           "formats",
+          "requiredDevices",
           "rotation",
           "dismissal",
           "label",
@@ -161661,7 +163966,8 @@
               "brand_collections",
               "recently_viewed",
               "collection_teaser",
-              "promise_strip"
+              "promise_strip",
+              "news"
             ]
           },
           "heading": {
@@ -161858,6 +164164,14 @@
               }
             ]
           },
+          "hidden": {
+            "type": "boolean",
+            "description": "Hidden by staff in the draft layout (POST …/visibility)"
+          },
+          "hiddenLive": {
+            "type": "boolean",
+            "description": "Hidden on the live homepage. Differs from hidden after a section is shown again, until the layout is published"
+          },
           "unavailableHidden": {
             "type": "integer",
             "description": "Products hidden automatically because they are unavailable"
@@ -161881,6 +164195,8 @@
           "schedule",
           "status",
           "locked",
+          "hidden",
+          "hiddenLive",
           "unavailableHidden",
           "productCount",
           "updatedAt"
@@ -162027,6 +164343,13 @@
               }
             ]
           },
+          "news": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/content.NewsCard"
+            },
+            "description": "news sections: the newest published posts (pinned first, up to 3); empty for other kinds"
+          },
           "banner": {
             "anyOf": [
               {
@@ -162096,6 +164419,7 @@
         "required": [
           "id",
           "kind",
+          "news",
           "products",
           "categories",
           "sellers",
@@ -162890,6 +165214,587 @@
           "productCount"
         ]
       },
+      "content.CampaignPageCard": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "eyebrow": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "e.g. Oct 6 – Oct 19"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MediaRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The page's cover image"
+          },
+          "endsAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "End of the campaign period, else the scheduled removal time"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "url",
+          "title"
+        ]
+      },
+      "content.NewsCategoryRef": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "icon": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "name"
+        ]
+      },
+      "content.NewsCategory": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "icon": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A content icon name, shown when a post has no cover"
+          },
+          "position": {
+            "type": "integer",
+            "description": "Order of the filter chips (1 first)"
+          },
+          "visible": {
+            "type": "boolean"
+          },
+          "postCount": {
+            "type": "integer",
+            "description": "Published posts in the category (store: listed ones only)"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "name",
+          "position",
+          "visible",
+          "postCount"
+        ]
+      },
+      "content.NewsCard": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "description": "/news/{slug}"
+          },
+          "title": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "category": {
+            "$ref": "#/components/schemas/content.NewsCategoryRef"
+          },
+          "cover": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MediaRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pinned": {
+            "type": "boolean"
+          },
+          "publishedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "url",
+          "title",
+          "summary",
+          "category",
+          "pinned",
+          "publishedAt"
+        ]
+      },
+      "content.NewsPost": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "category": {
+            "$ref": "#/components/schemas/content.NewsCategoryRef"
+          },
+          "cover": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MediaRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pinned": {
+            "type": "boolean"
+          },
+          "publishedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Null in a preview of a post never published"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "body": {
+            "type": "string",
+            "description": "Structured rich text (headings, lists, tables, links), sanitized"
+          },
+          "cta": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/content.LinkRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional button, e.g. See the deals → /deals"
+          },
+          "archived": {
+            "type": "boolean",
+            "description": "Past its archive time: no longer listed, but the link still opens it"
+          },
+          "related": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/content.NewsCard"
+            },
+            "description": "Up to 3 newer or recent other posts"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "url",
+          "title",
+          "summary",
+          "category",
+          "pinned",
+          "updatedAt",
+          "body",
+          "archived",
+          "related",
+          "version"
+        ]
+      },
+      "content.NewsInput": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Up to 90 characters"
+          },
+          "slug": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "categoryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "summary": {
+            "type": "string",
+            "description": "Up to 200 characters; shown on cards"
+          },
+          "body": {
+            "type": "string"
+          },
+          "cover": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MediaRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "16 : 9 cover (1200 × 675), uploaded with purpose content_image"
+          },
+          "cta": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/content.LinkRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "archiveAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "The post leaves the news list at this time; its link keeps working (archived)"
+          },
+          "ownerStaffId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "changeNote": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "title",
+          "categoryId",
+          "summary",
+          "body"
+        ]
+      },
+      "content.NewsAdmin": {
+        "type": "object",
+        "properties": {
+          "post": {
+            "$ref": "#/components/schemas/content.NewsPost",
+            "description": "The draft when there is one, else the live version"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "in_review",
+              "approved",
+              "scheduled",
+              "published",
+              "unpublished",
+              "removed"
+            ]
+          },
+          "archived": {
+            "type": "boolean"
+          },
+          "pinned": {
+            "type": "boolean"
+          },
+          "archiveAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "owner": {
+            "$ref": "#/components/schemas/content.OwnerRef"
+          },
+          "draftVersion": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "liveVersion": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "draftAuthor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Actor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who wrote the current draft (null without a draft); the author cannot approve it (SAME_REVIEWER)"
+          },
+          "canApprove": {
+            "type": "boolean",
+            "description": "The draft waits for review and the caller is not its author"
+          },
+          "draftReview": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/content.HelpArticleDraftReview"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Review of a live post's new draft (before the first publication, status tells it)"
+          },
+          "reviewRequired": {
+            "type": "boolean",
+            "description": "content.reviewRequired.news"
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/content.Schedule"
+          },
+          "lastPublishedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "post",
+          "status",
+          "archived",
+          "pinned",
+          "owner",
+          "canApprove",
+          "reviewRequired",
+          "schedule"
+        ]
+      },
+      "content.NewsAdminSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "category": {
+            "$ref": "#/components/schemas/content.NewsCategoryRef"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "in_review",
+              "approved",
+              "scheduled",
+              "published",
+              "unpublished",
+              "removed"
+            ]
+          },
+          "archived": {
+            "type": "boolean"
+          },
+          "pinned": {
+            "type": "boolean"
+          },
+          "awaitingReview": {
+            "type": "boolean",
+            "description": "The post or its new draft waits for review"
+          },
+          "owner": {
+            "$ref": "#/components/schemas/content.OwnerRef"
+          },
+          "publishedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "publishAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "archiveAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "draftVersion": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "liveVersion": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "url",
+          "title",
+          "category",
+          "status",
+          "archived",
+          "pinned",
+          "awaitingReview",
+          "owner",
+          "updatedAt"
+        ]
+      },
+      "content.NewsStatusCounts": {
+        "type": "object",
+        "properties": {
+          "all": {
+            "type": "integer"
+          },
+          "draft": {
+            "type": "integer"
+          },
+          "inReview": {
+            "type": "integer"
+          },
+          "scheduled": {
+            "type": "integer"
+          },
+          "published": {
+            "type": "integer"
+          },
+          "archived": {
+            "type": "integer",
+            "description": "Past their archive time, unpublished or removed"
+          }
+        },
+        "required": [
+          "all",
+          "draft",
+          "inReview",
+          "scheduled",
+          "published",
+          "archived"
+        ]
+      },
+      "content.NewsSummary": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "description": "Listed (published, not archived) posts"
+          },
+          "latestPublishedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "count"
+        ]
+      },
       "content.Curator": {
         "type": "object",
         "properties": {
@@ -162936,7 +165841,8 @@
             "enum": [
               "homepage",
               "page",
-              "article"
+              "article",
+              "news"
             ]
           },
           "entityId": {
@@ -207708,6 +210614,10 @@
             },
             "description": "Public feature flags, e.g. { \"wishlist\": false, \"paidSellerAds\": false, \"externalSignIn\": false }"
           },
+          "channels": {
+            "$ref": "#/components/schemas/settings.ServedChannels",
+            "description": "Which apps Marketly serves (Settings › Website and Android app)"
+          },
           "android": {
             "$ref": "#/components/schemas/settings.AndroidConfig"
           },
@@ -207722,8 +210632,26 @@
           "support",
           "checkout",
           "features",
+          "channels",
           "android",
           "maintenance"
+        ]
+      },
+      "settings.ServedChannels": {
+        "type": "object",
+        "properties": {
+          "website": {
+            "type": "boolean",
+            "description": "apps.serveWebsite: the desktop and tablet website is maintained"
+          },
+          "android": {
+            "type": "boolean",
+            "description": "apps.serveAndroidApp: the Android app is maintained"
+          }
+        },
+        "required": [
+          "website",
+          "android"
         ]
       },
       "settings.PublicMarket": {

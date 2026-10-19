@@ -1,6 +1,6 @@
 # Content (`content`)
 
-Store content managed by the Content Manager: ordered and scheduled homepage sections, campaign pages and curated collections, Help Center articles and categories, policies with versions and effective dates, the About page and footer links. Every item has an owner, a preview, a publication status and schedule, a version history with restore, and a correction or removal action.
+Store content managed by the Content Manager: ordered and scheduled homepage sections, campaign pages and curated collections, Help Center articles and categories, news posts and their categories, policies with versions and effective dates, the About page and footer links. Every item has an owner, a preview, a publication status and schedule, a version history with restore, and a correction or removal action.
 
 - **Group:** Growth · **Launch phase:** 1 · **Plan chapters:** 19, 15, 4, 3, 17
 - **Depends on:** [media](media.md), [access](access.md) · **Optional:** [catalog](catalog.md), [offers](offers.md), [inventory](inventory.md), [promotions](promotions.md), [advertising](advertising.md), [sellers](sellers.md), [search](search.md), [reports](reports.md), [notifications](notifications.md), [audit](audit.md), [settings](settings.md), [shipping](shipping.md), [wishlist](wishlist.md), [support](support.md), [returns](returns.md), [reviews](reviews.md)
@@ -31,10 +31,15 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | GET | `/api/store/content/home` | Homepage sections in order, resolved for display | shopper | `Homepage` |
 | GET | `/api/store/content/pages/{slug}` | Campaign page, collection, About or landing page | visitor | `StorePage` |
 | GET | `/api/store/content/collections` | Published collections of a brand (or of one collection kind) as cards | visitor | Page<CollectionCard> |
+| GET | `/api/store/content/campaign-pages` | Live campaign pages as cards | visitor | Page<CampaignPageCard> |
 | GET | `/api/store/content/pages/{slug}/products` | More products for rule-based collections (New arrivals, Best sellers) | visitor | Page<ProductTile> |
 | GET | `/api/store/content/navigation` | Header and footer links, service strip, contact details and company line | visitor | `SiteNavigation` |
 | GET | `/api/store/content/help` | Help Center: topics, popular articles, popular searches, featured guide and contact channels | visitor | `HelpHome` |
 | GET | `/api/store/content/help/articles` | Search or browse help articles | visitor | Page<HelpArticleSummary> |
+| GET | `/api/store/content/news` | News list: pinned first, then newest | visitor | Page<NewsCard> |
+| GET | `/api/store/content/news/categories` | Visible news categories that have posts, in order | visitor | `NewsCategory[]` |
+| GET | `/api/store/content/news/summary` | How many posts are listed and when the newest was published | visitor | `NewsSummary` |
+| GET | `/api/store/content/news/{slug}` | One news post | visitor | `NewsPost` |
 | GET | `/api/store/content/help/articles/{slug}` | A help article with effective and updated dates and related articles | visitor | `HelpArticle` |
 | POST | `/api/store/content/help/articles/{id}/feedback` | Was this helpful? | shopper | `{ helpful: bool, comment: text? }` → 204 No content |
 | GET | `/api/store/content/official-store` | Official Store profile: name, logo, banner, introduction, policy links and feedback summary | visitor | `OfficialStoreProfile` |
@@ -62,6 +67,7 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | GET | `/api/admin/content/homepage/sections/{id}/products` | Products in a section, resolved with title, seller and stock | staff<br>`content.view` | Page<SectionProductRow> |
 | POST | `/api/admin/content/homepage/sections/{id}/schedule` | Schedule a section (show from / remove at) _(audited)_ | staff<br>`content.homepage.manage` | `{ showFrom: datetime, removeAt: datetime?, timeZone: string }` → `HomeSectionAdmin` |
 | POST | `/api/admin/content/homepage/sections/{id}/remove` | Remove a section (correction or removal, reason required) _(audited)_ | staff<br>`content.homepage.manage` | `{ kind: enum(correction|removal), reason: text, immediately: bool }` → `HomeSectionAdmin` |
+| POST | `/api/admin/content/homepage/sections/{id}/visibility` | Hide a section now, or show it again in the draft _(audited)_ | staff<br>`content.homepage.manage` | `{ hidden: bool }` → `HomeSectionAdmin` |
 | PUT | `/api/admin/content/homepage/order` | Reorder sections in the draft (ad positions move with the layout but stay locked) | staff<br>`content.homepage.manage` | `{ sectionIds: uuid[] }` → `HomepageAdmin` |
 | POST | `/api/admin/content/homepage/preview` | Preview the homepage (draft or live) on desktop or phone at a given time | staff<br>`content.homepage.manage` | `PreviewRequest` → `Homepage` |
 | POST | `/api/admin/content/homepage/submit` | Send the draft layout for review _(audited)_ | staff<br>`content.homepage.manage` | `{ summary: string? }` → `HomepageAdmin` |
@@ -94,6 +100,20 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | PATCH | `/api/admin/content/help/articles/{id}` | Edit the article draft _(audited)_ | staff<br>`content.help.manage` | `HelpArticleInput` → `HelpArticleAdmin` |
 | POST | `/api/admin/content/help/articles/{id}/transition` | Submit, approve, request changes, schedule, publish, unpublish or remove an article _(audited)_ | staff<br>`content.help.manage` | `{ action: enum(submit|approve|requestChanges|schedule|cancelSchedule|publish|unpublish|remove|restore), reason: text?, kind: enum(correction|removal)?, publishAt: datetime?, unpublishAt: datetime? }` → `HelpArticleAdmin` |
 | GET | `/api/admin/content/help/articles/{id}/versions` | Article version history | staff<br>`content.view` | Page<Version> |
+| GET | `/api/admin/content/news` | News posts for the Admin Center list | staff<br>`content.view` | Page<NewsAdminSummary> |
+| GET | `/api/admin/content/news/counts` | Post counts per list tab | staff<br>`content.view` | `NewsStatusCounts` |
+| POST | `/api/admin/content/news` | Create a news post draft _(audited)_ | staff<br>`content.news.manage` | `NewsInput` → `NewsAdmin` |
+| GET | `/api/admin/content/news/{id}` | A news post with status, review and versions | staff<br>`content.view` | `NewsAdmin` |
+| PATCH | `/api/admin/content/news/{id}` | Edit the post draft _(audited)_ | staff<br>`content.news.manage` | `NewsInput` → `NewsAdmin` |
+| POST | `/api/admin/content/news/{id}/preview` | The post as the store shows it (draft or live) | staff<br>`content.view` | `{ useDraft: bool? }` → `NewsPost` |
+| POST | `/api/admin/content/news/{id}/transition` | Submit, approve, request changes, schedule, publish, unpublish or remove a post _(audited, also content.news.publish, content.news.publish, content.news.publish, content.news.publish, content.news.publish, content.news.publish, content.pages.remove when not own)_ | staff<br>`content.news.manage` | `{ action: enum(submit|approve|requestChanges|schedule|cancelSchedule|publish|unpublish|remove|restore|discardDraft), reason: text?, kind: enum(correction|removal)?, publishAt: datetime? }` → `NewsAdmin` |
+| POST | `/api/admin/content/news/{id}/pin` | Pin or unpin a post _(audited)_ | staff<br>`content.news.publish` | `{ pinned: bool }` → `NewsAdmin` |
+| GET | `/api/admin/content/news/{id}/versions` | Post version history | staff<br>`content.view` | Page<Version> |
+| POST | `/api/admin/content/news/{id}/versions/{number}/restore` | Restore an earlier post version as a new draft _(audited)_ | staff<br>`content.news.manage` | `{ reason: text }` → `NewsAdmin` |
+| GET | `/api/admin/content/news-categories` | News categories including hidden ones | staff<br>`content.view` | `NewsCategory[]` |
+| POST | `/api/admin/content/news-categories` | Add a news category _(audited)_ | staff<br>`content.news.manage` | `{ name: string, slug: string?, icon: string?, visible: bool? }` → `NewsCategory` |
+| PATCH | `/api/admin/content/news-categories/{id}` | Rename, hide or reorder a news category _(audited)_ | staff<br>`content.news.manage` | `{ name: string?, icon: string?, visible: bool?, position: int? }` → `NewsCategory` |
+| DELETE | `/api/admin/content/news-categories/{id}` | Delete an unused news category _(audited)_ | staff<br>`content.news.manage` | 204 No content |
 | POST | `/api/admin/content/help/articles/{id}/versions/{number}/restore` | Restore an earlier article version as a new draft _(audited)_ | staff<br>`content.help.manage` | `{ reason: text }` → `HelpArticleAdmin` |
 | GET | `/api/admin/content/policies` | Policies with current, scheduled and draft versions | staff<br>`content.view` | `PolicySummary[]` |
 | POST | `/api/admin/content/policies` | Create a new policy with its business owner _(audited)_ | staff<br>`content.policies.manage` | `{ key: string, kind: enum(returns|shipping|privacy|purchase_terms|seller_rules|advertising|cookies|other)?, title: string, ownerStaffId: uuid, editorStaffId: uuid?, audience: enum(customer|seller|both) }` → `PolicySummary` |
@@ -238,7 +258,7 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 
 | Field | Type |
 |---|---|
-| kind | `enum(campaign_banner|category_shortcuts|deals|official_highlights|featured_products|featured_sellers|new_arrivals|popular_products|brand_collections|recently_viewed|collection_teaser|promise_strip)` |
+| kind | `enum(campaign_banner|category_shortcuts|deals|official_highlights|featured_products|featured_sellers|new_arrivals|popular_products|brand_collections|recently_viewed|collection_teaser|promise_strip|news)` |
 | heading | `string?` |
 | subheading | `string?` |
 | banner | `BannerBlock?` |
@@ -272,6 +292,8 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | adPlacementKey | `string?` |
 | managedIn | `string?` |
 | config | `SectionInput?` |
+| hidden | `bool` Hidden by staff in the draft layout (POST …/visibility) |
+| hiddenLive | `bool` Hidden on the live homepage. Differs from hidden after a section is shown again, until the layout is published |
 | unavailableHidden | `int` Products hidden automatically because they are unavailable |
 | productCount | `int` Products in the section after unavailable ones are hidden, e.g. 12 (the drawer shows the first rows and + 8 more) |
 | updatedAt | `datetime` |
@@ -311,6 +333,7 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | heading | `string?` |
 | subheading | `string?` |
 | link | `LinkRef?` |
+| news | `NewsCard[]` news sections: the newest published posts (pinned first, up to 3); empty for other kinds |
 | banner | `BannerBlock?` |
 | products | `ProductTile[]` |
 | categories | `CategoryTile[]` |
@@ -496,6 +519,146 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | productCount | `int` Available products in the collection, e.g. 6 products |
 | image | `MediaRef?` |
 
+### CampaignPageCard
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| slug | `string` |
+| url | `string` |
+| title | `string` |
+| eyebrow | `string?` e.g. Oct 6 – Oct 19 |
+| image | `MediaRef?` The page's cover image |
+| endsAt | `datetime?` End of the campaign period, else the scheduled removal time |
+
+### NewsCategoryRef
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| slug | `string` |
+| name | `string` |
+| icon | `string?` |
+
+### NewsCategory
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| slug | `string` |
+| name | `string` |
+| icon | `string?` A content icon name, shown when a post has no cover |
+| position | `int` Order of the filter chips (1 first) |
+| visible | `bool` |
+| postCount | `int` Published posts in the category (store: listed ones only) |
+
+### NewsCard
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| slug | `string` |
+| url | `string` /news/{slug} |
+| title | `string` |
+| summary | `string` |
+| category | `NewsCategoryRef` |
+| cover | `MediaRef?` |
+| pinned | `bool` |
+| publishedAt | `datetime` |
+
+### NewsPost
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| slug | `string` |
+| url | `string` |
+| title | `string` |
+| summary | `string` |
+| category | `NewsCategoryRef` |
+| cover | `MediaRef?` |
+| pinned | `bool` |
+| publishedAt | `datetime?` Null in a preview of a post never published |
+| updatedAt | `datetime` |
+| body | `text` Structured rich text (headings, lists, tables, links), sanitized |
+| cta | `LinkRef?` Optional button, e.g. See the deals → /deals |
+| archived | `bool` Past its archive time: no longer listed, but the link still opens it |
+| related | `NewsCard[]` Up to 3 newer or recent other posts |
+| version | `int` |
+
+### NewsInput
+
+| Field | Type |
+|---|---|
+| title | `string` Up to 90 characters |
+| slug | `string?` |
+| categoryId | `uuid` |
+| summary | `string` Up to 200 characters; shown on cards |
+| body | `text` |
+| cover | `MediaRef?` 16 : 9 cover (1200 × 675), uploaded with purpose content_image |
+| cta | `LinkRef?` |
+| archiveAt | `datetime?` The post leaves the news list at this time; its link keeps working (archived) |
+| ownerStaffId | `uuid?` |
+| changeNote | `string?` |
+
+### NewsAdmin
+
+| Field | Type |
+|---|---|
+| post | `NewsPost` The draft when there is one, else the live version |
+| status | `enum(draft|in_review|approved|scheduled|published|unpublished|removed)` |
+| archived | `bool` |
+| pinned | `bool` |
+| archiveAt | `datetime?` |
+| owner | `OwnerRef` |
+| draftVersion | `int?` |
+| liveVersion | `int?` |
+| draftAuthor | `Actor?` Who wrote the current draft (null without a draft); the author cannot approve it (SAME_REVIEWER) |
+| canApprove | `bool` The draft waits for review and the caller is not its author |
+| draftReview | `HelpArticleDraftReview?` Review of a live post's new draft (before the first publication, status tells it) |
+| reviewRequired | `bool` content.reviewRequired.news |
+| schedule | `Schedule` |
+| lastPublishedAt | `datetime?` |
+
+### NewsAdminSummary
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| slug | `string` |
+| url | `string` |
+| title | `string` |
+| category | `NewsCategoryRef` |
+| status | `enum(draft|in_review|approved|scheduled|published|unpublished|removed)` |
+| archived | `bool` |
+| pinned | `bool` |
+| awaitingReview | `bool` The post or its new draft waits for review |
+| owner | `OwnerRef` |
+| publishedAt | `datetime?` |
+| publishAt | `datetime?` |
+| archiveAt | `datetime?` |
+| updatedAt | `datetime` |
+| draftVersion | `int?` |
+| liveVersion | `int?` |
+
+### NewsStatusCounts
+
+| Field | Type |
+|---|---|
+| all | `int` |
+| draft | `int` |
+| inReview | `int` |
+| scheduled | `int` |
+| published | `int` |
+| archived | `int` Past their archive time, unpublished or removed |
+
+### NewsSummary
+
+| Field | Type |
+|---|---|
+| count | `int` Listed (published, not archived) posts |
+| latestPublishedAt | `datetime?` |
+
 ### Curator
 
 | Field | Type |
@@ -511,7 +674,7 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | Field | Type |
 |---|---|
 | id | `uuid` |
-| entity | `enum(homepage|page|article)` |
+| entity | `enum(homepage|page|article|news)` |
 | entityId | `uuid` |
 | number | `int` |
 | state | `enum(draft|live|superseded|discarded)` |
@@ -841,6 +1004,7 @@ stateDiagram-v2
   draft --> in_review: submit
   in_review --> approved: approve
   in_review --> draft: requestChanges
+  approved --> draft: requestChanges
   draft --> scheduled: schedule
   approved --> scheduled: schedule
   draft --> published: publish
@@ -849,6 +1013,8 @@ stateDiagram-v2
   scheduled --> draft: cancelSchedule
   published --> unpublished: unpublish
   draft --> removed: remove
+  in_review --> removed: remove
+  approved --> removed: remove
   scheduled --> removed: remove
   published --> removed: remove
   unpublished --> scheduled: schedule
@@ -857,7 +1023,7 @@ stateDiagram-v2
   removed --> draft: restore
 ```
 
-Applies to pages, collections, homepage sections and help articles. Review is optional for pages and sections (content.reviewRequired setting) and required for help articles. scheduled → publish runs from the schedule job at publishAt; unpublish also runs at unpublishAt ('Removed Sep 16'). remove is the correction or removal action for content that must come down now (also a draft or a scheduled item that must never go live; a scheduled one loses its schedule): it requires a reason, records who and why, and leaves a correction note where configured. Editing a published item creates a new draft version; the live version stays until the draft is published.
+Applies to pages, collections, homepage sections and help articles. Review is optional for pages and sections (content.reviewRequired setting) and required for help articles. scheduled → publish runs from the schedule job at publishAt; unpublish also runs at unpublishAt ('Removed Sep 16'). remove is the correction or removal action for content that must come down now (also a draft or a scheduled item that must never go live; a scheduled one loses its schedule): it requires a reason, records who and why, and leaves a correction note where configured. An approved item can be sent back (requestChanges, with a reason) or removed before it goes live. Editing a published item creates a new draft version; the live version stays until the draft is published.
 
 ### Policy version (`PolicyVersion.state`)
 
@@ -932,7 +1098,7 @@ Indexes: `(kind, status)`, `(brand_id, status)`, `(status, publish_at)`, `(statu
 | Column | Type |
 |---|---|
 | id | uuid pk |
-| entity | text (homepage|page|article) |
+| entity | text (homepage|page|article|news) |
 | entity_id | uuid |
 | number | int |
 | state | text |
@@ -1070,6 +1236,42 @@ Indexes: `unique (policy_id, version)`, `(policy_id, state, effective_at)`
 | active_from | timestamptz? |
 | active_until | timestamptz? |
 
+**news_categories**: Staff-editable news categories (filter chips in the store)
+
+| Column | Type |
+|---|---|
+| id | uuid pk |
+| slug | text unique |
+| name | text |
+| icon | text? |
+| position | int |
+| visible | bool |
+| previous_slugs | jsonb (old slugs that still filter) |
+
+**news_posts**: News for customers; content lives in versions (entity news), these columns follow the live version
+
+| Column | Type |
+|---|---|
+| id | uuid pk |
+| slug | text unique |
+| previous_slugs | jsonb (old slugs that still open the post) |
+| category_id | uuid → news_categories |
+| title | text |
+| summary | text |
+| owner_staff_id | uuid? |
+| status | text |
+| pinned | bool |
+| pinned_at | timestamptz? |
+| publish_at | timestamptz? |
+| unpublish_at | timestamptz? |
+| archive_at | timestamptz? |
+| published_at | timestamptz? (first publication) |
+| live_version_id | uuid? → versions |
+| draft_version_id | uuid? → versions |
+| updated_at | timestamptz |
+
+Indexes: `(status, published_at)`, `(category_id, status)`
+
 **content_log**: Publication, schedule, unpublish, correction and removal actions with reasons
 
 | Column | Type |
@@ -1092,6 +1294,8 @@ Indexes: `(entity, entity_id, at desc)`
 | `content.page.published` | A page, collection or homepage layout version goes live (now or on schedule) | `{ entity: enum(homepage|page), entityId: uuid, slug: string?, version: int, url: string }` | advertising |
 | `content.page.unpublished` | A page is unpublished or reaches its removal time | `{ pageId: uuid, slug: string, reason: text? }` | - |
 | `content.page.removed` | A correction or removal action takes content down | `{ entity: string, entityId: uuid, kind: enum(correction|removal), reason: text }` | - |
+| `content.news.published` | A news post version goes live (now or on schedule) | `{ postId: uuid, slug: string, url: string, version: int }` | - |
+| `content.news.unpublished` | A news post is unpublished | `{ postId: uuid, slug: string, reason: text? }` | - |
 | `content.article.published` | A help article version goes live | `{ articleId: uuid, slug: string, version: int }` | - |
 | `content.article.review_due` | A published help article has not been reviewed for articleReviewDays (daily, once per review period) | `{ articleId: uuid, slug: string, title: string, ownerStaffId: uuid?, lastReviewedAt: datetime?, dueSince: datetime }` | notifications |
 | `content.policy.submitted` | A policy version is sent for approval | `{ policyVersionId: uuid, policyKey: string }` | - |
@@ -1143,7 +1347,9 @@ Indexes: `(entity, entity_id, at desc)`
 | `content.policies.edit` | staff | Draft policy versions, submit and schedule approved versions |
 | `content.policies.approve` | staff | Policy owner approval |
 | `content.policies.manage` | staff | Create policies and assign their owners |
-| `content.view` | staff | View the homepage layout, pages, help content and policies in the Admin Center (read only) |
+| `content.news.manage` | staff | Write news posts and submit them for review; manage news categories |
+| `content.news.publish` | staff | Approve, schedule, publish, unpublish and pin news posts |
+| `content.view` | staff | View the homepage layout, pages, help content, news and policies in the Admin Center (read only) |
 
 ## Approval actions
 
@@ -1161,13 +1367,13 @@ Checked through the access module (limits per role, second reviewer).
 | `SECTION_LOCKED` | 409 | Ad positions are controlled by advertising and cannot be edited here. |
 | `SLUG_TAKEN` | 409 | Another page or article uses this URL. |
 | `DRAFT_EXISTS` | 409 | The policy already has an open draft version. |
-| `SAME_REVIEWER` | 409 | The author cannot approve their own article or homepage draft. |
+| `SAME_REVIEWER` | 409 | The author cannot approve their own article, news post or homepage draft. |
 
 ## Background jobs
 
 | Job | Schedule | Does |
 |---|---|---|
-| `content.run-schedules` | every 1 min | Publish and unpublish sections, pages and articles whose publishAt / unpublishAt has passed; record a homepage version when the visible layout changes |
+| `content.run-schedules` | every 1 min | Publish and unpublish sections, pages, articles and news posts whose publishAt / unpublishAt has passed; record a homepage version when the visible layout changes |
 | `content.policy-effective` | every 1 min | Scheduled policy versions past effectiveAt → current; previous → superseded |
 | `content.refresh-collections` | hourly | Rebuild rule-based collections (best sellers hourly, new arrivals daily) and re-check availability of curated items, replacing or removing sold-out ones |
 | `content.article-review-due` | daily 07:00 market time | Flag articles not reviewed for articleReviewDays; publish content.article.review_due (notifications tells the owner) |
@@ -1180,7 +1386,7 @@ Checked through the access module (limits per role, second reviewer).
 | marketTimeZone | `"America/Los_Angeles"` | string | Default time zone for schedules |
 | policyNoticeDays | `14` | duration, days, 0–…, approval: business owner | Minimum days between publishing and the effective date of customer-facing policy changes |
 | articleReviewDays | `90` | duration, days, 1–… | Articles older than this are flagged for review |
-| reviewRequired | `{"page":false,"section":false,"article":true}` | json, approval: second reviewer | Whether the review step is required before publishing |
+| reviewRequired | `{"page":false,"section":false,"article":true,"news":true}` | json, approval: second reviewer | Whether the review step is required before publishing (news: a second person approves every post, owner decision 2026-10-18; a stored value without news counts as on) |
 | availabilityCheckMinutes | `60` | duration, minutes, 5–… | How often curated collections re-check stock |
 | maxSectionProducts | `24` | int, 1–… | Products per homepage section |
 | officialStoreLogoUrl | `"/brand/official-store-logo.svg"` | string | Official Store profile logo: an absolute URL or a path on the store site (example) |

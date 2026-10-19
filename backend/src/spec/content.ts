@@ -8,7 +8,7 @@ import * as promotions from './promotions.js';
 import * as reviews from './reviews.js';
 import * as settings from './settings.js';
 
-/** Content: Store content managed by the Content Manager: ordered and scheduled homepage sections, campaign pages and curated collections, Help Center articles and categories, policies with versions and effective dates, the About page and footer links. Every item has an owner, a preview, a publication status and schedule, a version history with restore, and a correction or removal action. */
+/** Content: Store content managed by the Content Manager: ordered and scheduled homepage sections, campaign pages and curated collections, Help Center articles and categories, news posts and their categories, policies with versions and effective dates, the About page and footer links. Every item has an owner, a preview, a publication status and schedule, a version history with restore, and a correction or removal action. */
 
 /* ------------------------------------------------------------------ types */
 
@@ -245,7 +245,7 @@ export const SectionKind: z.ZodType<SectionKind> = z.object({
 }).register(common.apiTypes, { id: "content.SectionKind" });
 
 export interface SectionInput {
-  kind: "campaign_banner" | "category_shortcuts" | "deals" | "official_highlights" | "featured_products" | "featured_sellers" | "new_arrivals" | "popular_products" | "brand_collections" | "recently_viewed" | "collection_teaser" | "promise_strip";
+  kind: "campaign_banner" | "category_shortcuts" | "deals" | "official_highlights" | "featured_products" | "featured_sellers" | "new_arrivals" | "popular_products" | "brand_collections" | "recently_viewed" | "collection_teaser" | "promise_strip" | "news";
   heading?: string | null;
   subheading?: string | null;
   banner?: BannerBlock | null;
@@ -268,7 +268,7 @@ export interface SectionInput {
 }
 
 export const SectionInput: z.ZodType<SectionInput> = z.object({
-  kind: z.enum(["campaign_banner", "category_shortcuts", "deals", "official_highlights", "featured_products", "featured_sellers", "new_arrivals", "popular_products", "brand_collections", "recently_viewed", "collection_teaser", "promise_strip"]),
+  kind: z.enum(["campaign_banner", "category_shortcuts", "deals", "official_highlights", "featured_products", "featured_sellers", "new_arrivals", "popular_products", "brand_collections", "recently_viewed", "collection_teaser", "promise_strip", "news"]),
   heading: z.string().nullish(),
   subheading: z.string().nullish(),
   get banner() {
@@ -308,6 +308,10 @@ export interface HomeSectionAdmin {
   adPlacementKey?: string | null;
   managedIn?: string | null;
   config?: SectionInput | null;
+  /** Hidden by staff in the draft layout (POST …/visibility) */
+  hidden: boolean;
+  /** Hidden on the live homepage. Differs from hidden after a section is shown again, until the layout is published */
+  hiddenLive: boolean;
   /** Products hidden automatically because they are unavailable */
   unavailableHidden: number;
   /** Products in the section after unavailable ones are hidden, e.g. 12 (the drawer shows the first rows and + 8 more) */
@@ -334,6 +338,8 @@ export const HomeSectionAdmin: z.ZodType<HomeSectionAdmin> = z.object({
   get config() {
     return SectionInput.nullish();
   },
+  hidden: z.boolean().describe("Hidden by staff in the draft layout (POST …/visibility)"),
+  hiddenLive: z.boolean().describe("Hidden on the live homepage. Differs from hidden after a section is shown again, until the layout is published"),
   unavailableHidden: z.number().int().describe("Products hidden automatically because they are unavailable"),
   productCount: z.number().int().describe("Products in the section after unavailable ones are hidden, e.g. 12 (the drawer shows the first rows and + 8 more)"),
   updatedAt: z.iso.datetime({ offset: true }),
@@ -401,6 +407,8 @@ export interface HomeSection {
   heading?: string | null;
   subheading?: string | null;
   link?: LinkRef | null;
+  /** news sections: the newest published posts (pinned first, up to 3); empty for other kinds */
+  news: NewsCard[];
   banner?: BannerBlock | null;
   products: ProductTile[];
   categories: CategoryTile[];
@@ -422,6 +430,9 @@ export const HomeSection: z.ZodType<HomeSection> = z.object({
   subheading: z.string().nullish(),
   get link() {
     return LinkRef.nullish();
+  },
+  get news() {
+    return z.array(NewsCard);
   },
   get banner() {
     return BannerBlock.nullish();
@@ -807,6 +818,302 @@ export const CollectionCard: z.ZodType<CollectionCard> = z.object({
   },
 }).register(common.apiTypes, { id: "content.CollectionCard" });
 
+export interface CampaignPageCard {
+  id: string;
+  slug: string;
+  url: string;
+  title: string;
+  /** e.g. Oct 6 – Oct 19 */
+  eyebrow?: string | null;
+  /** The page's cover image */
+  image?: common.MediaRef | null;
+  /** End of the campaign period, else the scheduled removal time */
+  endsAt?: string | null;
+}
+
+export const CampaignPageCard: z.ZodType<CampaignPageCard> = z.object({
+  id: z.uuid(),
+  slug: z.string(),
+  url: z.string(),
+  title: z.string(),
+  eyebrow: z.string().describe("e.g. Oct 6 – Oct 19").nullish(),
+  get image() {
+    return common.MediaRef.nullish();
+  },
+  endsAt: z.iso.datetime({ offset: true }).describe("End of the campaign period, else the scheduled removal time").nullish(),
+}).register(common.apiTypes, { id: "content.CampaignPageCard" });
+
+export interface NewsCategoryRef {
+  id: string;
+  slug: string;
+  name: string;
+  icon?: string | null;
+}
+
+export const NewsCategoryRef: z.ZodType<NewsCategoryRef> = z.object({
+  id: z.uuid(),
+  slug: z.string(),
+  name: z.string(),
+  icon: z.string().nullish(),
+}).register(common.apiTypes, { id: "content.NewsCategoryRef" });
+
+export interface NewsCategory {
+  id: string;
+  slug: string;
+  name: string;
+  /** A content icon name, shown when a post has no cover */
+  icon?: string | null;
+  /** Order of the filter chips (1 first) */
+  position: number;
+  visible: boolean;
+  /** Published posts in the category (store: listed ones only) */
+  postCount: number;
+}
+
+export const NewsCategory: z.ZodType<NewsCategory> = z.object({
+  id: z.uuid(),
+  slug: z.string(),
+  name: z.string(),
+  icon: z.string().describe("A content icon name, shown when a post has no cover").nullish(),
+  position: z.number().int().describe("Order of the filter chips (1 first)"),
+  visible: z.boolean(),
+  postCount: z.number().int().describe("Published posts in the category (store: listed ones only)"),
+}).register(common.apiTypes, { id: "content.NewsCategory" });
+
+export interface NewsCard {
+  id: string;
+  slug: string;
+  /** /news/{slug} */
+  url: string;
+  title: string;
+  summary: string;
+  category: NewsCategoryRef;
+  cover?: common.MediaRef | null;
+  pinned: boolean;
+  publishedAt: string;
+}
+
+export const NewsCard: z.ZodType<NewsCard> = z.object({
+  id: z.uuid(),
+  slug: z.string(),
+  url: z.string().describe("/news/{slug}"),
+  title: z.string(),
+  summary: z.string(),
+  get category() {
+    return NewsCategoryRef;
+  },
+  get cover() {
+    return common.MediaRef.nullish();
+  },
+  pinned: z.boolean(),
+  publishedAt: z.iso.datetime({ offset: true }),
+}).register(common.apiTypes, { id: "content.NewsCard" });
+
+export interface NewsPost {
+  id: string;
+  slug: string;
+  url: string;
+  title: string;
+  summary: string;
+  category: NewsCategoryRef;
+  cover?: common.MediaRef | null;
+  pinned: boolean;
+  /** Null in a preview of a post never published */
+  publishedAt?: string | null;
+  updatedAt: string;
+  /** Structured rich text (headings, lists, tables, links), sanitized */
+  body: string;
+  /** Optional button, e.g. See the deals → /deals */
+  cta?: LinkRef | null;
+  /** Past its archive time: no longer listed, but the link still opens it */
+  archived: boolean;
+  /** Up to 3 newer or recent other posts */
+  related: NewsCard[];
+  version: number;
+}
+
+export const NewsPost: z.ZodType<NewsPost> = z.object({
+  id: z.uuid(),
+  slug: z.string(),
+  url: z.string(),
+  title: z.string(),
+  summary: z.string(),
+  get category() {
+    return NewsCategoryRef;
+  },
+  get cover() {
+    return common.MediaRef.nullish();
+  },
+  pinned: z.boolean(),
+  publishedAt: z.iso.datetime({ offset: true }).describe("Null in a preview of a post never published").nullish(),
+  updatedAt: z.iso.datetime({ offset: true }),
+  body: z.string().describe("Structured rich text (headings, lists, tables, links), sanitized"),
+  get cta() {
+    return LinkRef.nullish();
+  },
+  archived: z.boolean().describe("Past its archive time: no longer listed, but the link still opens it"),
+  get related() {
+    return z.array(NewsCard);
+  },
+  version: z.number().int(),
+}).register(common.apiTypes, { id: "content.NewsPost" });
+
+export interface NewsInput {
+  /** Up to 90 characters */
+  title: string;
+  slug?: string | null;
+  categoryId: string;
+  /** Up to 200 characters; shown on cards */
+  summary: string;
+  body: string;
+  /** 16 : 9 cover (1200 × 675), uploaded with purpose content_image */
+  cover?: common.MediaRef | null;
+  cta?: LinkRef | null;
+  /** The post leaves the news list at this time; its link keeps working (archived) */
+  archiveAt?: string | null;
+  ownerStaffId?: string | null;
+  changeNote?: string | null;
+}
+
+export const NewsInput: z.ZodType<NewsInput> = z.object({
+  title: z.string().describe("Up to 90 characters"),
+  slug: z.string().nullish(),
+  categoryId: z.uuid(),
+  summary: z.string().describe("Up to 200 characters; shown on cards"),
+  body: z.string(),
+  get cover() {
+    return common.MediaRef.nullish();
+  },
+  get cta() {
+    return LinkRef.nullish();
+  },
+  archiveAt: z.iso.datetime({ offset: true }).describe("The post leaves the news list at this time; its link keeps working (archived)").nullish(),
+  ownerStaffId: z.uuid().nullish(),
+  changeNote: z.string().nullish(),
+}).register(common.apiTypes, { id: "content.NewsInput" });
+
+export interface NewsAdmin {
+  /** The draft when there is one, else the live version */
+  post: NewsPost;
+  status: "draft" | "in_review" | "approved" | "scheduled" | "published" | "unpublished" | "removed";
+  archived: boolean;
+  pinned: boolean;
+  archiveAt?: string | null;
+  owner: OwnerRef;
+  draftVersion?: number | null;
+  liveVersion?: number | null;
+  /** Who wrote the current draft (null without a draft); the author cannot approve it (SAME_REVIEWER) */
+  draftAuthor?: common.Actor | null;
+  /** The draft waits for review and the caller is not its author */
+  canApprove: boolean;
+  /** Review of a live post's new draft (before the first publication, status tells it) */
+  draftReview?: HelpArticleDraftReview | null;
+  /** content.reviewRequired.news */
+  reviewRequired: boolean;
+  schedule: Schedule;
+  lastPublishedAt?: string | null;
+}
+
+export const NewsAdmin: z.ZodType<NewsAdmin> = z.object({
+  get post() {
+    return NewsPost;
+  },
+  status: z.enum(["draft", "in_review", "approved", "scheduled", "published", "unpublished", "removed"]),
+  archived: z.boolean(),
+  pinned: z.boolean(),
+  archiveAt: z.iso.datetime({ offset: true }).nullish(),
+  get owner() {
+    return OwnerRef;
+  },
+  draftVersion: z.number().int().nullish(),
+  liveVersion: z.number().int().nullish(),
+  get draftAuthor() {
+    return common.Actor.nullish();
+  },
+  canApprove: z.boolean().describe("The draft waits for review and the caller is not its author"),
+  get draftReview() {
+    return HelpArticleDraftReview.nullish();
+  },
+  reviewRequired: z.boolean().describe("content.reviewRequired.news"),
+  get schedule() {
+    return Schedule;
+  },
+  lastPublishedAt: z.iso.datetime({ offset: true }).nullish(),
+}).register(common.apiTypes, { id: "content.NewsAdmin" });
+
+export interface NewsAdminSummary {
+  id: string;
+  slug: string;
+  url: string;
+  title: string;
+  category: NewsCategoryRef;
+  status: "draft" | "in_review" | "approved" | "scheduled" | "published" | "unpublished" | "removed";
+  archived: boolean;
+  pinned: boolean;
+  /** The post or its new draft waits for review */
+  awaitingReview: boolean;
+  owner: OwnerRef;
+  publishedAt?: string | null;
+  publishAt?: string | null;
+  archiveAt?: string | null;
+  updatedAt: string;
+  draftVersion?: number | null;
+  liveVersion?: number | null;
+}
+
+export const NewsAdminSummary: z.ZodType<NewsAdminSummary> = z.object({
+  id: z.uuid(),
+  slug: z.string(),
+  url: z.string(),
+  title: z.string(),
+  get category() {
+    return NewsCategoryRef;
+  },
+  status: z.enum(["draft", "in_review", "approved", "scheduled", "published", "unpublished", "removed"]),
+  archived: z.boolean(),
+  pinned: z.boolean(),
+  awaitingReview: z.boolean().describe("The post or its new draft waits for review"),
+  get owner() {
+    return OwnerRef;
+  },
+  publishedAt: z.iso.datetime({ offset: true }).nullish(),
+  publishAt: z.iso.datetime({ offset: true }).nullish(),
+  archiveAt: z.iso.datetime({ offset: true }).nullish(),
+  updatedAt: z.iso.datetime({ offset: true }),
+  draftVersion: z.number().int().nullish(),
+  liveVersion: z.number().int().nullish(),
+}).register(common.apiTypes, { id: "content.NewsAdminSummary" });
+
+export interface NewsStatusCounts {
+  all: number;
+  draft: number;
+  inReview: number;
+  scheduled: number;
+  published: number;
+  /** Past their archive time, unpublished or removed */
+  archived: number;
+}
+
+export const NewsStatusCounts: z.ZodType<NewsStatusCounts> = z.object({
+  all: z.number().int(),
+  draft: z.number().int(),
+  inReview: z.number().int(),
+  scheduled: z.number().int(),
+  published: z.number().int(),
+  archived: z.number().int().describe("Past their archive time, unpublished or removed"),
+}).register(common.apiTypes, { id: "content.NewsStatusCounts" });
+
+export interface NewsSummary {
+  /** Listed (published, not archived) posts */
+  count: number;
+  latestPublishedAt?: string | null;
+}
+
+export const NewsSummary: z.ZodType<NewsSummary> = z.object({
+  count: z.number().int().describe("Listed (published, not archived) posts"),
+  latestPublishedAt: z.iso.datetime({ offset: true }).nullish(),
+}).register(common.apiTypes, { id: "content.NewsSummary" });
+
 export interface Curator {
   name: string;
   avatar?: common.MediaRef | null;
@@ -827,7 +1134,7 @@ export const Curator: z.ZodType<Curator> = z.object({
 
 export interface Version {
   id: string;
-  entity: "homepage" | "page" | "article";
+  entity: "homepage" | "page" | "article" | "news";
   entityId: string;
   number: number;
   state: "draft" | "live" | "superseded" | "discarded";
@@ -841,7 +1148,7 @@ export interface Version {
 
 export const Version: z.ZodType<Version> = z.object({
   id: z.uuid(),
-  entity: z.enum(["homepage", "page", "article"]),
+  entity: z.enum(["homepage", "page", "article", "news"]),
   entityId: z.uuid(),
   number: z.number().int(),
   state: z.enum(["draft", "live", "superseded", "discarded"]),
@@ -1559,6 +1866,34 @@ export const ContentPageRemovedEvent: z.ZodType<ContentPageRemovedEvent> = z.obj
   reason: z.string(),
 });
 
+/** content.news.published: A news post version goes live (now or on schedule) */
+export interface ContentNewsPublishedEvent {
+  postId: string;
+  slug: string;
+  url: string;
+  version: number;
+}
+
+export const ContentNewsPublishedEvent: z.ZodType<ContentNewsPublishedEvent> = z.object({
+  postId: z.uuid(),
+  slug: z.string(),
+  url: z.string(),
+  version: z.number().int(),
+});
+
+/** content.news.unpublished: A news post is unpublished */
+export interface ContentNewsUnpublishedEvent {
+  postId: string;
+  slug: string;
+  reason?: string | null;
+}
+
+export const ContentNewsUnpublishedEvent: z.ZodType<ContentNewsUnpublishedEvent> = z.object({
+  postId: z.uuid(),
+  slug: z.string(),
+  reason: z.string().nullish(),
+});
+
 /** content.article.published: A help article version goes live */
 export interface ContentArticlePublishedEvent {
   articleId: string;
@@ -1720,7 +2055,7 @@ export interface ContentDb {
   /** Immutable snapshots of homepage layouts, pages and articles. Restore copies a snapshot into a new version. */
   versions: {
     id: string;
-    entity: 'homepage' | 'page' | 'article';
+    entity: 'homepage' | 'page' | 'article' | 'news';
     entity_id: string;
     number: number;
     state: string;
@@ -1834,6 +2169,39 @@ export interface ContentDb {
     active_from: Date | null;
     active_until: Date | null;
   };
+  /** Staff-editable news categories (filter chips in the store) */
+  news_categories: {
+    id: string;
+    slug: string;
+    name: string;
+    icon: string | null;
+    position: number;
+    visible: boolean;
+    /** old slugs that still filter */
+    previous_slugs: Json;
+  };
+  /** News for customers; content lives in versions (entity news), these columns follow the live version */
+  news_posts: {
+    id: string;
+    slug: string;
+    /** old slugs that still open the post */
+    previous_slugs: Json;
+    category_id: string;
+    title: string;
+    summary: string;
+    owner_staff_id: string | null;
+    status: string;
+    pinned: boolean;
+    pinned_at: Date | null;
+    publish_at: Date | null;
+    unpublish_at: Date | null;
+    archive_at: Date | null;
+    /** first publication */
+    published_at: Date | null;
+    live_version_id: string | null;
+    draft_version_id: string | null;
+    updated_at: Date;
+  };
   /** Publication, schedule, unpublish, correction and removal actions with reasons */
   content_log: {
     id: string;
@@ -1902,6 +2270,20 @@ export const endpoints = defineEndpoints({
     response: () => CollectionCard,
     status: 200,
     screens: ["store/brand"],
+    phase: 1,
+  },
+  listCampaignPages: {
+    area: "store",
+    method: "GET",
+    path: "/campaign-pages",
+    auth: "visitor",
+    scope: "public",
+    summary: "Live campaign pages as cards",
+    desc: "Campaign pages (kind campaign) inside their publication window, ending soonest first, then the most recently updated. Used by the Deals tab so phone shoppers can reach campaign pages (the header navigation is website only).",
+    paging: true,
+    response: () => CampaignPageCard,
+    status: 200,
+    screens: ["store/deals"],
     phase: 1,
   },
   listPageProducts: {
@@ -1974,6 +2356,67 @@ export const endpoints = defineEndpoints({
     response: () => HelpArticleSummary,
     status: 200,
     screens: ["help/center","seller/help"],
+    phase: 1,
+  },
+  listNews: {
+    area: "store",
+    method: "GET",
+    path: "/news",
+    auth: "visitor",
+    scope: "public",
+    summary: "News list: pinned first, then newest",
+    desc: "Published posts that are not archived. category is a category slug (old slugs still work). Cursor paging: the phone lazy-loads, the website pages.",
+    query: () =>
+      z.object({
+        category: z.string().optional(),
+      }),
+    paging: true,
+    response: () => NewsCard,
+    status: 200,
+    screens: ["store/news"],
+    phase: 1,
+  },
+  listNewsCategories: {
+    area: "store",
+    method: "GET",
+    path: "/news/categories",
+    auth: "visitor",
+    scope: "public",
+    summary: "Visible news categories that have posts, in order",
+    response: () => z.array(NewsCategory),
+    status: 200,
+    screens: ["store/news"],
+    phase: 1,
+  },
+  getNewsSummary: {
+    area: "store",
+    method: "GET",
+    path: "/news/summary",
+    auth: "visitor",
+    scope: "public",
+    summary: "How many posts are listed and when the newest was published",
+    desc: "For the 'new' dot: the app compares latestPublishedAt with the last post the customer opened.",
+    response: () => NewsSummary,
+    status: 200,
+    screens: ["account/overview","store/news"],
+    phase: 1,
+  },
+  getNewsPost: {
+    area: "store",
+    method: "GET",
+    path: "/news/{slug}",
+    auth: "visitor",
+    scope: "public",
+    summary: "One news post",
+    desc: "404 unless published (archived posts still open, with archived true). An old slug answers the post; its slug field is the current one.",
+    params: () =>
+      z.object({
+        slug: z.string(),
+      }),
+    response: () => NewsPost,
+    status: 200,
+    errors: ["NOT_FOUND"],
+    screens: ["store/news-post"],
     phase: 1,
   },
   getHelpArticle: {
@@ -2287,6 +2730,30 @@ export const endpoints = defineEndpoints({
     status: 200,
     errors: ["SECTION_LOCKED","ILLEGAL_TRANSITION"],
     audited: true,
+    screens: ["admin/content"],
+    phase: 1,
+  },
+  setHomeSectionVisibility: {
+    area: "admin",
+    method: "POST",
+    path: "/homepage/sections/{id}/visibility",
+    auth: "staff",
+    permission: "content.homepage.manage",
+    scope: "staff",
+    summary: "Hide a section now, or show it again in the draft",
+    desc: "hidden true takes the section off the live homepage at once (a new live version, without review) and keeps it hidden in the draft. hidden false shows it again in the draft only: customers see it once the layout is published. The section keeps its content and schedule either way.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => z.object({
+      hidden: z.boolean(),
+    }),
+    response: () => HomeSectionAdmin,
+    status: 200,
+    errors: ["SECTION_LOCKED","CONFLICT"],
+    audited: true,
+    events: ["content.page.published"],
     screens: ["admin/content"],
     phase: 1,
   },
@@ -2914,6 +3381,285 @@ export const endpoints = defineEndpoints({
     screens: ["admin/help-content"],
     phase: 1,
   },
+  listNewsAdmin: {
+    area: "admin",
+    method: "GET",
+    path: "/news",
+    auth: "staff",
+    permission: "content.view",
+    scope: "staff",
+    summary: "News posts for the Admin Center list",
+    desc: "status archived lists posts past their archive time, unpublished or removed; published lists the ones still listed in the store. inReview filters posts (or new drafts) waiting for review.",
+    query: () =>
+      z.object({
+        status: z.enum(["draft", "in_review", "scheduled", "published", "archived"]).optional(),
+        categoryId: z.uuid().optional(),
+        q: z.string().optional(),
+      }),
+    paging: true,
+    response: () => NewsAdminSummary,
+    status: 200,
+    screens: ["admin/news"],
+    phase: 1,
+  },
+  getNewsCounts: {
+    area: "admin",
+    method: "GET",
+    path: "/news/counts",
+    auth: "staff",
+    permission: "content.view",
+    scope: "staff",
+    summary: "Post counts per list tab",
+    response: () => NewsStatusCounts,
+    status: 200,
+    screens: ["admin/news"],
+    phase: 1,
+  },
+  createNews: {
+    area: "admin",
+    method: "POST",
+    path: "/news",
+    auth: "staff",
+    permission: "content.news.manage",
+    scope: "staff",
+    summary: "Create a news post draft",
+    body: () => NewsInput,
+    response: () => NewsAdmin,
+    status: 201,
+    errors: ["SLUG_TAKEN"],
+    audited: true,
+    screens: ["admin/news"],
+    phase: 1,
+  },
+  getNewsAdmin: {
+    area: "admin",
+    method: "GET",
+    path: "/news/{id}",
+    auth: "staff",
+    permission: "content.view",
+    scope: "staff",
+    summary: "A news post with status, review and versions",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    response: () => NewsAdmin,
+    status: 200,
+    screens: ["admin/news"],
+    phase: 1,
+  },
+  updateNews: {
+    area: "admin",
+    method: "PATCH",
+    path: "/news/{id}",
+    auth: "staff",
+    permission: "content.news.manage",
+    scope: "staff",
+    summary: "Edit the post draft",
+    desc: "Editing a live post makes a new draft; the live post stays until the draft is published. A draft in review or approved is frozen until changes are requested.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => NewsInput,
+    response: () => NewsAdmin,
+    status: 200,
+    errors: ["CONFLICT","SLUG_TAKEN"],
+    audited: true,
+    screens: ["admin/news"],
+    phase: 1,
+  },
+  previewNews: {
+    area: "admin",
+    method: "POST",
+    path: "/news/{id}/preview",
+    auth: "staff",
+    permission: "content.view",
+    scope: "staff",
+    summary: "The post as the store shows it (draft or live)",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => z.object({
+      useDraft: z.boolean().nullish(),
+    }),
+    response: () => NewsPost,
+    status: 200,
+    screens: ["admin/news"],
+    phase: 1,
+  },
+  transitionNews: {
+    area: "admin",
+    method: "POST",
+    path: "/news/{id}/transition",
+    auth: "staff",
+    permission: "content.news.manage",
+    permissionWhen: [{"if":{"body.action":"approve"},"permission":"content.news.publish"},{"if":{"body.action":"requestChanges"},"permission":"content.news.publish"},{"if":{"body.action":"schedule"},"permission":"content.news.publish"},{"if":{"body.action":"cancelSchedule"},"permission":"content.news.publish"},{"if":{"body.action":"publish"},"permission":"content.news.publish"},{"if":{"body.action":"unpublish"},"permission":"content.news.publish"},{"if":{"body.action":"remove"},"permission":"content.pages.remove"}],
+    scope: "staff",
+    summary: "Submit, approve, request changes, schedule, publish, unpublish or remove a post",
+    desc: "The Content publication state machine, as for help articles. With content.reviewRequired.news on (default), someone other than the draft's writer approves before it is scheduled or published (SAME_REVIEWER). Approving, scheduling, publishing and unpublishing need content.news.publish; remove needs content.pages.remove, a kind and a reason; requestChanges needs a reason (it also sends back an approved draft). discardDraft drops a live post's unpublished draft; the live post stays as it is.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => z.object({
+      action: z.enum(["submit", "approve", "requestChanges", "schedule", "cancelSchedule", "publish", "unpublish", "remove", "restore", "discardDraft"]),
+      reason: z.string().nullish(),
+      kind: z.enum(["correction", "removal"]).nullish(),
+      publishAt: z.iso.datetime({ offset: true }).nullish(),
+    }),
+    response: () => NewsAdmin,
+    status: 200,
+    errors: ["ILLEGAL_TRANSITION","SAME_REVIEWER"],
+    audited: true,
+    events: ["content.news.published","content.news.unpublished","content.page.removed"],
+    screens: ["admin/news"],
+    phase: 1,
+  },
+  pinNews: {
+    area: "admin",
+    method: "POST",
+    path: "/news/{id}/pin",
+    auth: "staff",
+    permission: "content.news.publish",
+    scope: "staff",
+    summary: "Pin or unpin a post",
+    desc: "Pinned posts list first. At most 3 published posts are pinned: pinning a fourth unpins the one pinned longest ago. Takes effect at once (no review).",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => z.object({
+      pinned: z.boolean(),
+    }),
+    response: () => NewsAdmin,
+    status: 200,
+    audited: true,
+    screens: ["admin/news"],
+    phase: 1,
+  },
+  listNewsVersions: {
+    area: "admin",
+    method: "GET",
+    path: "/news/{id}/versions",
+    auth: "staff",
+    permission: "content.view",
+    scope: "staff",
+    summary: "Post version history",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    paging: true,
+    response: () => Version,
+    status: 200,
+    screens: ["admin/news"],
+    phase: 1,
+  },
+  restoreNewsVersion: {
+    area: "admin",
+    method: "POST",
+    path: "/news/{id}/versions/{number}/restore",
+    auth: "staff",
+    permission: "content.news.manage",
+    scope: "staff",
+    summary: "Restore an earlier post version as a new draft",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+        number: z.coerce.number().int(),
+      }),
+    body: () => z.object({
+      reason: z.string(),
+    }),
+    response: () => NewsAdmin,
+    status: 200,
+    errors: ["NOT_FOUND","CONFLICT"],
+    audited: true,
+    screens: ["admin/news"],
+    phase: 1,
+  },
+  listNewsCategoriesAdmin: {
+    area: "admin",
+    method: "GET",
+    path: "/news-categories",
+    auth: "staff",
+    permission: "content.view",
+    scope: "staff",
+    summary: "News categories including hidden ones",
+    response: () => z.array(NewsCategory),
+    status: 200,
+    screens: ["admin/news"],
+    phase: 1,
+  },
+  createNewsCategory: {
+    area: "admin",
+    method: "POST",
+    path: "/news-categories",
+    auth: "staff",
+    permission: "content.news.manage",
+    scope: "staff",
+    summary: "Add a news category",
+    body: () => z.object({
+      name: z.string(),
+      slug: z.string().nullish(),
+      icon: z.string().nullish(),
+      visible: z.boolean().nullish(),
+    }),
+    response: () => NewsCategory,
+    status: 201,
+    errors: ["SLUG_TAKEN"],
+    audited: true,
+    screens: ["admin/news"],
+    phase: 1,
+  },
+  updateNewsCategory: {
+    area: "admin",
+    method: "PATCH",
+    path: "/news-categories/{id}",
+    auth: "staff",
+    permission: "content.news.manage",
+    scope: "staff",
+    summary: "Rename, hide or reorder a news category",
+    desc: "Renaming changes the slug; the old slug keeps working as a filter link. Hiding removes its chip; its posts stay listed under All.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => z.object({
+      name: z.string().nullish(),
+      icon: z.string().nullish(),
+      visible: z.boolean().nullish(),
+      position: z.number().int().nullish(),
+    }),
+    response: () => NewsCategory,
+    status: 200,
+    errors: ["SLUG_TAKEN"],
+    audited: true,
+    screens: ["admin/news"],
+    phase: 1,
+  },
+  deleteNewsCategory: {
+    area: "admin",
+    method: "DELETE",
+    path: "/news-categories/{id}",
+    auth: "staff",
+    permission: "content.news.manage",
+    scope: "staff",
+    summary: "Delete an unused news category",
+    desc: "CONFLICT when any post (in any state but removed) uses it; details.posts names them so they can be moved first.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    response: null,
+    status: 204,
+    errors: ["CONFLICT"],
+    audited: true,
+    screens: ["admin/news"],
+    phase: 1,
+  },
   restoreArticleVersion: {
     area: "admin",
     method: "POST",
@@ -3196,7 +3942,7 @@ export const spec = defineModuleSpec({
   group: "Growth",
   phase: 1,
   chapters: [19,15,4,3,17],
-  summary: "Store content managed by the Content Manager: ordered and scheduled homepage sections, campaign pages and curated collections, Help Center articles and categories, policies with versions and effective dates, the About page and footer links. Every item has an owner, a preview, a publication status and schedule, a version history with restore, and a correction or removal action.",
+  summary: "Store content managed by the Content Manager: ordered and scheduled homepage sections, campaign pages and curated collections, Help Center articles and categories, news posts and their categories, policies with versions and effective dates, the About page and footer links. Every item has an owner, a preview, a publication status and schedule, a version history with restore, and a correction or removal action.",
   dependsOn: ["media","access"],
   optionalDeps: ["catalog","offers","inventory","promotions","advertising","sellers","search","reports","notifications","audit","settings","shipping","wishlist","support","returns","reviews"],
   publicApi: ["currentPolicyVersions","getPolicyVersion","helpArticlesFor","pageLink","getHomePage","previewHomePage","getStorePage","previewPage","collectionProducts","getHelpCenter","getHelpArticle","countHelpArticlesForPolicy","sellerAnnouncements","contentForCampaign"],
@@ -3247,9 +3993,19 @@ export const spec = defineModuleSpec({
       "desc": "Create policies and assign their owners"
     },
     {
+      "key": "content.news.manage",
+      "audience": "staff",
+      "desc": "Write news posts and submit them for review; manage news categories"
+    },
+    {
+      "key": "content.news.publish",
+      "audience": "staff",
+      "desc": "Approve, schedule, publish, unpublish and pin news posts"
+    },
+    {
       "key": "content.view",
       "audience": "staff",
-      "desc": "View the homepage layout, pages, help content and policies in the Admin Center (read only)"
+      "desc": "View the homepage layout, pages, help content, news and policies in the Admin Center (read only)"
     }
   ],
   approvalActions: [
@@ -3285,6 +4041,11 @@ export const spec = defineModuleSpec({
         ],
         [
           "in_review",
+          "requestChanges",
+          "draft"
+        ],
+        [
+          "approved",
           "requestChanges",
           "draft"
         ],
@@ -3325,6 +4086,16 @@ export const spec = defineModuleSpec({
         ],
         [
           "draft",
+          "remove",
+          "removed"
+        ],
+        [
+          "in_review",
+          "remove",
+          "removed"
+        ],
+        [
+          "approved",
           "remove",
           "removed"
         ],
@@ -3422,6 +4193,8 @@ export const spec = defineModuleSpec({
       "content.page.published": { when: "A page, collection or homepage layout version goes live (now or on schedule)", payload: () => ContentPagePublishedEvent },
       "content.page.unpublished": { when: "A page is unpublished or reaches its removal time", payload: () => ContentPageUnpublishedEvent },
       "content.page.removed": { when: "A correction or removal action takes content down", payload: () => ContentPageRemovedEvent },
+      "content.news.published": { when: "A news post version goes live (now or on schedule)", payload: () => ContentNewsPublishedEvent },
+      "content.news.unpublished": { when: "A news post is unpublished", payload: () => ContentNewsUnpublishedEvent },
       "content.article.published": { when: "A help article version goes live", payload: () => ContentArticlePublishedEvent },
       "content.article.review_due": { when: "A published help article has not been reviewed for articleReviewDays (daily, once per review period)", payload: () => ContentArticleReviewDueEvent },
       "content.policy.submitted": { when: "A policy version is sent for approval", payload: () => ContentPolicySubmittedEvent },
@@ -3444,7 +4217,7 @@ export const spec = defineModuleSpec({
   jobs: {
     "content.run-schedules": {
       "schedule": "every 1 min",
-      "does": "Publish and unpublish sections, pages and articles whose publishAt / unpublishAt has passed; record a homepage version when the visible layout changes"
+      "does": "Publish and unpublish sections, pages, articles and news posts whose publishAt / unpublishAt has passed; record a homepage version when the visible layout changes"
     },
     "content.policy-effective": {
       "schedule": "every 1 min",
@@ -3488,9 +4261,10 @@ export const spec = defineModuleSpec({
       "default": {
         "page": false,
         "section": false,
-        "article": true
+        "article": true,
+        "news": true
       },
-      "desc": "Whether the review step is required before publishing",
+      "desc": "Whether the review step is required before publishing (news: a second person approves every post, owner decision 2026-10-18; a stored value without news counts as on)",
       "type": "json",
       "approval": "second_reviewer"
     },
@@ -3547,7 +4321,7 @@ export const spec = defineModuleSpec({
     },
     "SAME_REVIEWER": {
       "status": 409,
-      "meaning": "The author cannot approve their own article or homepage draft."
+      "meaning": "The author cannot approve their own article, news post or homepage draft."
     }
   },
   collections: {
@@ -3966,7 +4740,8 @@ export const spec = defineModuleSpec({
               "enum": [
                 "homepage",
                 "page",
-                "article"
+                "article",
+                "news"
               ]
             },
             "entity_id": {
@@ -4874,6 +5649,256 @@ export const spec = defineModuleSpec({
       "indexes": [],
       "unenforced": []
     },
+    "news_categories": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "slug",
+        "name",
+        "icon",
+        "position",
+        "visible",
+        "previous_slugs"
+      ],
+      "nullable": [
+        "icon"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "slug",
+            "name",
+            "position",
+            "visible",
+            "previous_slugs"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "slug": {
+              "bsonType": "string"
+            },
+            "name": {
+              "bsonType": "string"
+            },
+            "icon": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "position": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "visible": {
+              "bsonType": "bool"
+            },
+            "previous_slugs": {}
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "news_categories_slug_549e08",
+          "key": {
+            "slug": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "news_posts": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "slug",
+        "previous_slugs",
+        "category_id",
+        "title",
+        "summary",
+        "owner_staff_id",
+        "status",
+        "pinned",
+        "pinned_at",
+        "publish_at",
+        "unpublish_at",
+        "archive_at",
+        "published_at",
+        "live_version_id",
+        "draft_version_id",
+        "updated_at"
+      ],
+      "nullable": [
+        "owner_staff_id",
+        "pinned_at",
+        "publish_at",
+        "unpublish_at",
+        "archive_at",
+        "published_at",
+        "live_version_id",
+        "draft_version_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "pinned_at",
+        "publish_at",
+        "unpublish_at",
+        "archive_at",
+        "published_at",
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "slug",
+            "previous_slugs",
+            "category_id",
+            "title",
+            "summary",
+            "status",
+            "pinned",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "slug": {
+              "bsonType": "string"
+            },
+            "previous_slugs": {},
+            "category_id": {
+              "bsonType": "string"
+            },
+            "title": {
+              "bsonType": "string"
+            },
+            "summary": {
+              "bsonType": "string"
+            },
+            "owner_staff_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "bsonType": "string"
+            },
+            "pinned": {
+              "bsonType": "bool"
+            },
+            "pinned_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "publish_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "unpublish_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "archive_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "published_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "live_version_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "draft_version_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "news_posts_slug_549e08",
+          "key": {
+            "slug": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "news_posts_status_published_at_c8bf59",
+          "key": {
+            "status": 1,
+            "published_at": 1
+          }
+        },
+        {
+          "name": "news_posts_category_id_status_da886b",
+          "key": {
+            "category_id": 1,
+            "status": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
     "content_log": {
       "idField": "id",
       "key": [
@@ -4973,6 +5998,8 @@ declare module '../kernel/events/event-map.js' {
     "content.page.published": ContentPagePublishedEvent;
     "content.page.unpublished": ContentPageUnpublishedEvent;
     "content.page.removed": ContentPageRemovedEvent;
+    "content.news.published": ContentNewsPublishedEvent;
+    "content.news.unpublished": ContentNewsUnpublishedEvent;
     "content.article.published": ContentArticlePublishedEvent;
     "content.article.review_due": ContentArticleReviewDueEvent;
     "content.policy.submitted": ContentPolicySubmittedEvent;

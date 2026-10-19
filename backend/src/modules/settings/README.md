@@ -157,8 +157,16 @@ Market-level platform settings: country and service region, currency, time zone,
 | support | `PublicSupport` |
 | checkout | `CheckoutSettings` |
 | features | `map<bool>` Public feature flags, e.g. { "wishlist": false, "paidSellerAds": false, "externalSignIn": false } |
+| channels | `ServedChannels` Which apps Marketly serves (Settings › Website and Android app) |
 | android | `AndroidConfig` |
 | maintenance | `MaintenanceNotice` |
+
+### ServedChannels
+
+| Field | Type |
+|---|---|
+| website | `bool` apps.serveWebsite: the desktop and tablet website is maintained |
+| android | `bool` apps.serveAndroidApp: the Android app is maintained |
 
 ### PublicMarket
 
@@ -639,7 +647,7 @@ Checked through the access module (limits per role, second reviewer).
 - Boundary: settings owns market-level values (market.*, support.*, checkout.*, apps.*) and the generic store for runtime settings that modules declare in their manifest (the same `settings` entries as in their specs, opted in with editable: true). Versioned business rule sets with their own lifecycle stay in their modules: returns baseline and category exceptions (returns), fee rules and payout/hold settings (finance), shipping defaults and holidays (shipping), advertising global rules (advertising), seller performance targets (sellers), SLA targets (support). Those modules register a section provider so GET /overview shows their values, last change and scheduled changes, and the page edits them through the owning module's endpoint (SectionLink).
 - Removed keys are dropped from the store by a settings migration (stored values and scheduled changes), as for finance's second-reviewer thresholds and promotions' referencePriceDays: the fulfillment-service key warehouseAddress was removed (the inbound destination is the service location's address, fulfillment-service.serviceLocationId).
 - Every change states its effective date and its impact on existing commitments before saving (plan ch. 18). applyScope new_only means orders placed before the effective date keep what they accepted; purchase snapshots in orders already guarantee this for terms copied at purchase.
-- Settings-owned keys and their defaults (examples to confirm): market.country = US; market.serviceRegion = 48 contiguous states (Alaska, Hawaii and territories later); market.currency = USD (not editable at launch); market.timeZone = America/Los_Angeles; market.locale = en-US; support.businessHours = Mon–Sat 08:00–20:00; support.closures = Thanksgiving, Christmas, New Year; support.phone = 1-800-555-0136; checkout.guestCheckoutEnabled = true (approval: business_owner); checkout.offerAccountAfterGuestPurchase = true; market.legalName = Marketly, Inc. and market.companyLine (approval: business_owner; shown in footers, policies and emails); apps.android.minVersionCode, apps.android.latestVersionCode, apps.android.updateUrl; apps.maintenance.
+- Settings-owned keys and their defaults (examples to confirm): market.country = US; market.serviceRegion = 48 contiguous states (Alaska, Hawaii and territories later); market.currency = USD (not editable at launch); market.timeZone = America/Los_Angeles; market.locale = en-US; support.businessHours = Mon–Sat 08:00–20:00; support.closures = Thanksgiving, Christmas, New Year; support.phone = 1-800-555-0136; checkout.guestCheckoutEnabled = true (approval: business_owner); checkout.offerAccountAfterGuestPurchase = true; market.legalName = Marketly, Inc. and market.companyLine (approval: business_owner; shown in footers, policies and emails); apps.serveWebsite = true and apps.serveAndroidApp = true (which apps are served; with the website off, ads need no desktop images); apps.android.minVersionCode, apps.android.latestVersionCode, apps.android.updateUrl; apps.maintenance.
 - Launch has one market (plan ch. 1: one service region and one main currency; no other languages are planned). AppConfig.market (United States · English (US) · USD) is still returned for formatting, but the apps show no market row and no market or language picker and no supportedMarkets list until an expansion project adds a second market.
 - apps.maintenance holds { active, kind, message, until }; every change sets updatedAt. kind incident is used by the Platform Administrator for live service problems so error pages can show the current status note.
 - Changing market.timeZone or market.currency after launch needs a migration plan: both are business_owner approval, minLeadDays 30, and currency stays read-only in phase 1 (one currency, plan ch. 1).
