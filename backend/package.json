@@ -14,6 +14,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "bench:search": "vitest run --config vitest.bench.config.ts --silent=false src/modules/search/test/scale.bench.ts",
     "gen": "tsx tools/generate.ts",
     "gen:check": "tsx tools/generate.ts --check",
     "migrate": "tsx --env-file-if-exists=.env tools/migrate.ts",
