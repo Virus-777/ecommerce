@@ -6,7 +6,7 @@ import { AppError } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { pageOf, toPageRequest, type PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
-import type { AboutFacts, BannerBlock, Check, CollectionCard, LinkedPromotion, PageAdmin, PageBlock, PageDraftInput, PageSummary, ProductSource, ProductTile, RemovalInfo, StorePage, Version } from '../../../spec/content.js';
+import type { AboutFacts, BannerBlock, CampaignPageCard, Check, CollectionCard, LinkedPromotion, PageAdmin, PageBlock, PageDraftInput, PageSummary, ProductSource, ProductTile, RemovalInfo, StorePage, Version } from '../../../spec/content.js';
 import { isValidSlug, isValidTimeZone, sanitizeHtml, slugify } from '../domain/rules.js';
 import { contentPublicationMachine } from '../domain/state-machines.js';
 import type { PageRow, VersionRow } from '../ports.js';
@@ -369,6 +369,32 @@ export class ContentPages extends ContentTiles {
       }),
     );
     return { ...slice, items };
+  }
+
+  async listCampaignPages(page: PageRequest): Promise<common.Page<CampaignPageCard>> {
+    const rows = (await this.repo.listPages({ kind: 'campaign', statuses: ['published'] })).filter((p) => this.pageIsLive(p));
+    const versions = new Map((await this.repo.getVersions(rows.map((p) => p.live_version_id!))).map((v) => [v.id, v]));
+    const cards = rows.map((p) => {
+      const snap = this.snapshotOf(versions.get(p.live_version_id!));
+      const endsAt = snap?.period?.to ?? p.unpublish_at?.toISOString() ?? null;
+      return { p, snap, endsAt };
+    });
+    // ending soonest first (open-ended last), then the most recently updated
+    cards.sort((a, b) => (a.endsAt ?? '\uffff').localeCompare(b.endsAt ?? '\uffff') || b.p.updated_at.getTime() - a.p.updated_at.getTime());
+    const slice = pageOf(cards, page);
+    const covers = await this.refsMap(slice.items.map((c) => c.snap?.coverImage?.id));
+    return {
+      ...slice,
+      items: slice.items.map(({ p, snap, endsAt }): CampaignPageCard => ({
+        id: p.id,
+        slug: p.slug,
+        url: this.pageUrl(p),
+        title: snap?.title ?? p.title,
+        eyebrow: snap?.eyebrow ?? null,
+        image: snap?.coverImage?.id ? (covers.get(snap.coverImage.id) ?? null) : null,
+        endsAt,
+      })),
+    };
   }
 
   async pageLink(pageId: string): Promise<{ url: string; status: string; publishAt?: string; unpublishAt?: string } | null> {

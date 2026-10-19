@@ -42,14 +42,14 @@ export interface Harness {
   /** Staff token for an account id (all permissions unless given) */
   staff(id?: string, permissions?: string[]): Record<string, string>;
   staffId: string;
-  call(method: 'GET' | 'POST' | 'PATCH' | 'PUT', url: string, payload?: unknown, headers?: Record<string, string>): Promise<Awaited<ReturnType<FastifyInstance['inject']>>>;
-  admin(method: 'GET' | 'POST' | 'PATCH' | 'PUT', path: string, payload?: unknown, headers?: Record<string, string>): ReturnType<Harness['call']>;
+  call(method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE', url: string, payload?: unknown, headers?: Record<string, string>): Promise<Awaited<ReturnType<FastifyInstance['inject']>>>;
+  admin(method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE', path: string, payload?: unknown, headers?: Record<string, string>): ReturnType<Harness['call']>;
   store(method: 'GET' | 'POST', path: string, payload?: unknown, headers?: Record<string, string>): ReturnType<Harness['call']>;
   decide(requestId: string, actionKey: string, target: { id: string }, outcome: 'approved' | 'rejected' | 'cancelled' | 'expired'): Promise<void>;
   card(over?: Partial<search.ProductCard>): search.ProductCard;
 }
 
-const PUBLISHED = ['content.page.published', 'content.page.unpublished', 'content.page.removed', 'content.article.published', 'content.policy.submitted', 'content.policy.scheduled', 'content.policy.effective', 'content.article.review_due'];
+const PUBLISHED = ['content.news.published', 'content.news.unpublished', 'content.page.published', 'content.page.unpublished', 'content.page.removed', 'content.article.published', 'content.policy.submitted', 'content.policy.scheduled', 'content.policy.effective', 'content.article.review_due'];
 
 export async function harness(): Promise<Harness> {
   const clock = movingClock();

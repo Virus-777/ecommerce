@@ -40,6 +40,7 @@ describe('pages and collections', () => {
   it('is not visible in the store until published; publishing records the live version and the event', async () => {
     const id = (await h.admin('GET', '/pages?q=home')).json().items[0].id;
     expect((await h.store('GET', '/pages/home-week')).statusCode).toBe(404);
+    expect((await h.store('GET', '/campaign-pages')).json().items).toEqual([]);
     const preview = await h.admin('POST', `/pages/${id}/preview`, { device: 'desktop', useDraft: true });
     expect(preview.json()).toMatchObject({ slug: 'home-week', version: 1 });
     const pub = await h.admin('POST', `/pages/${id}/publish`);
@@ -49,6 +50,7 @@ describe('pages and collections', () => {
     const store = (await h.store('GET', '/pages/home-week')).json();
     expect(store).toMatchObject({ id, title: 'Home Week', version: 1 });
     expect(store.breadcrumb.at(-1)).toEqual({ label: 'Home Week', url: '/pages/home-week', kind: 'page' });
+    expect((await h.store('GET', '/campaign-pages')).json().items).toEqual([{ id, slug: 'home-week', url: '/pages/home-week', title: 'Home Week', eyebrow: 'Oct 6 – Oct 19', image: null, endsAt: null }]);
     // publishing again with no draft is illegal
     expect((await h.admin('POST', `/pages/${id}/publish`)).json().error.code).toBe('ILLEGAL_TRANSITION');
   });
@@ -77,6 +79,7 @@ describe('pages and collections', () => {
     const id = (await h.admin('GET', '/pages?q=home')).json().items[0].id;
     const un = await h.admin('POST', `/pages/${id}/unpublish`, { reason: 'Paused' });
     expect(un.json().summary.status).toBe('unpublished');
+    expect((await h.store('GET', '/campaign-pages')).json().items).toEqual([]);
     expect(h.eventsNamed('content.page.unpublished').at(-1)).toEqual({ pageId: id, slug: 'home-week', reason: 'Paused' });
     expect((await h.store('GET', '/pages/home-week')).statusCode).toBe(404);
     expect((await h.admin('POST', `/pages/${id}/unpublish`, {})).json().error.code).toBe('ILLEGAL_TRANSITION');

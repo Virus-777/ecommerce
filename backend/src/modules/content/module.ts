@@ -7,6 +7,7 @@ import { adminRoutes } from './http/admin.js';
 import { ContentRepository } from './repository.js';
 import { ContentService } from './service.js';
 import { schemas } from './schema.js';
+import { mongoMigrations } from './migrations.js';
 
 /**
  * Content: Store content managed by the Content Manager: ordered and scheduled homepage sections, campaign pages and curated collections, Help Center articles and categories, policies with versions and effective dates, the About page and footer links. Every item has an owner, a preview, a publication status and schedule, a version history with restore, and a correction or removal action.
@@ -16,8 +17,9 @@ import { schemas } from './schema.js';
  */
 export default defineModule({
   spec,
-  version: '2.0.2',
+  version: '2.1.0',
   schemas,
+  mongoMigrations,
   register(ctx) {
     const service = new ContentService({ repo: new ContentRepository(ctx.mongo), ctx });
     ctx.provide(service);

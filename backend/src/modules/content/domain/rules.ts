@@ -291,6 +291,7 @@ export const SECTION_KIND_LABEL: Record<string, string> = {
   recently_viewed: 'Recently viewed',
   collection_teaser: 'Collection',
   promise_strip: 'Our promise',
+  news: 'Latest news',
   ad_position: 'Ad position',
 };
 

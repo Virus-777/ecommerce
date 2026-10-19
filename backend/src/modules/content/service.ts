@@ -8,7 +8,7 @@ import type * as sellers from '../../spec/sellers.js';
 import { inWindow } from './domain/rules.js';
 import type { NavigationRow, PageRow, VersionRow } from './ports.js';
 import { invalid, iso, requireText, SYSTEM, type By } from './service/base.js';
-import { ContentPolicies } from './service/policies.js';
+import { ContentNews } from './service/news.js';
 
 export type { ContentServiceDeps } from './service/base.js';
 
@@ -18,7 +18,7 @@ export type { ContentServiceDeps } from './service/base.js';
  * The use cases are layered in service/: base → tiles → pages → homepage → help → policies → this class
  * (navigation, consumed events and jobs).
  */
-export class ContentService extends ContentPolicies implements ContentPublicApi {
+export class ContentService extends ContentNews implements ContentPublicApi {
   /* ---------------------------------------------------------------- navigation */
 
   /** Footer company facts from settings (market.companyLine and market.legalName); fallbacks when settings is off */
@@ -337,11 +337,12 @@ export class ContentService extends ContentPolicies implements ContentPublicApi 
 
   /* ---------------------------------------------------------------- jobs */
 
-  /** Job content.run-schedules: publish and unpublish sections, pages and articles whose times have passed */
+  /** Job content.run-schedules: publish and unpublish sections, pages, articles and news posts whose times have passed */
   async runSchedules(): Promise<void> {
     await this.runHomepageSchedules();
     await this.runPageSchedules();
     await this.runArticleSchedules();
+    await this.runNewsSchedules();
   }
 
   /** Job content.refresh-collections: re-checks curated collections' availability (rule-based ones are resolved live through search) */

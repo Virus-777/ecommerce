@@ -4,7 +4,7 @@
  */
 import { allSpecs } from '../../kernel/module-system/loader.js';
 import type { MongoMigration } from '../../kernel/mongo/schema.js';
-import { BUSINESS_OWNER, MARKETING_OFFERS_VIEW, PLATFORM_ADMINISTRATOR, STAFF_UPLOADS, SYSTEM_ROLES, viewCompanions } from './domain/seed.js';
+import { BUSINESS_OWNER, MARKETING_OFFERS_VIEW, NEWS_MANAGE, NEWS_PUBLISH, PLATFORM_ADMINISTRATOR, STAFF_UPLOADS, SYSTEM_ROLES, viewCompanions } from './domain/seed.js';
 
 /** Every staff permission key ending in `.view`, from every module's spec (enabled or not, like the registry) */
 export function staffViewKeys(): string[] {
@@ -84,4 +84,29 @@ export const platformAdminAccountActions: MongoMigration = {
   },
 };
 
-export const mongoMigrations: readonly MongoMigration[] = [businessOwnerViewKeys, staffWorkUploads, platformAdminAccountActions];
+/**
+ * News for customers (docs/06-news.md, 2026-10-18): the new keys reach roles seeded before them. The Content Manager
+ * (content.* in the seed) writes and publishes news; the Marketing Manager writes it. Roles holding
+ * content.pages.publish (custom roles included) get news publish too, and content.pages.manage news manage, so whoever
+ * runs campaign pages can run news. It runs once, so a key the owner removes afterwards stays removed.
+ */
+export const newsKeys: MongoMigration = {
+  id: '2026-10-18-news-keys',
+  async up(db) {
+    const roles = await db.collection('access.roles').find({ archived_at: null }).toArray();
+    if (!roles.length) return; // a new install: the registry sync seeds the roles with the keys
+    const now = new Date();
+    const grant = (roleId: unknown, key: string) =>
+      db.collection('access.role_permissions').updateOne({ role_id: roleId, permission_key: key }, { $setOnInsert: { granted_by: 'system', granted_at: now } }, { upsert: true });
+    const holders = async (key: string) => new Set((await db.collection('access.role_permissions').find({ permission_key: key }).toArray()).map((p) => String(p.role_id)));
+    const [pagePublishers, pageManagers] = await Promise.all([holders('content.pages.publish'), holders('content.pages.manage')]);
+    for (const role of roles) {
+      const id = String(role._id);
+      const contentManager = role.system && role.key === 'content_manager';
+      if (contentManager || pagePublishers.has(id)) await grant(role._id, NEWS_PUBLISH);
+      if (contentManager || pageManagers.has(id) || (role.system && role.key === 'marketing_manager')) await grant(role._id, NEWS_MANAGE);
+    }
+  },
+};
+
+export const mongoMigrations: readonly MongoMigration[] = [businessOwnerViewKeys, staffWorkUploads, platformAdminAccountActions, newsKeys];

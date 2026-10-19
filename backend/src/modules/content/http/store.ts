@@ -19,6 +19,16 @@ export const storeRoutes = (service: ContentService) =>
     },
     /** GET /collections: Published collections of a brand (or of one collection kind) as cards */
     listCollections: async ({ query, page }) => service.listCollections({ brandId: query.brandId, collectionKind: query.collectionKind }, page),
+    /** GET /campaign-pages: Live campaign pages as cards */
+    listCampaignPages: async ({ page }) => service.listCampaignPages(page),
+    /** GET /news: News list: pinned first, then newest */
+    listNews: async ({ query, page }) => service.listNews({ category: query.category }, page),
+    /** GET /news/categories: Visible news categories that have posts, in order */
+    listNewsCategories: async () => service.listNewsCategories(),
+    /** GET /news/summary: How many posts are listed and when the newest was published */
+    getNewsSummary: async () => service.getNewsSummary(),
+    /** GET /news/{slug}: One news post */
+    getNewsPost: async ({ params }) => service.getNewsPost(params.slug),
     /** GET /pages/{slug}/products: More products for rule-based collections (New arrivals, Best sellers) */
     listPageProducts: async ({ params, query, page }) => service.listPageProducts(params.slug, { categoryId: query.categoryId, blockId: query.blockId }, page),
     /** GET /navigation: Header and footer links, service strip, contact details and company line */

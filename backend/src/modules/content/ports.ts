@@ -12,6 +12,8 @@ export type PolicyVersionRow = ContentDb['policy_versions'];
 export type PolicyApprovalRow = ContentDb['policy_approvals'];
 export type NavigationRow = ContentDb['navigation'];
 export type LogRow = ContentDb['content_log'];
+export type NewsCategoryRow = ContentDb['news_categories'];
+export type NewsRow = ContentDb['news_posts'];
 
 export type VersionEntity = VersionRow['entity'];
 

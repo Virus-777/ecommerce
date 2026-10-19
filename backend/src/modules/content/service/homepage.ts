@@ -6,7 +6,7 @@ import { AppError } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { pageOf, type PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
-import type { BannerBlock, HomeSection, HomeSectionAdmin, Homepage, HomepageAdmin, HomepageReview, LinkRef, PreviewRequest, ProductSource, PromiseItem, SectionInput, SectionProductRow, Version } from '../../../spec/content.js';
+import type { BannerBlock, HomeSection, HomeSectionAdmin, Homepage, HomepageAdmin, HomepageReview, LinkRef, NewsCard, PreviewRequest, ProductSource, PromiseItem, SectionInput, SectionProductRow, Version } from '../../../spec/content.js';
 import { DEFAULT_AD_POSITIONS, DEFAULT_RULES, HOMEPAGE_ID, inWindow, PRODUCT_KINDS, SECTION_KIND_LABEL } from '../domain/rules.js';
 import { contentPublicationMachine } from '../domain/state-machines.js';
 import type { SectionRow, VersionRow } from '../ports.js';
@@ -298,6 +298,8 @@ export class ContentHomepage extends ContentPages {
                   ? 'Live flash sales from Promotions'
                   : r.kind === 'recently_viewed'
                     ? "Each customer's recently viewed products"
+                    : r.kind === 'news'
+                      ? 'The newest news posts, pinned first'
                     : (s.config.banner?.headline ?? SECTION_KIND_LABEL[r.kind] ?? r.kind);
     const status: SectionStatus = (['draft', 'scheduled', 'published', 'unpublished', 'removed'] as const).includes(r.status as SectionStatus) ? (r.status as SectionStatus) : 'draft';
     return {
@@ -759,11 +761,17 @@ export class ContentHomepage extends ContentPages {
       if (p) return { label: 'See all', url: this.pageUrl(p), kind: p.kind === 'collection' ? 'collection' : 'page' };
     }
     if (s.kind === 'deals') return { label: 'See all deals', url: '/deals', kind: 'deals' };
+    if (s.kind === 'news') return { label: 'All news', url: '/news', kind: 'page' };
     if (s.config.productSource?.mode === 'collection' && s.config.productSource.collectionId) {
       const p = pages.get(s.config.productSource.collectionId);
       if (p) return { label: 'See all', url: this.pageUrl(p), kind: 'collection' };
     }
     return null;
+  }
+
+  /** The homepage `news` section's posts (service/news.ts) */
+  protected async homeNews(): Promise<NewsCard[]> {
+    return [];
   }
 
   protected async resolveSection(s: SectionSnap, pages: Map<string, { kind: string; slug: string }>): Promise<ResolvedHomeSection> {
@@ -781,6 +789,7 @@ export class ContentHomepage extends ContentPages {
       brands: [],
       deals: null,
       promiseItems: s.kind === 'promise_strip' ? (s.config.promiseItems ?? []) : [],
+      news: [],
       adPlacementKey: s.kind === 'ad_position' ? s.adPlacementKey : null,
       endsAt: s.removeAt,
       meta: { linkedPromotionId: s.linkedPromotionId, collectionId: null, selectionRule: null, categoryIds: s.config.categoryIds ?? [], sellerIds: s.config.sellerIds ?? [] },
@@ -803,6 +812,7 @@ export class ContentHomepage extends ContentPages {
     if (s.kind === 'category_shortcuts') base.categories = await this.categoryTiles(s.config.categoryIds ?? []);
     if (s.kind === 'featured_sellers') base.sellers = await this.sellerTiles(s.config.sellerIds ?? []);
     if (s.kind === 'brand_collections') base.brands = await this.brandTiles(s.config.brandIds ?? []);
+    if (s.kind === 'news') base.news = await this.homeNews();
     if (s.kind === 'deals') {
       const promotions = this.ctx.tryUse('promotions');
       const campaignId = this.dealsCampaignOf(s);

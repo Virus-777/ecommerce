@@ -2,7 +2,7 @@ import { orThrow } from '../../kernel/lib/or-throw.js';
 import type { Page, PageRequest } from '../../kernel/lib/pagination.js';
 import { escapeRegExp } from '../../kernel/lib/text.js';
 import { contains, type Filter, type ModuleStore } from '../../kernel/mongo/index.js';
-import type { ArticleFilter, ArticleRow, CategoryRow, FeedbackRow, FeedbackStat, LogRow, NavigationRow, PageFilter, PageRow, PolicyApprovalRow, PolicyRow, PolicyVersionRow, SectionRow, VersionEntity, VersionRow } from './ports.js';
+import type { ArticleFilter, ArticleRow, CategoryRow, FeedbackRow, FeedbackStat, LogRow, NavigationRow, NewsCategoryRow, NewsRow, PageFilter, PageRow, PolicyApprovalRow, PolicyRow, PolicyVersionRow, SectionRow, VersionEntity, VersionRow } from './ports.js';
 
 /** One of `values`, or nothing when the list is empty (an empty IN matches no row) */
 const oneOf = (values: readonly unknown[]) => ({ $in: [...values] });
@@ -59,6 +59,8 @@ export class ContentRepository {
       approvals: this.store.table<PolicyApprovalRow>('policy_approvals'),
       navigation: this.store.table<NavigationRow>('navigation'),
       log: this.store.table<LogRow>('content_log'),
+      newsCategories: this.store.table<NewsCategoryRow>('news_categories'),
+      news: this.store.table<NewsRow>('news_posts'),
     };
   }
 
@@ -162,6 +164,62 @@ export class ContentRepository {
 
   pagesToUnpublish(now: Date, limit: number): Promise<PageRow[]> {
     return this.#t.pages.find({ status: 'published', unpublish_at: { $lte: now } }, { sort: { unpublish_at: 1 }, limit });
+  }
+
+  /* ================================================================ news */
+  listNewsCategories(): Promise<NewsCategoryRow[]> {
+    return this.#t.newsCategories.find({}, { sort: { position: 1, name: 1 } });
+  }
+
+  getNewsCategory(id: string): Promise<NewsCategoryRow | undefined> {
+    return this.#t.newsCategories.get(id);
+  }
+
+  /** By the current slug or one it had before */
+  async newsCategoryBySlug(slug: string): Promise<NewsCategoryRow | undefined> {
+    return (await this.#t.newsCategories.findOne({ slug })) ?? (await this.#t.newsCategories.findOne({ previous_slugs: slug }));
+  }
+
+  insertNewsCategory(row: NewsCategoryRow): Promise<NewsCategoryRow> {
+    return this.#t.newsCategories.insert(row);
+  }
+
+  async updateNewsCategory(id: string, patch: Partial<NewsCategoryRow>): Promise<NewsCategoryRow> {
+    return orThrow(await this.#t.newsCategories.update(id, patch), `news category ${id}`);
+  }
+
+  deleteNewsCategory(id: string): Promise<boolean> {
+    return this.#t.newsCategories.delete(id);
+  }
+
+  getNews(id: string, opts?: { forUpdate?: boolean }): Promise<NewsRow | undefined> {
+    return this.#t.news.get(id, opts);
+  }
+
+  /** By the current slug or one it had before */
+  async newsBySlug(slug: string): Promise<NewsRow | undefined> {
+    return (await this.#t.news.findOne({ slug })) ?? (await this.#t.news.findOne({ previous_slugs: slug }));
+  }
+
+  insertNews(row: NewsRow): Promise<NewsRow> {
+    return this.#t.news.insert(row);
+  }
+
+  async updateNews(id: string, patch: Partial<NewsRow>): Promise<NewsRow> {
+    return orThrow(await this.#t.news.update(id, patch), `news post ${id}`);
+  }
+
+  /** Every post (news is a short list: the service filters, sorts and pages in memory) */
+  listNews(f: { statuses?: string[]; categoryId?: string } = {}): Promise<NewsRow[]> {
+    return this.#t.news.find({ ...(f.statuses ? { status: { $in: f.statuses } } : {}), ...(f.categoryId ? { category_id: f.categoryId } : {}) }, { sort: { updated_at: -1 } });
+  }
+
+  newsToPublish(now: Date, limit: number): Promise<NewsRow[]> {
+    return this.#t.news.find({ status: 'scheduled', publish_at: { $lte: now } }, { sort: { publish_at: 1 }, limit });
+  }
+
+  newsToUnpublish(now: Date, limit: number): Promise<NewsRow[]> {
+    return this.#t.news.find({ status: 'published', unpublish_at: { $lte: now } }, { sort: { unpublish_at: 1 }, limit });
   }
 
   /* ================================================================ help */

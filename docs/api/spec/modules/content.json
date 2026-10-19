@@ -4,7 +4,7 @@
   "group": "Growth",
   "phase": 1,
   "chapters": [19, 15, 4, 3, 17],
-  "summary": "Store content managed by the Content Manager: ordered and scheduled homepage sections, campaign pages and curated collections, Help Center articles and categories, policies with versions and effective dates, the About page and footer links. Every item has an owner, a preview, a publication status and schedule, a version history with restore, and a correction or removal action.",
+  "summary": "Store content managed by the Content Manager: ordered and scheduled homepage sections, campaign pages and curated collections, Help Center articles and categories, news posts and their categories, policies with versions and effective dates, the About page and footer links. Every item has an owner, a preview, a publication status and schedule, a version history with restore, and a correction or removal action.",
   "owns": [
     "Homepage sections: order, owner, schedule (show from / remove at with time zone), status, preview on desktop and phone, published layout versions",
     "Ad positions shown as locked markers in the homepage layout (controlled by advertising)",
@@ -77,7 +77,7 @@
     },
     "SectionKind": { "kind": { "type": "enum(campaign_banner|category_shortcuts|deals|official_highlights|featured_products|featured_sellers|new_arrivals|popular_products|brand_collections|recently_viewed|collection_teaser|promise_strip|ad_position)" } },
     "SectionInput": {
-      "kind": "enum(campaign_banner|category_shortcuts|deals|official_highlights|featured_products|featured_sellers|new_arrivals|popular_products|brand_collections|recently_viewed|collection_teaser|promise_strip)",
+      "kind": "enum(campaign_banner|category_shortcuts|deals|official_highlights|featured_products|featured_sellers|new_arrivals|popular_products|brand_collections|recently_viewed|collection_teaser|promise_strip|news)",
       "heading": "string?", "subheading": "string?",
       "banner": "BannerBlock?",
       "productSource": "ProductSource?",
@@ -119,6 +119,7 @@
     "HomeSection": {
       "id": "uuid", "kind": "string", "heading": "string?", "subheading": "string?",
       "link": "LinkRef?",
+      "news": { "type": "NewsCard[]", "desc": "news sections: the newest published posts (pinned first, up to 3); empty for other kinds" },
       "banner": "BannerBlock?",
       "products": "ProductTile[]",
       "categories": "CategoryTile[]",
@@ -201,9 +202,64 @@
       "productCount": { "type": "int", "desc": "Available products in the collection, e.g. 6 products" },
       "image": "MediaRef?"
     },
+    "CampaignPageCard": {
+      "id": "uuid", "slug": "string", "url": "string", "title": "string",
+      "eyebrow": { "type": "string?", "desc": "e.g. Oct 6 – Oct 19" },
+      "image": { "type": "MediaRef?", "desc": "The page's cover image" },
+      "endsAt": { "type": "datetime?", "desc": "End of the campaign period, else the scheduled removal time" }
+    },
+    "NewsCategoryRef": { "id": "uuid", "slug": "string", "name": "string", "icon": "string?" },
+    "NewsCategory": {
+      "id": "uuid", "slug": "string", "name": "string", "icon": { "type": "string?", "desc": "A content icon name, shown when a post has no cover" },
+      "position": { "type": "int", "desc": "Order of the filter chips (1 first)" }, "visible": "bool",
+      "postCount": { "type": "int", "desc": "Published posts in the category (store: listed ones only)" }
+    },
+    "NewsCard": {
+      "id": "uuid", "slug": "string", "url": { "type": "string", "desc": "/news/{slug}" }, "title": "string", "summary": "string",
+      "category": "NewsCategoryRef", "cover": "MediaRef?", "pinned": "bool", "publishedAt": "datetime"
+    },
+    "NewsPost": {
+      "id": "uuid", "slug": "string", "url": "string", "title": "string", "summary": "string",
+      "category": "NewsCategoryRef", "cover": "MediaRef?", "pinned": "bool",
+      "publishedAt": { "type": "datetime?", "desc": "Null in a preview of a post never published" },
+      "updatedAt": "datetime",
+      "body": { "type": "text", "desc": "Structured rich text (headings, lists, tables, links), sanitized" },
+      "cta": { "type": "LinkRef?", "desc": "Optional button, e.g. See the deals → /deals" },
+      "archived": { "type": "bool", "desc": "Past its archive time: no longer listed, but the link still opens it" },
+      "related": { "type": "NewsCard[]", "desc": "Up to 3 newer or recent other posts" },
+      "version": "int"
+    },
+    "NewsInput": {
+      "title": { "type": "string", "desc": "Up to 90 characters" }, "slug": "string?", "categoryId": "uuid",
+      "summary": { "type": "string", "desc": "Up to 200 characters; shown on cards" },
+      "body": "text", "cover": { "type": "MediaRef?", "desc": "16 : 9 cover (1200 × 675), uploaded with purpose content_image" },
+      "cta": "LinkRef?",
+      "archiveAt": { "type": "datetime?", "desc": "The post leaves the news list at this time; its link keeps working (archived)" },
+      "ownerStaffId": "uuid?", "changeNote": "string?"
+    },
+    "NewsAdmin": {
+      "post": { "type": "NewsPost", "desc": "The draft when there is one, else the live version" },
+      "status": "enum(draft|in_review|approved|scheduled|published|unpublished|removed)",
+      "archived": "bool", "pinned": "bool", "archiveAt": "datetime?",
+      "owner": "OwnerRef", "draftVersion": "int?", "liveVersion": "int?",
+      "draftAuthor": { "type": "Actor?", "desc": "Who wrote the current draft (null without a draft); the author cannot approve it (SAME_REVIEWER)" },
+      "canApprove": { "type": "bool", "desc": "The draft waits for review and the caller is not its author" },
+      "draftReview": { "type": "HelpArticleDraftReview?", "desc": "Review of a live post's new draft (before the first publication, status tells it)" },
+      "reviewRequired": { "type": "bool", "desc": "content.reviewRequired.news" },
+      "schedule": "Schedule", "lastPublishedAt": "datetime?"
+    },
+    "NewsAdminSummary": {
+      "id": "uuid", "slug": "string", "url": "string", "title": "string", "category": "NewsCategoryRef",
+      "status": "enum(draft|in_review|approved|scheduled|published|unpublished|removed)",
+      "archived": "bool", "pinned": "bool", "awaitingReview": { "type": "bool", "desc": "The post or its new draft waits for review" },
+      "owner": "OwnerRef", "publishedAt": "datetime?", "publishAt": "datetime?", "archiveAt": "datetime?",
+      "updatedAt": "datetime", "draftVersion": "int?", "liveVersion": "int?"
+    },
+    "NewsStatusCounts": { "all": "int", "draft": "int", "inReview": "int", "scheduled": "int", "published": "int", "archived": { "type": "int", "desc": "Past their archive time, unpublished or removed" } },
+    "NewsSummary": { "count": { "type": "int", "desc": "Listed (published, not archived) posts" }, "latestPublishedAt": "datetime?" },
     "Curator": { "name": "string", "avatar": "MediaRef?", "updatedAt": "datetime", "sectionCount": "int", "productCount": "int" },
     "Version": {
-      "id": "uuid", "entity": "enum(homepage|page|article)", "entityId": "uuid", "number": "int",
+      "id": "uuid", "entity": "enum(homepage|page|article|news)", "entityId": "uuid", "number": "int",
       "state": "enum(draft|live|superseded|discarded)",
       "summary": { "type": "string", "desc": "e.g. Published Home Week banner, moved Deals above Official Store" },
       "author": "Actor", "createdAt": "datetime", "publishedAt": "datetime?",
@@ -331,7 +387,7 @@
   "tables": [
     { "name": "home_sections", "desc": "Homepage sections (draft state); ad positions are rows with kind ad_position and a placement key", "columns": { "id": "uuid pk", "kind": "text", "heading": "text?", "subheading": "text?", "config": "jsonb", "linked_promotion_id": "uuid?", "linked_page_id": "uuid?", "ad_placement_key": "text?", "show_from": "timestamptz?", "remove_at": "timestamptz?", "time_zone": "text", "owner_staff_id": "uuid?", "owner_role": "text?", "status": "text", "draft_position": "int", "removed_reason": "text?", "updated_by": "text", "updated_at": "timestamptz" } },
     { "name": "pages", "desc": "Campaign pages, collections, About and landing pages", "columns": { "id": "uuid pk", "kind": "text", "collection_kind": "text?", "slug": "text unique", "title": "text", "brand_id": "uuid?", "owner_staff_id": "uuid?", "linked_promotion_id": "uuid?", "status": "text", "publish_at": "timestamptz?", "unpublish_at": "timestamptz?", "time_zone": "text", "live_version_id": "uuid? → versions", "draft_version_id": "uuid? → versions", "removal": "jsonb?", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(kind, status)", "(brand_id, status)", "(status, publish_at)", "(status, unpublish_at)"] },
-    { "name": "versions", "desc": "Immutable snapshots of homepage layouts, pages and articles. Restore copies a snapshot into a new version.", "columns": { "id": "uuid pk", "entity": "text (homepage|page|article)", "entity_id": "uuid", "number": "int", "state": "text", "snapshot": "jsonb", "summary": "text?", "author_kind": "text", "author_id": "text?", "restored_from": "int?", "review_state": "text? (not_submitted|in_review|approved|changes_requested)", "submitted_by": "text?", "submitted_at": "timestamptz?", "reviewed_by": "text?", "reviewed_at": "timestamptz?", "review_note": "text?", "created_at": "timestamptz", "published_at": "timestamptz?" }, "indexes": ["unique (entity, entity_id, number)"] },
+    { "name": "versions", "desc": "Immutable snapshots of homepage layouts, pages and articles. Restore copies a snapshot into a new version.", "columns": { "id": "uuid pk", "entity": "text (homepage|page|article|news)", "entity_id": "uuid", "number": "int", "state": "text", "snapshot": "jsonb", "summary": "text?", "author_kind": "text", "author_id": "text?", "restored_from": "int?", "review_state": "text? (not_submitted|in_review|approved|changes_requested)", "submitted_by": "text?", "submitted_at": "timestamptz?", "reviewed_by": "text?", "reviewed_at": "timestamptz?", "review_note": "text?", "created_at": "timestamptz", "published_at": "timestamptz?" }, "indexes": ["unique (entity, entity_id, number)"] },
     { "name": "help_categories", "columns": { "id": "uuid pk", "slug": "text unique", "name": "text", "icon": "text?", "description": "text?", "position": "int", "visible": "bool", "audience": "text" } },
     { "name": "help_articles", "columns": { "id": "uuid pk", "slug": "text unique", "category_id": "uuid → help_categories", "title": "text", "summary": "text?", "audience": "text", "topics": "jsonb", "related_ids": "jsonb", "policy_keys": "jsonb", "featured": "bool", "popular_search": "text?", "owner_staff_id": "uuid?", "status": "text", "publish_at": "timestamptz?", "unpublish_at": "timestamptz?", "effective_at": "timestamptz?", "review_due_at": "timestamptz?", "live_version_id": "uuid? → versions", "draft_version_id": "uuid? → versions", "views": "int", "search": "text? (generated from the live version: title, summary, topics and body as plain text, matched by help search)", "updated_at": "timestamptz" }, "indexes": ["(category_id, status)", "(status, review_due_at)"] },
     { "name": "article_feedback", "columns": { "id": "uuid pk", "article_id": "uuid → help_articles", "helpful": "bool", "comment": "text?", "visitor_key": "text", "customer_id": "uuid?", "at": "timestamptz" }, "indexes": ["unique (article_id, visitor_key)"] },
@@ -339,6 +395,8 @@
     { "name": "policy_versions", "desc": "Never edited after approval; orders reference these ids", "columns": { "id": "uuid pk", "policy_id": "uuid → policies", "version": "text", "state": "text", "title": "text", "body": "text", "tables": "jsonb?", "effective_at": "timestamptz?", "change_summary": "text?", "impact": "text", "notify_customers": "bool", "notify_sellers": "bool", "approval_request_id": "uuid?", "created_by": "text", "created_at": "timestamptz", "published_at": "timestamptz?" }, "indexes": ["unique (policy_id, version)", "(policy_id, state, effective_at)"] },
     { "name": "policy_approvals", "columns": { "id": "uuid pk", "policy_version_id": "uuid → policy_versions", "role": "text", "reviewer_id": "text?", "state": "text", "note": "text?", "at": "timestamptz?" } },
     { "name": "navigation", "desc": "Header and footer link groups (versioned through versions with entity page kind 'navigation' is not needed; edits are audited)", "columns": { "id": "uuid pk", "area": "text (header|footer|service_strip)", "group_title": "text?", "position": "int", "label": "text", "url": "text", "kind": "text", "text": "text? (service_strip only)", "active_from": "timestamptz?", "active_until": "timestamptz?" } },
+    { "name": "news_categories", "desc": "Staff-editable news categories (filter chips in the store)", "columns": { "id": "uuid pk", "slug": "text unique", "name": "text", "icon": "text?", "position": "int", "visible": "bool", "previous_slugs": "jsonb (old slugs that still filter)" } },
+    { "name": "news_posts", "desc": "News for customers; content lives in versions (entity news), these columns follow the live version", "columns": { "id": "uuid pk", "slug": "text unique", "previous_slugs": "jsonb (old slugs that still open the post)", "category_id": "uuid → news_categories", "title": "text", "summary": "text", "owner_staff_id": "uuid?", "status": "text", "pinned": "bool", "pinned_at": "timestamptz?", "publish_at": "timestamptz?", "unpublish_at": "timestamptz?", "archive_at": "timestamptz?", "published_at": "timestamptz? (first publication)", "live_version_id": "uuid? → versions", "draft_version_id": "uuid? → versions", "updated_at": "timestamptz" }, "indexes": ["(status, published_at)", "(category_id, status)"] },
     { "name": "content_log", "desc": "Publication, schedule, unpublish, correction and removal actions with reasons", "columns": { "id": "uuid pk", "entity": "text", "entity_id": "uuid", "action": "text", "reason": "text?", "actor_kind": "text", "actor_id": "text?", "at": "timestamptz" }, "indexes": ["(entity, entity_id, at desc)"] }
   ],
   "stateMachines": [
@@ -348,6 +406,7 @@
         ["draft", "submit", "in_review"],
         ["in_review", "approve", "approved"],
         ["in_review", "requestChanges", "draft"],
+        ["approved", "requestChanges", "draft"],
         ["draft", "schedule", "scheduled"],
         ["approved", "schedule", "scheduled"],
         ["draft", "publish", "published"],
@@ -356,6 +415,8 @@
         ["scheduled", "cancelSchedule", "draft"],
         ["published", "unpublish", "unpublished"],
         ["draft", "remove", "removed"],
+        ["in_review", "remove", "removed"],
+        ["approved", "remove", "removed"],
         ["scheduled", "remove", "removed"],
         ["published", "remove", "removed"],
         ["unpublished", "schedule", "scheduled"],
@@ -363,7 +424,7 @@
         ["unpublished", "remove", "removed"],
         ["removed", "restore", "draft"]
       ],
-      "notes": "Applies to pages, collections, homepage sections and help articles. Review is optional for pages and sections (content.reviewRequired setting) and required for help articles. scheduled → publish runs from the schedule job at publishAt; unpublish also runs at unpublishAt ('Removed Sep 16'). remove is the correction or removal action for content that must come down now (also a draft or a scheduled item that must never go live; a scheduled one loses its schedule): it requires a reason, records who and why, and leaves a correction note where configured. Editing a published item creates a new draft version; the live version stays until the draft is published."
+      "notes": "Applies to pages, collections, homepage sections and help articles. Review is optional for pages and sections (content.reviewRequired setting) and required for help articles. scheduled → publish runs from the schedule job at publishAt; unpublish also runs at unpublishAt ('Removed Sep 16'). remove is the correction or removal action for content that must come down now (also a draft or a scheduled item that must never go live; a scheduled one loses its schedule): it requires a reason, records who and why, and leaves a correction note where configured. An approved item can be sent back (requestChanges, with a reason) or removed before it goes live. Editing a published item creates a new draft version; the live version stays until the draft is published."
     },
     {
       "name": "Policy version", "field": "PolicyVersion.state", "initial": "draft",
@@ -386,10 +447,15 @@
     { "id": "getHomepage", "area": "store", "method": "GET", "path": "/home", "summary": "Homepage sections in order, resolved for display", "desc": "Only published sections within their schedule. Products are resolved with current price, seller and availability; unavailable products are removed or replaced. Ad positions return only their placement key; the client requests the ad from advertising. One call renders the page (plus the ad decision).", "auth": "shopper", "query": { "device": "enum(desktop|phone|app)?" }, "response": "Homepage", "screens": ["store/home"] },
     { "id": "getStorePage", "area": "store", "method": "GET", "path": "/pages/{slug}", "summary": "Campaign page, collection, About or landing page", "desc": "Returns 404 outside the publication window. Collections list each product with live availability (checked hourly) and the seller.", "auth": "visitor", "params": { "slug": "string" }, "response": "StorePage", "errors": ["NOT_FOUND"], "screens": ["store/collection", "info/about"] },
     { "id": "listCollections", "area": "store", "method": "GET", "path": "/collections", "summary": "Published collections of a brand (or of one collection kind) as cards", "desc": "Used by the brand page (Collections row). Only collections inside their publication window; productCount counts available products.", "auth": "visitor", "query": { "brandId": "uuid?", "collectionKind": "enum(curated|new_arrivals|best_sellers|seasonal|brand|official)?" }, "paging": true, "response": "CollectionCard", "screens": ["store/brand"] },
+    { "id": "listCampaignPages", "area": "store", "method": "GET", "path": "/campaign-pages", "summary": "Live campaign pages as cards", "desc": "Campaign pages (kind campaign) inside their publication window, ending soonest first, then the most recently updated. Used by the Deals tab so phone shoppers can reach campaign pages (the header navigation is website only).", "auth": "visitor", "paging": true, "response": "CampaignPageCard", "screens": ["store/deals"] },
     { "id": "listPageProducts", "area": "store", "method": "GET", "path": "/pages/{slug}/products", "summary": "More products for rule-based collections (New arrivals, Best sellers)", "auth": "visitor", "params": { "slug": "string" }, "paging": true, "query": { "categoryId": "uuid?", "blockId": "string?" }, "response": "ProductTile", "errors": ["NOT_FOUND"], "screens": ["store/collection"] },
     { "id": "getNavigation", "area": "store", "method": "GET", "path": "/navigation", "summary": "Header and footer links, service strip, contact details and company line", "desc": "serviceStrip is returned only inside its activeFrom / activeUntil window.", "auth": "visitor", "response": "SiteNavigation", "screens": ["store/home", "info/about", "help/center"] },
     { "id": "getHelpHome", "area": "store", "method": "GET", "path": "/help", "summary": "Help Center: topics, popular articles, popular searches, featured guide and contact channels", "desc": "audience=seller returns the seller help home used by Seller Center (seller topics with their top articles, seller popular searches, the seller featured guide); default customer. Order-specific help (recent orders, open cases) comes from orders and support.", "auth": "visitor", "query": { "audience": "enum(customer|seller)?" }, "response": "HelpHome", "screens": ["help/center", "seller/help"] },
     { "id": "searchHelp", "area": "store", "method": "GET", "path": "/help/articles", "summary": "Search or browse help articles", "auth": "visitor", "paging": true, "query": { "q": "string?", "category": { "type": "string?", "desc": "Category slug" }, "audience": "enum(customer|seller)?" }, "response": "HelpArticleSummary", "screens": ["help/center", "seller/help"] },
+    { "id": "listNews", "area": "store", "method": "GET", "path": "/news", "summary": "News list: pinned first, then newest", "desc": "Published posts that are not archived. category is a category slug (old slugs still work). Cursor paging: the phone lazy-loads, the website pages.", "auth": "visitor", "paging": true, "query": { "category": "string?" }, "response": "NewsCard", "screens": ["store/news"] },
+    { "id": "listNewsCategories", "area": "store", "method": "GET", "path": "/news/categories", "summary": "Visible news categories that have posts, in order", "auth": "visitor", "response": "NewsCategory[]", "screens": ["store/news"] },
+    { "id": "getNewsSummary", "area": "store", "method": "GET", "path": "/news/summary", "summary": "How many posts are listed and when the newest was published", "desc": "For the 'new' dot: the app compares latestPublishedAt with the last post the customer opened.", "auth": "visitor", "response": "NewsSummary", "screens": ["account/overview", "store/news"] },
+    { "id": "getNewsPost", "area": "store", "method": "GET", "path": "/news/{slug}", "summary": "One news post", "desc": "404 unless published (archived posts still open, with archived true). An old slug answers the post; its slug field is the current one.", "auth": "visitor", "params": { "slug": "string" }, "response": "NewsPost", "errors": ["NOT_FOUND"], "screens": ["store/news-post"] },
     { "id": "getHelpArticle", "area": "store", "method": "GET", "path": "/help/articles/{slug}", "summary": "A help article with effective and updated dates and related articles", "auth": "visitor", "params": { "slug": "string" }, "response": "HelpArticle", "errors": ["NOT_FOUND"], "screens": ["help/article"] },
     { "id": "rateHelpArticle", "area": "store", "method": "POST", "path": "/help/articles/{id}/feedback", "summary": "Was this helpful?", "auth": "shopper", "params": { "id": "uuid" }, "body": { "helpful": "bool", "comment": "text?" }, "response": null, "status": 204, "errors": ["RATE_LIMITED"], "screens": ["help/article"] },
     { "id": "getOfficialStore", "area": "store", "method": "GET", "path": "/official-store", "summary": "Official Store profile: name, logo, banner, introduction, policy links and feedback summary", "desc": "The Official Store is not a seller record: its profile comes from content settings (officialStoreLogoUrl, officialStoreBannerUrl, officialStoreIntroduction, officialStorePolicyKinds), current policies and the reviews feedback summary for OFFICIAL_STORE_ID.", "auth": "visitor", "response": "OfficialStoreProfile", "screens": ["store/official"] },
@@ -442,6 +508,20 @@
     { "id": "updateHelpArticle", "area": "admin", "method": "PATCH", "path": "/help/articles/{id}", "summary": "Edit the article draft", "auth": "staff", "permission": "content.help.manage", "params": { "id": "uuid" }, "body": "HelpArticleInput", "response": "HelpArticleAdmin", "errors": ["CONFLICT", "SLUG_TAKEN"], "audited": true, "screens": ["admin/help-content"] },
     { "id": "transitionHelpArticle", "area": "admin", "method": "POST", "path": "/help/articles/{id}/transition", "summary": "Submit, approve, request changes, schedule, publish, unpublish or remove an article", "desc": "One action endpoint for the Content publication state machine on articles. remove needs kind and reason; schedule needs publishAt; requestChanges needs reason. A live article (published or unpublished) edited with PATCH keeps its status while the new draft is reviewed: submit, approve and requestChanges then act on HelpArticleAdmin.draftReview (in_review → approved or changes_requested; submit again after changes_requested), and publish puts the approved draft live (draftReview becomes null). A published article is not scheduled (it would be offline until then): publish its draft, or unpublish it first.", "auth": "staff", "permission": "content.help.manage", "params": { "id": "uuid" }, "body": { "action": "enum(submit|approve|requestChanges|schedule|cancelSchedule|publish|unpublish|remove|restore)", "reason": "text?", "kind": "enum(correction|removal)?", "publishAt": "datetime?", "unpublishAt": "datetime?" }, "response": "HelpArticleAdmin", "errors": ["ILLEGAL_TRANSITION", "SAME_REVIEWER"], "audited": true, "events": ["content.article.published", "content.page.removed"], "screens": ["admin/help-content"] },
     { "id": "listArticleVersions", "area": "admin", "method": "GET", "path": "/help/articles/{id}/versions", "summary": "Article version history", "auth": "staff", "permission": "content.view", "params": { "id": "uuid" }, "paging": true, "response": "Version", "screens": ["admin/help-content"] },
+    { "id": "listNewsAdmin", "area": "admin", "method": "GET", "path": "/news", "summary": "News posts for the Admin Center list", "desc": "status archived lists posts past their archive time, unpublished or removed; published lists the ones still listed in the store. inReview filters posts (or new drafts) waiting for review.", "auth": "staff", "permission": "content.view", "paging": true, "query": { "status": "enum(draft|in_review|scheduled|published|archived)?", "categoryId": "uuid?", "q": "string?" }, "response": "NewsAdminSummary", "screens": ["admin/news"] },
+    { "id": "getNewsCounts", "area": "admin", "method": "GET", "path": "/news/counts", "summary": "Post counts per list tab", "auth": "staff", "permission": "content.view", "response": "NewsStatusCounts", "screens": ["admin/news"] },
+    { "id": "createNews", "area": "admin", "method": "POST", "path": "/news", "summary": "Create a news post draft", "auth": "staff", "permission": "content.news.manage", "body": "NewsInput", "response": "NewsAdmin", "status": 201, "errors": ["SLUG_TAKEN"], "audited": true, "screens": ["admin/news"] },
+    { "id": "getNewsAdmin", "area": "admin", "method": "GET", "path": "/news/{id}", "summary": "A news post with status, review and versions", "auth": "staff", "permission": "content.view", "params": { "id": "uuid" }, "response": "NewsAdmin", "screens": ["admin/news"] },
+    { "id": "updateNews", "area": "admin", "method": "PATCH", "path": "/news/{id}", "summary": "Edit the post draft", "desc": "Editing a live post makes a new draft; the live post stays until the draft is published. A draft in review or approved is frozen until changes are requested.", "auth": "staff", "permission": "content.news.manage", "params": { "id": "uuid" }, "body": "NewsInput", "response": "NewsAdmin", "errors": ["CONFLICT", "SLUG_TAKEN"], "audited": true, "screens": ["admin/news"] },
+    { "id": "previewNews", "area": "admin", "method": "POST", "path": "/news/{id}/preview", "summary": "The post as the store shows it (draft or live)", "auth": "staff", "permission": "content.view", "params": { "id": "uuid" }, "body": { "useDraft": "bool?" }, "response": "NewsPost", "screens": ["admin/news"] },
+    { "id": "transitionNews", "area": "admin", "method": "POST", "path": "/news/{id}/transition", "summary": "Submit, approve, request changes, schedule, publish, unpublish or remove a post", "desc": "The Content publication state machine, as for help articles. With content.reviewRequired.news on (default), someone other than the draft's writer approves before it is scheduled or published (SAME_REVIEWER). Approving, scheduling, publishing and unpublishing need content.news.publish; remove needs content.pages.remove, a kind and a reason; requestChanges needs a reason (it also sends back an approved draft). discardDraft drops a live post's unpublished draft; the live post stays as it is.", "auth": "staff", "permission": "content.news.manage", "permissionWhen": [{ "if": { "body.action": "approve" }, "permission": "content.news.publish" }, { "if": { "body.action": "requestChanges" }, "permission": "content.news.publish" }, { "if": { "body.action": "schedule" }, "permission": "content.news.publish" }, { "if": { "body.action": "cancelSchedule" }, "permission": "content.news.publish" }, { "if": { "body.action": "publish" }, "permission": "content.news.publish" }, { "if": { "body.action": "unpublish" }, "permission": "content.news.publish" }, { "if": { "body.action": "remove" }, "permission": "content.pages.remove" }], "params": { "id": "uuid" }, "body": { "action": "enum(submit|approve|requestChanges|schedule|cancelSchedule|publish|unpublish|remove|restore|discardDraft)", "reason": "text?", "kind": "enum(correction|removal)?", "publishAt": "datetime?" }, "response": "NewsAdmin", "errors": ["ILLEGAL_TRANSITION", "SAME_REVIEWER"], "audited": true, "events": ["content.news.published", "content.news.unpublished", "content.page.removed"], "screens": ["admin/news"] },
+    { "id": "pinNews", "area": "admin", "method": "POST", "path": "/news/{id}/pin", "summary": "Pin or unpin a post", "desc": "Pinned posts list first. At most 3 published posts are pinned: pinning a fourth unpins the one pinned longest ago. Takes effect at once (no review).", "auth": "staff", "permission": "content.news.publish", "params": { "id": "uuid" }, "body": { "pinned": "bool" }, "response": "NewsAdmin", "audited": true, "screens": ["admin/news"] },
+    { "id": "listNewsVersions", "area": "admin", "method": "GET", "path": "/news/{id}/versions", "summary": "Post version history", "auth": "staff", "permission": "content.view", "params": { "id": "uuid" }, "paging": true, "response": "Version", "screens": ["admin/news"] },
+    { "id": "restoreNewsVersion", "area": "admin", "method": "POST", "path": "/news/{id}/versions/{number}/restore", "summary": "Restore an earlier post version as a new draft", "auth": "staff", "permission": "content.news.manage", "params": { "id": "uuid", "number": "int" }, "body": { "reason": "text" }, "response": "NewsAdmin", "errors": ["NOT_FOUND", "CONFLICT"], "audited": true, "screens": ["admin/news"] },
+    { "id": "listNewsCategoriesAdmin", "area": "admin", "method": "GET", "path": "/news-categories", "summary": "News categories including hidden ones", "auth": "staff", "permission": "content.view", "response": "NewsCategory[]", "screens": ["admin/news"] },
+    { "id": "createNewsCategory", "area": "admin", "method": "POST", "path": "/news-categories", "summary": "Add a news category", "auth": "staff", "permission": "content.news.manage", "body": { "name": "string", "slug": "string?", "icon": "string?", "visible": "bool?" }, "response": "NewsCategory", "status": 201, "errors": ["SLUG_TAKEN"], "audited": true, "screens": ["admin/news"] },
+    { "id": "updateNewsCategory", "area": "admin", "method": "PATCH", "path": "/news-categories/{id}", "summary": "Rename, hide or reorder a news category", "desc": "Renaming changes the slug; the old slug keeps working as a filter link. Hiding removes its chip; its posts stay listed under All.", "auth": "staff", "permission": "content.news.manage", "params": { "id": "uuid" }, "body": { "name": "string?", "icon": "string?", "visible": "bool?", "position": "int?" }, "response": "NewsCategory", "errors": ["SLUG_TAKEN"], "audited": true, "screens": ["admin/news"] },
+    { "id": "deleteNewsCategory", "area": "admin", "method": "DELETE", "path": "/news-categories/{id}", "summary": "Delete an unused news category", "desc": "CONFLICT when any post (in any state but removed) uses it; details.posts names them so they can be moved first.", "auth": "staff", "permission": "content.news.manage", "params": { "id": "uuid" }, "response": null, "status": 204, "errors": ["CONFLICT"], "audited": true, "screens": ["admin/news"] },
     { "id": "restoreArticleVersion", "area": "admin", "method": "POST", "path": "/help/articles/{id}/versions/{number}/restore", "summary": "Restore an earlier article version as a new draft", "auth": "staff", "permission": "content.help.manage", "params": { "id": "uuid", "number": "int" }, "body": { "reason": "text" }, "response": "HelpArticleAdmin", "errors": ["NOT_FOUND"], "audited": true, "screens": ["admin/help-content"] },
 
     { "id": "listPoliciesAdmin", "area": "admin", "method": "GET", "path": "/policies", "summary": "Policies with current, scheduled and draft versions", "auth": "staff", "permission": "content.view", "response": "PolicySummary[]", "screens": ["admin/help-content", "admin/settings"] },
@@ -462,6 +542,8 @@
       { "name": "content.page.published", "when": "A page, collection or homepage layout version goes live (now or on schedule)", "payload": { "entity": "enum(homepage|page)", "entityId": "uuid", "slug": "string?", "version": "int", "url": "string" } },
       { "name": "content.page.unpublished", "when": "A page is unpublished or reaches its removal time", "payload": { "pageId": "uuid", "slug": "string", "reason": "text?" } },
       { "name": "content.page.removed", "when": "A correction or removal action takes content down", "payload": { "entity": "string", "entityId": "uuid", "kind": "enum(correction|removal)", "reason": "text" } },
+      { "name": "content.news.published", "when": "A news post version goes live (now or on schedule)", "payload": { "postId": "uuid", "slug": "string", "url": "string", "version": "int" } },
+      { "name": "content.news.unpublished", "when": "A news post is unpublished", "payload": { "postId": "uuid", "slug": "string", "reason": "text?" } },
       { "name": "content.article.published", "when": "A help article version goes live", "payload": { "articleId": "uuid", "slug": "string", "version": "int" } },
       { "name": "content.article.review_due", "when": "A published help article has not been reviewed for articleReviewDays (daily, once per review period)", "payload": { "articleId": "uuid", "slug": "string", "title": "string", "ownerStaffId": "uuid?", "lastReviewedAt": "datetime?", "dueSince": "datetime" } },
       { "name": "content.policy.submitted", "when": "A policy version is sent for approval", "payload": { "policyVersionId": "uuid", "policyKey": "string" } },
@@ -491,14 +573,16 @@
     { "key": "content.policies.edit", "audience": "staff", "desc": "Draft policy versions, submit and schedule approved versions" },
     { "key": "content.policies.approve", "audience": "staff", "desc": "Policy owner approval" },
     { "key": "content.policies.manage", "audience": "staff", "desc": "Create policies and assign their owners" },
-    { "key": "content.view", "audience": "staff", "desc": "View the homepage layout, pages, help content and policies in the Admin Center (read only)" }
+    { "key": "content.news.manage", "audience": "staff", "desc": "Write news posts and submit them for review; manage news categories" },
+    { "key": "content.news.publish", "audience": "staff", "desc": "Approve, schedule, publish, unpublish and pin news posts" },
+    { "key": "content.view", "audience": "staff", "desc": "View the homepage layout, pages, help content, news and policies in the Admin Center (read only)" }
   ],
   "approvalActions": [
     { "key": "content.policies.approve", "desc": "Final approval of a new policy version (returns, shipping, purchase terms, privacy, seller rules, advertising)", "limit": "none", "secondReviewer": "always", "approvers": "Business Owner (after the policy owner approves)" },
     { "key": "content.policies.short-notice", "desc": "Schedule a customer-facing policy change with less than policyNoticeDays notice", "limit": "none", "secondReviewer": "always", "approvers": "Business Owner" }
   ],
   "jobs": [
-    { "name": "content.run-schedules", "schedule": "every 1 min", "does": "Publish and unpublish sections, pages and articles whose publishAt / unpublishAt has passed; record a homepage version when the visible layout changes" },
+    { "name": "content.run-schedules", "schedule": "every 1 min", "does": "Publish and unpublish sections, pages, articles and news posts whose publishAt / unpublishAt has passed; record a homepage version when the visible layout changes" },
     { "name": "content.policy-effective", "schedule": "every 1 min", "does": "Scheduled policy versions past effectiveAt → current; previous → superseded" },
     { "name": "content.refresh-collections", "schedule": "hourly", "does": "Rebuild rule-based collections (best sellers hourly, new arrivals daily) and re-check availability of curated items, replacing or removing sold-out ones" },
     { "name": "content.article-review-due", "schedule": "daily 07:00 market time", "does": "Flag articles not reviewed for articleReviewDays; publish content.article.review_due (notifications tells the owner)" },
@@ -508,7 +592,7 @@
     { "key": "marketTimeZone", "type": "string", "default": "America/Los_Angeles", "desc": "Default time zone for schedules" },
     { "key": "policyNoticeDays", "type": "duration", "default": 14, "desc": "Minimum days between publishing and the effective date of customer-facing policy changes", "unit": "days", "min": 0, "approval": "business_owner" },
     { "key": "articleReviewDays", "type": "duration", "default": 90, "desc": "Articles older than this are flagged for review", "unit": "days", "min": 1 },
-    { "key": "reviewRequired", "type": "json", "default": { "page": false, "section": false, "article": true }, "desc": "Whether the review step is required before publishing", "approval": "second_reviewer" },
+    { "key": "reviewRequired", "type": "json", "default": { "page": false, "section": false, "article": true, "news": true }, "desc": "Whether the review step is required before publishing (news: a second person approves every post, owner decision 2026-10-18; a stored value without news counts as on)", "approval": "second_reviewer" },
     { "key": "availabilityCheckMinutes", "type": "duration", "default": 60, "desc": "How often curated collections re-check stock", "unit": "minutes", "min": 5 },
     { "key": "maxSectionProducts", "type": "int", "default": 24, "desc": "Products per homepage section", "min": 1 },
     { "key": "officialStoreLogoUrl", "type": "string", "default": "/brand/official-store-logo.svg", "desc": "Official Store profile logo: an absolute URL or a path on the store site (example)" },
@@ -521,7 +605,7 @@
     "SECTION_LOCKED": { "status": 409, "meaning": "Ad positions are controlled by advertising and cannot be edited here." },
     "SLUG_TAKEN": { "status": 409, "meaning": "Another page or article uses this URL." },
     "DRAFT_EXISTS": { "status": 409, "meaning": "The policy already has an open draft version." },
-    "SAME_REVIEWER": { "status": 409, "meaning": "The author cannot approve their own article or homepage draft." }
+    "SAME_REVIEWER": { "status": 409, "meaning": "The author cannot approve their own article, news post or homepage draft." }
   },
   "notes": [
     "Homepage sections each have their own schedule; the published layout version is the ordered list of section snapshots. Reordering or editing creates a draft layout; customers see it after Publish. Scheduled sections appear automatically at showFrom without a new manual publish (the job records a new version so history stays complete).",

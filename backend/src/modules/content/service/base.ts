@@ -62,7 +62,7 @@ export interface DraftReview {
   reason?: string | null;
 }
 
-export type SettingsShape = { page: boolean; section: boolean; article: boolean };
+export type SettingsShape = { page: boolean; section: boolean; article: boolean; news: boolean };
 
 /** Homepage cache: resolved homepages per device, rebuilt by content.cache-warm and dropped on any change */
 export interface HomeCache {
@@ -113,7 +113,8 @@ export class ContentBase {
 
   protected async reviewRequired(): Promise<SettingsShape> {
     const v = (await this.ctx.settings.get('reviewRequired')) as Partial<SettingsShape> | null;
-    return { page: Boolean(v?.page), section: Boolean(v?.section), article: v?.article === undefined ? true : Boolean(v.article) };
+    // articles and news need a second person unless turned off (a value stored before news existed has no news key)
+    return { page: Boolean(v?.page), section: Boolean(v?.section), article: v?.article === undefined ? true : Boolean(v.article), news: v?.news === undefined ? true : Boolean(v.news) };
   }
 
   protected async timeZoneOr(tz: string | null | undefined, path = 'timeZone'): Promise<string> {

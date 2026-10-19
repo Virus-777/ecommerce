@@ -57,8 +57,15 @@ function loadScreens() {
   for (const [area, groups] of Object.entries(ctx.UI.CATALOGUE)) {
     for (const [group, ids] of groups) for (const id of ids) screens.set(id, { id, area, group, title: ctx.UI.screens[id]?.title ?? id });
   }
+  // screens designed in React after the prototype (the web apps' catalogue entries without a prototype file)
+  for (const [id, area, group, title] of REACT_SCREENS) if (!screens.has(id)) screens.set(id, { id, area, group, title });
   return screens;
 }
+const REACT_SCREENS = [
+  ['store/news', 'store', 'Help and policies', 'News'],
+  ['store/news-post', 'store', 'Help and policies', 'News post'],
+  ['admin/news', 'admin', 'Marketing and content', 'News'],
+];
 const SCREENS = loadScreens();
 
 /* ------------------------------------------------------------------ types */
