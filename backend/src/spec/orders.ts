@@ -1924,7 +1924,7 @@ export const OrdersItemStateChangedEvent: z.ZodType<OrdersItemStateChangedEvent>
   at: z.iso.datetime({ offset: true }),
 });
 
-/** orders.item.cancelled: Items are cancelled (customer request accepted, seller cannot fulfill, staff) */
+/** orders.item.cancelled: Items are cancelled (customer request accepted, seller cannot fulfill, staff), or a package came back to its seller undelivered (reasonCode returned_to_sender, initiatedBy system, beforeDispatch false; the refund covers the shipping only when a damaged or wrong item case or a lost_or_damaged exception covers the package) */
 export interface OrdersItemCancelledEvent {
   orderId: string;
   ref: string;
@@ -1943,6 +1943,7 @@ export interface OrdersItemCancelledEvent {
   cancellationId: string;
   initiatedBy: "customer" | "seller" | "staff" | "system";
   reasonCode: string;
+  /** False for a package returned to sender: the fee follows the returns treatment */
   beforeDispatch: boolean;
   countsAgainstSeller: boolean;
   refund: RefundBreakdownPayload;
@@ -1968,7 +1969,7 @@ export const OrdersItemCancelledEvent: z.ZodType<OrdersItemCancelledEvent> = z.o
   cancellationId: z.uuid(),
   initiatedBy: z.enum(["customer", "seller", "staff", "system"]),
   reasonCode: z.string(),
-  beforeDispatch: z.boolean(),
+  beforeDispatch: z.boolean().describe("False for a package returned to sender: the fee follows the returns treatment"),
   countsAgainstSeller: z.boolean(),
   get refund() {
     return RefundBreakdownPayload;
@@ -3486,7 +3487,7 @@ export const spec = defineModuleSpec({
       "orders.order.cancelled": { when: "A pending payment was declined, or every item was cancelled", payload: () => OrdersOrderCancelledEvent },
       "orders.order.completed": { when: "Every item is final and no return, case or refund is open", payload: () => OrdersOrderCompletedEvent },
       "orders.item.state_changed": { when: "Any item state change (for timelines, notifications and reports)", payload: () => OrdersItemStateChangedEvent },
-      "orders.item.cancelled": { when: "Items are cancelled (customer request accepted, seller cannot fulfill, staff)", payload: () => OrdersItemCancelledEvent },
+      "orders.item.cancelled": { when: "Items are cancelled (customer request accepted, seller cannot fulfill, staff), or a package came back to its seller undelivered (reasonCode returned_to_sender, initiatedBy system, beforeDispatch false; the refund covers the shipping only when a damaged or wrong item case or a lost_or_damaged exception covers the package)", payload: () => OrdersItemCancelledEvent },
       "orders.item.split": { when: "A partial cancellation, shipment or return splits an item line: the original line keeps its id with the remaining quantity and a new line takes the split-off quantity (splitFromItemId = original)", payload: () => OrdersItemSplitEvent },
       "orders.item.delayed": { when: "Items become Delayed (seller report or overdue dispatch)", payload: () => OrdersItemDelayedEvent },
       "orders.item.delivered": { when: "Items in a delivered shipment become Delivered", payload: () => OrdersItemDeliveredEvent },

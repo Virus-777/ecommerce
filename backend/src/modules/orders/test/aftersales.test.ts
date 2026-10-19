@@ -91,6 +91,39 @@ describe('shipping and delivery', () => {
     expect(list.body.items.map((r: any) => r.id)).toEqual([m.order.id]);
   });
 
+  async function returnToSender(m: Awaited<ReturnType<typeof twoSellerOrder>>, caseCategory?: string) {
+    const item = m.gA.items[0]!;
+    const s = await ship(m.order.id, m.gA.id, m.sellerA, [{ orderItemId: item.id, quantity: 2 }]);
+    if (caseCategory) {
+      await h.publish('support', 'support.case.opened', { caseId: newId(), ref: 'CS-261009-0001', kind: 'order_problem', category: caseCategory, priority: 'normal', customerId: m.customerId, contactEmail: null, sellerId: m.sellerA, orderId: m.order.id, orderItemIds: [item.id], handler: 'seller', ownerStaffId: null, trustReportId: null, nextResponseDueAt: null });
+    }
+    const back = { shipmentId: s, kind: 'outbound', orderId: m.order.id, groupId: m.gA.id, from: 'returning', to: 'returned_to_sender', statusLabel: 'Returned to sender', estimatedArrival: null, at: now() };
+    await h.publish('shipping', 'shipping.shipment.status_changed', back);
+    await h.publish('shipping', 'shipping.shipment.status_changed', back); // replayed: refunded once
+    return { item, events: h.named('orders.item.cancelled').filter((e) => e.orderId === m.order.id) };
+  }
+
+  it('refunds a package returned to sender like a cancellation after dispatch, without its shipping', async () => {
+    const m = await twoSellerOrder();
+    const { item, events } = await returnToSender(m);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ itemId: item.id, quantity: 2, initiatedBy: 'system', reasonCode: 'returned_to_sender', beforeDispatch: false, countsAgainstSeller: false });
+    // items 2 × 60.00 and their 6.00 tax; the 4.00 shipping stays paid
+    expect(events[0].refund).toMatchObject({ itemAmount: { amount: 12000 }, shippingRefund: { amount: 0 }, taxRefund: { amount: 600 }, total: { amount: 12600 } });
+    const o = (await h.service.getOrder(m.order.id))!;
+    expect(o.groups[0]!.items.map((i) => i.state)).toEqual(['returned']);
+    // never delivered: the package counts as cancelled, not delivered
+    expect(o.groups[0]!.status).toBe('cancelled');
+    expect(o.status.value).toBe('confirmed');
+  });
+
+  it('refunds the shipping of a returned package too when a damaged item case covers it', async () => {
+    const m = await twoSellerOrder();
+    const { events } = await returnToSender(m, 'item_damaged');
+    expect(events).toHaveLength(1);
+    expect(events[0].refund).toMatchObject({ shippingRefund: { amount: 400 }, total: { amount: 13000 } });
+  });
+
   it('moves Official Store items to Preparing when warehouse picking starts, closing instant cancellation', async () => {
     const customerId = newId();
     const p = product(h, { title: 'Pan', price: 2500, ownerType: 'official' });

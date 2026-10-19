@@ -195,13 +195,14 @@ export class LedgerPart extends Part {
       const reversal = itemAmount - discountPart + Math.min(e.refund.shippingRefund.amount, totals.shipping_charge);
       const bucket = l.state === 'pending' ? 'pending' : 'available';
       const ref = { kind: 'order' as const, id: e.orderId, label: e.ref };
-      const entries: NewEntry[] = [{ key: `cancel:${e.cancellationId}:${e.itemId}`, type: 'cancellation', amount: -reversal, bucket, ref, description: `Cancelled ${e.quantity} item${e.quantity === 1 ? '' : 's'} before dispatch (${e.reasonCode.replace(/_/g, ' ')})`, lotId: l.id }];
+      const entries: NewEntry[] = [{ key: `cancel:${e.cancellationId}:${e.itemId}`, type: 'cancellation', amount: -reversal, bucket, ref, description: `Cancelled ${e.quantity} item${e.quantity === 1 ? '' : 's'} ${e.beforeDispatch ? 'before dispatch' : 'after dispatch'} (${e.reasonCode.replace(/_/g, ' ')})`, lotId: l.id }];
       const charge = await tx.findOne('fee_charges', { order_item_id: l.order_item_id });
       let feeBack = 0;
-      if (charge && e.beforeDispatch && rule.treatment.cancellationBeforeDispatch === 'no_fee') {
+      // after dispatch (a package returned to sender) the fee follows the returns treatment
+      if (charge && (e.beforeDispatch ? rule.treatment.cancellationBeforeDispatch === 'no_fee' : rule.treatment.returns === 'fee_returned_pro_rata')) {
         feeBack = Math.min(charge.fee - charge.refunded_fee, prorate(charge.fee, itemAmount, totals.sale || l.gross));
         if (itemAmount >= l.gross) feeBack = charge.fee - charge.refunded_fee;
-        entries.push({ key: `cancel_fee:${e.cancellationId}:${e.itemId}`, type: 'fee_refund', amount: feeBack, bucket, ref, description: 'No fee on items cancelled before dispatch', lotId: l.id });
+        entries.push({ key: `cancel_fee:${e.cancellationId}:${e.itemId}`, type: 'fee_refund', amount: feeBack, bucket, ref, description: e.beforeDispatch ? 'No fee on items cancelled before dispatch' : 'Fee refunded on the returned item, in proportion to the refund', lotId: l.id });
       }
       const posted = await this.core.post(tx, l.seller_id, entries, out);
       if (!posted.length) return;

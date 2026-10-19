@@ -9,6 +9,7 @@ import type { BulkResult, FulfillmentTask } from '../../../spec/orders.js';
 import { CANCELLABLE, DAY, dateTime, is, isMarketlyService, marketlyFulfils, shortDate, UNSHIPPED, WAREHOUSE_STAGE_ENTRY, WAREHOUSE_STAGE_LABEL } from '../domain/rules.js';
 import type { DispatchChange, GroupRec, ItemRec, ShipmentRec } from '../ports.js';
 import { invalid, notFound, SYSTEM, type Agg, type By, type Core } from './core.js';
+import type { Cancellations } from './cancellations.js';
 import type { Views } from './views.js';
 
 const PREPARING_WAREHOUSE = ['picking', 'picked', 'packing', 'packed'];
@@ -18,6 +19,7 @@ export class Fulfillment {
   constructor(
     private readonly core: Core,
     private readonly views: Views,
+    private readonly cancellations: Cancellations,
   ) {}
 
   /** The seller's own group (another seller's → NOT_FOUND) */
@@ -294,8 +296,10 @@ export class Fulfillment {
       const prev = agg.shipments.find((s) => s.shipment_id === e.shipmentId);
       await tx.upsertShipment(this.shipmentRow(e, prev, { status: e.to, estimated_arrival: e.estimatedArrival ?? prev?.estimated_arrival ?? null }));
       if (e.to === 'returned_to_sender') {
-        for (const i of agg.items.filter((x) => x.shipment_id === e.shipmentId && x.state === 'shipped')) await this.core.move(tx, batch, i, 'return_to_sender', { reason: 'Returned to sender' });
-        await this.core.timeline(tx, agg.order.id, [{ group_id: e.groupId, visibility: 'customer', label: 'Returned to sender', detail: 'The package went back to the seller. Your refund follows once it arrives.' }]);
+        const back: ItemRec[] = [];
+        for (const i of agg.items.filter((x) => x.shipment_id === e.shipmentId && x.state === 'shipped')) back.push(await this.core.move(tx, batch, i, 'return_to_sender', { reason: 'Returned to sender' }));
+        // the package is back with the seller: refunded like a cancellation (once; a replayed event finds nothing shipped)
+        await this.cancellations.returnedToSender(tx, batch, agg, agg.groups.find((g) => g.id === e.groupId)!, back, e.shipmentId);
       }
     });
   }

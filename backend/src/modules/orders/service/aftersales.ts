@@ -189,7 +189,7 @@ export class AfterSales {
   async onCaseOpened(e: EventPayload<'support.case.opened'>) {
     if (!(await this.exists(e.orderId))) return;
     await this.core.write(e.orderId!, { actor: SYSTEM }, async (tx, agg) => {
-      if (!(await this.core.addFact(tx, agg.order.id, { kind: 'case', source_id: e.caseId, ref: e.ref, item_ids: e.orderItemIds ?? [], status: 'open', due_at: e.nextResponseDueAt ? new Date(e.nextResponseDueAt) : null }))) return;
+      if (!(await this.core.addFact(tx, agg.order.id, { kind: 'case', source_id: e.caseId, ref: e.ref, subkind: e.category, item_ids: e.orderItemIds ?? [], status: 'open', due_at: e.nextResponseDueAt ? new Date(e.nextResponseDueAt) : null }))) return;
       await this.core.timeline(tx, agg.order.id, [{ visibility: 'customer', label: 'Support case opened', detail: `Case ${e.ref}` }]);
     });
   }

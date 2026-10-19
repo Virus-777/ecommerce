@@ -380,8 +380,9 @@ export const ROUTES: Routes = {
           topic: 'seller.order.item_cancelled',
           to: [seller(p.sellerId)],
           link: sellerOrderLink(p.groupId, p.ref),
-          // Fulfilled by Marketly: Marketly's warehouse holds the units; the seller has nothing to stop
-          context: { order: { ref: p.ref }, item: { count: p.quantity }, cancel: { note: p.fulfilledBy === 'marketly_service' ? "Marketly's warehouse will not ship them." : 'Do not ship them.' } },
+          // Fulfilled by Marketly: Marketly's warehouse holds the units; the seller has nothing to stop. After dispatch
+          // (a package returned to sender) there is nothing left to stop either
+          context: { order: { ref: p.ref }, item: { count: p.quantity }, cancel: { note: !p.beforeDispatch ? 'The package came back to you and the customer is refunded.' : p.fulfilledBy === 'marketly_service' ? "Marketly's warehouse will not ship them." : 'Do not ship them.' } },
           subjects: { orderId: p.orderId, groupId: p.groupId },
           sellerId: p.sellerId,
           dedupe: `cancellation:${p.cancellationId}:${p.itemId}`,

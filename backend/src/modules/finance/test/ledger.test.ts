@@ -431,3 +431,23 @@ describe('seller credits without an original charge (creditSeller), replayed on 
     expect(await repo().count('recon_items', { check: 'seller_amounts', ref_id: S4 })).toBe(0);
   });
 });
+
+describe('a package returned to sender (cancelled after dispatch)', () => {
+  it('reverses the item and returns its fee under the returns treatment; the shipping charge stays with the seller', async () => {
+    const R = newId();
+    const order = k.order(R, [{ title: 'Desk lamp', quantity: 1, price: 3000, shipping: 500 }]);
+    await k.accept(order);
+    const item = order.groups[0]!.items[0]!;
+    // fee 10% of 3000 = 300
+    expect(await expectLedgerMatches(k, R)).toMatchObject({ total: 3000 + 500 - 300, pending: 3200 });
+    const cancel = { orderId: order.id, ref: order.ref, groupId: order.groups[0]!.id, ownerType: 'seller', sellerId: R, fulfilledBy: 'seller', itemId: item.id, offerId: newId(), stockItemId: newId(), quantity: 1, cancellationId: newId(), initiatedBy: 'system', reasonCode: 'returned_to_sender', beforeDispatch: false, countsAgainstSeller: false, refund: { itemAmount: USD(3000), discountShare: USD(0), shippingRefund: USD(0), taxRefund: USD(0), total: USD(3000) }, paymentIntentId: newId(), trustReportId: null, notifyCustomer: true };
+    await k.emit('orders.item.cancelled', cancel);
+    await k.emit('orders.item.cancelled', cancel); // redelivered
+    // the lot is reversed (nothing left pending forever) and the kept shipping charge becomes available
+    expect(await expectLedgerMatches(k, R)).toMatchObject({ total: 500, pending: 0, available: 500 });
+    expect((await k.svc.core.repo.findOne('earnings_lots', { order_item_id: item.id }))?.state).toBe('reversed');
+    expect(await k.svc.core.repo.findOne('fee_charges', { order_item_id: item.id })).toMatchObject({ refunded_fee: 300, status: 'reversed' });
+    const entries = await k.svc.core.repo.find('ledger_entries', { lot_id: (await k.svc.core.repo.findOne('earnings_lots', { order_item_id: item.id }))!.id });
+    expect(entries.find((e) => e.type === 'cancellation')?.description).toBe('Cancelled 1 item after dispatch (returned to sender)');
+  });
+});
