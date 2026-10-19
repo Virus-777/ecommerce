@@ -1223,7 +1223,7 @@ Checked through the access module (limits per role, second reviewer).
 | `PLACEMENT_DISABLED` | 409 | The placement is off or belongs to a later phase. |
 | `PAGE_NOT_ELIGIBLE` | 422 | A selected page is not eligible for the placement or is blocked by the global rules (checkout, payment results, tracking, returns). |
 | `CHECKS_FAILED` | 422 | Required checks failed (missing label, broken link, promoted offer unavailable, missing phone or desktop creative). details.checks. |
-| `SAME_REVIEWER` | 409 | The same person cannot approve two required review steps. |
+| `SAME_REVIEWER` | 409 | The same person cannot approve two required review steps, and the campaign creator approves none. |
 | `PROMOTION_NOT_STARTED` | 409 | The linked promotion has not started; schedule instead of activating. |
 | `AD_UNAVAILABLE` | 409 | The promoted offer is unavailable or the linked promotion is inactive. |
 | `CREATIVE_FORMAT_INVALID` | 422 | Size, dimensions, file type or text length does not match the placement format. |
@@ -1240,8 +1240,8 @@ Checked through the access module (limits per role, second reviewer).
 | `advertising.availability-sweep` | every 5 min | Pause ads for unavailable or low-stock promoted offers and inactive linked promotions; resume when available again |
 | `advertising.link-check` | hourly | Re-check destination links and promoted-offer availability for approved and live creatives |
 | `advertising.stats-rollup` | every 5 min | Aggregate ad_events into daily_stats |
-| `advertising.accrue-charges` | every 15 min | Accrue billable clicks/displays and fixed daily fees, capped at daily and total limits; stop delivery at the limit |
-| `advertising.post-charges` | daily 02:00 market time | Post the previous day's charges to finance (advertising.charge.posted) |
+| `advertising.accrue-charges` | every 15 min | Accrue billable clicks/displays and fixed daily fees of campaigns the seller requested, capped at daily and total limits; stop delivery at the limit |
+| `advertising.post-charges` | daily 02:00 market time | Post the previous day's charges to finance (advertising.charge.posted), only while paid seller ads are on. A charge of a campaign the seller did not request is voided with the reason instead and never posted |
 | `advertising.expire-frequency-state` | hourly | Delete frequency and suppression rows past their window |
 | `advertising.ending-soon-notice` | daily 08:00 market time | Publish advertising.campaign.ending_soon for campaigns ending within endingSoonDays (once per campaign), so owners finish or renew deliberately |
 
