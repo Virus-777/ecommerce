@@ -1308,7 +1308,7 @@ export interface RemedyInput {
   amount?: common.Money | null;
   explanation?: string | null;
   exchangeVariantId?: string | null;
-  /** Staff only (admin remedy and revise; sellers leave it out): re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password). Needed when the refund is within the caller's refund limit and above access stepUpAbove (it is approved in the same call), otherwise STEP_UP_REQUIRED and nothing is saved */
+  /** Staff only (admin remedy; sellers and revise leave it out): re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password). Needed when the refund is within the caller's refund limit and above access stepUpAbove (it is approved in the same call), otherwise STEP_UP_REQUIRED and nothing is saved */
   reauthToken?: string | null;
 }
 
@@ -1322,7 +1322,7 @@ export const RemedyInput: z.ZodType<RemedyInput> = z.object({
   },
   explanation: z.string().nullish(),
   exchangeVariantId: z.uuid().nullish(),
-  reauthToken: z.string().describe("Staff only (admin remedy and revise; sellers leave it out): re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password). Needed when the refund is within the caller's refund limit and above access stepUpAbove (it is approved in the same call), otherwise STEP_UP_REQUIRED and nothing is saved").nullish(),
+  reauthToken: z.string().describe("Staff only (admin remedy; sellers and revise leave it out): re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password). Needed when the refund is within the caller's refund limit and above access stepUpAbove (it is approved in the same call), otherwise STEP_UP_REQUIRED and nothing is saved").nullish(),
 }).register(common.apiTypes, { id: "returns.RemedyInput" });
 
 export interface ExceptionInput {
@@ -4007,7 +4007,7 @@ export const endpoints = defineEndpoints({
     permission: "returns.requests.manage",
     scope: "staff",
     summary: "Change a declined refund and resubmit",
-    desc: "The resubmission takes the same decision path as a new staff refund: within the reviser's refund limit approved now (reauthToken in the body above stepUpAbove, else STEP_UP_REQUIRED and nothing changes); otherwise under review with an access approval request for Finance (`approval` in the response).",
+    desc: "A declined request had been waiting for someone else's approval, so the resubmission always goes back under review with an access approval request for the refund approvers (`approval` in the response), filed in the reviser's name: the reviser becomes its proposer and cannot approve it, also within their own refund limit and also after that request lapses (POST /refunds/{id}/approve answers SELF_APPROVAL_NOT_ALLOWED). reauthToken is not used.",
     params: () =>
       z.object({
         id: z.uuid(),

@@ -275,6 +275,31 @@ describe('case refunds (requestRefund)', () => {
       h.authority.stepUp = false;
     }
   });
+
+  it('the proposer cannot send a refund back and resubmit it to approve it alone, even within their own limit', async () => {
+    const sellerId = newId();
+    const p = product(h, { title: 'Skillet', price: 5098, sellerId });
+    const m = await placeOrder(h, [group(h, [line(p, 1)], { sellerId })]);
+    const proposer = newId();
+    const mine = tokens.staff(undefined, { sub: proposer });
+    const rr = await h.service.requestRefund({ source: 'case', caseId: newId(), orderId: m.order.id, orderItemIds: [m.items[0]![0]!], breakdown: breakdown(5098, 5098), fundedBy: 'seller', reason: 'Returned to sender', proposedBy: { kind: 'staff', id: proposer } });
+    expect((await h.call('POST', `/api/admin/returns/refunds/${rr.id}/decline`, mine, { reason: 'Sending back to adjust' })).body.status).toBe('declined');
+    // within the proposer's own limit (access allows), the resubmission still waits for someone else
+    const revised = await h.call('POST', `/api/admin/returns/refunds/${rr.id}/revise`, mine, { kind: 'full_refund', explanation: 'Resubmit' });
+    expect(revised.status, JSON.stringify(revised.body)).toBe(200);
+    expect(revised.body).toMatchObject({ status: 'under_review', approval: { required: true }, proposedBy: { id: proposer } });
+    expect(h.calls.approvals.at(-1)).toMatchObject({ target: { id: rr.id }, requestedBy: { accountId: proposer } });
+    expect(h.calls.refunds.find((r) => r.originId === rr.id)).toBeUndefined();
+    // with the approval request lapsed, the fallback does not let the proposer approve it either
+    await h.service.core.repo.update('refund_requests', rr.id, { approval_request_id: null });
+    const self = await h.call('POST', `/api/admin/returns/refunds/${rr.id}/approve`, mine, {}, idem());
+    expect(self.status).toBe(403);
+    expect(self.body.error.code).toBe('SELF_APPROVAL_NOT_ALLOWED');
+    const list = await h.call('GET', '/api/admin/returns/refunds?awaitingApproval=true', mine);
+    expect(list.body.items.find((r: any) => r.id === rr.id)).toMatchObject({ canApprove: false });
+    const other = await h.call('POST', `/api/admin/returns/refunds/${rr.id}/approve`, staff(), {}, idem());
+    expect(other.body.status, JSON.stringify(other.body)).toBe('processing');
+  });
 });
 
 describe('staff refunds take one decision path (access returns.refunds.approve)', () => {

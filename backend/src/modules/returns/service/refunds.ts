@@ -524,6 +524,12 @@ export class Refunds {
         return this.viewOf(id);
       }
     }
+    // under review it waits for someone other than its proposer; with its approval request lapsed (expired or
+    // cancelled) the proposer still cannot approve it alone, as access would refuse on the request
+    const proposer = actorFrom(rr.proposed_by);
+    if (rr.status === 'under_review' && proposer?.kind === by.actor.kind && proposer.id && proposer.id === by.actor.id) {
+      throw new AppError('SELF_APPROVAL_NOT_ALLOWED', 'Someone else approves the refunds you propose', { refundRequestId: rr.id }, 403);
+    }
     // the same path as a refund staff start: within the limit approved now (password again above stepUpAbove),
     // above it an approval request; saved pending approval it answers 200 with approval in the body (FORMAT.md)
     const d = await this.authorize(by, money(rr.total, rr.currency), body.reauthToken);
@@ -549,10 +555,12 @@ export class Refunds {
         ok = check?.decision === 'allowed';
       }
       const requestId = r.approval?.approvalRequestId;
-      if (ok && requestId) {
-        // the person who asked for the approval cannot decide it (access refuses SELF_APPROVAL_NOT_ALLOWED)
-        const req = await this.core.soft('access', 'approval request', (a) => a.getApproval(requestId));
-        ok = !req || !['pending', 'partially_approved'].includes(req.status) || req.requestedBy?.id !== by.actor.id;
+      if (ok) {
+        // the person who asked for the approval cannot decide it (access refuses SELF_APPROVAL_NOT_ALLOWED), nor can the
+        // proposer once that request lapsed (approve refuses the same way)
+        const req = requestId ? await this.core.soft('access', 'approval request', (a) => a.getApproval(requestId)) : null;
+        if (req && ['pending', 'partially_approved'].includes(req.status)) ok = req.requestedBy?.id !== by.actor.id;
+        else if (r.status === 'under_review') ok = r.proposedBy?.id !== by.actor.id;
       }
       out.push({ ...r, canApprove: ok });
     }
@@ -777,8 +785,10 @@ export class Refunds {
   }
 
   /**
-   * Change a declined request and resubmit it: the resubmission goes through the same decision path as a new refund
-   * (within the reviser's refund limit approved now, otherwise an approval request for Finance).
+   * Change a declined request and resubmit it. A declined request had been waiting for someone else's approval, so
+   * the resubmission always goes back to the approvers (an access approval request in the reviser's name, who then
+   * cannot approve it): approving it within the reviser's own limit would let whoever proposed a refund that waits
+   * for Finance send it back and push it through alone, or overrule the person who sent it back.
    */
   async revise(id: string, remedy: RemedyInput, by: By): Promise<RefundRequest> {
     const rr = await this.repo.get('refund_requests', id);
@@ -790,8 +800,8 @@ export class Refunds {
       const agg = await this.core.load(rr.return_id);
       if (agg) p = await this.plan(agg, remedy, { except: rr.id });
     }
-    // decided on the new amount before anything is saved (STEP_UP_REQUIRED leaves the request declined)
-    const decision = await this.authorize(by, money(this.revised(rr, remedy, p).patch.total!, rr.currency), remedy.reauthToken);
+    this.revised(rr, remedy, p); // the new amount is checked before anything is saved
+    const decision: RefundDecision = { decision: 'approval_required', reason: 'A refund that was sent back needs another approver', claimed: null };
     const now = this.core.now();
     const after = await this.unlessSaved(decision, () =>
       this.repo.transaction(async (tx) => {
@@ -800,7 +810,8 @@ export class Refunds {
         const { patch, items } = this.revised(locked, remedy, p);
         await tx.setRefundItems(id, items);
         await tx.addRefundEvents(id, [this.ev('Refund revised and resubmitted', remedy.explanation ?? null, by.actor, now)]);
-        const updated = await tx.update('refund_requests', id, { ...patch, status, decline_reason: null, updated_at: now });
+        // the reviser proposes the resubmitted refund (the first proposal stays in its history)
+        const updated = await tx.update('refund_requests', id, { ...patch, status, decline_reason: null, proposed_by: actorText(by.actor), updated_at: now });
         if (updated.return_id) await this.core.timeline(tx, updated.return_id, [{ kind: 'refund_revised', label: 'Refund revised', detail: remedy.explanation ?? null, visibility: 'staff', actor: by.actor }]);
         return updated;
       }),
