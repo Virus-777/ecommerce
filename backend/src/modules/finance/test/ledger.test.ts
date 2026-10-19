@@ -160,15 +160,19 @@ describe('a refund after payout (scenario 6)', () => {
     await k.emit('payments.refund.sent', sent);
     await k.emit('payments.refund.sent', sent); // redelivered
     const t = await expectLedgerMatches(k, S);
-    expect(t.available).toBe(-5310 + 531);
+    expect(t.available).toBe(-5406 + 531);
     // the earnings card after booking: the posted amounts, not a new preview
-    expect(await k.svc.bookedRefundImpact(sent.refundId, [item.id])).toMatchObject({ sellerEarningsChange: USD(-5310), feeReturned: USD(531), afterPayout: true });
+    expect(await k.svc.bookedRefundImpact(sent.refundId, [item.id])).toMatchObject({ sellerEarningsChange: USD(-5406), feeReturned: USD(531), afterPayout: true });
     const entries = await k.call('GET', `${SELLER}/ledger?type=refunds`, sellerTokenOf());
-    expect(entries.body.items[0]).toMatchObject({ type: 'refund_after_payout', amount: USD(-5310) });
-    expect(entries.body.items[0].description).toContain('after payout');
-    expect(k.of('finance.balance.negative')).toEqual([expect.objectContaining({ sellerId: S, available: USD(-4779) })]);
+    // the seller's share of the refund, plus its share (5310/5560) of the Marketly-funded part of the coupon
+    // share (340 × 500/1680 = 101) it was paid with the sale: 96
+    const refunded = entries.body.items.find((e: any) => e.amount.amount === -5310);
+    expect(refunded).toMatchObject({ type: 'refund_after_payout' });
+    expect(refunded.description).toContain('after payout');
+    expect(entries.body.items.find((e: any) => e.amount.amount === -96)).toMatchObject({ type: 'refund_after_payout' });
+    expect(k.of('finance.balance.negative')).toEqual([expect.objectContaining({ sellerId: S, available: USD(-4875) })]);
     const bal = await k.call('GET', `${SELLER}/balances`, sellerTokenOf());
-    expect(bal.body).toMatchObject({ negative: true, available: USD(-4779) });
+    expect(bal.body).toMatchObject({ negative: true, available: USD(-4875) });
     // the sellers header totals count this seller's negative balance and include its balance
     const totals = await k.svc.sellerBalanceTotals();
     expect(totals.negativeCount).toBeGreaterThanOrEqual(1);
@@ -182,10 +186,10 @@ describe('a refund after payout (scenario 6)', () => {
     await k.svc.negativeBalanceAge();
     await k.app.kernel.events.drain();
     await k.app.kernel.jobs.runNow('finance.negative-balance.age'); // once only
-    expect(k.of('finance.amount_owed.created')).toEqual([expect.objectContaining({ sellerId: S, amount: USD(4779) })]);
+    expect(k.of('finance.amount_owed.created')).toEqual([expect.objectContaining({ sellerId: S, amount: USD(4875) })]);
     const owed = await k.call('GET', `${ADMIN}/amounts-owed?sellerId=${S}`, k.staff);
-    expect(owed.body.items).toEqual([expect.objectContaining({ amount: USD(4779), remaining: USD(4779), status: 'open' })]);
-    expect((await k.call('GET', `${SELLER}/balances`, sellerTokenOf())).body.amountOwed).toEqual(USD(4779));
+    expect(owed.body.items).toEqual([expect.objectContaining({ amount: USD(4875), remaining: USD(4875), status: 'open' })]);
+    expect((await k.call('GET', `${SELLER}/balances`, sellerTokenOf())).body.amountOwed).toEqual(USD(4875));
 
     orderB = k.order(S, [{ title: 'Studio headphones', quantity: 1, price: 10000 }]);
     await k.accept(orderB);
@@ -193,7 +197,7 @@ describe('a refund after payout (scenario 6)', () => {
     k.clock.advance(8 * DAY);
     await k.app.kernel.jobs.runNow('finance.release-pending');
     const t = await expectLedgerMatches(k, S);
-    expect(t.available).toBe(-4779 + 9000);
+    expect(t.available).toBe(-4875 + 9000);
     const settled = await k.call('GET', `${ADMIN}/amounts-owed?sellerId=${S}`, k.staff);
     expect(settled.body.items[0]).toMatchObject({ remaining: USD(0), status: 'settled' });
   });
@@ -201,14 +205,14 @@ describe('a refund after payout (scenario 6)', () => {
   it('shows the deduction with its payout reference on the next statement, which reconciles to the next payout', async () => {
     const res = await k.call('POST', `${ADMIN}/payout-runs`, k.staff, { cutoffAt: k.clock.now().toISOString(), scheduledRelease: new Date(k.clock.now().getTime() + 3_600_000).toISOString() }, { 'idempotency-key': newId() });
     expect(res.status, JSON.stringify(res.body)).toBe(201);
-    expect(res.body.total).toEqual(USD(4221));
+    expect(res.body.total).toEqual(USD(4125));
     const rows = await k.call('GET', `${ADMIN}/payout-runs/${res.body.id}/statements`, k.staff);
     const st = await k.call('GET', `${SELLER}/statements/${rows.body.items[0].statementId}`, sellerTokenOf());
     const refunds = st.body.sections.find((s: any) => s.key === 'refunds');
-    expect(refunds.total).toEqual(USD(-5310));
-    expect(refunds.lines[0].description).toMatch(/after payout \(paid out in PO-/);
+    expect(refunds.total).toEqual(USD(-5406));
+    expect(refunds.lines.some((l: any) => /after payout \(paid out in PO-/.test(l.description))).toBe(true);
     expect(st.body.afterPayoutNotices[0]).toContain('RT-261020-0533');
-    expect(st.body.reconciliation).toMatchObject({ openingAvailable: USD(0), payout: USD(4221), closingAvailable: USD(0) });
+    expect(st.body.reconciliation).toMatchObject({ openingAvailable: USD(0), payout: USD(4125), closingAvailable: USD(0) });
     const total = st.body.reconciliation.lines.reduce((s: number, l: any) => s + l.amount.amount, 0);
     expect(st.body.reconciliation.openingAvailable.amount + total - st.body.reconciliation.payout.amount).toBe(st.body.reconciliation.closingAvailable.amount);
     const list = await k.call('GET', `${SELLER}/statements`, sellerTokenOf());
@@ -449,5 +453,47 @@ describe('a package returned to sender (cancelled after dispatch)', () => {
     expect(await k.svc.core.repo.findOne('fee_charges', { order_item_id: item.id })).toMatchObject({ refunded_fee: 300, status: 'reversed' });
     const entries = await k.svc.core.repo.find('ledger_entries', { lot_id: (await k.svc.core.repo.findOne('earnings_lots', { order_item_id: item.id }))!.id });
     expect(entries.find((e) => e.type === 'cancellation')?.description).toBe('Cancelled 1 item after dispatch (returned to sender)');
+  });
+});
+
+describe('a return refund (Marketly-funded coupon, customer-paid return label, sales tax)', () => {
+  it('leaves the seller nothing on the returned unit: the coupon and the return shipping go back to Marketly', async () => {
+    const R = newId();
+    const order = k.order(R, [{ title: 'Cast iron skillet', quantity: 1, price: 4499, platformDiscount: 450 }]);
+    await k.accept(order);
+    const item = order.groups[0]!.items[0]!;
+    // the seller is paid the full price (the coupon is Marketly's), fee 10% of 4499 = 450
+    expect(await expectLedgerMatches(k, R)).toMatchObject({ total: 4499 - 450, pending: 4049 });
+    const labelId = newId();
+    await k.emit('returns.label.created', { returnId: newId(), ref: 'RT-261018-0007', orderRef: order.ref, ownerType: 'seller', sellerId: R, labelId, orderId: order.id, cost: USD(795), paidBy: 'customer' });
+    const refundRequestId = newId();
+    await k.emit('returns.refund.approved', { refundRequestId, returnId: newId(), caseId: null, orderId: order.id, orderItemIds: [item.id], items: [{ orderItemId: item.id, quantity: 1 }], ownerType: 'seller', sellerId: R, source: 'return', trustReportId: null, total: USD(3250), breakdown: { itemAmount: USD(4499), discountShare: USD(450), shippingRefund: USD(0), returnShippingDeduction: USD(799), deductions: [], total: USD(3250), maxRefundable: USD(4049), destination: 'Visa •••• 4417', isEstimate: false }, fundedBy: 'seller', sellerShare: USD(3250), platformShare: USD(0), approvedBy: { kind: 'seller', id: newId() } });
+    const sent = { refundId: newId(), ref: 'RT-261018-0007', orderId: order.id, origin: 'return', originId: refundRequestId, amount: USD(3250), items: [{ orderItemId: item.id, title: 'Cast iron skillet', groupId: order.groups[0]!.id, sellerId: R, amount: USD(3250) }], destination: 'Visa •••• 4417', sentAt: k.clock.now().toISOString() };
+    await k.emit('payments.refund.sent', sent);
+    await k.emit('payments.refund.sent', sent); // redelivered
+    // 4499 − 450 fee − 3250 refund − 450 coupon − 799 return shipping + 450 fee back = 0
+    expect(await expectLedgerMatches(k, R)).toMatchObject({ total: 0, pending: 0 });
+    expect((await k.svc.core.repo.findOne('earnings_lots', { order_item_id: item.id }))?.state).toBe('reversed');
+    const rows = await k.svc.core.repo.find('ledger_entries', { seller_id: R, type: 'refund' });
+    expect(rows.map((r) => r.amount).sort((a, b) => a - b)).toEqual([-3250, -799, -450]);
+    expect(await k.svc.bookedRefundImpact(sent.refundId, [item.id])).toMatchObject({ sellerEarningsChange: USD(-4499), feeReturned: USD(450) });
+    // Marketly bought the label and recovers the customer's fee for it
+    const costs = await k.svc.core.repo.find('platform_costs', { kind: 'label', order_id: order.id });
+    expect(costs.map((c) => c.amount).sort((a, b) => a - b)).toEqual([-799, 795]);
+  });
+
+  it('never charges the seller the sales tax refunded with the item', async () => {
+    const R = newId();
+    const order = k.order(R, [{ title: 'Kettle', quantity: 1, price: 3000 }]);
+    await k.accept(order);
+    const item = order.groups[0]!.items[0]!;
+    const refundRequestId = newId();
+    await k.emit('returns.refund.approved', { refundRequestId, returnId: newId(), caseId: null, orderId: order.id, orderItemIds: [item.id], items: [{ orderItemId: item.id, quantity: 1 }], ownerType: 'seller', sellerId: R, source: 'return', trustReportId: null, total: USD(3240), breakdown: { itemAmount: USD(3240), discountShare: USD(0), shippingRefund: USD(0), returnShippingDeduction: USD(0), deductions: [], taxRefund: USD(240), total: USD(3240), maxRefundable: USD(3240), destination: 'Visa •••• 4417', isEstimate: false }, fundedBy: 'seller', sellerShare: USD(3240), platformShare: USD(0), approvedBy: { kind: 'seller', id: newId() } });
+    await k.emit('payments.refund.sent', { refundId: newId(), ref: 'RT-261018-0008', orderId: order.id, origin: 'return', originId: refundRequestId, amount: USD(3240), items: [{ orderItemId: item.id, title: 'Kettle', groupId: order.groups[0]!.id, sellerId: R, amount: USD(3240) }], destination: 'Visa •••• 4417', sentAt: k.clock.now().toISOString() });
+    // 3000 − 300 fee − 3000 refund + 300 fee back
+    expect(await expectLedgerMatches(k, R)).toMatchObject({ total: 0 });
+    const [refund] = await k.svc.core.repo.find('ledger_entries', { seller_id: R, type: 'refund' });
+    expect(refund).toMatchObject({ amount: -3000 });
+    expect(refund!.description).toContain('$2.40 sales tax refunded by Marketly');
   });
 });
