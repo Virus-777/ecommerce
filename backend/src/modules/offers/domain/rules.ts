@@ -120,28 +120,17 @@ export function verifyLowestBasis(spans: readonly PriceSpan[], wasAmount: number
 }
 
 /**
- * The manufacturer list price on file for one variant: the variant's own list price (in the market
- * currency) first, else a list price in the product specs.
+ * The manufacturer list price on file for one variant: the variant's list price in the market currency, which only
+ * catalog staff set. A list price a seller typed into the product specs ("MSRP": "$199") is not evidence: it would
+ * let anyone back a fake was-price.
  */
 export function listPriceOnFile(
-  product: { specs?: Record<string, string> | null; variants?: readonly { id: string; listPrice?: { amount: number; currency: string } | null }[] } | null | undefined,
+  product: { variants?: readonly { id: string; listPrice?: { amount: number; currency: string } | null }[] } | null | undefined,
   variantId: string,
   currency: string,
 ): number | null {
   const own = product?.variants?.find((v) => v.id === variantId)?.listPrice;
-  if (own && own.currency === currency && own.amount > 0) return own.amount;
-  return listPriceInSpecs(product?.specs);
-}
-
-/** A list price in the product specs (e.g. "List price": "$249.00" or "MSRP": "249") */
-export function listPriceInSpecs(specs: Record<string, string> | null | undefined): number | null {
-  if (!specs) return null;
-  for (const [k, v] of Object.entries(specs)) {
-    if (!/^(list price|msrp|rrp|manufacturer list price)$/i.test(k.trim())) continue;
-    const n = Number(String(v).replace(/[^0-9.]/g, ''));
-    if (Number.isFinite(n) && n > 0) return Math.round(n * 100);
-  }
-  return null;
+  return own && own.currency === currency && own.amount > 0 ? own.amount : null;
 }
 
 export function compareAtExplanation(basis: 'lowest_30_days' | 'list_price', owner: string, lookbackDays: number): string {

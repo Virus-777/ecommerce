@@ -118,7 +118,7 @@ export const Offer: z.ZodType<Offer> = z.object({
 
 export interface CompareAtPrice {
   amount: common.Money;
-  /** lowest_30_days: this offer's lowest price in the 30 days before the sale; list_price: manufacturer list price on file */
+  /** lowest_30_days: this offer's lowest price in the 30 days before the sale; list_price: the manufacturer list price catalog staff set on the variant (a list price in seller-entered specs, e.g. MSRP, is not evidence) */
   basis: "lowest_30_days" | "list_price";
   /** Checked against price history or the list price on file. Unverified was-prices are never shown. */
   verified: boolean;
@@ -130,7 +130,7 @@ export const CompareAtPrice: z.ZodType<CompareAtPrice> = z.object({
   get amount() {
     return common.Money;
   },
-  basis: z.enum(["lowest_30_days", "list_price"]).describe("lowest_30_days: this offer's lowest price in the 30 days before the sale; list_price: manufacturer list price on file"),
+  basis: z.enum(["lowest_30_days", "list_price"]).describe("lowest_30_days: this offer's lowest price in the 30 days before the sale; list_price: the manufacturer list price catalog staff set on the variant (a list price in seller-entered specs, e.g. MSRP, is not evidence)"),
   verified: z.boolean().describe("Checked against price history or the list price on file. Unverified was-prices are never shown."),
   explanation: z.string().describe("e.g. 'Was price is the Official Store's lowest price in the 30 days before the sale.'"),
 }).register(common.apiTypes, { id: "offers.CompareAtPrice" });

@@ -181565,7 +181565,7 @@
               "lowest_30_days",
               "list_price"
             ],
-            "description": "lowest_30_days: this offer's lowest price in the 30 days before the sale; list_price: manufacturer list price on file"
+            "description": "lowest_30_days: this offer's lowest price in the 30 days before the sale; list_price: the manufacturer list price catalog staff set on the variant (a list price in seller-entered specs, e.g. MSRP, is not evidence)"
           },
           "verified": {
             "type": "boolean",

@@ -41,7 +41,7 @@ export class PricingPart extends Part {
   /**
    * Checks a was-price. lowest_30_days: the offer's own price history must cover the look-back window
    * before the sale and the was-price may not exceed the lowest price charged in it. list_price: the
-   * manufacturer list price on file (the variant's list price, else the product specs). Unverifiable →
+   * manufacturer list price catalog staff set on the variant (never the product specs). Unverifiable →
    * WAS_PRICE_NOT_VERIFIED.
    */
   async verifyCompareAt(c: CompareAtInput, price: common.Money, o: { product: catalog.ProductAdmin | null; variantId: string; history: readonly PriceSpan[]; saleStart: Date }): Promise<{ amount: common.Money; basis: CompareAtInput['basis'] }> {

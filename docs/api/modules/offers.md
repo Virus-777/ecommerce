@@ -136,7 +136,7 @@ How one seller (or the Official Store) sells one variant in one condition: price
 | Field | Type |
 |---|---|
 | amount | `Money` |
-| basis | `enum(lowest_30_days|list_price)` lowest_30_days: this offer's lowest price in the 30 days before the sale; list_price: manufacturer list price on file |
+| basis | `enum(lowest_30_days|list_price)` lowest_30_days: this offer's lowest price in the 30 days before the sale; list_price: the manufacturer list price catalog staff set on the variant (a list price in seller-entered specs, e.g. MSRP, is not evidence) |
 | verified | `bool` Checked against price history or the list price on file. Unverified was-prices are never shown. |
 | explanation | `string` e.g. 'Was price is the Official Store's lowest price in the 30 days before the sale.' |
 
