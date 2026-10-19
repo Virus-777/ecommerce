@@ -8,6 +8,6 @@ export type { paths, components } from './openapi';
 export { useAppConfig, useMarket, APP_CONFIG_KEY, type AppConfig, type PublicMarket, type DeliveryLocation } from './appConfig';
 export { uploadMedia, useUploads, assetPreview, fileSize, mediaFileName, type MediaAsset, type UploadItem, type UploadPurpose } from './uploads';
 export {
-  useProductImageSpec, ProductImageRatio, resolveProductImageSpec, validateProductImageSetting, parseRatio, renditionUrl, sizeText, productImageSpecKey,
+  useProductImageSpec, ProductImageRatio, resolveProductImageSpec, exactImageSpec, validateProductImageSetting, parseRatio, renditionUrl, sizeText, productImageSpecKey,
   DEFAULT_PRODUCT_IMAGE_SETTING, DEFAULT_PRODUCT_IMAGE_SPEC, PRODUCT_IMAGE_LIMITS, type ProductImageSetting, type ProductImageSpec, type Size,
 } from './imageSpec';

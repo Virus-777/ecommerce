@@ -44,6 +44,8 @@ export interface StoreCard {
   /** Sponsored hits: the advertising token sent with the display and click events. */
   impressionToken?: string | null;
   availability?: 'in_stock' | 'low_stock' | 'out_of_stock' | null;
+  /** The offer the card shows (its price and seller): what the card's add-to-cart button adds. */
+  offerId?: string | null;
 }
 
 export const productHref = (p: { id: string; slug?: string | null }, view = '') => href('store/product', view, { slug: p.slug || 'product', id: p.id });
@@ -72,6 +74,7 @@ export function toCardProduct(c: SearchCard, hit?: Pick<SearchHit, 'kind' | 'pos
     position: hit?.position,
     impressionToken: hit?.sponsored?.impressionToken ?? null,
     availability: c.availability,
+    offerId: c.offerId ?? null,
   };
 }
 
@@ -100,6 +103,7 @@ export function tileToCard(t: ProductTile, card?: SearchCard): StoreCard {
         ? { name: card.sellerName, official: card.official, slug: card.sellerSlug }
         : null,
     availability: t.availability ?? card?.availability ?? null,
+    offerId: t.offerId ?? card?.offerId ?? null,
   };
 }
 

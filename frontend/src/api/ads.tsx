@@ -1,10 +1,11 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { call, useApi, useSessionState, type components } from '@marketly/web-shared/api';
 import { dollars } from '@marketly/web-shared/lib/format';
 import { useIsPhone } from '@marketly/web-shared/lib/hooks';
-import { Button, Icon, Img, Price } from '@marketly/web-shared/ui';
+import { cx } from '@marketly/web-shared/lib/cx';
+import { Button, Icon, IconButton, Img, Price } from '@marketly/web-shared/ui';
 import { AdOverlay } from '@/pages/ads/data/overlay';
 import { initialsOf, tintOf } from './catalog';
 import { LogoPic, Pic } from './cards';
@@ -180,8 +181,112 @@ export function SponsoredBrandAd({ ad }: { ad: AdImpression }) {
   );
 }
 
+/** An image ad on the home banner: the whole creative links to the destination; the headline names it. */
+function ImageBannerAd({ ad }: { ad: AdImpression }) {
+  const { ref, click } = useAdTracking<HTMLSpanElement>(ad.impressionToken);
+  return (
+    <span ref={ref} style={{ display: 'contents' }}>
+      <AdLink ad={ad} className="home-adc-img" label={`${ad.label}: ${ad.headline}`} onClick={click}>
+        <Pic image={ad.image} icon="megaphone" tint="2" alt="" />
+        <span className="ad-label">{ad.label}</span>
+      </AdLink>
+    </span>
+  );
+}
+
+const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/**
+ * Home banner ads (placement home_banner): a carousel of every ad in the decision (all live ads unless staff set a
+ * "Most ads per page" limit on the placement), advancing every
+ * `seconds` (decision.rotationSeconds, 6 s) while more than one is live. Image creatives fill the slide
+ * (750 × 400 phone, 1200 × 300 desktop); a creative without an image shows as the sponsored brand block.
+ * It pauses on hover and keyboard focus (the placement's pauseOnHoverAndFocus) and while the tab is hidden;
+ * the pause button stops it for good (WCAG 2.2.2), and it starts stopped for people who prefer reduced motion.
+ * Swipe on touch screens; dots (and previous/next on wider screens) otherwise. Slides off screen are inert, and
+ * each ad records its display only once it is half on screen (useAdTracking), so unseen slides don't count.
+ */
+export function HomeAdCarousel({ ads, seconds }: { ads: AdImpression[]; seconds?: number | null }) {
+  const n = ads.length;
+  const [index, setIndex] = useState(0);
+  const [held, setHeld] = useState(false);
+  const [stopped, setStopped] = useState(reducedMotion);
+  const [hidden, setHidden] = useState(() => typeof document !== 'undefined' && document.hidden);
+  const at = n ? Math.min(index, n - 1) : 0;
+  const go = (k: number) => setIndex(((k % n) + n) % n);
+
+  useEffect(() => {
+    const onVis = () => setHidden(document.hidden);
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
+  useEffect(() => {
+    if (n < 2 || held || stopped || hidden) return;
+    const t = setTimeout(() => setIndex((x) => (x + 1) % n), Math.max(seconds ?? 6, 2) * 1000);
+    return () => clearTimeout(t);
+  }, [at, n, held, stopped, hidden, seconds]);
+
+  // touch swipe: a mostly horizontal move of 40 px changes the slide and cancels the tap on the ad
+  const swipe = useRef<{ x: number; y: number } | null>(null);
+  const swiped = useRef(false);
+  const onPointerDown = (e: ReactPointerEvent) => {
+    if (e.pointerType !== 'mouse') swipe.current = { x: e.clientX, y: e.clientY };
+  };
+  const onPointerUp = (e: ReactPointerEvent) => {
+    const s = swipe.current;
+    swipe.current = null;
+    if (!s || n < 2) return;
+    const dx = e.clientX - s.x;
+    if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(e.clientY - s.y)) return;
+    swiped.current = true;
+    go(at + (dx < 0 ? 1 : -1));
+  };
+  const onClickCapture = (e: ReactMouseEvent) => {
+    if (!swiped.current) return;
+    swiped.current = false;
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  if (!n) return null;
+  const rotating = n > 1 && !held && !stopped && !hidden;
+  return (
+    <section
+      className="home-adc"
+      aria-roledescription="carousel"
+      aria-label="Advertisements"
+      onMouseEnter={() => setHeld(true)}
+      onMouseLeave={() => setHeld(false)}
+      onFocus={() => setHeld(true)}
+      onBlur={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && setHeld(false)}
+    >
+      <div className="home-adc-view" onPointerDown={onPointerDown} onPointerUp={onPointerUp} onPointerCancel={() => (swipe.current = null)} onClickCapture={onClickCapture}>
+        <div className="home-adc-track" style={{ transform: `translateX(-${at * 100}%)` }} aria-live={rotating ? 'off' : 'polite'}>
+          {ads.map((ad, k) => (
+            <div key={ad.impressionToken || `${ad.campaignId}-${k}`} className="home-adc-slide" role="group" aria-roledescription="slide" aria-label={`${k + 1} of ${n}`} aria-hidden={k !== at || undefined} inert={k !== at}>
+              {ad.image ? <ImageBannerAd ad={ad} /> : <SponsoredBrandAd ad={ad} />}
+            </div>
+          ))}
+        </div>
+      </div>
+      {n > 1 && (
+        <div className="home-adc-nav">
+          <IconButton icon="chevron-left" label="Previous ad" size="sm" className="no-phone" onClick={() => go(at - 1)} />
+          <span className="home-adc-dots">
+            {ads.map((ad, k) => (
+              <button key={ad.impressionToken || k} type="button" className={cx('home-adc-dot', k === at && 'is-active')} aria-label={`Show ad ${k + 1} of ${n}`} aria-current={k === at || undefined} onClick={() => go(k)} />
+            ))}
+          </span>
+          <IconButton icon="chevron-right" label="Next ad" size="sm" className="no-phone" onClick={() => go(at + 1)} />
+          <IconButton icon={stopped ? 'play' : 'pause'} label={stopped ? 'Play the ads' : 'Pause the ads'} size="sm" onClick={() => setStopped((s) => !s)} />
+        </div>
+      )}
+    </section>
+  );
+}
+
 /** The ads of one placement key in a decision. */
-export const adsFor = (d: AdDecision | undefined, key: string): AdImpression[] => d?.slots[key] ?? [];
+export const adsFor =(d: AdDecision | undefined, key: string): AdImpression[] => d?.slots[key] ?? [];
 
 /** Placement keys whose ads come as the decision's overlay, not inline. */
 export const OVERLAY_KEYS = ['opening_fullscreen', 'popup', 'interstitial'];

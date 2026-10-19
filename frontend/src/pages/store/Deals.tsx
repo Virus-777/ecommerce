@@ -11,6 +11,7 @@ import { ApiProductCard, CardGridSkeleton, InfiniteRow, LoadError, Pic, SkLines 
 import { OFFICIAL_STORE_ID } from '@marketly/web-shared/config';
 import { productHref, useProductCards, type SearchCard, type StoreCard } from '@/api/search';
 import { useClearanceList, useCouponList, type DealList } from './data/deals';
+import { CampaignPages } from './data/campaign-pages';
 
 // Design: pages/store/store-deals.html. Data: GET /api/store/promotions/deals?tab= (tabs with counts,
 // flash sales with live meters, coupons, clearance, upcoming events, rules; deal items name their seller's
@@ -48,6 +49,7 @@ function dealToCard(d: DealProduct, c: SearchCard | undefined): StoreCard {
     delivery: c?.deliveryCue?.replace(/^Arrives\s+/i, '') ?? null,
     free: c?.freeDelivery ?? false,
     seller: { name: d.sellerName, official: c?.official ?? false, slug: d.sellerSlug },
+    offerId: d.offerId,
   };
 }
 
@@ -176,6 +178,7 @@ export default function Deals() {
           <h1 className="h1">Deals</h1>
           <p className="small sub">Every deal names the seller whose offer it applies to. A deal price is valid only for that offer, until the end time or until deal stock runs out.</p>
         </div>
+        <CampaignPages />
         <Tabs<DealTab> items={tabs} active={tab} onChange={setTab} label="Deal types" />
         {actionError && (
           <p className="small t-danger-text" role="alert">

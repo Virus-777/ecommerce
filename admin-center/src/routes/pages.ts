@@ -29,6 +29,7 @@ export const PAGES: Partial<Record<ScreenId, LazyExoticComponent<ComponentType>>
   'admin/promotion-new': lazy(() => import('../pages/admin/PromotionNew')),
   'admin/content': lazy(() => import('../pages/admin/Content')),
   'admin/help-content': lazy(() => import('../pages/admin/HelpContent')),
+  'admin/news': lazy(() => import('../pages/admin/News')),
   'admin/ads': lazy(() => import('../pages/admin/Ads')),
   'admin/ad-campaign': lazy(() => import('../pages/admin/AdCampaign')),
   'admin/ad-assets': lazy(() => import('../pages/admin/AdAssets')),

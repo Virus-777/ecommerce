@@ -110,7 +110,7 @@ export interface CardProduct {
 }
 
 /** Product card (.pcard). Heart toggles the wishlist state locally. */
-export function ProductCard({ p, sponsored, compact, showSeller, from, to = href('store/product'), extra, noFav }: { p: CardProduct; sponsored?: boolean; compact?: boolean; showSeller?: boolean; from?: boolean; to?: string; extra?: ReactNode; /** Hide the wishlist heart (the wishlist module is off at launch). */ noFav?: boolean }) {
+export function ProductCard({ p, sponsored, compact, showSeller, from, to = href('store/product'), extra, action, noFav }: { p: CardProduct; sponsored?: boolean; compact?: boolean; showSeller?: boolean; from?: boolean; to?: string; extra?: ReactNode; /** A control on the thumbnail, bottom right (e.g. add to cart). */ action?: ReactNode; /** Hide the wishlist heart (the wishlist module is off at launch). */ noFav?: boolean }) {
   const [saved, setSaved] = useState(false);
   const off = percentOff(p.price, p.was);
   const official = p.official ?? (p.seller ? 'official' in sellers[p.seller] : false);
@@ -128,6 +128,7 @@ export function ProductCard({ p, sponsored, compact, showSeller, from, to = href
         {!noFav && <button type="button" className={cx('fav', saved && 'is-active')} aria-label={`Save ${p.name} to wishlist`} aria-pressed={saved} onClick={() => setSaved((v) => !v)}>
           <Icon name="heart" fill={saved ? 'currentColor' : 'none'} />
         </button>}
+        {action}
       </div>
       <Link className="name" to={to}>
         {p.name}

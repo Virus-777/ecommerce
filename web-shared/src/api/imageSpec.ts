@@ -82,6 +82,27 @@ export function resolveProductImageSpec(s: ProductImageSetting, fromServer = fal
 
 export const DEFAULT_PRODUCT_IMAGE_SPEC = resolveProductImageSpec(DEFAULT_PRODUCT_IMAGE_SETTING);
 
+/**
+ * A crop spec for an image of one exact size, e.g. an ad creative format (1200 × 300) or a store banner (2400 × 800):
+ * the ImageCropper cuts that shape and saves exactly that size. Any shape is allowed (the product-image limits don't
+ * apply). The thumbnail is a small preview of the same crop.
+ */
+export function exactImageSpec(width: number, height: number, quality = 85): ProductImageSpec {
+  const thumbW = Math.min(width, 320);
+  const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
+  const g = gcd(width, height) || 1;
+  return {
+    aspectRatio: `${width / g}:${height / g}`,
+    detailWidth: width,
+    thumbnailWidth: thumbW,
+    quality,
+    ratio: { width: width / g, height: height / g },
+    detail: { width, height },
+    thumbnail: { width: thumbW, height: Math.max(1, Math.round((thumbW * height) / width)) },
+    fromServer: true,
+  };
+}
+
 /** "800 × 1000" */
 export const sizeText = (s: Size) => `${s.width} × ${s.height}`;
 

@@ -57,6 +57,8 @@ export const PAGES: Partial<Record<ScreenId, LazyExoticComponent<ComponentType>>
   'help/cases': lazy(() => import('../pages/help/Cases')),
   'help/case': lazy(() => import('../pages/help/Case')),
   'info/policy': lazy(() => import('../pages/info/Policy')),
+  'store/news': lazy(() => import('../pages/info/News')),
+  'store/news-post': lazy(() => import('../pages/info/NewsPost')),
   'info/about': lazy(() => import('../pages/info/About')),
   'info/unsubscribe': lazy(() => import('../pages/info/Unsubscribe')),
   'sell/landing': lazy(() => import('../pages/sell/Landing')),

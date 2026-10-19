@@ -9,12 +9,15 @@ const POLICY_VIEW: Record<string, string> = { returns: '', shipping: 'shipping',
 
 /**
  * Store route for a content link URL from the API (banners, CTAs, navigation). The API writes policy
- * links as /policies/{key}; the store shows policies at /policies?view=<slug>. Other paths are store
+ * links as /policies/{key}; the store shows policies at /policies?view=<slug>. Campaign pages (/pages/{slug})
+ * and collections (/collections/{slug}) open the store's page route /collection/{slug}. Other paths are store
  * routes already; absolute URLs are returned as they are.
  */
 export function contentLinkTo(url: string): string {
   const m = /^\/policies\/([a-z_]+)\/?$/.exec(url);
   if (m) return href('info/policy', POLICY_VIEW[m[1]!] ?? m[1]!.replace(/_/g, '-'));
+  const page = /^\/(?:pages|collections)\/([^/?#]+)\/?([?#].*)?$/.exec(url);
+  if (page) return href('store/collection', '', { slug: decodeURIComponent(page[1]!) }) + (page[2] ?? '');
   return url;
 }
 
@@ -39,6 +42,7 @@ const CONTENT_ICONS = [
   'store', 'calendar-check', 'undo-2', 'life-buoy', 'shield-check', 'truck', 'badge-check', 'headset', 'lock', 'package-check', 'rotate-ccw',
   'tag', 'zap', 'gift', 'star', 'heart', 'clock', 'calendar', 'map-pin', 'warehouse', 'bed-double', 'lamp-desk', 'cooking-pot', 'coffee',
   'headphones', 'speaker', 'monitor', 'shirt', 'tent', 'sparkles', 'puzzle', 'paw-print', 'package', 'info', 'circle-check', 'ticket-percent',
+  'megaphone', 'newspaper',
 ] as const satisfies readonly IconName[];
 
 /** An icon name from API content, or the fallback when the icon set doesn't have it. */

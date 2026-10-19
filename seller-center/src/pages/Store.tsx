@@ -1,11 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties } from 'react';
-import { ApiError, call, errorMessage, uploadMedia, useApi, useUploads, type components } from '@marketly/web-shared/api';
+import { ApiError, call, errorMessage, exactImageSpec, uploadMedia, useApi, useUploads, type components } from '@marketly/web-shared/api';
 import { SellerLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { initials } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Badge, Button, Card, Checkbox, Field, Icon, IconButton, Img, PageHeader, SegmentedControl, Select, Stars, Switch, Tabs, Textarea, TextInput, type IconName } from '@marketly/web-shared/ui';
+import { Alert, Badge, Button, Card, Checkbox, Field, Icon, IconButton, ImageCropper, Img, PageHeader, SegmentedControl, Select, Stars, Switch, Tabs, Textarea, TextInput, type CropWording, type IconName } from '@marketly/web-shared/ui';
 import { useSellerSession } from '@/app/session';
 import { fmtDay } from './data/finance';
 
@@ -123,10 +123,21 @@ function FileError({ msg }: { msg: string }) {
   );
 }
 
-/** Picked logo or banner: preview right away, uploaded through media; the asset id goes into the save. */
-function useImageUpload(purpose: 'store_logo' | 'store_banner', onError: (msg: string) => void) {
+/** The size each store image is cropped to and saved at: square logo, 3 : 1 banner, square collection image */
+const STORE_IMAGES = {
+  logo: { size: [400, 400], wording: { what: 'Store logos', place: 'centre the logo', detail: ['Logo', 'your store page'], thumbnail: ['Small', 'lists'] } },
+  banner: { size: [2400, 800], wording: { what: 'Store banners', place: 'frame the banner', detail: ['Banner', 'your store page'], thumbnail: ['Small', 'previews'] } },
+  collection: { size: [600, 600], wording: { what: 'Collection images', place: 'frame the image', detail: ['Collection', 'your store page'], thumbnail: ['Small', 'lists'] } },
+} satisfies Record<string, { size: [number, number]; wording: CropWording }>;
+
+/**
+ * Picked logo, banner or collection image: cropped to its size first (ImageCropper), then previewed right away and
+ * uploaded through media; the asset id goes into the save. Render `cropper` somewhere in the page.
+ */
+function useImageUpload(purpose: 'store_logo' | 'store_banner', kind: keyof typeof STORE_IMAGES, onError: (msg: string) => void) {
   const { session } = useApi();
   const [state, setState] = useState<{ url: string | null; assetId: string | null; uploading: boolean }>({ url: null, assetId: null, uploading: false });
+  const [picked, setPicked] = useState<File | null>(null);
   useEffect(
     () => () => {
       if (state.url) URL.revokeObjectURL(state.url);
@@ -140,6 +151,9 @@ function useImageUpload(purpose: 'store_logo' | 'store_banner', onError: (msg: s
     if (!/^image\/(png|jpeg|webp)$/.test(f.type)) return onError('Choose a JPG, PNG or WebP image.');
     if (f.size > IMG_MAX_MB * 1024 * 1024) return onError(`Images can be up to ${IMG_MAX_MB} MB.`);
     onError('');
+    setPicked(f);
+  };
+  const upload = (f: File) => {
     setState({ url: URL.createObjectURL(f), assetId: null, uploading: true });
     uploadMedia(session, f, purpose).then(
       (a) => setState((s) => ({ ...s, assetId: a.id, uploading: false })),
@@ -150,7 +164,9 @@ function useImageUpload(purpose: 'store_logo' | 'store_banner', onError: (msg: s
     );
   };
   const reset = () => setState({ url: null, assetId: null, uploading: false });
-  return { ...state, pick, reset };
+  const { size, wording } = STORE_IMAGES[kind];
+  const cropper = picked ? <ImageCropper files={[picked]} spec={exactImageSpec(size[0], size[1])} wording={wording} onProcessed={(img) => upload(img.file)} onClose={() => setPicked(null)} /> : null;
+  return { ...state, pick, reset, cropper };
 }
 
 export default function Store() {
@@ -173,10 +189,10 @@ export default function Store() {
   const [editing, setEditing] = useState<{ id: string; title: string; offerIds: string[] } | null>(null);
   const [device, setDevice] = useState<'desktop' | 'phone'>('phone');
   const [fileErr, setFileErr] = useState<Pick<Errors, 'logo' | 'banner'> & { collection?: string }>({});
-  const logo = useImageUpload('store_logo', (m) => setFileErr((f) => ({ ...f, logo: m || undefined })));
-  const banner = useImageUpload('store_banner', (m) => setFileErr((f) => ({ ...f, banner: m || undefined })));
+  const logo = useImageUpload('store_logo', 'logo', (m) => setFileErr((f) => ({ ...f, logo: m || undefined })));
+  const banner = useImageUpload('store_banner', 'banner', (m) => setFileErr((f) => ({ ...f, banner: m || undefined })));
   const evidence = useUploads('verification_document', { max: 3, accept: /\.(pdf|png|jpe?g)$|^(application\/pdf|image\/(png|jpeg))$/i });
-  const colImage = useImageUpload('store_banner', (m) => setFileErr((f) => ({ ...f, collection: m || undefined })));
+  const colImage = useImageUpload('store_banner', 'collection', (m) => setFileErr((f) => ({ ...f, collection: m || undefined })));
   const colImageInput = useRef<HTMLInputElement>(null);
   const offersQ = useQuery({
     queryKey: ['offers', 'offers', sellerId, 'collection-picker'],
@@ -741,6 +757,9 @@ export default function Store() {
           <span className="xs muted">Dashed outline: waiting for staff review.</span>
         </div>
       </div>
+      {logo.cropper}
+      {banner.cropper}
+      {colImage.cropper}
     </SellerLayout>
   );
 }

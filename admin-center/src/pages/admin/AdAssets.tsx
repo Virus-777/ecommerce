@@ -1,12 +1,12 @@
 import { useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { call, errorMessage, uploadMedia, useApi } from '@marketly/web-shared/api';
+import { call, errorMessage, exactImageSpec, uploadMedia, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, announce, Badge, Breadcrumbs, Button, Drawer, Field, Icon, Img, KeyValue, SearchInput, SegmentedControl, Select, StatusBadge, TableWrap, Tabs, Textarea } from '@marketly/web-shared/ui';
+import { Alert, announce, Badge, Breadcrumbs, Button, Dialog, Drawer, Field, Icon, ImageCropper, Img, KeyValue, SearchInput, SegmentedControl, Select, StatusBadge, TableWrap, Tabs, Textarea } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { dateTime, LoadError, shortDate, SkeletonLines } from '@/app/parts';
 import { CHECK_STYLE, fileLabel, groupCreatives, previewShape, REASONS, reasonLabel, ROLE_LABEL, sizeLine, type CreativeGroup } from './data/ad-assets';
@@ -160,16 +160,17 @@ export default function AdAssets() {
     },
   });
 
+  /** device: the format an image was cropped to (images); videos are matched by size */
   const add = useMutation({
-    mutationFn: async (f: File) => {
+    mutationFn: async ({ f, device }: { f: File; device?: 'any' | 'desktop' | 'phone' }) => {
       const isVideo = f.type.startsWith('video');
       const key = isVideo ? 'video' : placementKey;
       if (!key) throw new Error('Choose the format (placement) in the Format filter first, so the file is checked against its sizes.');
       const p = placements.data?.find((x) => x.key === key);
-      const size = await imageSize(f);
+      const size = device ? null : await imageSize(f);
       const match = size && p?.formats.find((x) => x.width === size.w && x.height === size.h);
       const asset = await uploadMedia(session, f, isVideo ? 'ad_video' : 'ad_creative');
-      return call(api.POST('/api/admin/advertising/creatives', { body: { kind: isVideo ? 'video' : 'image', device: match ? match.device : 'any', placementKey: key, mediaId: asset.id } })) as Promise<Creative>;
+      return call(api.POST('/api/admin/advertising/creatives', { body: { kind: isVideo ? 'video' : 'image', device: device ?? (match ? match.device : 'any'), placementKey: key, mediaId: asset.id } })) as Promise<Creative>;
     },
     onSuccess: (c) => {
       const msg = `${fileLabel(c)} uploaded as a draft`;
@@ -178,6 +179,17 @@ export default function AdAssets() {
       void qc.invalidateQueries({ queryKey: ['advertising', 'creatives'] });
     },
   });
+
+  // Images go through the cropper at one of the placement's formats (asked first when it has several), so they are
+  // saved at exactly that size; videos upload as they are.
+  const [crop, setCrop] = useState<{ file: File; formats: Placement['formats']; format: Placement['formats'][number] | null } | null>(null);
+  const pickUpload = (f: File) => {
+    add.reset();
+    if (f.type.startsWith('video') || !placementKey) return add.mutate({ f });
+    const formats = placements.data?.find((x) => x.key === placementKey)?.formats ?? [];
+    if (!formats.length) return add.mutate({ f });
+    setCrop({ file: f, formats, format: formats.length === 1 ? formats[0]! : null });
+  };
 
   const openReview = (g: CreativeGroup) => {
     setSel(g.id);
@@ -224,7 +236,7 @@ export default function AdAssets() {
           <p className="sub small">Images, ad text, video and destination links for every campaign · reviewed by Advertising and Content</p>
         </div>
         <div className="actions">
-          <input ref={upload} type="file" hidden accept="image/jpeg,image/png,image/webp,video/mp4" onChange={(e) => (e.target.files?.[0] && add.mutate(e.target.files[0]), (e.target.value = ''))} />
+          <input ref={upload} type="file" hidden accept="image/jpeg,image/png,image/webp,video/mp4" onChange={(e) => (e.target.files?.[0] && pickUpload(e.target.files[0]), (e.target.value = ''))} />
           {canManage && (
             <Button size="sm" icon="upload" onClick={() => (add.reset(), upload.current?.click())} disabled={add.isPending}>
               {add.isPending ? 'Uploading…' : 'Upload creative'}
@@ -527,6 +539,25 @@ export default function AdAssets() {
             <Textarea id="aa-note" value={comment} onChange={(e) => setComment(e.target.value)} />
           </Field>
         </Drawer>
+      )}
+      <Dialog open={!!crop && !crop.format} onClose={() => setCrop(null)} title="Which size is this image for?" size="sm">
+        <span className="small">The image is cropped to the size you choose and saved at exactly that size.</span>
+        <span className="stack gap-2">
+          {crop?.formats.map((f) => (
+            <Button key={`${f.device}-${f.width}`} variant="secondary" onClick={() => setCrop((c) => (c ? { ...c, format: f } : c))}>
+              {f.label}
+            </Button>
+          ))}
+        </span>
+      </Dialog>
+      {crop?.format && (
+        <ImageCropper
+          files={[crop.file]}
+          spec={exactImageSpec(crop.format.width, crop.format.height)}
+          wording={{ what: `${crop.format.label} ad images`, place: 'frame the ad', detail: ['Ad', 'the ad'], thumbnail: ['Preview', 'the creative library'] }}
+          onProcessed={(img) => crop.format && add.mutate({ f: img.file, device: crop.format.device })}
+          onClose={() => setCrop(null)}
+        />
       )}
     </AdminLayout>
   );

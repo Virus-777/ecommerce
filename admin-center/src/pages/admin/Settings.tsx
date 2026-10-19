@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState, type ReactElement, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
@@ -43,7 +43,17 @@ export default function Settings() {
   const canView = me.can('settings.view');
   const canPropose = me.can('settings.changes.propose');
 
-  const overviewQ = useQuery({ queryKey: ['settings', 'overview'], queryFn: () => call(api.GET('/api/admin/settings/overview')) as Promise<SettingsOverview>, enabled: canView });
+  const overviewQ = useQuery({
+    queryKey: ['settings', 'overview'],
+    queryFn: () => call(api.GET('/api/admin/settings/overview')) as Promise<SettingsOverview>,
+    enabled: canView,
+    // A scheduled change takes effect on the server (job settings.apply-due-changes, every minute) without the page
+    // asking: while one is due within 2 minutes or overdue, check every 10 s so the new values show without a reload.
+    refetchInterval: (q) => {
+      const soon = Date.now() + 2 * 60_000;
+      return (q.state.data?.scheduled ?? []).some((c) => c.status === 'scheduled' && new Date(c.effectiveAt).getTime() <= soon) ? 10_000 : false;
+    },
+  });
   const defsQ = useQuery({ queryKey: ['settings', 'definitions'], queryFn: () => call(api.GET('/api/admin/settings/definitions')) as Promise<SettingDefinition[]>, enabled: canView, staleTime: 5 * 60_000 });
   const defs = useMemo(() => new Map((defsQ.data ?? []).map((d) => [d.key, d])), [defsQ.data]);
   const sections = useMemo(() => (overviewQ.data?.sections ?? []).filter((s) => s.available), [overviewQ.data]);
@@ -89,8 +99,47 @@ export default function Settings() {
     if (top < nav.scrollTop) nav.scrollTop = top - 8;
     else if (top + a.offsetHeight > nav.scrollTop + nav.clientHeight) nav.scrollTop = top + a.offsetHeight - nav.clientHeight + 8;
   }, [active]);
+  // Scroll spy: the list follows the card being read. The active card is the last one whose top has passed a
+  // line a quarter of the way down the screen; at the end of the page the last card wins (it may never reach it).
+  // A click in the list keeps its choice until that smooth scroll ends.
+  const spyPaused = useRef(0);
+  const loaded = sections.length > 0 && !defsQ.isPending;
+  useEffect(() => {
+    if (!loaded) return;
+    // measured on each scroll event (about 20 cards); requestAnimationFrame would stall in a background tab
+    const spy = (e?: Event) => {
+      if (Date.now() < spyPaused.current) return;
+      const cards = Array.from(document.querySelectorAll<HTMLElement>('.ac-set [id^="set-"]'));
+      if (!cards.length) return;
+      // the switch line: a quarter of the way down the area below the sticky header
+      const navTop = Math.max(document.querySelector('.ac-setnav')?.getBoundingClientRect().top ?? 0, 0);
+      const line = navTop + (window.innerHeight - navTop) / 4;
+      const target = e?.target;
+      // only the scrolling that moves the cards (not the section list's own scrolling, nor other panels)
+      if (target instanceof HTMLElement && !target.contains(cards[0]!)) return;
+      const scroller = target instanceof HTMLElement ? target : document.scrollingElement;
+      const atEnd = !!scroller && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 2 && scroller.scrollTop > 0;
+      let current = cards[0]!;
+      if (atEnd) current = cards[cards.length - 1]!;
+      else for (const c of cards) if (c.getBoundingClientRect().top <= line) current = c;
+      const i = current.id === 'set-products' ? PRODUCTS : Number(current.id.slice(4));
+      if (!Number.isNaN(i)) setActive(i);
+    };
+    const ended = () => {
+      if (spyPaused.current) spyPaused.current = 0;
+    };
+    // capture: the scrolling element may be the page or a layout container
+    document.addEventListener('scroll', spy, { capture: true, passive: true });
+    document.addEventListener('scrollend', ended, { capture: true });
+    spy();
+    return () => {
+      document.removeEventListener('scroll', spy, { capture: true });
+      document.removeEventListener('scrollend', ended, { capture: true });
+    };
+  }, [loaded]);
   const goTo = (i: number) => {
     setActive(i);
+    spyPaused.current = Date.now() + 1500;
     document.getElementById(i === PRODUCTS ? 'set-products' : `set-${i}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
   // The Products section (product image crop and sizes) is the web app's own card; it follows Catalog in the list.
@@ -349,7 +398,8 @@ export default function Settings() {
           </Alert>
         )}
         {others.length > 0 && <div className="ac-fgrid">{others.map((v) => field(v, isEditing))}</div>}
-        {bools.length > 0 && <div className="stack gap-3">{bools.map((v) => field(v, isEditing))}</div>}
+        {/* on/off settings side by side, wrapping to the next line when they don't fit */}
+        {bools.length > 0 && <div className="row gap-6">{bools.map((v) => field(v, isEditing))}</div>}
         {!s.values.length && <Note>No values yet.</Note>}
         {s.scheduled.map((c) => (
           <Note key={c.ref}>

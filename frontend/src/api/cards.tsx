@@ -1,9 +1,11 @@
-import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
-import { errorMessage } from '@marketly/web-shared/api';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useMutation } from '@tanstack/react-query';
+import { call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { dollars } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Button, Img, LazyLoad, Pager, ProductCard, type CardProduct, type IconName } from '@marketly/web-shared/ui';
+import { Alert, Button, Icon, Img, LazyLoad, Pager, ProductCard, announce, type CardProduct, type IconName } from '@marketly/web-shared/ui';
+import { useSession } from '@/app/session';
 import { useAdTracking } from './ad-events';
 import type { MediaRef } from './catalog';
 import { productHref, type Listing, type StoreCard } from './search';
@@ -58,6 +60,8 @@ export function toCardData(c: StoreCard): CardProduct {
  * the impression token. The wrapper has display: contents so the grid is unchanged.
  */
 export function ApiProductCard({ c, compact, showSeller, from, extra, onOpen }: { c: StoreCard; compact?: boolean; showSeller?: boolean; from?: boolean; extra?: ReactNode; onOpen?: (c: StoreCard) => void }) {
+  const [cartError, setCartError] = useState('');
+  const canAdd = !!c.offerId && !!c.price && c.availability !== 'out_of_stock';
   const card = (
     <ProductCard
       p={toCardData(c)}
@@ -67,12 +71,18 @@ export function ApiProductCard({ c, compact, showSeller, from, extra, onOpen }: 
       showSeller={showSeller}
       from={from}
       noFav
+      action={canAdd ? <CardCartButton offerId={c.offerId!} title={c.title} onError={setCartError} /> : undefined}
       extra={
         <>
           {c.availability === 'out_of_stock' && (
             <div className="meta">
               <span>Out of stock</span>
             </div>
+          )}
+          {cartError && (
+            <span className="xs t-danger-text" role="alert">
+              {cartError}
+            </span>
           )}
           {extra}
         </>
@@ -84,6 +94,39 @@ export function ApiProductCard({ c, compact, showSeller, from, extra, onOpen }: 
     <TrackedCard c={c} onOpen={onOpen}>
       {card}
     </TrackedCard>
+  );
+}
+
+/**
+ * Cart button on a card's thumbnail: adds one of the offer the card shows (POST cart/items), refreshes the cart
+ * badge and shows a check for a moment. Errors (e.g. a purchase limit) appear under the card.
+ */
+function CardCartButton({ offerId, title, onError }: { offerId: string; title: string; onError: (text: string) => void }) {
+  const { api } = useApi();
+  const { refreshCart } = useSession();
+  const [added, setAdded] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const add = useMutation({
+    mutationFn: () => call(api.POST('/api/store/cart/cart/items', { body: { offerId, quantity: 1 } })),
+    onSuccess: (r) => {
+      refreshCart();
+      onError('');
+      setAdded(true);
+      announce(r.message || `Added ${title} to your cart`);
+      clearTimeout(timer.current);
+      timer.current = setTimeout(() => setAdded(false), 2500);
+    },
+    onError: (e) => {
+      const text = errorMessage(e);
+      onError(text);
+      announce(text);
+    },
+  });
+  return (
+    <button type="button" className="cart-add" aria-label={added ? `${title} added to cart` : `Add ${title} to cart`} disabled={add.isPending} onClick={() => add.mutate()}>
+      <Icon name={added ? 'check' : 'shopping-cart'} />
+    </button>
   );
 }
 

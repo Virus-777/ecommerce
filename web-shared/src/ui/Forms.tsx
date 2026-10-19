@@ -50,13 +50,39 @@ interface TextInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'pr
   ref?: Ref<HTMLInputElement>;
 }
 
-/** .input, optionally inside an .input-group with prefix/suffix/icon. Uncontrolled unless `value` is given. */
+const PICKER_TYPES = new Set(['date', 'datetime-local', 'time', 'month', 'week']);
+
+/** .input, optionally inside an .input-group with prefix/suffix/icon. Uncontrolled unless `value` is given.
+ *  On a date or time input the icon opens the browser's picker, which replaces the browser's own picker button. */
 export function TextInput({ id, prefix, suffix, icon, error, ctl, className, type = 'text', ...rest }: TextInputProps) {
-  const input = <input className={cx('input', error && 'is-error', ctl, className)} id={id} type={type} aria-invalid={error || undefined} {...rest} />;
+  const picker = !!icon && PICKER_TYPES.has(type);
+  const input = <input className={cx('input', error && 'is-error', picker && 'has-picker', ctl, className)} id={id} type={type} aria-invalid={error || undefined} {...rest} />;
   if (!prefix && !suffix && !icon) return input;
   return (
     <span className="input-group">
-      {icon && <Icon name={icon} className="ic-sm" />}
+      {picker ? (
+        // pointer shortcut only: keyboard users open the picker from the field itself (Alt+Down or Space)
+        <button
+          type="button"
+          className="input-picker"
+          tabIndex={-1}
+          aria-hidden="true"
+          disabled={rest.disabled || rest.readOnly}
+          onClick={(e) => {
+            const el = e.currentTarget.parentElement?.querySelector('input');
+            el?.focus();
+            try {
+              el?.showPicker();
+            } catch {
+              /* not supported, or not allowed for this input: the field still takes typing */
+            }
+          }}
+        >
+          <Icon name={icon} className="ic-sm" />
+        </button>
+      ) : (
+        icon && <Icon name={icon} className="ic-sm" />
+      )}
       {prefix && <span className="affix">{prefix}</span>}
       {input}
       {suffix && <span className="affix">{suffix}</span>}

@@ -11,13 +11,15 @@ import { href } from '@marketly/web-shared/routes';
 import { Alert, Avatar, Badge, Button, Card, EmptyState, Icon, Img, SegmentedControl, StatusBadge, type IconName } from '@marketly/web-shared/ui';
 import { ACCOUNT_OVERVIEW, caseHref, fmtDay, fmtMonthYear, fmtWeekday, humanize, orderHref, plural, refundTone, returnHref, returnTone, stateTone, type GImage, type GMoney } from './data/orders';
 import { LoadError, SkeletonRows } from './data/order-parts';
+import { useNewsDot } from '@/api/news';
 
 // Design: pages/store/account-overview.html. On the phone this is the Account tab: no app bar,
 // and the menu below the cards lists the app links (help, selling, policies, settings, sign out).
 // Data: the AccountOverview screen query. `me.wallet` is null while wallet is off (phase 3); the
 // store credit tile shows only when it answers. Delay alerts come from `delayedItems` (dates and
 // options), the other overview alerts (payment checking or failed, a return to send back, a case
-// waiting on you) from `overviewAlerts`.
+// waiting on you) from `overviewAlerts`. The app menu's News item shows a dot when
+// GET /api/store/content/news/summary has a post newer than the last one this device showed (api/news.ts).
 
 interface OverviewData {
   me: {
@@ -69,7 +71,7 @@ function alertLink(a: OverviewAlert): { to: string; label: string } | null {
   return null;
 }
 
-type MenuLink = { id: ScreenId; view?: string; icon: IconName; label: string; sub?: string; count?: 'messages' | 'notifications' };
+type MenuLink = { id: ScreenId; view?: string; icon: IconName; label: string; sub?: string; count?: 'messages' | 'notifications'; dot?: 'news' };
 
 const MENU: Array<{ title: string; links: MenuLink[] }> = [
   {
@@ -122,6 +124,7 @@ const APP_MENU: Array<{ title: string; links: MenuLink[] }> = [
   {
     title: 'About and policies',
     links: [
+      { id: 'store/news', icon: 'newspaper', label: 'News', dot: 'news' },
       { id: 'info/about', icon: 'info', label: `About ${BRAND}` },
       { id: 'info/policy', view: 'shipping', icon: 'truck', label: 'Shipping policy' },
       { id: 'info/policy', icon: 'undo-2', label: 'Returns policy' },
@@ -159,6 +162,7 @@ export default function Overview() {
   const me = d?.me;
   const name = me?.displayName ?? customer?.name ?? '';
   const counts = { messages: me?.unreadMessages.messages ?? 0, notifications: d?.unreadNotificationCount ?? 0 };
+  const newsDot = useNewsDot();
 
   const changeTheme = (t: Theme) => {
     setTheme(t);
@@ -428,6 +432,11 @@ export default function Overview() {
                       </span>
                     ) : (
                       <span className="grow">{l.label}</span>
+                    )}
+                    {l.dot === 'news' && newsDot && (
+                      <span className="news-dot">
+                        <span className="sr-only">New posts</span>
+                      </span>
                     )}
                     <Icon name="chevron-right" className="ic-sm" />
                   </Link>

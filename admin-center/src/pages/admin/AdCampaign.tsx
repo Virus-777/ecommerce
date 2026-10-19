@@ -1,12 +1,12 @@
 import { Fragment, useEffect, useRef, useState, type ChangeEvent } from 'react';
-import { Link, useSearchParams } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ApiError, call, errorMessage, uploadMedia, useApi } from '@marketly/web-shared/api';
+import { ApiError, call, errorMessage, exactImageSpec, uploadMedia, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { useScrollRegion, useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, announce, Badge, Breadcrumbs, Button, Card, EmptyState, Field, Icon, Img, SegmentedControl, Select, Textarea, TextInput, type IconName } from '@marketly/web-shared/ui';
+import { Alert, announce, Badge, Breadcrumbs, Button, Card, Dialog, EmptyState, Field, Icon, ImageCropper, Img, SegmentedControl, Select, Textarea, TextInput, type CropWording, type IconName } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { dateTime, LoadError, shortDate, SkeletonLines, time } from '@/app/parts';
 import { runCampaignAction, CampaignActionDialog, type CampaignAction, type PendingAction } from './data/ad-actions';
@@ -183,7 +183,14 @@ function period(d: Draft) {
   return `${shortDate(a)}–${shortDate(b)} ${tzShort(d.tz)}`.trim();
 }
 
-function validate(step: number, d: Draft): Errors {
+/**
+ * required: the placement's requiredDevices (Placement.requiredDevices). Without "desktop" while Settings › Serve
+ * the website is off: the desktop image is optional then.
+ */
+/** The cropper's words for an ad image (it shows the saved size and a small preview) */
+const adCropWording = (k: 'desktop' | 'phone'): CropWording => ({ what: `${k} ad images`, place: 'frame the ad', detail: [k === 'desktop' ? 'Desktop ad' : 'Phone ad', 'the ad'], thumbnail: ['Preview', 'the creative library'] });
+
+function validate(step: number, d: Draft, required: readonly string[] = ['desktop', 'phone']): Errors {
   const e: Errors = {};
   if (step === 0) {
     if (!d.name.trim()) e.name = 'Enter a campaign name.';
@@ -204,7 +211,9 @@ function validate(step: number, d: Draft): Errors {
     if (!d.headline.trim()) e.headline = 'Enter a headline.';
     else if (d.headline.length > HEADLINE_MAX) e.headline = `Shorten the headline to ${HEADLINE_MAX} characters.`;
     if (!d.button.trim()) e.button = 'Enter the button text.';
-    if (!d.desktop || !d.phone) e.creative = 'Add a desktop and a phone image.';
+    const needDesktop = required.includes('desktop') || required.includes('any');
+    const needPhone = required.includes('phone') || required.includes('any');
+    if ((needDesktop && !d.desktop) || (needPhone && !d.phone)) e.creative = needDesktop && needPhone ? 'Add a desktop and a phone image.' : needPhone ? 'Add a phone image.' : 'Add a desktop image.';
   }
   return e;
 }
@@ -295,6 +304,10 @@ export default function AdCampaign() {
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [checkResult, setCheckResult] = useState<CampaignCheckResult | null>(null);
   const [loadedId, setLoadedId] = useState('');
+  /** The draft this visit created (the steps save as you go): Cancel offers to delete it */
+  const [createdId, setCreatedId] = useState('');
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const navigate = useNavigate();
   const [reviewAs, setReviewAs] = useState('');
   const deskFile = useRef<HTMLInputElement>(null);
   const phoneFile = useRef<HTMLInputElement>(null);
@@ -330,6 +343,8 @@ export default function AdCampaign() {
     if (!campaignId && !d.placementKey && enabled.length) setD((p) => ({ ...p, placementKey: enabled[0].key, pages: enabled[0].eligiblePages.slice(0, 1) }));
   }, [campaignId, d.placementKey, enabled]);
   const placement = placements.data?.find((p) => p.key === d.placementKey);
+  /** Settings › Serve the website is off: the placement needs no desktop image (it can still be added) */
+  const desktopOptional = !!placement && placement.formats.some((f) => f.device === 'desktop') && !placement.requiredDevices.includes('desktop');
 
   const status = c?.status ?? 'draft';
   const editable = status === 'draft' && can('advertising.campaigns.manage');
@@ -404,6 +419,7 @@ export default function AdCampaign() {
       qc.setQueryData(['advertising', 'campaign', urlKey ?? saved.id], saved);
       setD((p) => ({ ...p, textId }));
       setLoadedId(saved.id);
+      if (!campaignId) setCreatedId(saved.id);
       setSavedAt(time(saved.updatedAt));
       void qc.invalidateQueries({ queryKey: ['advertising', 'campaigns'] });
       void qc.invalidateQueries({ queryKey: ['advertising', 'dashboard'] });
@@ -425,30 +441,65 @@ export default function AdCampaign() {
     onSuccess: setCheckResult,
   });
 
-  const go = (i: number) => {
+  /**
+   * Moves to step i. `savedId`: the draft the step just saved; it goes into the URL in the same update as the step,
+   * because two quick search-param updates overwrite each other (the step change would drop the ?id= the save set,
+   * and the next step would create another draft instead of editing this one).
+   */
+  const go = (i: number, savedId?: string) => {
     setErrors({});
-    setView(STEPS[i].view);
+    if (savedId && savedId !== idParam) {
+      setParams(
+        (prev) => {
+          const p = new URLSearchParams(prev);
+          p.set('id', savedId);
+          const v = STEPS[i].view;
+          if (v) p.set('view', v);
+          else p.delete('view');
+          return p;
+        },
+        { preventScrollReset: true },
+      );
+    } else setView(STEPS[i].view);
     window.scrollTo({ top: 0 });
   };
   const next = async () => {
-    const e = validate(stepIdx, d);
+    const e = validate(stepIdx, d, placement?.requiredDevices);
     setErrors(e);
     if (Object.keys(e).length) {
       announce('Check the highlighted fields before you continue.');
       return;
     }
     if (editable) {
+      let saved;
       try {
-        const { saved } = await save.mutateAsync(d);
-        if (stepIdx >= 2) runCheck.mutate(saved.id);
+        saved = (await save.mutateAsync(d)).saved;
       } catch {
         return;
       }
+      if (stepIdx >= 2) runCheck.mutate(saved.id);
+      go(stepIdx + 1, saved.id);
+      return;
     }
     go(stepIdx + 1);
   };
+  const discard = useMutation({
+    mutationFn: (id: string) => call(api.DELETE('/api/admin/advertising/campaigns/{id}', { params: { path: { id } } })),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['advertising'] });
+      announce('Campaign cancelled and its draft deleted');
+      navigate(href('admin/ads'));
+    },
+  });
+  /** A new campaign whose steps saved a draft asks what to do with it; otherwise Cancel just leaves */
+  const cancel = () => {
+    if (createdId && createdId === campaignId && status === 'draft') {
+      discard.reset();
+      setCancelOpen(true);
+    } else navigate(href('admin/ads'));
+  };
   const saveDraft = () => {
-    const e = validate(0, d);
+    const e = validate(0, d, placement?.requiredDevices);
     setErrors(e);
     if (Object.keys(e).length) return announce('Check the highlighted fields before you save.');
     save.mutate(d, { onSuccess: ({ saved }) => announce(`Draft saved at ${time(saved.updatedAt)}`) });
@@ -466,10 +517,17 @@ export default function AdCampaign() {
       announce(`${k === 'desktop' ? 'Desktop' : 'Phone'} image uploaded`);
     },
   });
+  // Every image goes through the cropper first: it cuts the format's exact shape and saves its exact size, so the
+  // server's size check (same shape, at least that size) always passes.
+  const [cropping, setCropping] = useState<{ k: 'desktop' | 'phone'; file: File } | null>(null);
+  const formatOf = (k: 'desktop' | 'phone') => placement?.formats.find((f) => f.device === k) ?? placement?.formats.find((f) => f.device === 'any');
+  const cropFormat = cropping ? formatOf(cropping.k) : undefined;
   const pickFile = (k: 'desktop' | 'phone') => (e: ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
-    if (f) upload.mutate({ k, f });
     e.target.value = '';
+    if (!f) return;
+    if (!formatOf(k)) return void upload.mutate({ k, f }); // no format to crop to: the server checks the file
+    setCropping({ k, file: f });
   };
 
   const submit = useMutation({
@@ -823,7 +881,7 @@ export default function AdCampaign() {
                     <div className="ab-form-grid">
                       {(
                         [
-                          ['desktop', `Desktop image · ${placement?.formats.find((f) => f.device === 'desktop' || f.device === 'any')?.label.replace(/^\w+\s/, '') ?? ''}`, deskFile],
+                          ['desktop', `Desktop image · ${placement?.formats.find((f) => f.device === 'desktop' || f.device === 'any')?.label.replace(/^\w+\s/, '') ?? ''}${desktopOptional ? ' (optional: the website is not served)' : ''}`, deskFile],
                           ['phone', `Phone image · ${placement?.formats.find((f) => f.device === 'phone' || f.device === 'any')?.label.replace(/^\w+\s/, '') ?? ''}`, phoneFile],
                         ] as const
                       ).map(([k, label, fileRef]) => {
@@ -1006,15 +1064,16 @@ export default function AdCampaign() {
           )}
 
           <div className="ab-wizard-foot">
-            {stepIdx === 0 ? (
-              <Button variant="ghost" to={href('admin/ads')}>
+            <span className="row gap-2">
+              {stepIdx > 0 && (
+                <Button variant="ghost" icon="arrow-left" onClick={() => go(stepIdx - 1)}>
+                  Back
+                </Button>
+              )}
+              <Button variant="ghost" onClick={cancel} disabled={discard.isPending}>
                 Cancel
               </Button>
-            ) : (
-              <Button variant="ghost" icon="arrow-left" onClick={() => go(stepIdx - 1)}>
-                Back
-              </Button>
-            )}
+            </span>
             <span className="row gap-2">
               {editable && (
                 <Button variant="secondary" onClick={saveDraft} disabled={save.isPending}>
@@ -1090,6 +1149,43 @@ export default function AdCampaign() {
         </div>
       </div>
 
+      <Dialog
+        open={cancelOpen}
+        onClose={() => setCancelOpen(false)}
+        title="Cancel this campaign?"
+        size="sm"
+        foot={
+          <>
+            <Button variant="ghost" onClick={() => setCancelOpen(false)} disabled={discard.isPending}>
+              Keep editing
+            </Button>
+            <Button variant="secondary" to={href('admin/ads')} disabled={discard.isPending}>
+              Keep as draft
+            </Button>
+            <Button variant="danger" icon="trash" onClick={() => createdId && discard.mutate(createdId)} disabled={discard.isPending}>
+              {discard.isPending ? 'Deleting…' : 'Delete draft'}
+            </Button>
+          </>
+        }
+      >
+        {discard.isError && (
+          <Alert tone="danger" title="The draft wasn’t deleted">
+            {errorMessage(discard.error)}
+          </Alert>
+        )}
+        <span className="small">
+          The steps you completed were saved as draft {c?.ref ?? ''}. Delete it, or keep it in Advertisements to finish later.
+        </span>
+      </Dialog>
+      {cropping && cropFormat && (
+        <ImageCropper
+          files={[cropping.file]}
+          spec={exactImageSpec(cropFormat.width, cropFormat.height)}
+          wording={adCropWording(cropping.k)}
+          onProcessed={(img) => upload.mutate({ k: cropping.k, f: img.file })}
+          onClose={() => setCropping(null)}
+        />
+      )}
       <CampaignActionDialog
         pending={pending}
         busy={act.isPending}

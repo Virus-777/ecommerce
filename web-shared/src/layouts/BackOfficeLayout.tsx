@@ -74,6 +74,7 @@ export const ADMIN_NAV: NavEntry[] = [
   { grp: 'Marketing and content', items: [
     { key: 'promotions', label: 'Promotions and coupons', icon: 'ticket-percent', id: 'admin/promotions' },
     { key: 'content', label: 'Homepage and pages', icon: 'layout-template', id: 'admin/content' },
+    { key: 'news', label: 'News', icon: 'newspaper', id: 'admin/news' },
     { key: 'help-content', label: 'Help and policies', icon: 'book-open', id: 'admin/help-content' },
     { key: 'ads', label: 'Advertisements', icon: 'megaphone', id: 'admin/ads' },
     { key: 'ad-assets', label: 'Ad creative library', icon: 'images', id: 'admin/ad-assets' },

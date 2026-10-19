@@ -7,10 +7,11 @@ import { dollars } from '@marketly/web-shared/lib/format';
 import { useIsPhone } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import { Badge, Button, Countdown, Icon, Meter, Price, SectionHeader } from '@marketly/web-shared/ui';
-import { adsFor, OpeningAd, OVERLAY_KEYS, SponsoredBrandAd, useAdDecision } from '@/api/ads';
+import { adsFor, HomeAdCarousel, OpeningAd, OVERLAY_KEYS, useAdDecision } from '@/api/ads';
 import { categoryArt, initialsOf, tintOf } from '@/api/catalog';
 import { ApiProductCard, CardGridSkeleton, LoadError, LogoPic, Pic } from '@/api/cards';
 import { contentIcon, contentLinkTo, isExternal, useOfficialStore } from '@/api/content';
+import { NewsCardLink } from '@/api/news-cards';
 import { productHref, tileToCard, useProductCards, type SearchCard } from '@/api/search';
 
 // Design: pages/store/store-home.html. Sections come from GET /api/store/content/home in the order the
@@ -18,7 +19,8 @@ import { productHref, tileToCard, useProductCards, type SearchCard } from '@/api
 // filled in with GET /api/store/search/cards (delivery cues, offer counts, flash-deal product slugs), recently
 // viewed comes from GET /api/store/customers/recently-viewed and the Official Store copy from
 // GET /api/store/content/official-store. Ad positions (ad_position sections: the opening full-screen ad and
-// the sponsored brand banner) ask POST /api/store/advertising/decisions and show nothing when no ad is live.
+// the sponsored brand banner, a carousel of every live ad) ask POST /api/store/advertising/decisions and show
+// nothing when no ad is live. A `news` section ("Latest news") carries its posts (`news`, up to 3) and hides when empty.
 // REST rather than the HomePage screen query: the query has no device (phone and desktop section sets),
 // selects images without thumbUrl and has no stock state on product cards.
 
@@ -385,11 +387,25 @@ export default function Home() {
             ))}
           </section>
         );
+      case 'news':
+        // Latest news: up to 3 posts (pinned first); a horizontal row on the phone, 3 columns wider (docs/06-news.md §5).
+        if (!s.news.length) return null;
+        return (
+          <section key={s.id} className="stack gap-4" aria-labelledby={hid}>
+            <SectionHeader title={s.heading ?? 'Latest news'} id={hid} link={link?.label ?? 'All news'} to={link?.to ?? href('store/news')} />
+            <div className="news-row">
+              {s.news.slice(0, 3).map((n) => (
+                <NewsCardLink key={n.id} post={n} />
+              ))}
+            </div>
+          </section>
+        );
       case 'ad_position': {
-        // Overlay positions (the opening ad) show the decision's overlay below; inline ones their first ad.
+        // Overlay positions (the opening ad) show the decision's overlay below; inline ones (the sponsored brand
+        // banner) a carousel of their ads, rotating at the decision's rotationSeconds.
         const key = s.adPlacementKey ?? '';
-        const ad = OVERLAY_KEYS.includes(key) ? undefined : adsFor(ads.data, key)[0];
-        return ad ? <SponsoredBrandAd key={s.id} ad={ad} /> : null;
+        const list = OVERLAY_KEYS.includes(key) ? [] : adsFor(ads.data, key);
+        return list.length ? <HomeAdCarousel key={s.id} ads={list} seconds={ads.data?.rotationSeconds} /> : null;
       }
       default:
         // recently_viewed renders the customer's list (above).

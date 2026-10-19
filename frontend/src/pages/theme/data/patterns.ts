@@ -1,5 +1,6 @@
 import type { ScreenId } from '@marketly/web-shared/routes';
 import type { IconName } from '@marketly/web-shared/ui';
+import type { AdImpression } from '@/api/ads';
 
 // Sample content for theme-patterns.html.
 
@@ -96,4 +97,20 @@ export const SELLER_NAV_DEMO: Array<{ label: string; icon: IconName; id: ScreenI
   { label: 'Store and settings', icon: 'store', id: 'seller/store' },
   { label: 'Notifications', icon: 'bell', id: 'seller/notifications', count: 4 },
   { label: 'Help and support', icon: 'life-buoy', id: 'seller/help' },
+];
+
+/** A sample banner creative (750 × 400): a flat colour with a headline, as an SVG data URL (no files needed). */
+const bannerArt = (bg: string, ink: string, eyebrow: string, title: string) =>
+  'data:image/svg+xml;utf8,' +
+  encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="640" viewBox="0 0 1200 640"><rect width="1200" height="640" fill="${bg}"/>` +
+      `<circle cx="1040" cy="520" r="300" fill="${ink}" opacity="0.12"/><text x="80" y="250" font-family="Inter, Arial, sans-serif" font-size="44" font-weight="700" fill="${ink}" opacity="0.8">${eyebrow}</text>` +
+      `<text x="80" y="350" font-family="Inter, Arial, sans-serif" font-size="88" font-weight="800" fill="${ink}">${title}</text></svg>`,
+  );
+
+/** Home banner carousel sample: two image creatives and one text-only creative (empty tokens: no ad events). */
+export const AD_CAROUSEL_DEMO: AdImpression[] = [
+  { impressionToken: '', campaignId: 'demo-1', creativeId: 'demo-1', placementKey: 'home_banner', label: 'Ad', advertiserName: 'Marketly', headline: 'Fall flash deals', buttonText: 'Shop the deals', destination: '#', dismissible: false, image: { id: 'demo-1', url: bannerArt('#1F6F5C', '#FFFFFF', 'FALL FLASH DEALS', 'Up to 40% off') } },
+  { impressionToken: '', campaignId: 'demo-2', creativeId: 'demo-2', placementKey: 'home_banner', label: 'Sponsored', advertiserName: 'Northwind Audio', headline: 'Northwind Aurora headphones', buttonText: 'Shop now', destination: '#', dismissible: false, image: { id: 'demo-2', url: bannerArt('#F3E3D3', '#5A2E12', 'NORTHWIND AUDIO', 'Hear every detail') } },
+  { impressionToken: '', campaignId: 'demo-3', creativeId: 'demo-3', placementKey: 'home_banner', label: 'Sponsored', advertiserName: 'Casa Verde Home', eyebrow: 'Kitchen week', headline: 'Cookware for every kitchen', body: 'A text-only creative shows as the sponsored brand block.', buttonText: 'See the range', destination: '#', dismissible: false },
 ];

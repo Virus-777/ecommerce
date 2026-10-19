@@ -1,13 +1,13 @@
 import { Fragment, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router';
-import { ApiError, call, errorMessage, useApi, useUploads, type UploadItem } from '@marketly/web-shared/api';
+import { ApiError, call, errorMessage, exactImageSpec, useApi, useUploads, type UploadItem } from '@marketly/web-shared/api';
 import { SellerLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { formatMoney } from '@marketly/web-shared/lib/format';
 import { useScrollRegion, useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Breadcrumbs, Button, Card, Checkbox, EmptyState, Field, Icon, Img, KeyValue, OptionCard, StatusBadge, TableWrap, TextInput, announce } from '@marketly/web-shared/ui';
+import { Alert, Breadcrumbs, Button, Card, Checkbox, EmptyState, Field, Icon, ImageCropper, Img, KeyValue, OptionCard, StatusBadge, TableWrap, TextInput, announce } from '@marketly/web-shared/ui';
 import { useSellerSession } from '@/app/session';
 import { adStatus, isAmount, isLaterPhase, parsePT, retryUnlessLater, stampPT, usd, type SellerAdCampaign } from './data/marketing';
 
@@ -18,6 +18,11 @@ import { adStatus, isAmount, isLaterPhase, parsePT, retryUnlessLater, stampPT, u
 // answers 501 NOT_IMPLEMENTED the form explains that and can't be sent.
 
 type AdType = 'sponsored_product' | 'sponsored_store';
+/**
+ * The image size each seller ad type takes (the backend's placement formats, advertising domain/rules.ts: one "any"
+ * format each). There is no seller endpoint for placements, so they are listed here; images are cropped to them.
+ */
+const AD_IMAGE: Record<AdType, { width: number; height: number }> = { sponsored_product: { width: 600, height: 600 }, sponsored_store: { width: 1200, height: 300 } };
 type Billing = 'cpc' | 'fixed_daily';
 type Page = 'search' | 'category' | 'product' | 'home';
 
@@ -386,8 +391,11 @@ function SetUp({ id }: { id: string | null }) {
   const [d, setD] = useState<Draft>(DRAFT);
   const [tried, setTried] = useState(false);
   const [notice, setNotice] = useState(id ? 'Editing sends the request back to the start of review when you submit again.' : '');
-  const desktop = useUploads('ad_creative', { max: 1, maxBytes: 5 * 1024 * 1024, accept: /\.(jpe?g|png)$/i });
-  const phone = useUploads('ad_creative', { max: 1, maxBytes: 5 * 1024 * 1024, accept: /\.(jpe?g|png)$/i });
+  // the cropper saves WebP (or JPEG where the browser can't): both are accepted
+  const desktop = useUploads('ad_creative', { max: 1, maxBytes: 5 * 1024 * 1024, accept: /\.(jpe?g|png|webp)$/i });
+  const phone = useUploads('ad_creative', { max: 1, maxBytes: 5 * 1024 * 1024, accept: /\.(jpe?g|png|webp)$/i });
+  /** The photo being cropped and where it goes */
+  const [cropping, setCropping] = useState<{ target: 'desktop' | 'phone'; file: File } | null>(null);
 
   const offers = useQuery({ queryKey: ['advertising', 'promotable', sellerId], queryFn: () => call(api.GET('/api/seller/advertising/promotable-offers', { params: { query: { page: 1, limit: 50 } } })), retry: retryUnlessLater });
   const pricing = useQuery({ queryKey: ['advertising', 'pricing', d.type], queryFn: () => call(api.GET('/api/seller/advertising/pricing', { params: { query: { type: d.type } } })), retry: retryUnlessLater });
@@ -640,14 +648,27 @@ function SetUp({ id }: { id: string | null }) {
             <div className="grid md2 gap-4">
               <div className="stack gap-2">
                 <span className="label">Desktop image</span>
-                <Drop title="Upload desktop image" hint="1200 × 900 px, JPG or PNG, up to 5 MB" item={desktop.items[0]} disabled={disabled} onFile={(f) => (desktop.clear(), desktop.add([f]))} />
+                <Drop title="Upload desktop image" hint={`${AD_IMAGE[d.type].width} × ${AD_IMAGE[d.type].height} px (you crop it to fit), JPG or PNG, up to 5 MB`} item={desktop.items[0]} disabled={disabled} onFile={(f) => setCropping({ target: 'desktop', file: f })} />
               </div>
               <div className="stack gap-2">
                 <span className="label">Mobile image</span>
-                <Drop title="Upload mobile image" hint="800 × 800 px, JPG or PNG, up to 5 MB" item={phone.items[0]} disabled={disabled} onFile={(f) => (phone.clear(), phone.add([f]))} />
+                <Drop title="Upload mobile image" hint={`${AD_IMAGE[d.type].width} × ${AD_IMAGE[d.type].height} px (you crop it to fit), JPG or PNG, up to 5 MB`} item={phone.items[0]} disabled={disabled} onFile={(f) => setCropping({ target: 'phone', file: f })} />
               </div>
             </div>
             {(desktop.error || phone.error) && <span className="xs muted">{desktop.error || phone.error}</span>}
+            {cropping && (
+              <ImageCropper
+                files={[cropping.file]}
+                spec={exactImageSpec(AD_IMAGE[d.type].width, AD_IMAGE[d.type].height)}
+                wording={{ what: d.type === 'sponsored_store' ? 'Store ad images' : 'Product ad images', place: 'frame the ad', detail: ['Ad', 'the ad'], thumbnail: ['Preview', 'previews'] }}
+                onProcessed={(img) => {
+                  const u = cropping.target === 'desktop' ? desktop : phone;
+                  u.clear();
+                  u.add([img.file]);
+                }}
+                onClose={() => setCropping(null)}
+              />
+            )}
             <Field label="Short headline" hint={`40 characters max. Claims must match the product page. ${d.headline.trim().length}/40`} error={errs.headline}>
               <TextInput id="ad-headline" value={d.headline} error={!!errs.headline} placeholder="" disabled={disabled} onChange={(ev) => set('headline', ev.target.value)} />
             </Field>

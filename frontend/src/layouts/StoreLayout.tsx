@@ -86,6 +86,7 @@ const STORE_FOOTER: FooterGroup[] = [
     title: 'Help',
     links: [
       { label: 'Help Center', to: href('help/center') },
+      { label: 'News', to: href('store/news') },
       { label: 'Track an order', to: href('account/orders') },
       { label: 'Returns and refunds', to: href('account/returns') },
       { label: 'Contact us', to: href('help/contact') },

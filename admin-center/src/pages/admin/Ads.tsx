@@ -6,7 +6,7 @@ import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { formatMoney } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, announce, BarChart, Badge, Breadcrumbs, Button, Card, Icon, SearchInput, Select, Stat, StatusBadge, TableWrap, type IconName } from '@marketly/web-shared/ui';
+import { Alert, announce, BarChart, Badge, Breadcrumbs, Button, Card, Dialog, Icon, SearchInput, Select, Stat, StatusBadge, TableWrap, type IconName } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { dateTime, LoadError, shortDate, SkeletonLines } from '@/app/parts';
 import { ACTION_LABEL, ACTION_PERMISSION, CampaignActionDialog, NEEDS_INPUT, runCampaignAction, type CampaignAction, type PendingAction } from './data/ad-actions';
@@ -27,7 +27,7 @@ const AT_RISK: CampaignStatus[] = ['in_review', 'paused'];
 
 const campaignHref = (c: { ref: string }, view = '') => href('admin/ad-campaign', view, undefined, { ref: c.ref });
 
-type RowAction = { label: string; icon?: IconName; variant?: 'ghost' | 'secondary'; to?: string; action?: CampaignAction };
+type RowAction = { label: string; icon?: IconName; variant?: 'ghost' | 'secondary'; to?: string; action?: CampaignAction; del?: boolean };
 /** Row buttons from the API's allowedActions (at most two, in the design's order). */
 function actionsFor(c: AdCampaignSummary, can: (p: string) => boolean): RowAction[] {
   const allowed = new Set(c.allowedActions);
@@ -40,6 +40,8 @@ function actionsFor(c: AdCampaignSummary, can: (p: string) => boolean): RowActio
   add('resume', 'play');
   add('schedule', undefined, 'secondary');
   if (allowed.has('edit') && can('advertising.campaigns.manage')) out.push({ label: 'Edit', to: campaignHref(c) });
+  // a staff draft that never ran (DELETE /campaigns/{id}); campaigns that ran are finished and archived instead
+  if (allowed.has('delete') && can('advertising.campaigns.manage')) out.push({ label: 'Delete', icon: 'trash', del: true });
   add('finish');
   add('archive');
   add('renew');
@@ -85,6 +87,18 @@ export default function Ads() {
   const [type, setType] = useState('');
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [notice, setNotice] = useState('');
+  /** The draft whose Delete was pressed (confirmation dialog) */
+  const [toDelete, setToDelete] = useState<AdCampaignSummary | null>(null);
+  const remove = useMutation({
+    mutationFn: (c: AdCampaignSummary) => call(api.DELETE('/api/admin/advertising/campaigns/{id}', { params: { path: { id: c.id } } })),
+    onSuccess: (_, c) => {
+      setToDelete(null);
+      const msg = `${c.name} deleted`;
+      setNotice(msg);
+      announce(msg);
+      void qc.invalidateQueries({ queryKey: ['advertising'] });
+    },
+  });
   const [ending, setEnding] = useState<Record<string, 'finish'>>({});
 
   const dash = useQuery({ queryKey: ['advertising', 'dashboard'], queryFn: () => call(api.GET('/api/admin/advertising/dashboard')) as Promise<AdsDashboard> });
@@ -278,7 +292,7 @@ export default function Ads() {
                                     {inner}
                                   </Link>
                                 ) : (
-                                  <button key={a.label} type="button" className={cls} disabled={act.isPending} onClick={() => a.action && start(c, a.action)}>
+                                  <button key={a.label} type="button" className={cls} disabled={act.isPending || remove.isPending} onClick={() => (a.del ? (remove.reset(), setToDelete(c)) : a.action && start(c, a.action))}>
                                     {inner}
                                   </button>
                                 );
@@ -437,6 +451,31 @@ export default function Ads() {
         </div>
       </div>
 
+      <Dialog
+        open={!!toDelete}
+        onClose={() => setToDelete(null)}
+        title={toDelete ? `Delete ${toDelete.name}?` : 'Delete campaign'}
+        size="sm"
+        foot={
+          <>
+            <Button variant="ghost" onClick={() => setToDelete(null)} disabled={remove.isPending}>
+              Cancel
+            </Button>
+            <Button variant="danger" icon="trash" onClick={() => toDelete && remove.mutate(toDelete)} disabled={remove.isPending}>
+              {remove.isPending ? 'Deleting…' : 'Delete draft'}
+            </Button>
+          </>
+        }
+      >
+        {remove.isError && (
+          <Alert tone="danger" title="The draft wasn’t deleted">
+            {errorMessage(remove.error)}
+          </Alert>
+        )}
+        <span className="small">
+          The draft {toDelete?.ref} and the creatives only it uses are deleted. This can’t be undone; Action history keeps a record. Campaigns that have run can’t be deleted: finish and archive them instead.
+        </span>
+      </Dialog>
       <CampaignActionDialog
         pending={pending}
         busy={act.isPending}

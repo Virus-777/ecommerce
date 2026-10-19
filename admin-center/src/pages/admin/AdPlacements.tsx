@@ -224,7 +224,7 @@ export default function AdPlacements() {
                     <Field label="Frequency cap: per day" hint="Empty = no cap" error={errors.perDay}>
                       <TextInput id={`pl-${p.id}-capday`} inputMode="numeric" value={draft.perDay} error={!!errors.perDay} onChange={(e) => set('perDay', e.target.value)} />
                     </Field>
-                    <Field label="Most ads per page" error={errors.maxPerPage}>
+                    <Field label="Most ads per page" hint={p.rotation.mode === 'carousel' ? 'Leave empty to show every live ad.' : undefined} error={errors.maxPerPage}>
                       <TextInput id={`pl-${p.id}-priority`} inputMode="numeric" value={draft.maxPerPage} error={!!errors.maxPerPage} onChange={(e) => set('maxPerPage', e.target.value)} />
                     </Field>
                     <Field label="Dismissal: hide for days" hint={p.dismissal.label} error={errors.dismissDays}>

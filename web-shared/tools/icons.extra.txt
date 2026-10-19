@@ -22,3 +22,4 @@ square-pen
 trash
 user
 archive
+newspaper

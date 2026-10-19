@@ -1,0 +1,26 @@
+/* News page (pages/admin/News.tsx): the few styles the shared stylesheet has no class for. */
+
+.nw-cover { max-width: 360px; }
+.nw-title { min-width: 220px; max-width: 46ch; }
+.nw-pair { display: grid; gap: var(--sp-3); grid-template-columns: minmax(0, 1fr); }
+@container app (min-width: 768px) { .nw-pair { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+
+.nw-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-1-5) var(--sp-3); align-items: center; margin: 0; }
+.nw-facts dt { font-size: var(--fs-xs); color: var(--text-3); }
+.nw-facts dd { margin: 0; min-width: 0; }
+
+/* Preview: the post as the store shows it, in a desktop window or a phone frame. */
+.nw-pv { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-4); background: var(--surface); max-height: 620px; overflow: auto; }
+.nw-pv .prose { max-width: none; font-size: var(--fs-sm); }
+.nw-pv.is-phone { padding: var(--sp-3); }
+.nw-pv.is-phone .prose { font-size: var(--fs-xs); }
+.nw-mframe { max-width: 260px; }
+
+/* Manage categories dialog */
+.nw-cats > li { flex-wrap: wrap; }
+.nw-cat-ic { width: 36px; height: 36px; border-radius: var(--r-md); background: var(--surface-2); color: var(--text-2); display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.nw-cat-ctl { flex-wrap: wrap; justify-content: flex-end; }
+.nw-cat-ctl .select { width: auto; min-width: 130px; }
+.nw-cat-add { display: grid; gap: var(--sp-3); grid-template-columns: minmax(0, 1fr); align-items: end; padding-top: var(--sp-3); border-top: 1px solid var(--border); }
+@container app (min-width: 768px) { .nw-cat-add { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto; } }
+.nw-cat-add .field { margin: 0; }

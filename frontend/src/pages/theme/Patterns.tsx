@@ -4,7 +4,8 @@ import { Logo } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { href } from '@marketly/web-shared/routes';
 import { Avatar, Badge, Count, Icon, IconButton, LogoMark, LogoTile, Price, ShipLine, Sponsored } from '@marketly/web-shared/ui';
-import { APP_VS_WEB, OFFERS, SELLER_NAV_DEMO, STORE_NAV_DEMO, TABBAR_DEMO } from './data/patterns';
+import { HomeAdCarousel } from '@/api/ads';
+import { AD_CAROUSEL_DEMO, APP_VS_WEB, OFFERS, SELLER_NAV_DEMO, STORE_NAV_DEMO, TABBAR_DEMO } from './data/patterns';
 
 // Design: pages/theme/theme-patterns.html (design-system reference page, no store chrome).
 // The design's only <h1> sat inside the back-office preview ("Orders"); the page gets its own
@@ -68,6 +69,11 @@ export default function Patterns() {
             <Badge tone="brand" icon="badge-check">
               Official Store
             </Badge>
+          </div>
+          <div className="stack gap-2">
+            <h3 className="h4">Home banner carousel</h3>
+            <p className="small sub measure-lg">Every live ad at the top of the home screen, 6 s each. Swipe on the phone; dots, arrows and pause on wider screens. It pauses on hover and focus. Example creatives below.</p>
+            <HomeAdCarousel ads={AD_CAROUSEL_DEMO} seconds={6} />
           </div>
         </section>
 
