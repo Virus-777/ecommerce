@@ -89,6 +89,8 @@ export interface StoredQuote {
   lineAllocations: Record<string, promotions.DiscountAllocation[]>;
   /** Shipping discount per package (minor units) */
   shippingDiscounts: Record<string, number>;
+  /** Who pays each package's shipping discount (minor units); the Marketly part is credited to the seller as shipping */
+  shippingFunding?: Record<string, { platform: number; seller: number }>;
   coupons: CouponResult[];
   discounts: DiscountLine[];
   tax: { jurisdiction: string; label: string; rate: number } | null;

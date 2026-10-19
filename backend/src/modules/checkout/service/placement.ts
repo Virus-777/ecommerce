@@ -529,6 +529,8 @@ export class Placement {
       const idx = q.totals.shippingByPackage.findIndex((s) => s.packageKey === key);
       const t = q.totals.perPackage[idx]!;
       const shares = allocate(t.shipping, pl.map((l) => Math.max(1, l.unit_price * l.quantity)));
+      // a shipping discount Marketly funds is still paid to the seller (finance credits it as shipping)
+      const funding = q.shippingFunding?.[key];
       const now = this.now();
       return {
         key,
@@ -543,7 +545,8 @@ export class Placement {
           service: opt?.methodCode ?? null,
           price: opt ? (opt.free ? m(0, cur) : opt.price) : m(0, cur),
           free: opt ? opt.free || t.shipping.amount === 0 : t.shipping.amount === 0,
-          fundedBy: opt?.fundedBy ?? 'customer',
+          fundedBy: !opt?.free && t.shipping.amount === 0 && funding ? (funding.platform ? 'platform' : 'seller') : (opt?.fundedBy ?? 'customer'),
+          platformFunded: funding?.platform ? m(funding.platform, cur) : null,
           arrival: opt?.arrival ?? { from: now.toISOString().slice(0, 10), to: now.toISOString().slice(0, 10) },
           dispatchBy: opt?.dispatchBy ?? now.toISOString(),
         },

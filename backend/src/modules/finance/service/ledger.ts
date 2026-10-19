@@ -7,6 +7,7 @@ import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
+import { allocate } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
 import type { LedgerEntry, Reference, RefundImpactPreview, SellerBalances } from '../../../spec/finance.js';
 import type * as orders from '../../../spec/orders.js';
@@ -139,12 +140,14 @@ export class LedgerPart extends Part {
     const splits = new Map<string, { seller: number; platform: number }>();
     for (const item of items) splits.set(item.id, await this.discountSplit(item));
     const cur = this.core.currency();
+    const platformShipping = this.platformShipping(order);
     const out = new Outbox();
     await this.repo.transaction(async (tx) => {
       for (const item of items) {
         const split = splits.get(item.id)!;
+        const shipPaid = platformShipping.get(item.id) ?? 0;
         // category fee rates apply to the product category at purchase (the order item's snapshot)
-        const calc = calculate(rule, { categoryId: item.categoryId ?? null, itemPrice: item.lineSubtotal.amount, sellerDiscount: split.seller, platformDiscount: split.platform, shippingCharged: item.shippingShare.amount }, cur);
+        const calc = calculate(rule, { categoryId: item.categoryId ?? null, itemPrice: item.lineSubtotal.amount, sellerDiscount: split.seller, platformDiscount: split.platform, shippingCharged: item.shippingShare.amount + shipPaid }, cur);
         const lotId = detId(`lot:${item.id}`);
         await tx.insertIfAbsent('earnings_lots', { id: lotId, seller_id: sellerId, order_id: order.id, order_item_id: item.id, state: 'pending', gross: item.lineSubtotal.amount, fee: calc.fee.amount, net: 0, delivered_at: null, available_at: null, payout_id: null });
         const lot = (await tx.findOne('earnings_lots', { order_item_id: item.id }))!;
@@ -158,7 +161,10 @@ export class LedgerPart extends Part {
         ];
         if (rule.platformDiscountsReduceFee) entries.push({ key: `sale_platform_discount:${item.id}`, type: 'seller_discount', amount: -calc.platformDiscount.amount, bucket: 'pending', ref, description: `Marketly-funded discount on ${item.title} (fee rule ${rule.version})`, lotId });
         entries.push(
-          { key: `sale_shipping:${item.id}`, type: 'shipping_charge', amount: calc.shippingCharged.amount, bucket: 'pending', ref, description: `Shipping charged for ${item.title}`, lotId },
+          { key: `sale_shipping:${item.id}`, type: 'shipping_charge', amount: calc.shippingCharged.amount - shipPaid, bucket: 'pending', ref, description: `Shipping charged for ${item.title}`, lotId },
+        );
+        if (shipPaid) entries.push({ key: `sale_shipping_platform:${item.id}`, type: 'shipping_charge', amount: shipPaid, bucket: 'pending', ref, description: `Shipping for ${item.title} paid by Marketly (Marketly-funded shipping discount)`, lotId });
+        entries.push(
           { key: `sale_fee:${item.id}`, type: 'marketplace_fee', amount: -calc.fee.amount, bucket: 'pending', ref, description: `${(calc.rateBps / 100).toString()}% of ${fmt(calc.feeBasis.amount, cur)} ${rule.basis === 'after_seller_discounts' && calc.sellerDiscount.amount ? 'item price after your discount' : 'item price'}${rule.includeShipping ? ' (shipping included)' : ' (shipping excluded)'}`, lotId },
         );
         await this.core.post(tx, sellerId, entries, out);
@@ -192,7 +198,9 @@ export class LedgerPart extends Part {
       const itemAmount = Math.min(e.refund.itemAmount.amount, l.gross);
       if (itemAmount <= 0 && e.refund.shippingRefund.amount <= 0) return;
       const discountPart = prorate(-totals.seller_discount, itemAmount, totals.sale);
-      const reversal = itemAmount - discountPart + Math.min(e.refund.shippingRefund.amount, totals.shipping_charge);
+      // the customer's shipping refund comes off the shipping the customer paid; Marketly's part follows below
+      const customerShipping = totals.shipping_charge - ((await tx.findOne('ledger_entries', { source_event_id: `sale_shipping_platform:${l.order_item_id}` }))?.amount ?? 0);
+      const reversal = itemAmount - discountPart + Math.min(e.refund.shippingRefund.amount, customerShipping);
       const bucket = l.state === 'pending' ? 'pending' : 'available';
       const ref = { kind: 'order' as const, id: e.orderId, label: e.ref };
       const entries: NewEntry[] = [{ key: `cancel:${e.cancellationId}:${e.itemId}`, type: 'cancellation', amount: -reversal, bucket, ref, description: `Cancelled ${e.quantity} item${e.quantity === 1 ? '' : 's'} ${e.beforeDispatch ? 'before dispatch' : 'after dispatch'} (${e.reasonCode.replace(/_/g, ' ')})`, lotId: l.id }];
@@ -212,7 +220,45 @@ export class LedgerPart extends Part {
       await tx.update('earnings_lots', l.id, { gross, fee: fresh.fee - feeBack });
       if (gross === 0 && (fresh.state === 'pending' || fresh.state === 'available')) await this.core.moveLot(tx, { ...fresh, gross }, 'reverse', out);
     });
+    if (e.beforeDispatch) await this.reversePlatformShipping(e, out);
     this.core.flush(out);
+  }
+
+  /**
+   * Marketly-funded shipping of each seller package, split over its items by item price like the customer's
+   * shipping at checkout (OrderGroup.delivery.platformFunded)
+   */
+  platformShipping(order: orders.OrderDetail): Map<string, number> {
+    const out = new Map<string, number>();
+    for (const g of order.groups) {
+      const paid = g.delivery?.platformFunded;
+      if (!paid?.amount || !g.items.length) continue;
+      allocate(paid, g.items.map((i) => Math.max(1, i.lineSubtotal.amount))).forEach((m, n) => out.set(g.items[n]!.id, m.amount));
+    }
+    return out;
+  }
+
+  /**
+   * A package cancelled whole before dispatch is never shipped: the Marketly-funded shipping credited with its sales
+   * goes back, once per lot (as the customer's shipping is refunded only when the whole package is cancelled)
+   */
+  async reversePlatformShipping(e: EventPayload<'orders.item.cancelled'>, out: Outbox) {
+    const order = await this.order(e.orderId);
+    const group = order?.groups.find((g) => g.id === e.groupId);
+    if (!group?.items.length || !group.items.every((i) => i.state === 'cancelled')) return;
+    const ref = { kind: 'order' as const, id: e.orderId, label: e.ref };
+    for (const item of group.items) {
+      const lot = await this.lotOf(item.id, order);
+      if (!lot) continue;
+      await this.repo.transaction(async (tx) => {
+        const credited = await tx.findOne('ledger_entries', { source_event_id: `sale_shipping_platform:${lot.order_item_id}` });
+        if (!credited?.amount) return;
+        const l = (await tx.get('earnings_lots', lot.id, { forUpdate: true }))!;
+        // a lot already reversed has moved what it kept to available
+        const pending = l.state === 'pending';
+        await this.core.post(tx, l.seller_id, [{ key: `cancel_shipping_platform:${l.order_item_id}`, type: 'cancellation', amount: -credited.amount, bucket: pending ? 'pending' : 'available', ref, description: 'Package cancelled before dispatch: shipping Marketly paid goes back', ...(pending || l.state === 'available' ? { lotId: l.id } : {}) }], out);
+      });
+    }
   }
 
   async feeRuleOf(tx: FinanceRepository, lot: LotRec) {

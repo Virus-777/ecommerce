@@ -497,3 +497,31 @@ describe('a return refund (Marketly-funded coupon, customer-paid return label, s
     expect(refund!.description).toContain('$2.40 sales tax refunded by Marketly');
   });
 });
+
+describe('Marketly-funded free shipping (package delivery.platformFunded)', () => {
+  const cancel = (order: FakeOrder, item: { id: string; price: number }) => ({ orderId: order.id, ref: order.ref, groupId: order.groups[0]!.id, ownerType: 'seller', sellerId: order.groups[0]!.sellerId, fulfilledBy: 'seller', itemId: item.id, offerId: newId(), stockItemId: newId(), quantity: 1, cancellationId: newId(), initiatedBy: 'customer', reasonCode: 'changed_mind', beforeDispatch: true, countsAgainstSeller: false, refund: { itemAmount: USD(item.price), discountShare: USD(0), shippingRefund: USD(0), taxRefund: USD(0), total: USD(item.price) }, paymentIntentId: newId(), trustReportId: null, notifyCustomer: true });
+
+  it('credits the shipping Marketly pays to the seller, split over the items, and takes it back only when the whole package is cancelled before dispatch', async () => {
+    const R = newId();
+    const order = k.order(R, [{ title: 'Pan', quantity: 1, price: 3000 }, { title: 'Lid', quantity: 1, price: 1000 }], { platformShipping: 599 });
+    await k.accept(order);
+    const [a, b] = order.groups[0]!.items as [FakeOrder['groups'][0]['items'][0], FakeOrder['groups'][0]['items'][0]];
+    // 3000 + 1000 + 599 shipping paid by Marketly − 10% fees (300 + 100)
+    expect(await expectLedgerMatches(k, R)).toMatchObject({ total: 4199, pending: 4199 });
+    const credits = await k.svc.core.repo.find('ledger_entries', { seller_id: R, type: 'shipping_charge' });
+    expect(credits.filter((c) => c.amount > 0).reduce((s, c) => s + c.amount, 0)).toBe(599);
+    expect(credits.find((c) => c.amount > 0)?.description).toContain('paid by Marketly');
+
+    // one item cancelled: the package still ships, so the seller keeps the shipping
+    a.state = 'cancelled';
+    await k.emit('orders.item.cancelled', cancel(order, a));
+    expect((await expectLedgerMatches(k, R)).total).toBe(1000 + 599 - 100);
+
+    // the rest cancelled: the package never ships and Marketly's shipping goes back, once
+    b.state = 'cancelled';
+    const last = cancel(order, b);
+    await k.emit('orders.item.cancelled', last);
+    await k.emit('orders.item.cancelled', last); // redelivered
+    expect(await expectLedgerMatches(k, R)).toMatchObject({ total: 0, pending: 0, available: 0 });
+  });
+});

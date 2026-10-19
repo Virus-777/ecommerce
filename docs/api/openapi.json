@@ -185080,6 +185080,17 @@
             ],
             "description": "Who pays the shipping when it is free to the customer"
           },
+          "platformFunded": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Part of the shipping price Marketly pays through a Marketly-funded free-shipping or shipping discount. Finance credits it to the seller as shipping charged, and takes it back when the whole package is cancelled before dispatch"
+          },
           "arrival": {
             "$ref": "#/components/schemas/DateRange"
           },

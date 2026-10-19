@@ -45,6 +45,8 @@ export interface FakeItem {
 export interface FakeGroup {
   id: string;
   sellerId: string | null;
+  /** Marketly-funded shipping of the package (DeliveryPromise.platformFunded) */
+  platformShipping?: number;
   items: FakeItem[];
 }
 
@@ -74,7 +76,7 @@ export interface Kit {
   call(method: string, url: string, token: string, body?: unknown, headers?: Record<string, string>): Promise<{ status: number; body: any }>;
   emit(name: string, payload: unknown): Promise<void>;
   sellerToken(sellerId: string, o?: { permissions?: string[]; accountId?: string }): string;
-  order(sellerId: string | null, items: Omit<FakeItem, 'id'>[], o?: { ref?: string }): FakeOrder;
+  order(sellerId: string | null, items: Omit<FakeItem, 'id'>[], o?: { ref?: string; platformShipping?: number }): FakeOrder;
   accept(order: FakeOrder): Promise<void>;
   deliver(order: FakeOrder, itemIds?: string[]): Promise<void>;
   decide(requestId: string, outcome: 'approved' | 'rejected' | 'cancelled', decidedBy?: string): Promise<void>;
@@ -113,7 +115,7 @@ function orderDetail(o: FakeOrder): any {
       };
     });
     const total = items.reduce((s, i) => s + i.paidAmount.amount, 0);
-    return { id: g.id, packageLabel: `Package ${gi + 1} of ${o.groups.length}`, seller: { ownerType: g.sellerId ? 'seller' : 'official', id: g.sellerId, name: 'Seller', slug: 's', verified: true }, items, totals: { items: USD(0), discounts: USD(0), shipping: USD(0), tax: USD(0), total: USD(total) } };
+    return { id: g.id, packageLabel: `Package ${gi + 1} of ${o.groups.length}`, ...(g.platformShipping ? { delivery: { platformFunded: USD(g.platformShipping) } } : {}), seller: { ownerType: g.sellerId ? 'seller' : 'official', id: g.sellerId, name: 'Seller', slug: 's', verified: true }, items, totals: { items: USD(0), discounts: USD(0), shipping: USD(0), tax: USD(0), total: USD(total) } };
   });
   const total = groups.reduce((s, g) => s + g.totals.total.amount, 0);
   return { id: o.id, ref: o.ref, groups, totals: { total: USD(total) } };
@@ -240,7 +242,7 @@ export async function boot(o: { modules?: string[]; apiStubs?: NonNullable<Param
     },
     sellerToken: (sellerId, o = {}) => callers.seller({ sellerId, ...o }),
     order(sellerId, items, o = {}) {
-      const ord: FakeOrder = { id: newId(), ref: o.ref ?? `MK-261009-${refCounter++}`, groups: [{ id: newId(), sellerId, items: items.map((i) => ({ ...i, id: newId() })) }] };
+      const ord: FakeOrder = { id: newId(), ref: o.ref ?? `MK-261009-${refCounter++}`, groups: [{ id: newId(), sellerId, platformShipping: o.platformShipping, items: items.map((i) => ({ ...i, id: newId() })) }] };
       orders.set(ord.id, ord);
       return ord;
     },

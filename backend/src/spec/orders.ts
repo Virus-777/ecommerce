@@ -236,6 +236,8 @@ export interface DeliveryPromise {
   free: boolean;
   /** Who pays the shipping when it is free to the customer */
   fundedBy: "customer" | "seller" | "company" | "platform";
+  /** Part of the shipping price Marketly pays through a Marketly-funded free-shipping or shipping discount. Finance credits it to the seller as shipping charged, and takes it back when the whole package is cancelled before dispatch */
+  platformFunded?: common.Money | null;
   arrival: common.DateRange;
   dispatchBy: string;
 }
@@ -249,6 +251,9 @@ export const DeliveryPromise: z.ZodType<DeliveryPromise> = z.object({
   },
   free: z.boolean(),
   fundedBy: z.enum(["customer", "seller", "company", "platform"]).describe("Who pays the shipping when it is free to the customer"),
+  get platformFunded() {
+    return common.Money.nullish();
+  },
   get arrival() {
     return common.DateRange;
   },

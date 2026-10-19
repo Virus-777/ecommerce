@@ -190,6 +190,7 @@ The accepted purchase: one order per checkout, one seller group per seller packa
 | price | `Money` |
 | free | `bool` |
 | fundedBy | `enum(customer|seller|company|platform)` Who pays the shipping when it is free to the customer |
+| platformFunded | `Money?` Part of the shipping price Marketly pays through a Marketly-funded free-shipping or shipping discount. Finance credits it to the seller as shipping charged, and takes it back when the whole package is cancelled before dispatch |
 | arrival | `DateRange` |
 | dispatchBy | `datetime` |
 

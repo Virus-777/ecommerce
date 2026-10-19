@@ -285,6 +285,45 @@ describe('coupons (promotions)', () => {
     const split = await w.api('promotions').fundingSplitFor(order.groups[0].items[0].id);
     expect(split.platformFunded).toEqual(USD(500));
   });
+
+  it('records free shipping Marketly funds on the package, so finance pays the seller its shipping', async () => {
+    const staff = (await w.f.staffWithRoles(w.owner, 'fay@marketly.test', 'Fay Marketing', ['marketing_manager'])).accessToken;
+    const reviewer = (await w.f.staffWithRoles(w.owner, 'flo@marketly.test', 'Flo Marketing', ['marketing_manager'])).accessToken;
+    const now = w.clock.now().getTime();
+    const created = await w.call('POST', '/api/admin/promotions/campaigns', staff, {
+      name: 'Ships free',
+      description: 'Free shipping on us',
+      discount: { kind: 'free_shipping' },
+      code: 'SHIPFREE',
+      startsAt: new Date(now - 60_000).toISOString(),
+      endsAt: new Date(now + 7 * 86_400_000).toISOString(),
+      timeZone: 'America/Los_Angeles',
+      scope: { mode: 'sitewide', include: [], exclude: [] },
+      eligibility: { audience: 'everyone' },
+      limits: { budget: USD(100_000) },
+      funding: { owner: 'platform', costCenter: 'MKT-01' },
+      stacking: { withSellerMarkdowns: true, withOtherCoupons: false, withFreeShipping: true, withFlashSalePrices: false },
+    });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    for (const step of ['submit', 'confirm-funding', 'schedule']) {
+      const r = await w.call('POST', `/api/admin/promotions/campaigns/${created.body.id}/${step}`, step === 'confirm-funding' ? reviewer : staff, {});
+      expect(r.status, `${step}: ${JSON.stringify(r.body)}`).toBe(200);
+    }
+
+    const fred = await w.customer('fred@example.com');
+    const v = await readyCheckout(w, fred.token, { source: 'buy_now', offerId: w.offers.white, quantity: 1 });
+    const shipping = v.totals.shippingTotal.amount;
+    expect(shipping).toBeGreaterThan(0);
+    const applied = await w.call('POST', `${STORE}/sessions/${v.id}/coupons`, fred.token, { code: 'SHIPFREE' });
+    expect(applied.body.result, JSON.stringify(applied.body)).toMatchObject({ status: 'applied', fundedBy: 'platform' });
+    expect(applied.body.checkout.totals.shippingTotal).toEqual(USD(0));
+
+    const placed = await w.call('POST', `${STORE}/sessions/${v.id}/place`, fred.token, placeBody(applied.body.checkout), { 'idempotency-key': key() });
+    expect(placed.body.outcome, JSON.stringify(placed.body)).toBe('accepted');
+    const order = await w.api('orders').getOrder(placed.body.orderId);
+    expect(order.groups[0].items[0].shippingShare).toEqual(USD(0)); // the customer paid no shipping
+    expect(order.groups[0].delivery).toMatchObject({ free: true, fundedBy: 'platform', platformFunded: USD(shipping) });
+  });
 });
 
 describe('changes before charging (scenario 2)', () => {
