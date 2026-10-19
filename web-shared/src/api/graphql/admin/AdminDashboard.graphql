@@ -1,0 +1,176 @@
+# screens: admin/dashboard
+# replaces: GET reports/dashboard, GET workqueues/summary, GET advertising/dashboard, GET finance/payout-runs, GET access/me
+# why: The morning overview combines sales figures, queue tiles, overdue dispatch, ads, the next payout run and approvals from six modules in one request.
+query AdminDashboard(
+  $period: DashboardPeriod = LAST_7_DAYS
+  $overdueLimit: Int = 5
+  $adListLimit: Int = 3
+) {
+  adminDashboard(period: $period) {
+    period
+    from
+    to
+    asOf
+    basisLabel
+    currency
+    mayStillChange
+    kpis {
+      ...Kpi
+    }
+    series {
+      key
+      label
+      unit
+      granularity
+      points {
+        date
+        label
+        value
+      }
+      total {
+        display
+      }
+    }
+    split {
+      key
+      label
+      sharePct
+      amount {
+        ...Amount
+      }
+    }
+    unavailable
+  }
+
+  workSummary {
+    generatedAt
+    needsAttention {
+      queueKey
+      name
+      areaLabel
+      count
+      overdue
+      tone
+      oldestLabel
+      screen
+      screenFilter
+    }
+    overdueDispatch(limit: $overdueLimit) {
+      id
+      title
+      summary
+      subject {
+        type
+        id
+        ref
+      }
+      # DELIVERY_EXCEPTION id for the Remind seller action (shipping notify-seller)
+      relatedSubjects {
+        type
+        id
+      }
+      sellerName
+      deadline {
+        ...Due
+      }
+      ownerRole
+      assignee {
+        name
+        role
+      }
+      waitingOn
+      links {
+        label
+        screen
+        state
+      }
+    }
+    team {
+      staff {
+        staffId
+        name
+        role
+      }
+      area
+      role
+      coveringFor {
+        name
+      }
+      status
+    }
+  }
+
+  adDashboard(listLimit: $adListLimit) {
+    liveNow {
+      total
+    }
+    startingIn7Days
+    live {
+      ...AdRow
+    }
+    upcomingStarts {
+      ...AdRow
+    }
+  }
+
+  nextPayoutRun {
+    id
+    ref
+    status
+    scheduledRelease
+    total {
+      ...Amount
+    }
+    sellerCount
+    readyCount
+    heldCount
+    failedLastRun
+    approval {
+      required
+      reason
+    }
+  }
+
+  myApprovalSummary {
+    toDecide
+    overdue
+    dueSoon
+  }
+}
+
+fragment Amount on Money {
+  amount
+  currency
+  formatted
+}
+
+fragment Due on Deadline {
+  dueAt
+  state
+}
+
+fragment Kpi on MetricValue {
+  metricKey
+  label
+  display
+  unit
+  note
+  delta {
+    value
+    unit
+    direction
+    good
+  }
+}
+
+fragment AdRow on AdCampaignSummary {
+  id
+  name
+  placementName
+  pagesLabel
+  periodLabel
+  budgetLabel
+  # e.g. once per session · new visitors
+  deliveryLabel
+  status
+}

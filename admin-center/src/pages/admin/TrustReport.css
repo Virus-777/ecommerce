@@ -1,0 +1,71 @@
+/* admin/trust-report (designed in React, no design file). Mobile-first; tokens from marketly.css. */
+
+/* Header: queue navigation with J/K hints. */
+.trr-queue { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.trr-queue .pos { font-size: var(--fs-xs); color: var(--text-3); font-variant-numeric: tabular-nums; padding-inline: var(--sp-1); white-space: nowrap; }
+.trr-kbd { font-family: var(--font-mono); font-size: var(--fs-2xs); padding: 1px 5px; border: 1px solid var(--border-strong); border-radius: var(--r-xs); color: var(--text-3); background: var(--surface); }
+
+/* Strip under the header: SLA timer, scoring note, assignee. */
+.trr-strip { display: flex; flex-wrap: wrap; gap: var(--sp-3) var(--sp-4); align-items: center; justify-content: space-between; }
+.trr-strip .who { display: inline-flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+
+/* Verdict: band first (large), score second, then the one-sentence reason. */
+.trr-verdict { display: grid; gap: var(--sp-3) var(--sp-4); grid-template-columns: minmax(0, 1fr); align-items: center; }
+@container app (min-width: 768px) { .trr-verdict { grid-template-columns: auto minmax(0, 1fr); } }
+.trr-band { display: inline-flex; flex-direction: column; gap: var(--sp-0-5); padding: var(--sp-3) var(--sp-4); border-radius: var(--r-md); border: 2px solid currentColor; min-width: 148px; justify-self: start; }
+.trr-band .b { font-family: var(--font-display); font-size: var(--fs-xl); font-weight: var(--fw-bold); line-height: var(--lh-tight); }
+.trr-band .s { font-size: var(--fs-sm); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
+.trr-band.t-high { color: var(--danger); background: var(--danger-soft); }
+.trr-band.t-med { color: var(--warning); background: var(--warning-soft); }
+.trr-band.t-low { color: var(--info); background: var(--info-soft); }
+.trr-why { font-size: var(--fs-md); line-height: var(--lh-snug); color: var(--text); margin: 0; }
+
+/* Risk factors, grouped by direction. */
+.trr-factors { display: grid; gap: var(--sp-4) var(--sp-5); grid-template-columns: minmax(0, 1fr); }
+@container app (min-width: 768px) { .trr-factors { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); } }
+.trr-fgroup { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.trr-fgroup > h3 { display: inline-flex; align-items: center; gap: var(--sp-1-5); font-size: var(--fs-sm); font-weight: var(--fw-bold); color: var(--text); margin: 0; }
+.trr-flist { display: flex; flex-direction: column; gap: var(--sp-3); }
+.trr-flist li { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: var(--sp-0-5) var(--sp-2); align-items: start; font-size: var(--fs-sm); }
+.trr-flist li > svg.lucide { margin-top: 2px; width: var(--ic-sm); height: var(--ic-sm); }
+.trr-flist li.t-raises > svg.lucide { color: var(--danger); }
+.trr-flist li.t-lowers > svg.lucide { color: var(--success); }
+.trr-flist .d { grid-column: 2 / -1; font-size: var(--fs-xs); color: var(--text-3); }
+.trr-empty-group { font-size: var(--fs-xs); color: var(--text-3); }
+
+/* Evidence tabs sit at the top of the card body. */
+.trr-ev .tabs { margin-bottom: 0; }
+.trr-ev [role='tabpanel']:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.trr-hist { display: flex; flex-direction: column; }
+.trr-hist > li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-1) var(--sp-3); padding: var(--sp-3) 0; border-bottom: 1px solid var(--border); align-items: start; }
+.trr-hist > li:last-child { border-bottom: 0; padding-bottom: 0; }
+.trr-ent { display: inline-flex; gap: var(--sp-2); align-items: flex-start; min-width: 180px; }
+.trr-ent > svg.lucide { margin-top: 2px; color: var(--text-3); flex: none; }
+
+/* Recommended next step. */
+.trr-rec { box-shadow: inset var(--edge-w) 0 0 var(--brand); }
+.trr-rec .card-body > .btn { align-self: flex-start; }
+.trr-ev .trr-tabs { padding-bottom: 0; }
+
+/* Fixed action set. */
+.trr-acts { display: flex; flex-direction: column; }
+.trr-acts > li { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: var(--sp-2) var(--sp-3); align-items: start; padding: var(--sp-3) 0; border-bottom: 1px solid var(--border); }
+.trr-acts > li:first-child { padding-top: 0; }
+.trr-acts > li:last-child { border-bottom: 0; padding-bottom: 0; }
+.trr-acts > li > .btn { grid-column: 2; justify-self: start; }
+@container app (min-width: 480px) { .trr-acts > li { grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; } .trr-acts > li > .btn { grid-column: 3; } }
+.trr-acts .ic { width: 32px; height: 32px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--surface-2); color: var(--text-2); }
+.trr-acts .ic svg.lucide { width: var(--ic-sm); height: var(--ic-sm); }
+.trr-acts > li.is-off .ic { color: var(--text-3); }
+.trr-acts > li.is-off .strong { color: var(--text-3); }
+.trr-undo { display: inline-flex; gap: var(--sp-1); align-items: center; font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
+.trr-undo svg.lucide { width: var(--ic-14); height: var(--ic-14); }
+
+/* Dialog: what the chosen action does. */
+.trr-conseq { display: flex; flex-direction: column; gap: var(--sp-2); font-size: var(--fs-sm); }
+.trr-conseq .r { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: var(--sp-2); align-items: start; }
+.trr-conseq .r > svg.lucide { margin-top: 2px; width: var(--ic-sm); height: var(--ic-sm); color: var(--text-3); }
+
+/* After a decision: next case prompt. */
+.trr-next { display: flex; flex-wrap: wrap; gap: var(--sp-3) var(--sp-4); align-items: center; justify-content: space-between; }
+.trr-next .ab-risk { width: 48px; height: 48px; font-size: var(--fs-lg); }

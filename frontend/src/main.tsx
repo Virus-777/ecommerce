@@ -1,0 +1,38 @@
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import { RouterProvider } from 'react-router';
+import { ApiProvider, ProductImageRatio } from '@marketly/web-shared/api';
+import { createAppRouter } from '@marketly/web-shared/routes';
+import '@marketly/web-shared/styles/marketly.css';
+import '@marketly/web-shared/styles/app.css';
+import { SessionProvider } from './app/session';
+import { EMAIL_LINK_ROUTES } from './routes/email-links';
+import { PAGES } from './routes/pages';
+
+// Inert placeholder links (actions that have no screen yet) must not jump to the top.
+document.addEventListener('click', (e) => {
+  const a = (e.target as HTMLElement | null)?.closest?.('a[href="#"]');
+  if (a) e.preventDefault();
+});
+
+const router = createAppRouter({
+  pages: PAGES,
+  notFound: PAGES['store/not-found']!,
+  wrap: (children) => (
+    <SessionProvider>
+      {/* Product image frames follow the configured aspect ratio (Admin Center › Settings › Product images). */}
+      <ProductImageRatio />
+      {children}
+    </SessionProvider>
+  ),
+  extraRoutes: EMAIL_LINK_ROUTES,
+  // /design/check (development only) opens each design sample as a visitor or as the sample customer
+});
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <ApiProvider audience="store">
+      <RouterProvider router={router} />
+    </ApiProvider>
+  </StrictMode>,
+);

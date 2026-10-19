@@ -1,0 +1,86 @@
+/* Product reviews and Questions and answers (store/reviews, store/questions).
+   Screens added after the design export: page styles on top of marketly.css, using its tokens.
+   Mobile-first (phone = Android app), website breakpoints as container queries like marketly.css. */
+
+/* Product summary card */
+.rv-prod .imgph { width: 56px; }
+.rv-prod-name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.rv-prod-actions { flex: none; }
+@container app (min-width: 768px) { .rv-prod .imgph { width: 72px; } }
+
+/* Section anchor below the sticky header when paging */
+.rv-anchor { scroll-margin-top: var(--sp-8); }
+
+/* Rating histogram: each row is one button (label, bar, share) */
+.rv-hist { display: flex; flex-direction: column; gap: var(--sp-0-5); }
+.rv-bar {
+  display: grid; grid-template-columns: 56px minmax(0, 1fr) 40px; gap: var(--sp-3); align-items: center;
+  min-height: var(--tap); margin-inline: calc(-1 * var(--sp-2)); padding: 0 var(--sp-2);
+  border: 0; border-radius: var(--r-sm); background: none; cursor: pointer; text-align: left;
+  font: inherit; font-size: var(--fs-sm); color: var(--text-2); font-variant-numeric: tabular-nums;
+}
+.rv-bar .lbl { color: var(--brand-text); font-weight: var(--fw-semibold); white-space: nowrap; }
+.rv-bar .pct { text-align: right; }
+.rv-bar:hover { background: var(--surface-2); }
+.rv-bar:hover .lbl { text-decoration: underline; }
+.rv-bar.is-active { background: var(--brand-soft); color: var(--text); }
+.rv-bar.is-active .lbl { color: var(--text); }
+.rv-bar.is-dim .meter > i { opacity: 0.35; }
+@container app (min-width: 1024px) { .rv-bar { min-height: 34px; } }
+
+/* "Customers say" topics */
+.rv-topic.is-positive svg.lucide { color: var(--success); }
+.rv-topic.is-mixed svg.lucide { color: var(--warning); }
+.rv-topic.is-negative svg.lucide { color: var(--danger); }
+.rv-topic.is-active svg.lucide { color: inherit; }
+.rv-n { font-size: var(--fs-xs); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.chip.is-active .rv-n { color: inherit; opacity: 0.75; }
+
+/* Filter chips: divider and color swatch */
+.rv-sep { width: 1px; align-self: stretch; margin-block: var(--sp-1); background: var(--border); }
+.rv-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: var(--tint); border: 1px solid var(--border-strong); }
+
+/* Search matches */
+.rv-mark { background: var(--warning-soft); color: inherit; border-radius: var(--r-xs); padding: 0 2px; font-weight: var(--fw-semibold); }
+
+/* Photo buttons: strip, review thumbnails, viewer film strip */
+.rv-ph { flex: none; width: 88px; padding: 2px; border: 2px solid transparent; border-radius: var(--r-md); background: none; cursor: pointer; }
+.rv-ph .imgph { border-radius: var(--r-sm); }
+.rv-ph .imgph svg.lucide { width: 34%; height: 34%; }
+.rv-ph:hover .imgph { filter: brightness(0.96); }
+.rv-ph.is-active { border-color: var(--brand); }
+.rv-thumbs { flex-wrap: wrap; }
+.rv-thumbs .rv-ph { width: 72px; }
+@container app (min-width: 768px) { .rv-strip .rv-ph { width: 104px; } }
+
+/* Photos viewer: full screen in the app, a large dialog on the website */
+.modal.lg.rv-viewer { height: 100%; max-height: 100%; max-width: none; border-radius: 0; }
+.modal-body.rv-viewer-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); align-content: start; }
+.rv-stage { position: relative; display: flex; justify-content: center; padding: var(--sp-3); border-radius: var(--r-lg); background: var(--surface-2); touch-action: pan-y; }
+.rv-stage .imgph { width: min(100%, 52vh); border-radius: var(--r-md); }
+.rv-stage .imgph svg.lucide { max-width: 120px; max-height: 120px; }
+.rv-count { position: absolute; left: var(--sp-3); bottom: var(--sp-3); }
+.rv-nav { position: absolute; top: 50%; transform: translateY(-50%); background: var(--surface); box-shadow: var(--sh-2); border-radius: 50%; }
+.rv-nav.prev { left: var(--sp-2); }
+.rv-nav.next { right: var(--sp-2); }
+.rv-film { padding-top: var(--sp-1); }
+.rv-film .rv-ph { width: 60px; }
+@container app (min-width: 768px) {
+  .modal.lg.rv-viewer { height: auto; max-height: 92%; max-width: 1040px; border-radius: var(--r-xl); }
+  .modal-body.rv-viewer-body { grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); align-items: start; }
+  .rv-film { grid-column: 1 / -1; }
+  .rv-stage .imgph { width: min(100%, 60vh); }
+}
+
+/* Report dialog: the review being reported */
+.rv-quote { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-3); border-radius: var(--r-md); background: var(--surface-2); }
+.rv-clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* Questions */
+.shop-qa.rv-new { margin-inline: calc(-1 * var(--sp-3)); padding-inline: var(--sp-3); border-radius: var(--r-md); background: var(--brand-soft); }
+.rv-more-answers { align-self: flex-start; margin-left: var(--sp-4); }
+.rv-center { justify-content: center; flex-wrap: wrap; }
+
+/* Ask dialog */
+.rv-similar { padding: var(--sp-3); border-radius: var(--r-md); background: var(--info-soft); }
+.rv-route { padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-md); }

@@ -1,0 +1,501 @@
+# screens: admin/order
+# replaces: GET orders/orders/{id}, GET payments/orders/{orderId}/summary, GET payments/orders/{orderId}/refundable, GET payments/refunds, GET returns/requests, GET returns/refunds, GET access/approval-requests, GET shipping/shipments, GET shipping/exceptions, GET support/cases, GET warehouse/fulfillments/{id}, GET audit/targets/{type}/{id}
+# why: The order 360 shows every seller group with packages, payment, refunds, returns, cases, exceptions and staff history, which REST spreads over eight modules.
+query AdminOrder($ref: String!, $historyPaging: PageInput) {
+  orderAdmin(ref: $ref) {
+    id
+    ref
+    placedAt
+    acceptedAt
+    channel
+    status
+    statusLabel
+    statusFlags
+    itemCount
+    sellerCount
+    packageCount
+    allowedActions
+    alerts {
+      tone
+      title
+      message
+      caseRef
+    }
+    flags {
+      kind
+      tone
+      label
+    }
+    customer {
+      customerId
+      guest
+      name
+      email
+      phone
+      customerSince
+      orderCount
+    }
+    deliveryAddress {
+      line1
+      line2
+      city
+      region
+      postalCode
+    }
+
+    groups {
+      id
+      packageLabel
+      seller {
+        ...SellerLabel
+      }
+      shipsFrom
+      fulfilledBy
+      status
+      statusLabel
+      deadlineLabel
+      dispatchResult
+      dispatchDeadline {
+        ...Due
+      }
+      estimateLabel
+      alert {
+        tone
+        title
+        message
+      }
+      totals {
+        items {
+          ...Amount
+        }
+      }
+      items {
+        id
+        productId
+        title
+        variantLabel
+        image {
+          url
+          alt
+        }
+        quantity
+        unitPrice {
+          ...Amount
+        }
+        lineSubtotal {
+          ...Amount
+        }
+        paidAmount {
+          ...Amount
+        }
+        state
+        stateLabel
+        stateNote
+        deliveredAt
+        returnWindowEndsAt
+        offerTerms {
+          sellerSku
+          conditionLabel
+        }
+        afterSales {
+          returnRef
+          refundStatus
+          refundedAmount {
+            ...Amount
+          }
+          caseRef
+        }
+        discountFunding {
+          platformFunded {
+            ...Amount
+          }
+          sellerFunded {
+            ...Amount
+          }
+          allocations {
+            code
+            label
+            amount {
+              ...Amount
+            }
+            platformPart {
+              ...Amount
+            }
+            sellerPart {
+              ...Amount
+            }
+          }
+        }
+      }
+      shipments {
+        id
+        packageLabel
+        carrierName
+        serviceName
+        trackingNumber
+        trackingUrl
+        status
+        statusLabel
+        trackingState
+        shippedAt
+        estimateLabel
+        deliveredAt
+        dispatchedOnTime
+      }
+      warehouseTask {
+        id
+        status
+        shipBy
+        deadline {
+          ...Due
+        }
+        waveRef
+        holdReason
+        packages {
+          index
+          of
+          status
+          trackingNumber
+          packedBy {
+            ...Who
+          }
+          packedAt
+        }
+      }
+    }
+
+    afterSales {
+      itemId
+      title
+      sellerName
+      request
+      amount {
+        ...Amount
+      }
+      status
+      owner
+    }
+
+    moneyBySeller {
+      groupId
+      seller {
+        ...SellerLabel
+      }
+      items {
+        ...Amount
+      }
+      platformFunded {
+        ...Amount
+      }
+      sellerFunded {
+        ...Amount
+      }
+      customerPaid {
+        ...Amount
+      }
+      marketplaceFee {
+        ...Amount
+      }
+      sellerEarnings {
+        ...Amount
+      }
+      companySale
+    }
+    couponFundingNote
+
+    totals {
+      items {
+        ...Amount
+      }
+      discounts {
+        code
+        label
+        fundedBy
+        amount {
+          ...Amount
+        }
+      }
+      discountTotal {
+        ...Amount
+      }
+      shippingTotal {
+        ...Amount
+      }
+      shippingLabel
+      tax {
+        ...Amount
+      }
+      taxLabel
+      total {
+        ...Amount
+      }
+      refundedSoFar {
+        ...Amount
+      }
+    }
+
+    payment {
+      state
+      stateLabel
+      status
+      methodLabel
+      providerRef
+      authorizedAt
+      capturedAt
+      capturedAmount {
+        ...Amount
+      }
+      refundedAmount {
+        ...Amount
+      }
+      refundsInFlight {
+        ...Amount
+      }
+    }
+
+    refundable {
+      captured {
+        ...Amount
+      }
+      refunded {
+        ...Amount
+      }
+      inFlight {
+        ...Amount
+      }
+      remaining {
+        ...Amount
+      }
+      items {
+        orderItemId
+        title
+        groupId
+        sellerName
+        paid {
+          ...Amount
+        }
+        refunded {
+          ...Amount
+        }
+        inFlight {
+          ...Amount
+        }
+        remaining {
+          ...Amount
+        }
+        blockedReason
+      }
+    }
+
+    refunds {
+      id
+      ref
+      origin
+      originRef
+      status
+      statusLabel
+      destinationLabel
+      amount {
+        ...Amount
+      }
+      items {
+        orderItemId
+        title
+      }
+      failureReason
+      nextStep
+      createdAt
+    }
+
+    refundRequests {
+      id
+      ref
+      source
+      returnRef
+      orderItemIds
+      sellerName
+      status
+      fundedBy
+      reason
+      breakdown {
+        total {
+          ...Amount
+        }
+        destination
+      }
+      proposedBy {
+        ...Who
+      }
+      approval {
+        required
+        reason
+        approvers
+      }
+      approvalRequest {
+        id
+        ref
+        status
+        approvalsRemaining
+        steps {
+          step
+          state
+          label
+          deadline {
+            ...Due
+          }
+        }
+        canDecide
+        cannotDecideReason
+      }
+    }
+
+    returns {
+      id
+      ref
+      sellerName
+      status
+      statusLabel
+      reason
+      items {
+        orderItemId
+        title
+      }
+      owner {
+        ...Who
+      }
+      nextDeadline {
+        ...Due
+      }
+      flags {
+        kind
+        label
+      }
+      refund {
+        ref
+        status
+        statusLabel
+      }
+      exception {
+        reasonCode
+        details
+        proposedBy {
+          ...Who
+        }
+        approvedBy {
+          ...Who
+        }
+      }
+    }
+
+    cases {
+      id
+      ref
+      subject
+      kind
+      priority
+      status
+      statusLabel
+      owner {
+        ...Who
+      }
+      expectedResponse {
+        ...Due
+      }
+    }
+
+    deliveryExceptions {
+      id
+      kind
+      groupId
+      situation
+      nextStep
+      status
+      deadlineLabel
+      deadline {
+        ...Due
+      }
+      owner {
+        name
+        role
+      }
+      customerNotifiedAt
+      caseRef
+    }
+
+    notes {
+      id
+      text
+      author {
+        ...Who
+      }
+      at
+    }
+
+    history {
+      at
+      label
+      detail
+      actor {
+        ...Who
+      }
+    }
+
+    auditTrail(paging: $historyPaging) {
+      total
+      nextCursor
+      items {
+        ...AuditRow
+      }
+    }
+  }
+}
+
+fragment Amount on Money {
+  amount
+  currency
+  formatted
+}
+
+fragment Due on Deadline {
+  dueAt
+  state
+}
+
+fragment Who on Actor {
+  kind
+  id
+  name
+}
+
+fragment SellerLabel on OrderSellerLabel {
+  id
+  name
+  slug
+  official
+  verified
+  logo {
+    url
+    alt
+  }
+}
+
+fragment AuditRow on AuditEntry {
+  id
+  at
+  actor {
+    ...Who
+  }
+  actorRoles {
+    name
+  }
+  actionLabel
+  reason
+  change {
+    before
+    after
+  }
+  approval {
+    state
+    note
+  }
+}

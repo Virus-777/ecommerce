@@ -1,0 +1,36 @@
+{
+  "name": "@marketly/web-shared",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Shared code of the Marketly web apps: design stylesheet, UI components, icons, back-office layout, screen catalogue, links between apps, sample data and design tooling.",
+  "exports": {
+    "./ui": "./src/ui/index.ts",
+    "./layouts": "./src/layouts/index.ts",
+    "./routes": "./src/routes/index.ts",
+    "./config": "./src/config.ts",
+    "./lib/*": "./src/lib/*.ts",
+    "./data/*": "./src/data/*.ts",
+    "./styles/*": "./src/styles/*",
+    "./vite": "./vite.ts",
+    "./api": "./src/api/index.ts",
+    "./api/graphql/*": "./src/api/graphql/*"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "gen:icons": "node tools/gen-icons.mjs",
+    "design:extract": "node tools/extract-design.mjs",
+    "gen:api": "node tools/gen-api.mjs"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.104.2",
+    "lucide-react": "^1.55.0",
+    "openapi-fetch": "^0.17.0",
+    "react-day-picker": "10.0.2"
+  },
+  "peerDependencies": {
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-router": "^8.4.0"
+  }
+}

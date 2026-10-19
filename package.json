@@ -1,0 +1,29 @@
+{
+  "name": "marketly-web",
+  "private": true,
+  "description": "Marketly web apps (npm workspaces). The backend in backend/ is a separate project.",
+  "workspaces": [
+    "web-shared",
+    "frontend",
+    "seller-center",
+    "admin-center"
+  ],
+  "scripts": {
+    "dev:store": "npm run dev -w @marketly/store",
+    "dev:seller": "npm run dev -w @marketly/seller-center",
+    "dev:admin": "npm run dev -w @marketly/admin-center",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "build": "npm run build -w @marketly/store -w @marketly/seller-center -w @marketly/admin-center",
+    "gen:icons": "npm run gen:icons -w @marketly/web-shared",
+    "design:extract": "npm run design:extract -w @marketly/web-shared --",
+    "gen:api": "npm run gen:api -w @marketly/web-shared --"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4"
+  }
+}

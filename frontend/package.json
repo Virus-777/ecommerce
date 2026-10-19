@@ -1,0 +1,23 @@
+{
+  "name": "@marketly/store",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Marketly Customer Store (website; its phone layout is the Android app layout).",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p . && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@marketly/web-shared": "*",
+    "qrcode": "^1.5.4",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-router": "^8.4.0"
+  },
+  "devDependencies": {
+    "@types/qrcode": "^1.5.6"
+  }
+}

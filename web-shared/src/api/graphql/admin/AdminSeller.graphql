@@ -1,0 +1,333 @@
+# screens: admin/seller
+# replaces: GET sellers/sellers/{id}, GET sellers/appeals, GET finance/sellers/{sellerId}, GET catalog/products, GET orders/orders, GET returns/requests, GET support/cases, GET trust/reports, GET access/approval-requests, GET audit/targets/{type}/{id}
+# why: The seller 360 puts account status, performance, restrictions, catalog, open obligations, money and approvals from nine modules on one page.
+query AdminSeller(
+  $id: UUID!
+  $openCasesOnly: Boolean = true
+  $orderPaging: PageInput
+  $returnPaging: PageInput
+  $casePaging: PageInput
+  $trustPaging: PageInput
+  $historyPaging: PageInput
+) {
+  sellerAdmin(id: $id) {
+    id
+    ref
+    storeName
+    logo {
+      url
+      alt
+    }
+    location
+    sellingSince
+    legalName
+    status
+    statusSince
+    canSellNew
+    verified
+    owner {
+      name
+      email
+      phone
+    }
+    accountManager {
+      name
+    }
+    verification {
+      state
+      checked
+      notChecked
+      reason
+      lastCheckedAt
+      expiresAt
+    }
+    payoutReadiness {
+      state
+      destinationLabel
+      note
+      blockedReasons
+    }
+    rating {
+      label
+      positivePct
+      count
+    }
+
+    performance {
+      from
+      to
+      orderCount
+      overall
+      onTimeDispatchPct
+      metrics {
+        key
+        label
+        value
+        display
+        status
+        detail
+        target {
+          display
+          windowDays
+        }
+      }
+      warnings {
+        id
+        kind
+        title
+        issuedAt
+        state
+      }
+    }
+
+    restrictions {
+      id
+      ref
+      state
+      title
+      reasonCode
+      reason
+      affectedActivities
+      affectedSummary
+      stillWorks
+      toResolve
+      reviewDate
+      startedAt
+      setBy {
+        ...Who
+      }
+      recommendedBy {
+        ...Who
+      }
+      appealRoute {
+        deadline
+        howTo
+        reviewer
+        secondAppealTo
+      }
+      approval {
+        required
+        approvers
+      }
+      trustReport {
+        ref
+        title
+      }
+    }
+
+    appeals {
+      id
+      ref
+      subject
+      subjectRef
+      level
+      argument
+      state
+      submittedAt
+      reviewer {
+        ...Who
+      }
+      decideBy {
+        ...Due
+      }
+      decision {
+        outcome
+        explanation
+        decidedAt
+      }
+    }
+
+    catalogCounts {
+      approved
+      inReview
+      changesRequested
+      rejected
+      drafts
+      submissionsBlocked
+      blockedNote
+      pausedSubmissions
+    }
+
+    orderCounts {
+      open
+      overdueDispatch
+      dueToday
+      cancellationRequests
+      cancellations30d
+    }
+
+    balance {
+      asOf
+      pending {
+        ...Amount
+      }
+      available {
+        ...Amount
+      }
+      held {
+        ...Amount
+      }
+      negative
+      amountOwed {
+        ...Amount
+      }
+      owedDueBy
+      holds {
+        id
+        amount {
+          ...Amount
+        }
+        reason
+        reviewDate
+        status
+        placedBy {
+          ...Who
+        }
+      }
+      nextPayout {
+        scheduledFor
+        estimatedAmount {
+          ...Amount
+        }
+        destination {
+          label
+          status
+        }
+        note
+      }
+    }
+
+    returns(paging: $returnPaging) {
+      total
+      items {
+        id
+        ref
+        orderRef
+        status
+        statusLabel
+        nextDeadline {
+          ...Due
+        }
+      }
+    }
+
+    cases(open: $openCasesOnly, paging: $casePaging) {
+      total
+      items {
+        id
+        ref
+        subject
+        status
+        statusLabel
+        expectedResponse {
+          ...Due
+        }
+      }
+    }
+
+    trustReportCounts {
+      filedBy
+      against
+      open
+    }
+    trustReports(paging: $trustPaging) {
+      total
+      items {
+        id
+        ref
+        type
+        title
+        status
+        riskLevel
+        riskScore
+      }
+    }
+
+    pendingApprovals {
+      id
+      ref
+      summary
+      status
+      action {
+        label
+      }
+      deadline {
+        ...Due
+      }
+      canDecide
+    }
+
+    notes {
+      id
+      body
+      author {
+        ...Who
+      }
+      createdAt
+    }
+
+    auditTrail(paging: $historyPaging) {
+      total
+      nextCursor
+      items {
+        ...AuditRow
+      }
+    }
+  }
+
+  ordersAdmin(filter: { sellerId: $id }, paging: $orderPaging) {
+    total
+    nextCursor
+    items {
+      id
+      ref
+      groups {
+        id
+        seller {
+          id
+        }
+        status
+        statusLabel
+        deadlineLabel
+        dispatchDeadline {
+          ...Due
+        }
+        itemsSummary
+      }
+    }
+  }
+}
+
+fragment Amount on Money {
+  amount
+  currency
+  formatted
+}
+
+fragment Due on Deadline {
+  dueAt
+  state
+}
+
+fragment Who on Actor {
+  kind
+  id
+  name
+}
+
+fragment AuditRow on AuditEntry {
+  id
+  at
+  actor {
+    ...Who
+  }
+  actorRoles {
+    name
+  }
+  actionLabel
+  reason
+  change {
+    before
+    after
+  }
+}

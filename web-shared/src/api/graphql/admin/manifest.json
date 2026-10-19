@@ -1,0 +1,50 @@
+{
+  "AdminCase": {
+    "id": "1edd1813026165f301e7179aa93d69d5effb664ad202367e232897cf169e1a62",
+    "screens": [
+      "admin/case"
+    ]
+  },
+  "AdminCustomer": {
+    "id": "007b8474361e22e341e8eb3b80eeee1f5fec1c18c4abfcc7d0fad04db4acc501",
+    "screens": [
+      "admin/customers"
+    ]
+  },
+  "AdminDashboard": {
+    "id": "4253b7c4b0ec740cfbe8ccaf88f2d29d9cc280b30b57772b5c426ad29e835d60",
+    "screens": [
+      "admin/dashboard"
+    ]
+  },
+  "AdminOrder": {
+    "id": "d60e2be4ca75903d776149217bfe4cddc24accd2663123458ed4f1044b486e31",
+    "screens": [
+      "admin/order"
+    ]
+  },
+  "AdminPayoutRun": {
+    "id": "e7c77d4eae156e2ff2c777fac66a96fe8326985e78155fd16aec060cf7876cf7",
+    "screens": [
+      "admin/payouts"
+    ]
+  },
+  "AdminProductReview": {
+    "id": "f56c56f76865d5c80b0d4dedef135a837343224cfe377ea3517e0354b9021a1c",
+    "screens": [
+      "admin/product-review"
+    ]
+  },
+  "AdminSeller": {
+    "id": "1fc9252065b9a5926de3637c597307993ecd94046b768aa4a52d6ee7cacbd837",
+    "screens": [
+      "admin/seller"
+    ]
+  },
+  "OpsQueues": {
+    "id": "50479cce2e3cfb2417cef00b111e6f4ed1ed1234f36f0756e5b21d5d16ecfc8b",
+    "screens": [
+      "ops/queues"
+    ]
+  }
+}

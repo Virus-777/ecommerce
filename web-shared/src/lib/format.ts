@@ -1,0 +1,38 @@
+/** $1,234.50: prices are USD at launch (plan ch. 21). */
+export const money = (n: number) =>
+  '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** 1,234 */
+export const num = (n: number) => Number(n).toLocaleString('en-US');
+
+/** Percent off between a sale price and a was price, rounded. */
+export const percentOff = (price: number, was?: number | null) =>
+  was && was > price ? Math.round((1 - price / was) * 100) : 0;
+
+/** "Jordan Lee" -> "JL" */
+export const initials = (name: string) =>
+  String(name).split(' ').map((w) => w[0]).slice(0, 2).join('');
+
+/** A money value as the API sends it: an integer amount in minor units (cents) plus the currency. */
+export interface MoneyValue {
+  amount: number;
+  currency: string;
+}
+
+/** Formats an API money value: { amount: 18900, currency: 'USD' } -> "$189.00". Empty for null. */
+export const formatMoney = (m?: MoneyValue | null): string => (m ? money(m.amount / 100) : '');
+
+/** Dollars of an API money value (for arithmetic in the UI). */
+export const dollars = (m?: MoneyValue | null): number => (m ? m.amount / 100 : 0);
+
+const PT_INSTANT = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+
+/**
+ * Server sentences sometimes carry raw ISO instants ("Respond by 2026-10-15T16:58:28.953Z", "next pickup
+ * 2026-10-15T23:00:00.000Z"): shows them as market time, "Thu, Oct 15, 4:58 PM PT". Other text is unchanged.
+ */
+export const isoInText = (text?: string | null): string =>
+  (text ?? '').replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})/g, (m) => {
+    const d = new Date(m);
+    return Number.isNaN(d.getTime()) ? m : `${PT_INSTANT.format(d)} PT`;
+  });

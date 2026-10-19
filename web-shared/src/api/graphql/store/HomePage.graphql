@@ -1,0 +1,153 @@
+# screens: store/home
+# replaces: GET content/home, GET catalog/categories, GET promotions/deals, GET promotions/flash-sales/{campaignId}, GET search/cards, GET reviews/rating-summaries, GET shipping/estimates, GET customers/recently-viewed, GET wishlist/saved
+# why: The homepage mixes content sections, flash deals, priced product cards, ratings and recently viewed items from eight modules; one round trip keeps the app's first screen fast. Ad slots stay on REST because serving an ad records an impression.
+query HomePage($postalCode: String, $sectionProductLimit: Int = 10, $recentlyViewedLimit: Int = 12) {
+  homePage {
+    version
+    generatedAt
+    sections {
+      id
+      position
+      kind
+      heading
+      subheading
+      link { ...LinkFields }
+      endsAt
+      selectionRule
+      # AD_POSITION sections: the client asks advertising (REST) for this placement
+      adPlacementKey
+      banner {
+        eyebrow
+        headline
+        body
+        theme
+        images { ...ImageFields }
+        primaryCta { ...LinkFields }
+        secondaryCta { ...LinkFields }
+      }
+      campaign {
+        id
+        name
+        period { endsAt display }
+      }
+      categories {
+        label
+        image { ...ImageFields }
+        category { id name slug comingSoon }
+      }
+      flashSales {
+        id
+        name
+        state
+        secondsLeft
+        period { endsAt }
+        items {
+          id
+          state
+          percentOffBps
+          claimedPct
+          purchaseLimit
+          dealPrice { ...MoneyFields }
+          regularPrice { ...MoneyFields }
+          offer { id }
+          product { id slug title images { ...ImageFields } }
+        }
+      }
+      products(limit: $sectionProductLimit) {
+        badge
+        rank
+        group
+        offer { ...CardOfferFields }
+        product {
+          ...ProductCardFields
+          featuredOffer(postalCode: $postalCode) { ...CardOfferFields }
+        }
+      }
+      sellers {
+        id
+        slug
+        storeName
+        verified
+        location
+        dispatchLabel
+        logo { ...ImageFields }
+        rating { positivePct average count label }
+      }
+      brands {
+        id
+        name
+        slug
+        productCount
+        logo { ...ImageFields }
+      }
+      collection { id title slug url }
+      # PROMISE_STRIP sections (Our promise)
+      promiseItems { icon title body }
+    }
+  }
+  recentlyViewed(limit: $recentlyViewedLimit) {
+    productId
+    variantId
+    title
+    available
+    viewedAt
+    image { ...ImageFields }
+    product {
+      id
+      slug
+      featuredOffer(postalCode: $postalCode) {
+        id
+        price { ...MoneyFields }
+        deal {
+          price { ...MoneyFields }
+          wasPrice { ...MoneyFields }
+        }
+      }
+    }
+  }
+}
+
+fragment MoneyFields on Money {
+  amount
+  currency
+  formatted
+}
+
+fragment ImageFields on MediaRef {
+  id
+  url
+  alt
+  width
+  height
+}
+
+fragment LinkFields on ContentLink {
+  label
+  url
+  kind
+}
+
+fragment ProductCardFields on Product {
+  id
+  slug
+  title
+  offerCount
+  saved
+  images { ...ImageFields }
+  reviewSummary { hasReviews average ratingCount }
+}
+
+fragment CardOfferFields on Offer {
+  id
+  official
+  sellerName
+  seller { id slug verified }
+  price { ...MoneyFields }
+  deal {
+    percentOffBps
+    price { ...MoneyFields }
+    wasPrice { ...MoneyFields }
+    badges { label kind }
+  }
+  deliveryEstimate(postalCode: $postalCode) { free arrivalLabel }
+}

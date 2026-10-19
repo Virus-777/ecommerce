@@ -1,0 +1,120 @@
+# screens: store/search, store/search-empty
+# replaces: GET search/products, GET search/facets, GET search/ranking-policy, GET promotions/offer-prices, GET reviews/rating-summaries, GET shipping/estimates, GET wishlist/saved
+# why: Results, spelling correction, removable filters, facets, the store match card, empty-result guidance and priced cards with ratings and delivery come from five modules; one query per search or filter change. Typing suggestions are their own query (searchSuggestions) and sponsored rows stay on REST.
+query SearchResults($query: String!, $exact: Boolean = false, $filters: SearchFilterInput, $sort: SearchSort = RECOMMENDED, $postalCode: String, $searchId: String, $paging: PageInput) {
+  search(query: $query, exact: $exact, filters: $filters, sort: $sort, postalCode: $postalCode, searchId: $searchId, paging: $paging) {
+    searchId
+    total
+    totalLabel
+    page
+    totalPages
+    nextCursor
+    query { raw normalized correctedTo correctionApplied searchInsteadFor }
+    appliedFilters { ...AppliedFilterFields }
+    clearAllQuery
+    facets { ...FacetFields }
+    sorts { key label available selected }
+    storeMatch {
+      sellerId
+      name
+      slug
+      verified
+      official
+      positivePct
+      ratingCount
+      productCount
+      location
+      note
+      logo { ...ImageFields }
+    }
+    category {
+      category { id name slug }
+    }
+    sponsoredSlots { placement kind positions maxItems }
+    items { ...ResultCardFields }
+    emptyGuidance {
+      title
+      message
+      clearAllCount
+      tips
+      removableFilters {
+        resultCount
+        filter { ...AppliedFilterFields }
+      }
+      nearbyCategories { id name slug count comingSoon }
+      popular { ...ResultCardFields }
+    }
+    fromPriceNote
+    rankingNote
+  }
+}
+
+fragment MoneyFields on Money {
+  amount
+  currency
+  formatted
+}
+
+fragment ImageFields on MediaRef {
+  id
+  url
+  alt
+  width
+  height
+}
+
+fragment AppliedFilterFields on SearchAppliedFilter {
+  key
+  value
+  label
+  removeQuery
+}
+
+fragment FacetFields on SearchFacet {
+  key
+  label
+  group
+  groupLabel
+  kind
+  multiSelect
+  unit
+  moreCount
+  collapsed
+  values { value label count selected note }
+  range {
+    min { ...MoneyFields }
+    max { ...MoneyFields }
+    selectedMin { ...MoneyFields }
+    selectedMax { ...MoneyFields }
+  }
+}
+
+fragment ResultCardFields on Product {
+  id
+  slug
+  title
+  saved
+  images { ...ImageFields }
+  reviewSummary { hasReviews average ratingCount }
+  searchMatch {
+    position
+    variantId
+    variantCue
+    priceIsFrom
+    badges
+    offer {
+      id
+      official
+      sellerName
+      seller { id slug verified }
+      price { ...MoneyFields }
+      deal {
+        percentOffBps
+        price { ...MoneyFields }
+        wasPrice { ...MoneyFields }
+        badges { label kind }
+      }
+      deliveryEstimate(postalCode: $postalCode) { free arrivalLabel }
+    }
+  }
+}

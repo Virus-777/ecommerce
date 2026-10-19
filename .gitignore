@@ -1,1 +1,5 @@
+# Web apps (npm workspaces at the repository root; the backend has its own .gitignore)
+/node_modules/
+
+# Android customer app kit (screen specs and screenshots, kept locally)
 android-customer-app/

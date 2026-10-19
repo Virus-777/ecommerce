@@ -1,0 +1,381 @@
+# screens: admin/case
+# replaces: GET support/cases/{id}, GET orders/orders/{id}, GET shipping/shipments, GET payments/orders/{orderId}/refundable, GET finance/holds, GET returns/refunds/{id}, GET access/approval-requests/{id}, GET access/me, POST access/authority-checks
+# why: A dispute decision needs the case file, the order with its shipments, refundable amounts, seller holds, the refund approval, the decider's own approval limit and the seller earnings effect of the proposed remedy together. Pass withRemedyPreview (with orderRef) once a remedy is filled in; cases without an order leave orderRef out.
+query AdminCase(
+  $ref: String!
+  $orderRef: String = ""
+  $approvalActionKey: String! = "support.remedies.approve"
+  $withRemedyPreview: Boolean = false
+  $remedyItems: [FinanceRefundImpactItemInput!]
+  $remedyAmount: Int
+  $remedyFundedBy: FinanceRefundFundedBy = SELLER
+) {
+  myApprovalLimit(actionKey: $approvalActionKey) {
+    actionKey
+    actionLabel
+    authority
+    unit
+    limitValue
+    needsSecondReviewer
+    route
+    summary
+    limit {
+      ...Amount
+    }
+    secondReviewerAbove {
+      ...Amount
+    }
+  }
+
+  refundImpactPreview(orderRef: $orderRef, items: $remedyItems, amount: $remedyAmount, fundedBy: $remedyFundedBy) @include(if: $withRemedyPreview) {
+    fundedBy
+    afterPayout
+    note
+    refund {
+      ...Amount
+    }
+    sellerEarningsChange {
+      ...Amount
+    }
+    feeReturned {
+      ...Amount
+    }
+    platformShare {
+      ...Amount
+    }
+    balanceAfter {
+      ...Amount
+    }
+  }
+
+  caseAdmin(ref: $ref) {
+    id
+    ref
+    kind
+    subject
+    category {
+      key
+      label
+      resolutionBusinessDays
+    }
+    priority
+    status
+    statusLabel
+    openedAt
+    updatedAt
+    open
+    reopened
+    orderRef
+    team
+    owner {
+      ...Who
+    }
+    financeReviewer {
+      ...Who
+    }
+    customer {
+      id
+      name
+      location
+      orders
+      openCases
+      email
+      asksFor
+    }
+    seller {
+      ownerType
+      id
+      name
+      verified
+      location
+      onTimeDispatchPct
+      offers
+    }
+    nextAction {
+      label
+      whoMustAct
+      due {
+        ...Due
+      }
+    }
+    deadlines {
+      label
+      party
+      deadline {
+        ...Due
+      }
+    }
+
+    purchaseTerms {
+      snapshotAt
+      termsVersion
+      item
+      pricePaid {
+        ...Amount
+      }
+      listPrice {
+        ...Amount
+      }
+      discountNote
+      promisedDelivery
+      dispatchBy
+      shipping
+      returns
+      payment
+    }
+
+    items {
+      orderItemId
+      title
+      options {
+        name
+        value
+      }
+      quantity
+      price {
+        ...Amount
+      }
+      imageUrl
+      sellerName
+      packageLabel
+      itemStatus
+      estimate
+    }
+
+    shipmentEvidence {
+      ...Event
+    }
+
+    evidence {
+      id
+      party
+      kind
+      note
+      at
+      addedBy {
+        ...Who
+      }
+      media {
+        id
+        url
+        alt
+        bytes
+      }
+    }
+
+    messages {
+      id
+      authorLabel
+      role
+      audience
+      body
+      at
+      attachments {
+        id
+        url
+      }
+    }
+
+    # saved, unpublished decision (Save decision draft)
+    decisionDraft {
+      outcome
+      reason
+      remedies {
+        kind
+        amount {
+          ...Amount
+        }
+        chargedTo
+        orderItemIds
+        dueAt
+        note
+      }
+      appealDeadline
+      notifyParties
+      savedAt
+      savedBy {
+        ...Who
+      }
+    }
+
+    decision {
+      outcome
+      reason
+      decidedBy {
+        ...Who
+      }
+      decidedAt
+      publishedAt
+      appealDeadline
+      appealRoute
+      final
+    }
+
+    remedies {
+      id
+      kind
+      chargedTo
+      status
+      statusLabel
+      track
+      currentStep
+      destination
+      note
+      refundRequestId
+      amount {
+        ...Amount
+      }
+    }
+
+    appeal {
+      status
+      submittedAt
+      reviewer {
+        ...Who
+      }
+    }
+
+    holds {
+      id
+      sellerName
+      amount {
+        ...Amount
+      }
+      reason
+      reviewDate
+      status
+      placedAt
+    }
+
+    refundRequests {
+      id
+      ref
+      status
+      fundedBy
+      breakdown {
+        itemAmount {
+          ...Amount
+        }
+        discountShare {
+          ...Amount
+        }
+        total {
+          ...Amount
+        }
+        maxRefundable {
+          ...Amount
+        }
+        destination
+      }
+      sellerShare {
+        ...Amount
+      }
+      platformShare {
+        ...Amount
+      }
+      earningsImpact {
+        sellerEarningsChange {
+          ...Amount
+        }
+        feeReturned {
+          ...Amount
+        }
+        note
+      }
+      paymentRefundId
+      approval {
+        required
+        reason
+        approvers
+      }
+      approvalRequest {
+        id
+        status
+        steps {
+          step
+          state
+          label
+          decidedBy {
+            ...Who
+          }
+          decidedAt
+        }
+        canDecide
+        cannotDecideReason
+      }
+    }
+
+    history {
+      ...Event
+    }
+
+    order {
+      id
+      ref
+      groups {
+        id
+        packageLabel
+        seller {
+          name
+        }
+        status
+        statusLabel
+        dispatchDeadline {
+          ...Due
+        }
+        shipments {
+          id
+          carrierName
+          serviceName
+          trackingNumber
+          status
+          statusLabel
+          shippedAt
+          events {
+            at
+            label
+            location
+          }
+        }
+      }
+      refundable {
+        items {
+          orderItemId
+          paid {
+            ...Amount
+          }
+          remaining {
+            ...Amount
+          }
+          blockedReason
+        }
+      }
+    }
+  }
+}
+
+fragment Amount on Money {
+  amount
+  currency
+  formatted
+}
+
+fragment Due on Deadline {
+  dueAt
+  state
+}
+
+fragment Who on Actor {
+  kind
+  id
+  name
+}
+
+fragment Event on TimelineEvent {
+  at
+  label
+  detail
+  actor {
+    ...Who
+  }
+}

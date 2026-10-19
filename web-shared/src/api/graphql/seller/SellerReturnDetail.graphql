@@ -1,0 +1,332 @@
+# screens: seller/return
+# replaces: GET returns/requests/{id}, GET returns/terms, GET orders/orders/{id}, GET support/cases/{id}, GET messaging/conversations/{id}, GET messaging/conversations/{id}/messages
+# why: The return case needs the request, applied terms, payment, deadlines, return shipment, inspection, earnings impact, the support case with dispute evidence and the case thread together.
+query SellerReturnDetail($ref: String!, $messagePaging: PageInput) {
+  sellerReturn(ref: $ref) {
+    id
+    ref
+    orderRef
+    status
+    statusLabel
+    requestedAt
+    open
+    nextStep
+    nextDeadline {
+      ...Due
+    }
+    track {
+      key
+      label
+      state
+    }
+    reason
+    details
+    remedy
+    handledBy
+    media {
+      ...Image
+    }
+    items {
+      orderItemId
+      title
+      sku
+      imageUrl
+      quantity
+      options {
+        name
+        value
+      }
+      unitPrice {
+        ...Amount
+      }
+    }
+    customer {
+      displayName
+      city
+      ordersWithSeller
+    }
+    payment {
+      methodLabel
+      itemPaid {
+        ...Amount
+      }
+      shippingPaid {
+        ...Amount
+      }
+      discountShare {
+        ...Amount
+      }
+      maxRefundable {
+        ...Amount
+      }
+      refundedSoFar {
+        ...Amount
+      }
+    }
+    terms {
+      windowDays
+      changeOfMindAllowed
+      condition
+      remedies
+      responseTargetBusinessDays
+      summary
+      policyVersion
+      source
+      responsibilities {
+        reasonGroup
+        paidBy
+        note
+        customerFee {
+          ...Amount
+        }
+      }
+    }
+    shippingPaidBy
+    deadlines {
+      respondBy {
+        ...Due
+      }
+      inspectBy {
+        ...Due
+      }
+      refundBy {
+        ...Due
+      }
+    }
+    infoRequest {
+      question
+      askedAt
+      replyDueAt
+      reply
+      repliedAt
+    }
+    decision {
+      kind
+      explanation
+      decidedAt
+      platformDecision
+      decidedBy {
+        ...Who
+      }
+    }
+    shipment {
+      id
+      status
+      method
+      carrier
+      service
+      trackingNumber
+      trackingUrl
+      paidBy
+      cost {
+        ...Amount
+      }
+      to {
+        name
+        line1
+        city
+        region
+        postalCode
+      }
+      events {
+        at
+        label
+        detail
+      }
+    }
+    inspection {
+      id
+      inspectedAt
+      conditionOutcome
+      grade
+      notes
+      proposedStockOutcome
+      missingParts
+      media {
+        ...Image
+      }
+      inspectedBy {
+        ...Who
+      }
+    }
+    # inspect-and-refund form: expected checklist, saved draft and the inspector
+    inspectionChecklist {
+      expectedContents
+      serialShipped
+      items {
+        key
+        kind
+        label
+        expected
+        required
+      }
+    }
+    inspectionDraft {
+      inspection
+      remedy
+      savedAt
+      savedBy {
+        ...Who
+      }
+    }
+    inspector {
+      ...Who
+    }
+    # evidence added before escalation ("Add files now so they are on record")
+    evidence {
+      id
+      kind
+      note
+      party
+      addedAt
+      caseId
+      media {
+        ...Image
+      }
+    }
+    refund {
+      ref
+      status
+      statusLabel
+      explanation
+    }
+    refundRequest {
+      ref
+      status
+    }
+    earningsImpact {
+      afterPayout
+      note
+      refundToCustomer {
+        ...Amount
+      }
+      sellerEarningsChange {
+        ...Amount
+      }
+      feeReturned {
+        ...Amount
+      }
+      labelCharge {
+        ...Amount
+      }
+      totalBalanceChange {
+        ...Amount
+      }
+    }
+    escalation {
+      at
+      reason
+      caseRef
+    }
+    case {
+      id
+      ref
+      status
+      statusLabel
+      marketplaceInvolved
+      nextAction {
+        label
+        whoMustAct
+        youNeedToAct
+        due {
+          ...Due
+        }
+      }
+      evidence {
+        id
+        party
+        kind
+        note
+        at
+        addedBy {
+          ...Who
+        }
+        media {
+          ...Image
+          bytes
+        }
+      }
+    }
+    platformInvolved
+    flags {
+      kind
+      label
+    }
+    allowedActions
+    activity {
+      at
+      label
+      detail
+      actor {
+        ...Who
+      }
+    }
+    order {
+      id
+      ref
+      placedAt
+      groups {
+        id
+        items {
+          id
+          deliveredAt
+          returnWindowEndsAt
+        }
+      }
+    }
+    conversation {
+      id
+      privacyNote
+      rulesNote
+      canSend
+      replyDue {
+        ...Due
+      }
+      participants {
+        kind
+        name
+        label
+      }
+      messages(paging: $messagePaging) {
+        nextCursor
+        items {
+          id
+          kind
+          authorLabel
+          fromMe
+          body
+          hidden
+          at
+          author {
+            kind
+          }
+          attachments {
+            ...Image
+          }
+        }
+      }
+    }
+  }
+}
+
+fragment Amount on Money {
+  amount
+  currency
+  formatted
+}
+
+fragment Due on Deadline {
+  dueAt
+  state
+}
+
+fragment Image on MediaRef {
+  id
+  url
+  alt
+}
+
+fragment Who on Actor {
+  kind
+  name
+}

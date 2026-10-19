@@ -1,0 +1,90 @@
+{
+  "AccountOverview": {
+    "id": "03b5be935b63328a8f63096021bb805f4327d0a06060a3985f2eab159a3a86d9",
+    "screens": [
+      "account/overview"
+    ]
+  },
+  "CartPage": {
+    "id": "c1a5ab3016ed9182e0be4fdc1749dd99f1ceaa78bb6e85cb8f77888a7b3b7e49",
+    "screens": [
+      "store/cart"
+    ]
+  },
+  "CaseDetail": {
+    "id": "8503142182690971e3a013aa1fd843a4fb1117b6dd939a097ccbb74a455eab01",
+    "screens": [
+      "help/case"
+    ]
+  },
+  "CategoryPage": {
+    "id": "dd15f9ac59a588ddfdb864cb35bd8709e9e69cddfbb2e1f79fb7eb6727178a60",
+    "screens": [
+      "store/category"
+    ]
+  },
+  "CheckoutReview": {
+    "id": "69580f4012f45d7b1176d2dd9fd09080c2e0f10ff4f2ac2ceda8918890f21ea0",
+    "screens": [
+      "store/checkout",
+      "store/checkout-review-changes"
+    ]
+  },
+  "HomePage": {
+    "id": "2ab81518ae0c3fe148a3364b126bd40ba3bf39264bd4782269b911cf15956aa4",
+    "screens": [
+      "store/home"
+    ]
+  },
+  "OffersPage": {
+    "id": "f73d51fa04092ded3bb313835c0da7f3cb3395ac0f5da4cb12bdf244a7e125d7",
+    "screens": [
+      "store/offers"
+    ]
+  },
+  "OrderConfirmation": {
+    "id": "4c483c87d0962918daf44bb310cd67bf18f4809811f546bfb8e8ae7a048db38f",
+    "screens": [
+      "store/confirmation"
+    ]
+  },
+  "OrderDetail": {
+    "id": "9b1ec2df358e44ab644245b3f6b51dd815ff0409a585acdfc5008dae9b5bccbb",
+    "screens": [
+      "account/order",
+      "account/tracking",
+      "account/cancel"
+    ]
+  },
+  "OrderList": {
+    "id": "24a7290a1362ce6dfb09b6dd3a68c1168dc52b421e91a3e9e8b2e65e1a5a6175",
+    "screens": [
+      "account/orders"
+    ]
+  },
+  "ProductPage": {
+    "id": "97c9c632e440d7206a070ea59a6bd96cae4f750ce62cbb5952c1fd4deae660a5",
+    "screens": [
+      "store/product"
+    ]
+  },
+  "ReturnDetail": {
+    "id": "eb07b5442b352696aa9488d8328ce8a36e8d9668588f451685a7c3435147665f",
+    "screens": [
+      "account/return"
+    ]
+  },
+  "SearchResults": {
+    "id": "30e9077513f94a2cea4a3464410ba3002ff0d83995b7f8650266339edd5e42ec",
+    "screens": [
+      "store/search",
+      "store/search-empty"
+    ]
+  },
+  "SellerStorefront": {
+    "id": "1d1bfb67108407569f9313a16b7dafe0246402abd0a52f978ecbbfe399dfc0fc",
+    "screens": [
+      "store/seller"
+    ]
+  }
+}

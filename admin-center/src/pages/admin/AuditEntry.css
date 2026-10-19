@@ -1,0 +1,56 @@
+/* admin/audit-entry (designed in React, no design file). Mobile-first; tokens from marketly.css. */
+
+/* The headline is a sentence, so it is set a step smaller than a page title on the phone. */
+.ae-head .t .h1 { font-size: var(--fs-xl); line-height: var(--lh-snug); text-wrap: balance; }
+@container app (min-width: 768px) { .ae-head .t .h1 { font-size: var(--fs-2xl); } }
+.ae-meta { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
+.ae-code { font-family: var(--font-mono); font-size: var(--fs-xs); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-xs); padding: 1px var(--sp-1-5); color: var(--text-2); }
+
+/* Facts and approval come first on the phone (the blueprint order), and sit on the right from 1180px. */
+.ae-split { display: grid; gap: var(--sp-5); grid-template-columns: minmax(0, 1fr); align-items: start; }
+.ae-split > .ae-side { order: -1; }
+@container app (min-width: 1180px) {
+  .ae-split { grid-template-columns: minmax(0, 1fr) 360px; }
+  .ae-split > .ae-side { order: 0; }
+}
+
+/* Fact panel values: IDs with a copy button. */
+.ae-id { display: inline-flex; align-items: center; gap: var(--sp-1); min-width: 0; max-width: 100%; }
+.ae-id .mono { overflow-wrap: anywhere; }
+.ae-id .icon-btn { width: 28px; height: 28px; flex: none; }
+.ae-facts .kv { grid-template-columns: minmax(96px, auto) minmax(0, 1fr); }
+
+/* What changed: before → after per field. On the phone each field is a stacked block. */
+.ae-diff { display: flex; flex-direction: column; }
+.ae-diff > li { display: grid; gap: var(--sp-1) var(--sp-3); grid-template-columns: minmax(0, 1fr); padding: var(--sp-3) 0; border-bottom: 1px solid var(--border); }
+.ae-diff > li:first-child { padding-top: 0; }
+.ae-diff > li:last-child { border-bottom: 0; padding-bottom: 0; }
+.ae-diff .f { display: flex; flex-direction: column; gap: 0; }
+.ae-diff .vals { display: flex; flex-wrap: wrap; gap: var(--sp-1-5); align-items: center; }
+.ae-diff .vals svg.lucide { width: var(--ic-14); height: var(--ic-14); color: var(--text-3); flex: none; }
+.ae-diff del, .ae-diff ins { overflow-wrap: anywhere; }
+.ae-diff .unset { color: var(--text-3); font-style: italic; }
+@container app (min-width: 768px) {
+  .ae-diff > li { grid-template-columns: minmax(160px, 0.8fr) minmax(0, 2fr); align-items: baseline; }
+}
+
+/* Raw JSON behind a disclosure. */
+.ae-raw { border-top: 1px solid var(--border); padding-top: var(--sp-3); }
+.ae-raw > summary { cursor: pointer; display: inline-flex; align-items: center; gap: var(--sp-1-5); font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text-2); list-style: none; }
+.ae-raw > summary::-webkit-details-marker { display: none; }
+.ae-raw > summary svg.lucide { width: var(--ic-14); height: var(--ic-14); transition: transform var(--dur-fast) var(--ease); }
+.ae-raw[open] > summary svg.lucide { transform: rotate(90deg); }
+.ae-raw .ae-raw-body { display: flex; flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-3); }
+.ae-raw pre { margin: 0; font-family: var(--font-mono); font-size: var(--fs-xs); line-height: 1.55; color: var(--text); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--sp-3); overflow: auto; max-height: 360px; white-space: pre; tab-size: 2; }
+
+/* Related events. */
+.ae-rel { display: flex; flex-direction: column; }
+.ae-rel > li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-1) var(--sp-3); padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--border); align-items: start; }
+.ae-rel > li:last-child { border-bottom: 0; }
+.ae-rel > li.is-self { background: var(--surface-2); }
+.ae-rel .t { font-size: var(--fs-sm); color: var(--text); }
+.ae-rel .t a { font-weight: var(--fw-semibold); }
+
+/* Append-only notice. */
+.ae-lock { display: flex; gap: var(--sp-2); align-items: flex-start; }
+.ae-lock svg.lucide { flex: none; margin-top: 2px; width: var(--ic-14); height: var(--ic-14); }

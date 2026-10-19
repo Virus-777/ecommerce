@@ -1,0 +1,160 @@
+# screens: store/seller
+# replaces: GET sellers/stores/{slug}, GET sellers/stores/{slug}/collections/{collectionId}, GET reviews/sellers/{sellerId}/feedback-summary, GET reviews/sellers/{sellerId}/feedback, GET search/products, GET search/facets, GET promotions/offer-prices, GET reviews/rating-summaries, GET shipping/estimates
+# why: The storefront combines the seller profile and verification, rating and reply figures, seller promotions, shipping and return terms, a product grid with facets and seller feedback from seven modules; one round trip per page.
+query SellerStorefront($slug: String!, $collectionOfferLimit: Int = 4, $filters: SearchFilterInput, $sort: SearchSort = RECOMMENDED, $postalCode: String, $searchId: String, $paging: PageInput, $feedbackSentiment: SellerFeedbackSentiment, $feedbackPaging: PageInput) {
+  sellerStorefront(slug: $slug) {
+    id
+    slug
+    storeName
+    location
+    verified
+    dispatchLabel
+    sellingSince
+    sellingNow
+    logo { ...ImageFields }
+    rating { periodMonths count average positivePct label }
+    replyStats { targetHours repliedWithinTargetPct averageReplyMinutes label }
+    publicProfile {
+      tagline
+      introduction
+      onTimeDispatchPct
+      warranty
+      banner { ...ImageFields }
+      verification { state checked notChecked lastCheckedAt }
+      approvedClaims { kind text }
+      contact { canMessage productQuestions replyTarget phone }
+      collections {
+        id
+        title
+        itemCount
+        image { ...ImageFields }
+        offers(limit: $collectionOfferLimit) {
+          id
+          price { ...MoneyFields }
+          deal {
+            percentOffBps
+            price { ...MoneyFields }
+            wasPrice { ...MoneyFields }
+          }
+          product {
+            id
+            slug
+            title
+            images { ...ImageFields }
+            reviewSummary { hasReviews average ratingCount }
+          }
+        }
+      }
+    }
+    activePromotions {
+      title
+      detail
+      autoApply
+      code
+      period { display endsAt }
+    }
+    shippingSummary {
+      shipsFrom
+      coverageLabel
+      excluded
+      dispatchLabel
+      sameDayCutoff
+      businessDaysLabel
+      carriers
+      freeShippingLabel
+      methods { name transitMinDays transitMaxDays priceLabel }
+      closures { name from to }
+      notices { id title message }
+    }
+    returnTerms { summary windowDays changeOfMindAllowed }
+    categories { id name slug count comingSoon }
+    products(filters: $filters, sort: $sort, postalCode: $postalCode, searchId: $searchId, paging: $paging) {
+      searchId
+      total
+      totalLabel
+      page
+      totalPages
+      nextCursor
+      appliedFilters { key value label removeQuery }
+      clearAllQuery
+      facets { ...FacetFields }
+      sorts { key label available selected }
+      items { ...ResultCardFields }
+      fromPriceNote
+    }
+    feedback(sentiment: $feedbackSentiment, paging: $feedbackPaging) {
+      total
+      nextCursor
+      items {
+        id
+        sentiment
+        overall
+        comment
+        itemTitle
+        postedAt
+        author { displayName }
+        response { fromName text publishedAt }
+      }
+    }
+  }
+}
+
+fragment MoneyFields on Money {
+  amount
+  currency
+  formatted
+}
+
+fragment ImageFields on MediaRef {
+  id
+  url
+  alt
+  width
+  height
+}
+
+fragment FacetFields on SearchFacet {
+  key
+  label
+  group
+  groupLabel
+  kind
+  multiSelect
+  unit
+  moreCount
+  collapsed
+  values { value label count selected note }
+  range {
+    min { ...MoneyFields }
+    max { ...MoneyFields }
+    selectedMin { ...MoneyFields }
+    selectedMax { ...MoneyFields }
+  }
+}
+
+fragment ResultCardFields on Product {
+  id
+  slug
+  title
+  saved
+  images { ...ImageFields }
+  reviewSummary { hasReviews average ratingCount }
+  searchMatch {
+    position
+    variantId
+    variantCue
+    priceIsFrom
+    badges
+    offer {
+      id
+      price { ...MoneyFields }
+      deal {
+        percentOffBps
+        price { ...MoneyFields }
+        wasPrice { ...MoneyFields }
+        badges { label kind }
+      }
+      deliveryEstimate(postalCode: $postalCode) { free arrivalLabel }
+    }
+  }
+}

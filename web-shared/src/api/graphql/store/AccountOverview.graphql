@@ -1,0 +1,100 @@
+# screens: account/overview
+# replaces: GET customers/overview, GET orders/orders, GET orders/orders/counts, GET returns/requests/overview, GET returns/requests, GET support/cases, GET messaging/unread-count, GET notifications/inbox/summary, GET wallet/credit
+# why: The Account tab home shows tiles, the delay alert, recent orders, open cases and returns, and menu badges from seven modules; one round trip when the tab opens. The store credit tile reads wallet (phase 3) and is null until then.
+query AccountOverview($recentOrdersPaging: PageInput, $openCasesLimit: Int = 3, $openReturnsLimit: Int = 2) {
+  me {
+    id
+    displayName
+    firstName
+    email
+    memberSince
+    overviewAlerts { kind title body orderId orderRef caseRef returnRef actions }
+    orderCounts { inProgress delayedPackages }
+    delayedItems {
+      orderId
+      orderRef
+      groupId
+      title
+      sellerName
+      newDispatchBy
+      newArrivalFrom
+      newArrivalTo
+      options
+      caseRef
+    }
+    returnsOverview {
+      openReturns
+      openNote
+      refundsOnTheWay { ...MoneyFields }
+    }
+    unreadMessages { conversations messages fromNames }
+    wallet {
+      available { ...MoneyFields }
+      nextExpiry {
+        expiresAt
+        amount { ...MoneyFields }
+      }
+    }
+    openCases(limit: $openCasesLimit) {
+      total
+      items {
+        id
+        ref
+        subject
+        status
+        statusLabel
+        orderRef
+        expectedReply
+        handledBy { kind name supportFollowing }
+        nextAction { label youNeedToAct }
+        items { sellerName }
+      }
+    }
+    openReturns(limit: $openReturnsLimit) {
+      total
+      items {
+        id
+        ref
+        status
+        statusLabel
+        sellerName
+        items { orderItemId title imageUrl }
+        refund { status statusLabel }
+      }
+    }
+  }
+  orders(paging: $recentOrdersPaging) {
+    total
+    items {
+      id
+      ref
+      placedAt
+      status
+      statusLabel
+      packageCount
+      thumbnails { ...ImageFields }
+      totals {
+        total { ...MoneyFields }
+      }
+      groups {
+        id
+        items { id state }
+      }
+    }
+  }
+  unreadNotificationCount
+}
+
+fragment MoneyFields on Money {
+  amount
+  currency
+  formatted
+}
+
+fragment ImageFields on MediaRef {
+  id
+  url
+  alt
+  width
+  height
+}
