@@ -134,6 +134,17 @@ describe('a line split by a partial cancellation', () => {
     await app.kernel.events.drain();
     expect(await reserved(), 'the cancelled unit is released').toBe(before + 2);
 
+    // out of stock: the seller has none, so the offer is off sale until the seller enters a new count
+    const other = await f.customer('second-buyer@example.com');
+    const blocked = await f.call('POST', '/api/store/cart/cart/items', { token: other.accessToken, body: { offerId: listing.offerId, quantity: 1 } });
+    expect(blocked.body.error?.details?.reason, JSON.stringify(blocked.body)).toBe('out_of_stock');
+    const stock = await f.call('GET', '/api/seller/inventory/stock-items', { token: listing.sellerToken });
+    const row = (stock.body.items as { stockItemId: string; offerId: string | null; available: number }[]).find((i) => i.offerId === listing.offerId)!;
+    expect(row.available).toBe(0);
+    const recount = await f.call('POST', `/api/seller/inventory/stock-items/${row.stockItemId}/adjustments`, { token: listing.sellerToken, body: { newAvailable: 20, reasonCode: 'received_stock' } });
+    expect(recount.status, JSON.stringify(recount.body)).toBeLessThan(300);
+    await app.kernel.events.drain();
+
     // the remaining 2 units are on the split-off line; shipping them takes them out of stock
     const after = await f.call('GET', `/api/store/orders/orders/${orderId}`, { token: c.accessToken });
     const open = (after.body.groups[0].items as { id: string; quantity: number; state: string }[]).find((i) => i.state !== 'cancelled')!;
@@ -164,7 +175,7 @@ describe('a line split by a partial cancellation', () => {
     const groupId = order.body.groups[0].id as string;
     expect(order.body.groups[0].totals.shipping.amount, 'the package has a shipping charge').toBeGreaterThan(0);
     const cancel = async (itemId: string, quantity: number) => {
-      const r = await f.call('POST', `/api/seller/orders/orders/${groupId}/cancel-items`, { token: listing.sellerToken, body: { items: [{ itemId, quantity }], reasonCode: 'out_of_stock' }, headers: { 'idempotency-key': key() } });
+      const r = await f.call('POST', `/api/seller/orders/orders/${groupId}/cancel-items`, { token: listing.sellerToken, body: { items: [{ itemId, quantity }], reasonCode: 'pricing_error' }, headers: { 'idempotency-key': key() } });
       expect(r.status, JSON.stringify(r.body)).toBeLessThan(300);
       await app.kernel.events.drain();
     };

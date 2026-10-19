@@ -112,6 +112,8 @@ const REASON_LABELS: Record<string, string> = {
   hold_released: 'Checkout hold released',
   hold_expired: 'Checkout hold expired',
   order_cancelled: 'Order item cancelled',
+  seller_out_of_stock: 'Seller cancelled: out of stock',
+  seller_damaged: 'Seller cancelled: damaged in storage',
   staff_release: 'Released by staff',
   dispatched: 'Dispatched',
   purchase_order_sent: 'Purchase order sent',

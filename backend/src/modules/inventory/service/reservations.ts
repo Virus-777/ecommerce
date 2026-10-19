@@ -10,7 +10,7 @@ import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type { MovementRef, Reservation } from '../../../spec/inventory.js';
 import { reservationMachine } from '../domain/state-machines.js';
-import { lineStateAfter, mapLinesToItems, openQty, reservationStateOf, type ReservationState } from '../domain/rules.js';
+import { lineStateAfter, mapLinesToItems, openQty, reservationStateOf, type GroupOrOutside, type ReservationState } from '../domain/rules.js';
 import { SYSTEM_ACTOR, toReservationLine } from '../mappers.js';
 import type { Row } from '../ports.js';
 import type { InventoryRepository } from '../repository.js';
@@ -22,6 +22,9 @@ const STALE_ALLOCATION_DAYS = 14;
 
 /** reservations.source: checkout holds (and the order's own allocation), or allocateForOrder for a replacement or exchange (never expire; releaseHold may release them) */
 type AllocationSource = Row<'reservations'>['source'];
+
+/** Seller cancellation reasons that mean the seller does not have the units: the movement reason that writes them off */
+const SELLER_WRITE_OFF: Record<string, 'seller_out_of_stock' | 'seller_damaged' | undefined> = { out_of_stock: 'seller_out_of_stock', damaged_in_storage: 'seller_damaged' };
 
 const RESERVATION_EVENT: Record<ReservationState, 'allocate' | 'fulfill' | 'release' | 'expire' | null> = { held: null, allocated: 'allocate', fulfilled: 'fulfill', released: 'release', expired: 'expire' };
 
@@ -226,13 +229,13 @@ export class Reservations {
 
   /**
    * Returns open units of these lines to Available (all, or `qty(line)` each), closes lines that
-   * have nothing open and derives the reservation state from its lines.
+   * have nothing open and derives the reservation state from its lines. `to: 'outside'` writes the units off instead.
    */
   async #releaseLines(
     st: StockTx,
     r: Row<'reservations'>,
     lines: Row<'reservation_lines'>[],
-    how: { reason: string; note?: string | null; releasedReason: string; ref: MovementRef; actor: common.Actor; qty?: (l: Row<'reservation_lines'>) => number; closedAs?: 'released' | 'expired' },
+    how: { reason: string; note?: string | null; releasedReason: string; ref: MovementRef; actor: common.Actor; qty?: (l: Row<'reservation_lines'>) => number; closedAs?: 'released' | 'expired'; to?: GroupOrOutside },
   ): Promise<{ reservation: Row<'reservations'>; changed: Row<'reservation_lines'>[] }> {
     const changed: Row<'reservation_lines'>[] = [];
     await st.lock(lines.map((l) => l.stock_item_id));
@@ -240,7 +243,7 @@ export class Reservations {
       const open = openQty({ quantity: l.quantity, fulfilled: l.fulfilled_qty, released: l.released_qty, state: l.state });
       const n = Math.min(open, how.qty ? how.qty(l) : open);
       if (n <= 0) continue;
-      await st.move(l.stock_item_id, l.location_id, 'reserved', 'available', n, { reason: how.reason, note: how.note, ref: how.ref, actor: how.actor });
+      await st.move(l.stock_item_id, l.location_id, 'reserved', how.to ?? 'available', n, { reason: how.reason, note: how.note, ref: how.ref, actor: how.actor });
       const released = l.released_qty + n;
       const state = lineStateAfter({ quantity: l.quantity, fulfilled: l.fulfilled_qty, released, state: l.state }, how.closedAs ?? 'released');
       changed.push(await st.tx.update('reservation_lines', l.id, { released_qty: released, state }));
@@ -488,9 +491,24 @@ export class Reservations {
     if (moved === 0) this.core.ctx.log.info({ orderId: event.orderId, itemId: event.itemId, newItemId: event.newItemId, reason: event.reason }, 'inventory: split order item has no open reserved units to move');
   }
 
-  /** orders.item.cancelled: Release that item's held or allocated units back to Available (matched by itemId, so a split-off item releases only its own units) */
+  /**
+   * orders.item.cancelled: Release that item's held or allocated units back to Available (matched by itemId, so a
+   * split-off item releases only its own units). A seller cancelling its own stock as out of stock or damaged in
+   * storage does not have those units: they are written off, and out of stock also takes the rest of the item's
+   * Available units off sale until the seller enters a new count.
+   */
   async onItemCancelledFromOrders(event: EventPayload<'orders.item.cancelled'>): Promise<void> {
     const note = `Cancellation ${event.cancellationId}`;
+    const writeOff = event.initiatedBy === 'seller' && event.fulfilledBy === 'seller' ? SELLER_WRITE_OFF[event.reasonCode] : undefined;
+    const ref: MovementRef = { kind: 'order', id: event.orderId, label: `Order ${event.ref}` };
+    if (writeOff === 'seller_out_of_stock' && event.stockItemId) {
+      const stockItemId = event.stockItemId;
+      await this.core.stock('order_cancelled', async (st) => {
+        if (!(await st.tx.claimEvent(`item-cancelled-out-of-stock:${event.cancellationId}:${event.itemId}`))) return;
+        await st.lock([stockItemId]);
+        for (const l of st.levels(stockItemId)) if (l.available > 0) await st.move(stockItemId, l.location_id, 'available', 'outside', l.available, { reason: writeOff, note, ref, actor: SYSTEM_ACTOR });
+      });
+    }
     const lines = (await this.core.repo.linesWhere({ orderItemIds: [event.itemId] })).filter((l) => l.state === 'held' || l.state === 'allocated');
     if (!lines.length) return;
     for (const rid of new Set(lines.map((l) => l.reservation_id))) {
@@ -502,11 +520,12 @@ export class Reservations {
         const own = (await st.tx.lines([rid], { forUpdate: true })).filter((l) => l.order_item_id === event.itemId && (l.state === 'held' || l.state === 'allocated'));
         let left = event.quantity;
         return this.#releaseLines(st, r, own, {
-          reason: 'order_cancelled',
+          reason: writeOff ?? 'order_cancelled',
           note,
           releasedReason: `Cancelled: ${event.reasonCode}`,
-          ref: { kind: 'order', id: event.orderId, label: `Order ${event.ref}` },
+          ref,
           actor: SYSTEM_ACTOR,
+          to: writeOff ? 'outside' : 'available',
           qty: (l) => {
             const n = Math.min(left, openQty({ quantity: l.quantity, fulfilled: l.fulfilled_qty, released: l.released_qty, state: l.state }));
             left -= n;

@@ -35,7 +35,7 @@ const accepted = (orderId: string, ref: string, itemIds: string[]) =>
     acceptedAt: new Date().toISOString(),
   });
 
-const cancelled = (orderId: string, itemId: string, stockItemId: string, quantity: number, cancellationId = newId()) =>
+const cancelled = (orderId: string, itemId: string, stockItemId: string, quantity: number, cancellationId = newId(), over: Record<string, unknown> = {}) =>
   h.app.kernel.events.publish('orders', 'orders.item.cancelled', {
     orderId,
     ref: 'MK-261009-00001',
@@ -55,6 +55,7 @@ const cancelled = (orderId: string, itemId: string, stockItemId: string, quantit
     fulfilledBy: 'official_warehouse' as const,
     refund: { itemAmount: { amount: 0, currency: 'USD' }, discountShare: { amount: 0, currency: 'USD' }, shippingRefund: { amount: 0, currency: 'USD' }, taxRefund: { amount: 0, currency: 'USD' }, total: { amount: 0, currency: 'USD' } },
     paymentIntentId: newId(),
+    ...over,
   });
 
 const dispatched = (orderId: string, lines: { orderItemId: string; quantity: number }[], shipmentId = newId()) =>
@@ -222,6 +223,46 @@ describe('orders: allocation, cancellation and dispatch', () => {
     cancelled(orderId, itemA, a.id, 2);
     await h.app.kernel.events.drain();
     expect(await quantities(h, a.id)).toMatchObject({ available: 8, reserved: 0 });
+    expect(await ledgerMismatches(h)).toEqual([]);
+    expect(await reservedMismatches(h)).toEqual([]);
+  });
+
+  it('a seller cancelling as out of stock or damaged in storage writes the units off; out of stock takes the rest off sale', async () => {
+    const bySeller = { initiatedBy: 'seller', reasonCode: 'out_of_stock', fulfilledBy: 'seller', ownerType: 'seller', sellerId, countsAgainstSeller: true };
+    const a = await sellerItem(h, sellerId, 6);
+    const r = await h.api.hold(`chk-${newId()}`, [{ stockItemId: a.id, quantity: 2 }]);
+    const orderId = newId();
+    const itemA = newId();
+    await h.api.attachOrder(r.id, orderId, [{ stockItemId: a.id, orderItemId: itemA }]);
+    const cancellationId = newId();
+    cancelled(orderId, itemA, a.id, 1, cancellationId, bySeller);
+    await h.app.kernel.events.drain();
+    cancelled(orderId, itemA, a.id, 1, cancellationId, bySeller); // the same event again
+    await h.app.kernel.events.drain();
+    // the cancelled unit and the 4 Available leave stock; the unit still reserved for the order stays
+    expect(await quantities(h, a.id)).toMatchObject({ available: 0, reserved: 1 });
+    const moves = (await admin(h, 'GET', `/movements?stockItemId=${a.id}&reasonCode=seller_out_of_stock`)).json().items;
+    expect(moves).toHaveLength(2);
+    expect(moves).toEqual(expect.arrayContaining([expect.objectContaining({ fromGroup: 'reserved', toGroup: 'outside', quantity: 1 }), expect.objectContaining({ fromGroup: 'available', toGroup: 'outside', quantity: 4 })]));
+
+    const b = await sellerItem(h, sellerId, 5);
+    const rb = await h.api.hold(`chk-${newId()}`, [{ stockItemId: b.id, quantity: 2 }]);
+    const itemB = newId();
+    await h.api.attachOrder(rb.id, orderId, [{ stockItemId: b.id, orderItemId: itemB }]);
+    cancelled(orderId, itemB, b.id, 1, newId(), { ...bySeller, reasonCode: 'damaged_in_storage' });
+    await h.app.kernel.events.drain();
+    expect(await quantities(h, b.id)).toMatchObject({ available: 3, reserved: 1 });
+    // other reasons, and other initiators, put the units back on sale
+    cancelled(orderId, itemB, b.id, 1, newId(), { ...bySeller, reasonCode: 'pricing_error' });
+    await h.app.kernel.events.drain();
+    expect(await quantities(h, b.id)).toMatchObject({ available: 4, reserved: 0 });
+    const c = await sellerItem(h, sellerId, 3);
+    const rc = await h.api.hold(`chk-${newId()}`, [{ stockItemId: c.id, quantity: 1 }]);
+    const itemC = newId();
+    await h.api.attachOrder(rc.id, orderId, [{ stockItemId: c.id, orderItemId: itemC }]);
+    cancelled(orderId, itemC, c.id, 1, newId(), { ...bySeller, initiatedBy: 'customer' });
+    await h.app.kernel.events.drain();
+    expect(await quantities(h, c.id)).toMatchObject({ available: 3, reserved: 0 });
     expect(await ledgerMismatches(h)).toEqual([]);
     expect(await reservedMismatches(h)).toEqual([]);
   });
