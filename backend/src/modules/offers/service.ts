@@ -181,6 +181,10 @@ export class OffersService implements OffersPublicApi {
     return this.enforcement.onProductPublicationChanged(event);
   }
 
+  onBrandChangedFromCatalog(event: EventPayload<'catalog.brand.changed'>) {
+    return this.enforcement.onBrandChanged(event);
+  }
+
   onProductApprovedFromCatalog(event: EventPayload<'catalog.product.approved'>) {
     return this.enforcement.onProductApproved(event);
   }

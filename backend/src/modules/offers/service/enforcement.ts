@@ -59,6 +59,8 @@ export class EnforcementPart extends Part {
       const code = product.publication === 'suspended' ? 'product_suspended' : 'product_hidden';
       return { source: { kind: 'product', id: r.product_id }, reason: this.core.statusReason(code, product.publication === 'suspended' ? 'The product is suspended in the catalog' : 'The product is hidden in the catalog', by) };
     }
+    const brand = await this.brandVerdict(r);
+    if (brand && !brand.allowed) return { source: { kind: 'brand', id: brand.brandId }, reason: this.core.statusReason('brand_not_authorized', brand.reason ?? 'The brand does not allow this offer', by) };
     if (r.seller_id) {
       const check = await this.core.soft('sellers.canSell', () => this.ctx.use('sellers').canSell(r.seller_id!, { activity: 'sales', ...(product?.product.categoryId ? { categoryId: product.product.categoryId } : {}), condition: r.condition, offerId: r.id }));
       if (check && !check.allowed) {
@@ -201,6 +203,33 @@ export class EnforcementPart extends Part {
       const cache: ProductCache = new Map();
       for (const r of await this.sourced('product', e.productId)) await this.restoreOrSwitch(r, { by, log: { reasonCode: 'product_active', reason: e.reason } }, cache);
       await this.parts.manage.publishWaiting(await this.repo.find('offers', { product_id: e.productId, status: 'draft', publish_on_approval: true }), 'product active');
+    }
+  }
+
+  /** catalog.brandSellerCheck for the offer's seller (null: the Official Store); undefined when catalog can't answer */
+  brandVerdict(r: Pick<OfferRec, 'product_id' | 'seller_id'>) {
+    return this.core.soft('catalog.brandSellerCheck', () => this.ctx.use('catalog').brandSellerCheck(r.product_id, r.seller_id ?? null));
+  }
+
+  /**
+   * catalog.brand.changed: a brand blocked, made official_only or authorized_list (or its list changed) stops the
+   * offers it no longer allows; offers the brand allows again come back unless something else still stops them
+   */
+  async onBrandChanged(e: EventPayload<'catalog.brand.changed'>) {
+    if (e.change === 'created') return;
+    const by: By = { actor: SYSTEM };
+    const productIds = (await this.core.soft('catalog.productIdsOfBrand', () => this.ctx.use('catalog').productIdsOfBrand(e.brandId))) ?? [];
+    const cache: ProductCache = new Map();
+    for (const productId of productIds) {
+      for (const r of await this.repo.find('offers', { product_id: productId, status: [...STOPPABLE, 'ineligible'] })) {
+        const verdict = await this.brandVerdict(r);
+        if (!verdict) continue;
+        if (!verdict.allowed && STOPPABLE.includes(r.status)) {
+          await this.makeIneligible([r], { kind: 'brand', id: e.brandId }, this.core.statusReason('brand_not_authorized', verdict.reason ?? 'The brand does not allow this offer', by), by);
+        } else if (verdict.allowed && r.status === 'ineligible' && this.sourceOf(r).kind === 'brand') {
+          await this.restoreOrSwitch(r, { by, log: { reasonCode: 'brand_allowed', reason: 'The brand allows this offer again' } }, cache);
+        }
+      }
     }
   }
 

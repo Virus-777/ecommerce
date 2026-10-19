@@ -46,7 +46,7 @@ const offers = new Schema(
     warranty_handled_by: { type: String, default: null },
     status: { type: String, required: true, enum: ["draft","active","paused","out_of_stock","ineligible","removed"] },
     status_before_ineligible: { type: String, default: null },
-    ineligible_source: { type: Schema.Types.Mixed, default: null }, // { kind: restriction|suspension|product|staff|fulfillment_service, id }
+    ineligible_source: { type: Schema.Types.Mixed, default: null }, // { kind: restriction|suspension|product|staff|fulfillment_service|brand, id }
     status_reason: { type: Schema.Types.Mixed, default: null },
     publish_on_approval: { type: Boolean, required: true },
     content_gaps: { type: [String], default: undefined },

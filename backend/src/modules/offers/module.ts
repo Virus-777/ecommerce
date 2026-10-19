@@ -37,6 +37,7 @@ export default defineModule({
     ctx.events.on("sellers.launch_review.decided", (e) => service.onLaunchReviewDecidedFromSellers(e.payload));
     ctx.events.on("sellers.seller.closed", (e) => service.onSellerClosedFromSellers(e.payload));
     ctx.events.on("catalog.product.publication_changed", (e) => service.onProductPublicationChangedFromCatalog(e.payload));
+    ctx.events.on("catalog.brand.changed", (e) => service.onBrandChangedFromCatalog(e.payload));
     ctx.events.on("catalog.product.approved", (e) => service.onProductApprovedFromCatalog(e.payload));
     ctx.events.on("catalog.product.merged", (e) => service.onProductMergedFromCatalog(e.payload));
     ctx.events.on("catalog.product.updated", (e) => service.onProductUpdatedFromCatalog(e.payload));

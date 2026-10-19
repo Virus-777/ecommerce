@@ -108,6 +108,22 @@
       ]
     },
     {
+      "name": "brandSellerCheck",
+      "signature": "(productId: uuid, sellerId: uuid | null) => { allowed: bool, reason: string | null, brandId: uuid | null }",
+      "desc": "Whether the product's brand lets this seller (null: the Official Store) sell it: nobody sells a blocked brand, official_only is the Official Store's, authorized_list is for the sellers on the brand's list",
+      "usedBy": [
+        "offers"
+      ]
+    },
+    {
+      "name": "productIdsOfBrand",
+      "signature": "(brandId: uuid) => uuid[]",
+      "desc": "Ids of a brand's products (offers re-checks their offers on catalog.brand.changed)",
+      "usedBy": [
+        "offers"
+      ]
+    },
+    {
       "name": "getBrands",
       "signature": "(brandIds: uuid[]) => Brand[]",
       "desc": "Brands by id with status (content brand tiles, advertising brand names, search). Unknown ids are left out",
@@ -1906,7 +1922,7 @@
       "method": "POST",
       "path": "/products/{id}/approve",
       "summary": "Approve a submission",
-      "desc": "Official Store products (no seller) need a second person: whoever created, edited or sent the product for review since its last decision cannot approve it (SAME_REVIEWER).",
+      "desc": "Official Store products (no seller) need a second person: whoever created, edited or sent the product for review since its last decision cannot approve it (SAME_REVIEWER). A failed brand_authorization check blocks approval (BRAND_NOT_AUTHORIZED); the other submission checks stay advisory.",
       "auth": "staff",
       "permission": "catalog.products.review",
       "params": {
@@ -1919,7 +1935,8 @@
       "errors": [
         "ILLEGAL_TRANSITION",
         "BRAND_NOT_ACTIVE",
-        "SAME_REVIEWER"
+        "SAME_REVIEWER",
+        "BRAND_NOT_AUTHORIZED"
       ],
       "audited": true,
       "events": [
@@ -2676,6 +2693,10 @@
     }
   ],
   "errorCodes": {
+    "BRAND_NOT_AUTHORIZED": {
+      "status": 409,
+      "meaning": "The brand does not let this seller sell it (blocked, official_only or not on the authorized list): approving the submission or the offer is refused"
+    },
     "SAME_REVIEWER": {
       "status": 409,
       "meaning": "The person who created, edited or submitted an Official Store product cannot approve it."

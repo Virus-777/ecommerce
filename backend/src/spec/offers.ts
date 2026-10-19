@@ -236,7 +236,7 @@ export const IneligibilityReason: z.ZodType<IneligibilityReason> = z.object({
 
 export interface StatusReason {
   /** fulfillment_service_suspended: the seller's Fulfilled by Marketly enrollment is suspended or offboarding, so the offer stops selling (it never switches to seller shipping); restored when the enrollment is reinstated or the SKU leaves the service */
-  code: "awaiting_launch_review" | "seller_restricted" | "seller_suspended" | "seller_closed" | "product_hidden" | "product_suspended" | "product_merged" | "staff_hold" | "removed_by_staff" | "ended_by_seller" | "enforcement" | "fulfillment_service_suspended";
+  code: "awaiting_launch_review" | "seller_restricted" | "seller_suspended" | "seller_closed" | "product_hidden" | "product_suspended" | "product_merged" | "staff_hold" | "removed_by_staff" | "ended_by_seller" | "enforcement" | "fulfillment_service_suspended" | "brand_not_authorized";
   text: string;
   /** For restrictions: what is stopped, e.g. 'Refurbished offers and new listings' */
   affectedActivity?: string | null;
@@ -249,7 +249,7 @@ export interface StatusReason {
 }
 
 export const StatusReason: z.ZodType<StatusReason> = z.object({
-  code: z.enum(["awaiting_launch_review", "seller_restricted", "seller_suspended", "seller_closed", "product_hidden", "product_suspended", "product_merged", "staff_hold", "removed_by_staff", "ended_by_seller", "enforcement", "fulfillment_service_suspended"]).describe("fulfillment_service_suspended: the seller's Fulfilled by Marketly enrollment is suspended or offboarding, so the offer stops selling (it never switches to seller shipping); restored when the enrollment is reinstated or the SKU leaves the service"),
+  code: z.enum(["awaiting_launch_review", "seller_restricted", "seller_suspended", "seller_closed", "product_hidden", "product_suspended", "product_merged", "staff_hold", "removed_by_staff", "ended_by_seller", "enforcement", "fulfillment_service_suspended", "brand_not_authorized"]).describe("fulfillment_service_suspended: the seller's Fulfilled by Marketly enrollment is suspended or offboarding, so the offer stops selling (it never switches to seller shipping); restored when the enrollment is reinstated or the SKU leaves the service"),
   text: z.string(),
   affectedActivity: z.string().describe("For restrictions: what is stopped, e.g. 'Refurbished offers and new listings'").nullish(),
   appealRoute: z.string().describe("For restrictions and removals: how to appeal").nullish(),
@@ -1958,7 +1958,7 @@ export interface OffersDb {
     warranty_handled_by: string | null;
     status: 'draft' | 'active' | 'paused' | 'out_of_stock' | 'ineligible' | 'removed';
     status_before_ineligible: string | null;
-    /** { kind: restriction|suspension|product|staff|fulfillment_service, id } */
+    /** { kind: restriction|suspension|product|staff|fulfillment_service|brand, id } */
     ineligible_source: Json | null;
     status_reason: Json | null;
     publish_on_approval: boolean;
@@ -2272,7 +2272,7 @@ export const endpoints = defineEndpoints({
     body: () => OfferInput,
     response: () => SellerOfferDetail,
     status: 201,
-    errors: ["VALIDATION_FAILED","PRODUCT_NOT_PURCHASABLE","VARIANT_NOT_IN_PRODUCT","DUPLICATE_OFFER","SELLER_RESTRICTED","MISSING_ITEMS_REQUIRED","RETURN_TERMS_BELOW_BASELINE","PRICE_BELOW_MINIMUM","WAS_PRICE_NOT_VERIFIED","SHIPPING_PROFILE_INVALID"],
+    errors: ["BRAND_NOT_AUTHORIZED","VALIDATION_FAILED","PRODUCT_NOT_PURCHASABLE","VARIANT_NOT_IN_PRODUCT","DUPLICATE_OFFER","SELLER_RESTRICTED","MISSING_ITEMS_REQUIRED","RETURN_TERMS_BELOW_BASELINE","PRICE_BELOW_MINIMUM","WAS_PRICE_NOT_VERIFIED","SHIPPING_PROFILE_INVALID"],
     events: ["offers.offer.created","offers.offer.status_changed"],
     screens: ["seller/offer","seller/catalog-match"],
     phase: 1,
@@ -2313,7 +2313,7 @@ export const endpoints = defineEndpoints({
       }),
     response: () => SellerOfferDetail,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","PRODUCT_NOT_PURCHASABLE","SELLER_RESTRICTED"],
+    errors: ["BRAND_NOT_AUTHORIZED","ILLEGAL_TRANSITION","PRODUCT_NOT_PURCHASABLE","SELLER_RESTRICTED"],
     events: ["offers.offer.status_changed"],
     screens: ["seller/offer","seller/products"],
     phase: 1,
@@ -2376,7 +2376,7 @@ export const endpoints = defineEndpoints({
       }),
     response: () => SellerOfferDetail,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","SELLER_RESTRICTED"],
+    errors: ["BRAND_NOT_AUTHORIZED","ILLEGAL_TRANSITION","SELLER_RESTRICTED"],
     events: ["offers.offer.status_changed"],
     screens: ["seller/products"],
     phase: 1,
@@ -2777,7 +2777,7 @@ export const endpoints = defineEndpoints({
     body: () => OfficialOfferInput,
     response: () => OfferAdminDetail,
     status: 201,
-    errors: ["VALIDATION_FAILED","PRODUCT_NOT_PURCHASABLE","DUPLICATE_OFFER","MISSING_ITEMS_REQUIRED","RETURN_TERMS_BELOW_BASELINE","WAS_PRICE_NOT_VERIFIED"],
+    errors: ["BRAND_NOT_AUTHORIZED","VALIDATION_FAILED","PRODUCT_NOT_PURCHASABLE","DUPLICATE_OFFER","MISSING_ITEMS_REQUIRED","RETURN_TERMS_BELOW_BASELINE","WAS_PRICE_NOT_VERIFIED"],
     audited: true,
     events: ["offers.offer.created","offers.offer.status_changed"],
     screens: ["admin/official","ops/return-inspection"],
@@ -2818,7 +2818,7 @@ export const endpoints = defineEndpoints({
       }),
     response: () => OfferAdminDetail,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","PRODUCT_NOT_PURCHASABLE"],
+    errors: ["BRAND_NOT_AUTHORIZED","ILLEGAL_TRANSITION","PRODUCT_NOT_PURCHASABLE"],
     audited: true,
     events: ["offers.offer.status_changed"],
     screens: ["admin/official"],
@@ -2861,7 +2861,7 @@ export const endpoints = defineEndpoints({
       }),
     response: () => OfferAdminDetail,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION"],
+    errors: ["BRAND_NOT_AUTHORIZED","ILLEGAL_TRANSITION"],
     audited: true,
     events: ["offers.offer.status_changed"],
     screens: ["admin/official"],
@@ -3364,6 +3364,7 @@ export const spec = defineModuleSpec({
       "sellers.seller.reinstated": "restoreEligibility on offers made ineligible by liftedRestrictionId or endedSuspensionId, except offers still covered by remainingRestrictionIds",
       "sellers.launch_review.decided": "outcome passed: publish the seller's drafts waiting with publish_on_approval (approved product, complete offer; out_of_stock when available = 0) and clear statusReason awaiting_launch_review. changes_needed: keep them in draft",
       "sellers.seller.closed": "Remove all the seller's offers (reason seller_closed)",
+      "catalog.brand.changed": "A brand blocked, made official_only or authorized_list (or its authorized list changed): the offers on its products the brand no longer allows become Ineligible (brand_not_authorized, ineligible_source brand); offers it allows again come back unless another cause still stops them",
       "catalog.product.publication_changed": "Hidden or Suspended → offers Ineligible (product_hidden / product_suspended); Active → restoreEligibility",
       "catalog.product.approved": "Publish draft offers with publishOnApproval on that product; refresh content_gaps",
       "catalog.product.merged": "Move offers from the duplicate to the kept product, mapping variants by options; unmatched variants are paused and the seller told. Each moved offer's stock item follows it (inventory.updateStockItem with the kept productId / variantId) and its title is refreshed",
@@ -3469,6 +3470,10 @@ export const spec = defineModuleSpec({
     }
   },
   errorCodes: {
+    "BRAND_NOT_AUTHORIZED": {
+      "status": 409,
+      "meaning": "The product's brand does not let this seller sell it: blocked, official_only (Official Store only) or authorized_list without this seller"
+    },
     "PRODUCT_NOT_PURCHASABLE": {
       "status": 409,
       "meaning": "The product is not approved and Active. Save as draft with publishOnApproval, or wait for review."

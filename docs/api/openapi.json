@@ -16151,7 +16151,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nBRAND_NOT_ACTIVE: The product's brand is under review or blocked; decide the brand first\nSAME_REVIEWER: The person who created, edited or submitted an Official Store product cannot approve it.",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nBRAND_NOT_ACTIVE: The product's brand is under review or blocked; decide the brand first\nSAME_REVIEWER: The person who created, edited or submitted an Official Store product cannot approve it.\nBRAND_NOT_AUTHORIZED: The brand does not let this seller sell it (blocked, official_only or not on the authorized list): approving the submission or the offer is refused",
             "content": {
               "application/json": {
                 "schema": {
@@ -68634,7 +68634,7 @@
             }
           },
           "409": {
-            "description": "PRODUCT_NOT_PURCHASABLE: The product is not approved and Active. Save as draft with publishOnApproval, or wait for review.\nDUPLICATE_OFFER: This seller already has a New offer for this variant, or the seller SKU is in use. details.offerId\nSELLER_RESTRICTED: A restriction covers this activity. details.reason, details.affectedActivity, details.appealRoute",
+            "description": "BRAND_NOT_AUTHORIZED: The product's brand does not let this seller sell it: blocked, official_only (Official Store only) or authorized_list without this seller\nPRODUCT_NOT_PURCHASABLE: The product is not approved and Active. Save as draft with publishOnApproval, or wait for review.\nDUPLICATE_OFFER: This seller already has a New offer for this variant, or the seller SKU is in use. details.offerId\nSELLER_RESTRICTED: A restriction covers this activity. details.reason, details.affectedActivity, details.appealRoute",
             "content": {
               "application/json": {
                 "schema": {
@@ -69246,7 +69246,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nPRODUCT_NOT_PURCHASABLE: The product is not approved and Active. Save as draft with publishOnApproval, or wait for review.\nSELLER_RESTRICTED: A restriction covers this activity. details.reason, details.affectedActivity, details.appealRoute",
+            "description": "BRAND_NOT_AUTHORIZED: The product's brand does not let this seller sell it: blocked, official_only (Official Store only) or authorized_list without this seller\nILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nPRODUCT_NOT_PURCHASABLE: The product is not approved and Active. Save as draft with publishOnApproval, or wait for review.\nSELLER_RESTRICTED: A restriction covers this activity. details.reason, details.affectedActivity, details.appealRoute",
             "content": {
               "application/json": {
                 "schema": {
@@ -69569,7 +69569,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nSELLER_RESTRICTED: A restriction covers this activity. details.reason, details.affectedActivity, details.appealRoute",
+            "description": "BRAND_NOT_AUTHORIZED: The product's brand does not let this seller sell it: blocked, official_only (Official Store only) or authorized_list without this seller\nILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nSELLER_RESTRICTED: A restriction covers this activity. details.reason, details.affectedActivity, details.appealRoute",
             "content": {
               "application/json": {
                 "schema": {
@@ -71816,7 +71816,7 @@
             }
           },
           "409": {
-            "description": "PRODUCT_NOT_PURCHASABLE: The product is not approved and Active. Save as draft with publishOnApproval, or wait for review.\nDUPLICATE_OFFER: This seller already has a New offer for this variant, or the seller SKU is in use. details.offerId",
+            "description": "BRAND_NOT_AUTHORIZED: The product's brand does not let this seller sell it: blocked, official_only (Official Store only) or authorized_list without this seller\nPRODUCT_NOT_PURCHASABLE: The product is not approved and Active. Save as draft with publishOnApproval, or wait for review.\nDUPLICATE_OFFER: This seller already has a New offer for this variant, or the seller SKU is in use. details.offerId",
             "content": {
               "application/json": {
                 "schema": {
@@ -72029,7 +72029,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nPRODUCT_NOT_PURCHASABLE: The product is not approved and Active. Save as draft with publishOnApproval, or wait for review.",
+            "description": "BRAND_NOT_AUTHORIZED: The product's brand does not let this seller sell it: blocked, official_only (Official Store only) or authorized_list without this seller\nILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nPRODUCT_NOT_PURCHASABLE: The product is not approved and Active. Save as draft with publishOnApproval, or wait for review.",
             "content": {
               "application/json": {
                 "schema": {
@@ -72247,7 +72247,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
+            "description": "BRAND_NOT_AUTHORIZED: The product's brand does not let this seller sell it: blocked, official_only (Official Store only) or authorized_list without this seller\nILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
             "content": {
               "application/json": {
                 "schema": {
@@ -181795,7 +181795,8 @@
               "removed_by_staff",
               "ended_by_seller",
               "enforcement",
-              "fulfillment_service_suspended"
+              "fulfillment_service_suspended",
+              "brand_not_authorized"
             ],
             "description": "fulfillment_service_suspended: the seller's Fulfilled by Marketly enrollment is suspended or offboarding, so the offer stops selling (it never switches to seller shipping); restored when the enrollment is reinstated or the SKU leaves the service"
           },

@@ -442,7 +442,7 @@
     },
     "StatusReason": {
       "code": {
-        "type": "enum(awaiting_launch_review|seller_restricted|seller_suspended|seller_closed|product_hidden|product_suspended|product_merged|staff_hold|removed_by_staff|ended_by_seller|enforcement|fulfillment_service_suspended)",
+        "type": "enum(awaiting_launch_review|seller_restricted|seller_suspended|seller_closed|product_hidden|product_suspended|product_merged|staff_hold|removed_by_staff|ended_by_seller|enforcement|fulfillment_service_suspended|brand_not_authorized)",
         "desc": "fulfillment_service_suspended: the seller's Fulfilled by Marketly enrollment is suspended or offboarding, so the offer stops selling (it never switches to seller shipping); restored when the enrollment is reinstated or the SKU leaves the service"
       },
       "text": "text",
@@ -1228,7 +1228,7 @@
         "warranty_handled_by": "text?",
         "status": "text (draft|active|paused|out_of_stock|ineligible|removed)",
         "status_before_ineligible": "text?",
-        "ineligible_source": "jsonb? ({ kind: restriction|suspension|product|staff|fulfillment_service, id })",
+        "ineligible_source": "jsonb? ({ kind: restriction|suspension|product|staff|fulfillment_service|brand, id })",
         "status_reason": "jsonb?",
         "publish_on_approval": "bool",
         "content_gaps": "text[]",
@@ -1819,6 +1819,7 @@
       "response": "SellerOfferDetail",
       "status": 201,
       "errors": [
+        "BRAND_NOT_AUTHORIZED",
         "VALIDATION_FAILED",
         "PRODUCT_NOT_PURCHASABLE",
         "VARIANT_NOT_IN_PRODUCT",
@@ -1885,6 +1886,7 @@
       },
       "response": "SellerOfferDetail",
       "errors": [
+        "BRAND_NOT_AUTHORIZED",
         "ILLEGAL_TRANSITION",
         "PRODUCT_NOT_PURCHASABLE",
         "SELLER_RESTRICTED"
@@ -1964,6 +1966,7 @@
       },
       "response": "SellerOfferDetail",
       "errors": [
+        "BRAND_NOT_AUTHORIZED",
         "ILLEGAL_TRANSITION",
         "SELLER_RESTRICTED"
       ],
@@ -2417,6 +2420,7 @@
       "response": "OfferAdminDetail",
       "status": 201,
       "errors": [
+        "BRAND_NOT_AUTHORIZED",
         "VALIDATION_FAILED",
         "PRODUCT_NOT_PURCHASABLE",
         "DUPLICATE_OFFER",
@@ -2474,6 +2478,7 @@
       },
       "response": "OfferAdminDetail",
       "errors": [
+        "BRAND_NOT_AUTHORIZED",
         "ILLEGAL_TRANSITION",
         "PRODUCT_NOT_PURCHASABLE"
       ],
@@ -2524,6 +2529,7 @@
       },
       "response": "OfferAdminDetail",
       "errors": [
+        "BRAND_NOT_AUTHORIZED",
         "ILLEGAL_TRANSITION"
       ],
       "audited": true,
@@ -2956,6 +2962,10 @@
         "does": "Remove all the seller's offers (reason seller_closed)"
       },
       {
+        "name": "catalog.brand.changed",
+        "does": "A brand blocked, made official_only or authorized_list (or its authorized list changed): the offers on its products the brand no longer allows become Ineligible (brand_not_authorized, ineligible_source brand); offers it allows again come back unless another cause still stops them"
+      },
+      {
         "name": "catalog.product.publication_changed",
         "does": "Hidden or Suspended → offers Ineligible (product_hidden / product_suspended); Active → restoreEligibility"
       },
@@ -3143,6 +3153,10 @@
     }
   ],
   "errorCodes": {
+    "BRAND_NOT_AUTHORIZED": {
+      "status": 409,
+      "meaning": "The product's brand does not let this seller sell it: blocked, official_only (Official Store only) or authorized_list without this seller"
+    },
     "PRODUCT_NOT_PURCHASABLE": {
       "status": 409,
       "meaning": "The product is not approved and Active. Save as draft with publishOnApproval, or wait for review."

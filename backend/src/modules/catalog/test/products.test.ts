@@ -315,3 +315,13 @@ describe('Official Store products', () => {
     expect((await a.admin('POST', '/products', { title: 'x' }, noPerm)).statusCode).toBe(403);
   });
 });
+
+describe('brand rules at approval', () => {
+  it('does not approve a submission from a seller the brand does not authorize', async () => {
+    const listed = await brand(t, 'Listed Only', { sellingPolicy: 'authorized_list', authorizedSellerIds: [] });
+    const { id } = await sellerProduct(t, newId(), { brandId: listed.id, categoryId: cat.id });
+    const res = await a.admin('POST', `/products/${id}/approve`, {}, auth(callers.staff()));
+    expect(res.statusCode, res.body).toBe(409);
+    expect(res.json().error.code).toBe('BRAND_NOT_AUTHORIZED');
+  });
+});

@@ -45,6 +45,9 @@ export class CatalogReview extends CatalogProducts {
       if (brand && brand.status !== 'active') {
         throw new AppError('BRAND_NOT_ACTIVE', `${brand.name} is ${brand.status === 'blocked' ? 'blocked' : 'under review'}; decide the brand first.`, { brandId: brand.id, status: brand.status });
       }
+      // the brand check blocks approval (the other checks stay advisory): the submitting seller may not sell the brand
+      const check = await this.brandCheck(row);
+      if (check.result === 'fail') throw new AppError('BRAND_NOT_AUTHORIZED', `${check.message}: the product can't be approved for this seller.`, { brandId: brand?.id ?? null });
     }
     return this.decide(id, 'approve', { reason: note?.trim() || null, fields: {} }, by);
   }

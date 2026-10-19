@@ -39,6 +39,29 @@ export class CatalogService extends CatalogAdmin implements CatalogPublicApi {
     return Boolean(row && !row.merged_into_id && row.review_state === 'approved' && row.publication === 'active');
   }
 
+  /**
+   * Whether the product's brand lets this seller (null: the Official Store) sell it: nobody sells a blocked brand,
+   * official_only is the Official Store's, authorized_list is for the sellers on the brand's list
+   */
+  async brandSellerCheck(productId: string, sellerId: string | null): Promise<{ allowed: boolean; reason: string | null; brandId: string | null }> {
+    const p = await this.repo.getProduct(productId);
+    const brand = p?.brand_id ? await this.repo.getBrand(p.brand_id) : undefined;
+    if (!brand) return { allowed: true, reason: null, brandId: null };
+    const no = (reason: string) => ({ allowed: false, reason, brandId: brand.id });
+    if (brand.status === 'blocked') return no(`${brand.name} is blocked on Marketly`);
+    if (!sellerId) return { allowed: true, reason: null, brandId: brand.id };
+    if (brand.selling_policy === 'official_only') return no(`${brand.name} is sold by the Official Store only`);
+    if (brand.selling_policy === 'authorized_list' && !(await this.repo.authorizedSellers([brand.id])).some((a) => a.seller_id === sellerId)) {
+      return no(`Only sellers authorized by ${brand.name} can sell it`);
+    }
+    return { allowed: true, reason: null, brandId: brand.id };
+  }
+
+  /** Ids of the products of a brand (offers re-checks their offers when the brand's rules change) */
+  async productIdsOfBrand(brandId: string): Promise<string[]> {
+    return (await this.repo.productsOfBrand(brandId, [])).map((p) => p.id);
+  }
+
   /** Frozen copy of title, brand, options and version stored on an order item (plan ch. 8: purchases keep what was accepted) */
   async snapshotForOrder(variantId: string): Promise<ProductSnapshot> {
     const variant = await this.repo.getVariant(variantId);

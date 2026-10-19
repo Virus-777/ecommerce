@@ -670,7 +670,7 @@ export class CatalogProducts extends CatalogTaxonomy {
     };
   }
 
-  private async brandCheck(p: ProductRow): Promise<CheckResult> {
+  protected async brandCheck(p: ProductRow): Promise<CheckResult> {
     const out = (result: CheckResult['result'], message: string, details: string[] = []): CheckResult => ({ kind: 'brand_authorization', result, message, details, evidence: [] });
     if (!p.brand_id) return out('warn', 'No brand chosen');
     const brand = await this.repo.getBrand(p.brand_id);
