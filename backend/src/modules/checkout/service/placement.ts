@@ -87,12 +87,13 @@ export class Placement {
     }
   }
 
-  private async transition(id: string, from: string[], event: Event, patch: Partial<SessionRow> = {}): Promise<{ session: SessionRow; won: boolean }> {
+  private async transition(id: string, from: string[], event: Event, patch: Partial<SessionRow> | ((s: SessionRow) => Partial<SessionRow>) = {}): Promise<{ session: SessionRow; won: boolean }> {
     return this.core.repo.transaction(async (tx) => {
       const s = (await tx.getSession(id, { forUpdate: true }))!;
       if (!from.includes(s.status)) return { session: s, won: false };
       const status = checkoutSessionMachine.next(s.status as Status, event);
-      return { session: await tx.updateSession(id, { ...patch, status, updated_at: this.now() }), won: true };
+      const fields = typeof patch === 'function' ? patch(s) : patch;
+      return { session: await tx.updateSession(id, { ...fields, status, updated_at: this.now() }), won: true };
     });
   }
 
@@ -712,12 +713,12 @@ export class Placement {
   async failPayment(session: SessionRow, decline: payments.Decline | null, by: By): Promise<SessionRow> {
     const minutes = Number(await this.ctx.settings.get('retryWindowMinutes')) || 30;
     const holdUntil = new Date(this.now().getTime() + minutes * 60_000);
-    const t = await this.transition(session.id, ['placing', 'awaiting_action', 'payment_pending'], 'payment_declined', { hold_until: holdUntil, credit_hold_id: null });
+    // the decline is written with the status: a request that loses the race (the payments event got here first) reads the reason, not a bare failure
+    const t = await this.transition(session.id, ['placing', 'awaiting_action', 'payment_pending'], 'payment_declined', (s) => ({ hold_until: holdUntil, credit_hold_id: null, ...this.core.paymentPatch({ ...this.core.payment(s), intentState: 'failed', decline }) }));
     if (!t.won) return t.session;
     const creditHold = session.credit_hold_id;
     const wallet = this.ctx.tryUse('wallet');
     if (wallet && creditHold) await this.core.optional('wallet.releaseHold', () => wallet.releaseHold(creditHold));
-    await this.savePayment(session.id, { intentState: 'failed', decline });
     if (t.session.stock_reservation_id) {
       await this.core.optional('inventory.extendHold', () => this.ctx.use('inventory').extendHold(t.session.stock_reservation_id!, holdUntil.toISOString()));
     }
