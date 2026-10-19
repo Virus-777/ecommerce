@@ -1487,7 +1487,7 @@ Indexes: `(at)`
 | Consumes | From | Does |
 |---|---|---|
 | `orders.order.accepted` | orders | Create pending earnings lots and fee charges per seller item (sale, shipping charged, seller-funded discount, fee); Official Store items go to trading_entries |
-| `orders.item.cancelled` | orders | Reverse the lot; apply the cancellation fee treatment |
+| `orders.item.cancelled` | orders | Reverse the lot; apply the cancellation fee treatment. Before dispatch the shipping stays with the seller while the rest of the package ships; once every item of the package is cancelled, the shipping credited with each of its sales (the customer's and Marketly's) is reversed, once per lot. After dispatch the item's refunded shipping is reversed with it |
 | `orders.item.delivered` | orders | Start the availability clock for the item's lot |
 | `payments.payment.captured` | payments | Record collected money for reconciliation (payments vs orders): card amount plus creditAmount (store credit) per capture, including captures with amount 0 for orders or groups paid entirely by store credit; the daily check compares card captures plus credit with the order total less cancelled items, so mixed and credit-only payments are not mismatches |
 | `returns.refund.approved` | returns | Store the funding split (seller, platform, shared) for the refund |

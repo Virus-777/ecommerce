@@ -2117,7 +2117,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => ProductAdmin,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","BRAND_NOT_ACTIVE"],
+    errors: ["ILLEGAL_TRANSITION","BRAND_NOT_ACTIVE","SAME_REVIEWER"],
     audited: true,
     events: ["catalog.product.approved"],
     screens: ["admin/product-review"],
@@ -2791,6 +2791,10 @@ export const spec = defineModuleSpec({
     }
   },
   errorCodes: {
+    "SAME_REVIEWER": {
+      "status": 409,
+      "meaning": "The person who created, edited or submitted an Official Store product cannot approve it."
+    },
     "BRAND_NOT_ACTIVE": {
       "status": 409,
       "meaning": "The product's brand is under review or blocked; decide the brand first"

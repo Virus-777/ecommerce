@@ -86,7 +86,13 @@ export class CatalogProducts extends CatalogTaxonomy {
 
   async createOfficialDraft(body: ProductInput, by: By) {
     const row = await this.saveProduct({ existing: null, owner: { type: 'official', sellerId: null }, body, by });
+    await this.logWriter(row.id, 'created', by);
     return this.adminView(row, this.staffViewer(by));
+  }
+
+  /** Who wrote an Official Store product, for its two-person approval (CatalogReview.approve) */
+  protected async logWriter(productId: string, action: 'created' | 'edited', by: By) {
+    await this.repo.insertLog({ id: newId(), product_id: productId, action, reason: null, fields: {} as never, actor_kind: by.actor.kind, actor_id: by.actor.id ?? null, at: this.now() });
   }
 
   /** Drafts and products with changes requested are edited in place; an approved product's edit goes back to review (content_change) */
@@ -96,6 +102,7 @@ export class CatalogProducts extends CatalogTaxonomy {
       throw new AppError('ILLEGAL_TRANSITION', `A ${existing.review_state.replace('_', ' ')} product can't be edited.`, { from: existing.review_state, event: 'edit' });
     }
     const row = await this.saveProduct({ existing, owner: { type: 'official', sellerId: null }, body, by });
+    await this.logWriter(row.id, 'edited', by);
     if (existing.review_state !== 'approved') return this.adminView(row, this.staffViewer(by));
     const ref = await this.submissionRef();
     const clock = await this.reviewClock();

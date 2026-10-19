@@ -2125,7 +2125,7 @@ export const endpoints = defineEndpoints({
     permission: "advertising.campaigns.review",
     scope: "staff",
     summary: "Approve one review step (the campaign is approved when all steps are)",
-    desc: "A billed seller request is approved only while paid seller ads are on (PAID_ADS_DISABLED) and the seller may advertise (sellers.canSell, FORBIDDEN). The step is chosen from the caller's access roles (access.rolesOf), not from the request: Advertising (placement, schedule, limits) or Content/Marketing (creative, claims, links). The same person cannot approve two required steps.",
+    desc: "A billed seller request is approved only while paid seller ads are on (PAID_ADS_DISABLED) and the seller may advertise (sellers.canSell, FORBIDDEN). The step is chosen from the caller's access roles (access.rolesOf), not from the request: Advertising (placement, schedule, limits) or Content/Marketing (creative, claims, links). The same person cannot approve two required steps, and the person who created the campaign approves none (SAME_REVIEWER).",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -3297,7 +3297,7 @@ export const spec = defineModuleSpec({
     },
     "SAME_REVIEWER": {
       "status": 409,
-      "meaning": "The same person cannot approve two required review steps."
+      "meaning": "The same person cannot approve two required review steps, and the campaign creator approves none."
     },
     "PROMOTION_NOT_STARTED": {
       "status": 409,

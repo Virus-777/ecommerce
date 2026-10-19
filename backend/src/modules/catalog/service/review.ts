@@ -39,6 +39,7 @@ export class CatalogReview extends CatalogProducts {
   async approve(id: string, note: string | null | undefined, by: By): Promise<ProductAdmin> {
     const row = await this.product(id);
     productReviewMachine.next(row.review_state as never, 'approve');
+    if (!row.owner_seller_id && (await this.wroteSinceDecision(id, by))) throw this.ctx.error('SAME_REVIEWER', 'You created, edited or sent this Official Store product for review; someone else approves it.');
     if (row.brand_id) {
       const brand = await this.repo.getBrand(row.brand_id);
       if (brand && brand.status !== 'active') {
@@ -79,6 +80,17 @@ export class CatalogReview extends CatalogProducts {
       by,
     );
     return this.adminView(after, this.staffViewer(by));
+  }
+
+  /** Whether `by` created, edited or submitted the product since its last decision (review_log, newest first) */
+  private async wroteSinceDecision(id: string, by: By): Promise<boolean> {
+    const me = by.actor.id;
+    if (!me) return false;
+    for (const l of (await this.repo.logsOf([id])).reverse()) {
+      if (Object.values(DECISION_LOG).includes(l.action)) return false;
+      if ((l.action === 'created' || l.action === 'edited' || l.action === 'submitted') && l.actor_id === me) return true;
+    }
+    return false;
   }
 
   private async decideTx(id: string, decision: Decision, input: { reason: string | null; fields: Record<string, string> }, by: By) {

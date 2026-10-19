@@ -1367,7 +1367,7 @@ Checked through the access module (limits per role, second reviewer).
 | `SECTION_LOCKED` | 409 | Ad positions are controlled by advertising and cannot be edited here. |
 | `SLUG_TAKEN` | 409 | Another page or article uses this URL. |
 | `DRAFT_EXISTS` | 409 | The policy already has an open draft version. |
-| `SAME_REVIEWER` | 409 | The author cannot approve their own article, news post or homepage draft. |
+| `SAME_REVIEWER` | 409 | Whoever created, edited, submitted or restored an article, news post, page or homepage draft since it last went live cannot approve it. |
 
 ## Background jobs
 

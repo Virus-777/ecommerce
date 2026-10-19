@@ -572,6 +572,8 @@ export class CampaignsPart extends Part {
     // a billed seller request goes live only while paid seller ads are on and the seller may advertise
     if (row.seller_id && row.origin === 'seller_request' && row.billing !== 'none') await this.core.assertPaidSellerAds(row.seller_id);
     const reviewer = encodeActor(by.actor);
+    // the two review steps are two people besides whoever made the campaign
+    if (row.created_by === reviewer) throw this.ctx.error('SAME_REVIEWER', 'You created this campaign; two other people approve its review steps.');
     const done = await this.repo.transaction(async (tx) => {
       const locked = await tx.get('campaigns', id, { forUpdate: true });
       if (!locked) throw notFound('Campaign');

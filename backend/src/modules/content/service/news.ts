@@ -266,7 +266,7 @@ export class ContentNews extends ContentPolicies {
       draftVersion: draft?.number ?? null,
       liveVersion: live?.number ?? null,
       draftAuthor,
-      canApprove: this.awaitingReview(r, draft) && !isAuthor,
+      canApprove: this.awaitingReview(r, draft) && !isAuthor && !(await this.isOwnWork('news', r.id, v, viewer)),
       draftReview: review ? { state: review.state, by: review.by ?? actorFromKey(null), at: review.at ?? iso(draft!.created_at)!, reason: review.reason ?? null } : null,
       reviewRequired: reviewOn,
       schedule: this.schedule(r.publish_at, r.unpublish_at, await this.marketTimeZone()),
@@ -422,6 +422,7 @@ export class ContentNews extends ContentPolicies {
       throw this.slugConflictNews(err, snap.slug);
     }
     await media.commit();
+    await this.logAction('news', id, 'create', by);
     await this.audit({ action: 'content.news.create', actionLabel: 'Created news post', target: { type: 'news_post', id, label: snap.title }, after: snap }, by);
     return this.newsAdmin(row, by);
   }
@@ -453,6 +454,7 @@ export class ContentNews extends ContentPolicies {
       throw this.slugConflictNews(err, snap.slug);
     }
     await media.commit();
+    await this.logAction('news', id, 'edit', by, input.changeNote ?? null);
     await this.audit({ action: 'content.news.update', actionLabel: 'Edited news post draft', target: { type: 'news_post', id, label: snap.title }, before: draftSnap ?? this.newsSnapOf(live), after: snap, reason: input.changeNote ?? null }, by);
     return this.newsAdmin(row, by);
   }
@@ -492,7 +494,8 @@ export class ContentNews extends ContentPolicies {
       case 'requestChanges': {
         const approving = body.action === 'approve';
         if (!approving) requireText(body.reason, 'reason', 'Say what needs to change');
-        if (approving && draft?.author_id && draft.author_id === by.actor.id) throw this.ctx.error('SAME_REVIEWER', 'The writer cannot approve their own post; someone else approves it.');
+        // a restored post has no draft: what goes back live is the live version
+        if (approving) await this.assertNotOwnWork('news', id, draft ?? (r.live_version_id ? await this.repo.getVersion(r.live_version_id) : undefined), by, 'post');
         // a live post's draft in review, or an approved one sent back before it goes live
         if (status !== 'in_review' && (draftReview?.state === 'in_review' || (!approving && draftReview?.state === 'approved'))) {
           await this.setNewsDraftReview(r, approving ? { state: 'approved', by: by.actor, at: now.toISOString() } : { state: 'changes_requested', by: by.actor, at: now.toISOString(), reason: body.reason!.trim() });

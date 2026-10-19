@@ -112,7 +112,7 @@ describe('search with the real catalog', () => {
     const stock = await inventory.createStockItem({ ownerType: 'official', offerId, sku: 'OFF-STUDIO-1', productId: id, variantId, condition: 'new', label: 'Black', initialAvailable: 12 });
     offers.set(id, { id: offerId, productId: id, variantId, price: 21900, stockItemId: stock.id });
     expect((await call('POST', `/api/admin/catalog/products/${id}/submit`)).status).toBe(200);
-    const approved = await call('POST', `/api/admin/catalog/products/${id}/approve`, {});
+    const approved = await call('POST', `/api/admin/catalog/products/${id}/approve`, {}, callers.staff()); // a second person approves
     expect(approved.status, JSON.stringify(approved.body)).toBe(200);
 
     const visitor = callers.visitor();

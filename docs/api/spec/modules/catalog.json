@@ -1906,6 +1906,7 @@
       "method": "POST",
       "path": "/products/{id}/approve",
       "summary": "Approve a submission",
+      "desc": "Official Store products (no seller) need a second person: whoever created, edited or sent the product for review since its last decision cannot approve it (SAME_REVIEWER).",
       "auth": "staff",
       "permission": "catalog.products.review",
       "params": {
@@ -1917,7 +1918,8 @@
       "response": "ProductAdmin",
       "errors": [
         "ILLEGAL_TRANSITION",
-        "BRAND_NOT_ACTIVE"
+        "BRAND_NOT_ACTIVE",
+        "SAME_REVIEWER"
       ],
       "audited": true,
       "events": [
@@ -2674,6 +2676,10 @@
     }
   ],
   "errorCodes": {
+    "SAME_REVIEWER": {
+      "status": 409,
+      "meaning": "The person who created, edited or submitted an Official Store product cannot approve it."
+    },
     "BRAND_NOT_ACTIVE": {
       "status": 409,
       "meaning": "The product's brand is under review or blocked; decide the brand first"

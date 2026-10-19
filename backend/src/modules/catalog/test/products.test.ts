@@ -294,7 +294,11 @@ describe('Official Store products', () => {
     const sub = await a.admin('POST', `/products/${id}/submit`);
     expect(sub.statusCode, sub.body).toBe(200);
     expect(t.eventsNamed('catalog.product.submitted').map((e) => e.payload)).toContainEqual(expect.objectContaining({ productId: id, ownerSellerId: null, kind: 'new' }));
-    await a.admin('POST', `/products/${id}/approve`, {});
+    // whoever created and submitted it does not approve it
+    const own = await a.admin('POST', `/products/${id}/approve`, {});
+    expect(own.statusCode).toBe(409);
+    expect(own.json().error.code).toBe('SAME_REVIEWER');
+    await a.admin('POST', `/products/${id}/approve`, {}, auth(callers.staff())); // a second person approves
     t.events.length = 0;
     const edit = await a.admin('PATCH', `/products/${id}`, { title: 'Aurora wireless headphones, 2nd gen' });
     expect(edit.statusCode, edit.body).toBe(200);

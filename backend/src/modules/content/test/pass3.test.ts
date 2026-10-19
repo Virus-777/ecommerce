@@ -184,3 +184,21 @@ describe('deals limited to one promotion', () => {
     }
   });
 });
+
+describe('homepage restore while review is on', () => {
+  it('publishes straight away only a layout that was live before; any other version is restored as a draft', async () => {
+    h.settingsValues['content.reviewRequired'] = { page: false, section: true, article: true };
+    try {
+      const added = await h.admin('POST', '/homepage/sections', { kind: 'promise_strip', heading: 'Never reviewed', promiseItems: [{ icon: 'truck', title: 'Fast', body: 'Quick' }, { icon: 'return', title: 'Returns', body: '30 days' }] });
+      expect(added.statusCode, added.body).toBe(201);
+      const versions = (await h.admin('GET', '/homepage/versions')).json().items as { number: number; state: string; publishedAt?: string | null }[];
+      const unreviewed = versions.find((v) => v.state === 'draft')!;
+      const res = await h.admin('POST', `/homepage/versions/${unreviewed.number}/restore`, { reason: 'Skip the review', publish: true });
+      expect(res.statusCode).toBe(409);
+      expect(res.json().error).toMatchObject({ code: 'ILLEGAL_TRANSITION', details: { reason: 'review_required' } });
+      expect((await h.admin('POST', `/homepage/versions/${unreviewed.number}/restore`, { reason: 'Review it first', publish: false })).statusCode).toBe(200);
+    } finally {
+      delete h.settingsValues['content.reviewRequired'];
+    }
+  });
+});

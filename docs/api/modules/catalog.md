@@ -1014,6 +1014,7 @@ Checked through the access module (limits per role, second reviewer).
 
 | Code | Status | Meaning |
 |---|---|---|
+| `SAME_REVIEWER` | 409 | The person who created, edited or submitted an Official Store product cannot approve it. |
 | `BRAND_NOT_ACTIVE` | 409 | The product's brand is under review or blocked; decide the brand first |
 | `DATASET_UNAVAILABLE` | 409 | reports refused the export dataset: it is not in the export registry or catalog exports are switched off (raised by reports.requestExport) |
 

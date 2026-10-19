@@ -457,6 +457,7 @@ export class ContentPages extends ContentTiles {
       await media.undo();
       throw this.slugConflict(err, snap.slug!);
     }
+    await this.logAction('page', id, 'create', by);
     await this.audit({ action: 'content.page.create', actionLabel: 'Created page', target: { type: 'page', id, label: row.title }, after: snap }, by);
     return this.pageAdmin(row);
   }
@@ -499,6 +500,7 @@ export class ContentPages extends ContentTiles {
       throw this.slugConflict(err, snap.slug!);
     }
     await media.commit();
+    await this.logAction('page', id, 'edit', by, input.changeNote ?? null);
     await this.audit({ action: 'content.page.update', actionLabel: 'Edited page draft', target: { type: 'page', id, label: row.title }, before: this.stripMeta(this.snapshotOf(draft) ?? this.snapshotOf(live)), after: snap, reason: input.changeNote ?? null }, by);
     return this.pageAdmin(row);
   }
@@ -531,6 +533,7 @@ export class ContentPages extends ContentTiles {
     const draft = p.draft_version_id ? await this.repo.getVersion(p.draft_version_id) : undefined;
     const event = body.approve ? 'approve' : 'requestChanges';
     if (!body.approve) requireText(body.reason, 'reason', 'Say what needs to change');
+    if (body.approve) await this.assertNotOwnWork('page', id, draft ?? (p.live_version_id ? await this.repo.getVersion(p.live_version_id) : undefined), by, 'page');
     if (p.status !== 'in_review' && this.snapshotOf(draft)?._review?.state === 'in_review') {
       await this.setDraftReview(p, body.approve ? { state: 'approved', by: by.actor, at: this.now().toISOString() } : null);
     } else {

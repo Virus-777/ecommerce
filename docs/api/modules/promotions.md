@@ -1123,7 +1123,7 @@ Indexes: `unique (campaign_id, seller_id)`, `(seller_id, state)`, `(state, respo
 
 Indexes: `unique (participation_id, offer_id)`, `(offer_id)`
 
-**flash_items**: Deal price, deal stock and purchase limit per offer in a flash sale
+**flash_items**: Deal price, deal stock and purchase limit per offer in a flash sale. approved_* keep what Finance confirmed (set at confirmFunding): a live or paused sale can only change within them
 
 | Column | Type |
 |---|---|
@@ -1138,6 +1138,9 @@ Indexes: `unique (participation_id, offer_id)`, `(offer_id)`
 | purchase_limit | int |
 | state | text |
 | sold_out_at | timestamptz? |
+| approved_deal_price | bigint? |
+| approved_deal_stock | int? |
+| approved_purchase_limit | int? |
 
 Indexes: `unique (campaign_id, offer_id)`, `(offer_id, state)`
 

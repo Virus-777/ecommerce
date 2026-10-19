@@ -304,3 +304,16 @@ describe('served apps (Settings › Website and Android app)', () => {
     }
   });
 });
+
+describe('the campaign creator is not one of its reviewers', () => {
+  it('refuses a review step approved by the person who created the campaign', async () => {
+    const creativeIds = (await openingCreatives(k)).map((c: any) => c.id);
+    const created = await k.call('POST', `${ADMIN}/campaigns`, k.staff, campaignInput(k, { creativeIds }));
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    expect((await k.call('POST', `${ADMIN}/campaigns/${created.body.id}/submit`, k.staff, {})).status).toBe(200);
+    const own = await k.call('POST', `${ADMIN}/campaigns/${created.body.id}/approve`, k.staff, { role: 'advertising' });
+    expect(own.status).toBe(409);
+    expect(own.body.error.code).toBe('SAME_REVIEWER');
+    expect((await k.call('POST', `${ADMIN}/campaigns/${created.body.id}/approve`, callers.staff(), { role: 'advertising' })).status).toBe(200);
+  });
+});

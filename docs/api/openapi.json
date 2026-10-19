@@ -4218,7 +4218,7 @@
           "Store API · Advertising"
         ],
         "summary": "Record displays, clicks and dismissals (batched)",
-        "description": "Each event carries the signed impression token from the decision. A dismissal applies the campaign's suppression rule immediately for the visitor. Duplicate events for the same token and kind are ignored. Clicks start the attribution period.\n\n**Screens:** ads/opening, ads/popup, ads/formats, store/home",
+        "description": "Each event carries the signed impression token from the decision. A dismissal applies the campaign's suppression rule immediately for the visitor. Duplicate events for the same token and kind are ignored, and so are displays of a campaign that is no longer live. Clicks start the attribution period. A click on a seller's CPC campaign is billed only after the same impression's display was recorded (displays in a batch count first), and at most once per visitor (visitor or session key, and the signed-in customer) per campaign per market day; other clicks are recorded for reports, unbilled.\n\n**Screens:** ads/opening, ads/popup, ads/formats, store/home",
         "security": [
           {
             "bearer": []
@@ -4615,7 +4615,7 @@
           "Admin API · Advertising"
         ],
         "summary": "Create an ad campaign draft",
-        "description": "**Permission:** `advertising.campaigns.manage`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/ad-campaign",
+        "description": "A campaign for a seller made by staff is unbilled (budget.billing none, VALIDATION_FAILED otherwise): a seller is billed only for ads it requests itself (seller ad requests are its consent).\n\n**Permission:** `advertising.campaigns.manage`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/ad-campaign",
         "security": [
           {
             "bearer": []
@@ -5329,7 +5329,7 @@
           "Admin API · Advertising"
         ],
         "summary": "Approve one review step (the campaign is approved when all steps are)",
-        "description": "The step is chosen from the caller's access roles (access.rolesOf), not from the request: Advertising (placement, schedule, limits) or Content/Marketing (creative, claims, links). The same person cannot approve two required steps.\n\n**Permission:** `advertising.campaigns.review`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `advertising.campaign.status_changed`\n\n**Screens:** admin/ad-campaign, admin/ads",
+        "description": "A billed seller request is approved only while paid seller ads are on (PAID_ADS_DISABLED) and the seller may advertise (sellers.canSell, FORBIDDEN). The step is chosen from the caller's access roles (access.rolesOf), not from the request: Advertising (placement, schedule, limits) or Content/Marketing (creative, claims, links). The same person cannot approve two required steps, and the person who created the campaign approves none (SAME_REVIEWER).\n\n**Permission:** `advertising.campaigns.review`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `advertising.campaign.status_changed`\n\n**Screens:** admin/ad-campaign, admin/ads",
         "security": [
           {
             "bearer": []
@@ -5428,7 +5428,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nSAME_REVIEWER: The same person cannot approve two required review steps.",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nSAME_REVIEWER: The same person cannot approve two required review steps, and the campaign creator approves none.\nPAID_ADS_DISABLED: Paid seller advertising is not enabled yet.",
             "content": {
               "application/json": {
                 "schema": {
@@ -16151,7 +16151,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nBRAND_NOT_ACTIVE: The product's brand is under review or blocked; decide the brand first",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nBRAND_NOT_ACTIVE: The product's brand is under review or blocked; decide the brand first\nSAME_REVIEWER: The person who created, edited or submitted an Official Store product cannot approve it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -24233,7 +24233,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nSAME_REVIEWER: The author cannot approve their own article, news post or homepage draft.",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nSAME_REVIEWER: Whoever created, edited, submitted or restored an article, news post, page or homepage draft since it last went live cannot approve it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -24557,7 +24557,7 @@
           "Admin API · Content"
         ],
         "summary": "Restore an earlier layout (creates a new version; nothing is overwritten)",
-        "description": "**Permission:** `content.homepage.publish`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `content.page.published`\n\n**Screens:** admin/content",
+        "description": "With content.reviewRequired.section on, publish restores straight to live only a version that was live before; any other version is restored as a draft to send for review (ILLEGAL_TRANSITION, reason review_required).\n\n**Permission:** `content.homepage.publish`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `content.page.published`\n\n**Screens:** admin/content",
         "security": [
           {
             "bearer": []
@@ -24638,6 +24638,16 @@
           },
           "404": {
             "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
             "content": {
               "application/json": {
                 "schema": {
@@ -25309,7 +25319,7 @@
           "Admin API · Content"
         ],
         "summary": "Approve or request changes",
-        "description": "**Permission:** `content.pages.publish`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/content",
+        "description": "Approving needs someone who did not create, edit, submit or restore the page since it last went live (SAME_REVIEWER).\n\n**Permission:** `content.pages.publish`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/content",
         "security": [
           {
             "bearer": []
@@ -25402,7 +25412,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nSAME_REVIEWER: Whoever created, edited, submitted or restored an article, news post, page or homepage draft since it last went live cannot approve it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -27137,7 +27147,7 @@
           "Admin API · Content"
         ],
         "summary": "Submit, approve, request changes, schedule, publish, unpublish or remove an article",
-        "description": "One action endpoint for the Content publication state machine on articles. remove needs kind and reason; schedule needs publishAt; requestChanges needs reason. A live article (published or unpublished) edited with PATCH keeps its status while the new draft is reviewed: submit, approve and requestChanges then act on HelpArticleAdmin.draftReview (in_review → approved or changes_requested; submit again after changes_requested), and publish puts the approved draft live (draftReview becomes null). A published article is not scheduled (it would be offline until then): publish its draft, or unpublish it first.\n\n**Permission:** `content.help.manage`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `content.article.published`, `content.page.removed`\n\n**Screens:** admin/help-content",
+        "description": "One action endpoint for the Content publication state machine on articles. approve needs someone who did not create, edit, submit or restore the article since it last went live (SAME_REVIEWER). remove needs kind and reason; schedule needs publishAt; requestChanges needs reason. A live article (published or unpublished) edited with PATCH keeps its status while the new draft is reviewed: submit, approve and requestChanges then act on HelpArticleAdmin.draftReview (in_review → approved or changes_requested; submit again after changes_requested), and publish puts the approved draft live (draftReview becomes null). A published article is not scheduled (it would be offline until then): publish its draft, or unpublish it first.\n\n**Permission:** `content.help.manage`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `content.article.published`, `content.page.removed`\n\n**Screens:** admin/help-content",
         "security": [
           {
             "bearer": []
@@ -27265,7 +27275,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nSAME_REVIEWER: The author cannot approve their own article, news post or homepage draft.",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nSAME_REVIEWER: Whoever created, edited, submitted or restored an article, news post, page or homepage draft since it last went live cannot approve it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -28069,7 +28079,7 @@
           "Admin API · Content"
         ],
         "summary": "Submit, approve, request changes, schedule, publish, unpublish or remove a post",
-        "description": "The Content publication state machine, as for help articles. With content.reviewRequired.news on (default), someone other than the draft's writer approves before it is scheduled or published (SAME_REVIEWER). Approving, scheduling, publishing and unpublishing need content.news.publish; remove needs content.pages.remove, a kind and a reason; requestChanges needs a reason (it also sends back an approved draft). discardDraft drops a live post's unpublished draft; the live post stays as it is.\n\n**Permission:** `content.news.manage`\n\n**Also needs:** `content.news.publish` when body.action = approve; `content.news.publish` when body.action = requestChanges; `content.news.publish` when body.action = schedule; `content.news.publish` when body.action = cancelSchedule; `content.news.publish` when body.action = publish; `content.news.publish` when body.action = unpublish; `content.pages.remove` when body.action = remove\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `content.news.published`, `content.news.unpublished`, `content.page.removed`\n\n**Screens:** admin/news",
+        "description": "The Content publication state machine, as for help articles. With content.reviewRequired.news on (default), someone who did not create, edit, submit or restore the post since it last went live approves (a restored post without a draft is checked against its live version) before it is scheduled or published (SAME_REVIEWER). Approving, scheduling, publishing and unpublishing need content.news.publish; remove needs content.pages.remove, a kind and a reason; requestChanges needs a reason (it also sends back an approved draft). discardDraft drops a live post's unpublished draft; the live post stays as it is.\n\n**Permission:** `content.news.manage`\n\n**Also needs:** `content.news.publish` when body.action = approve; `content.news.publish` when body.action = requestChanges; `content.news.publish` when body.action = schedule; `content.news.publish` when body.action = cancelSchedule; `content.news.publish` when body.action = publish; `content.news.publish` when body.action = unpublish; `content.pages.remove` when body.action = remove\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `content.news.published`, `content.news.unpublished`, `content.page.removed`\n\n**Screens:** admin/news",
         "security": [
           {
             "bearer": []
@@ -28191,7 +28201,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nSAME_REVIEWER: The author cannot approve their own article, news post or homepage draft.",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nSAME_REVIEWER: Whoever created, edited, submitted or restored an article, news post, page or homepage draft since it last went live cannot approve it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -49804,7 +49814,7 @@
           "Admin API · Identity"
         ],
         "summary": "Disable a staff account (offboarding)",
-        "description": "Revokes sessions. access consumes identity.account.disabled to end role assignments and flag lead/backup gaps.\n\n**Permission:** `identity.staff-accounts.manage`\n\n**Step-up:** single-use re-auth token in the body (purpose `staff-account`)\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `identity.account.disabled`\n\n**Screens:** admin/staff",
+        "description": "Revokes sessions and cancels the pending staff invitations the person sent. access consumes identity.account.disabled to end role assignments, cancel the approval requests the person made and flag lead/backup gaps. A Business Owner can be disabled only by another Business Owner (FORBIDDEN), and never the last active one (LAST_BUSINESS_OWNER): access.disableCheck decides.\n\n**Permission:** `identity.staff-accounts.manage`\n\n**Step-up:** single-use re-auth token in the body (purpose `staff-account`)\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `identity.account.disabled`\n\n**Screens:** admin/staff",
         "security": [
           {
             "bearer": []
@@ -49895,7 +49905,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nLAST_BUSINESS_OWNER: At least one active Business Owner must remain: the last one cannot be disabled (access.disableCheck).",
             "content": {
               "application/json": {
                 "schema": {
@@ -85826,7 +85836,7 @@
           "Admin API · Promotions"
         ],
         "summary": "Set flash sale offers, deal prices, deal stock and purchase limits",
-        "description": "Deal stock cannot exceed the offer's available stock at the time of saving (inventory check). Raising deal stock on a live sale restocks sold-out items.\n\n**Permission:** `promotions.campaigns.manage`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/promotion-new\n\n**Launch phase:** 2",
+        "description": "Deal stock cannot exceed the offer's available stock at the time of saving (inventory check). Platform and shared sales: any change to an approved or scheduled sale reopens it to draft for a new Finance confirmation; a live or paused sale can only change within what Finance confirmed (deal price no lower, deal stock and purchase limit no higher, no new offers; removing offers is allowed), else ILLEGAL_TRANSITION with details.items. Raising deal stock on a live sale restocks sold-out items, up to the confirmed deal stock.\n\n**Permission:** `promotions.campaigns.manage`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/promotion-new\n\n**Launch phase:** 2",
         "security": [
           {
             "bearer": []
@@ -85925,7 +85935,7 @@
             }
           },
           "409": {
-            "description": "CAMPAIGN_LOCKED: Edits are locked while Finance reviews the funding.",
+            "description": "CAMPAIGN_LOCKED: Edits are locked while Finance reviews the funding.\nILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
             "content": {
               "application/json": {
                 "schema": {
@@ -86051,7 +86061,7 @@
           "Admin API · Promotions"
         ],
         "summary": "Send to Finance for funding confirmation",
-        "description": "Runs validation (period, scope not empty, funding consistent with seller consent) and builds the funding review checks. Edits lock until Finance decides.\n\n**Permission:** `promotions.campaigns.manage`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `promotions.campaign.submitted`\n\n**Screens:** admin/promotion-new",
+        "description": "Runs validation (period, scope not empty, funding consistent with seller consent, a budget for platform and shared funding so every platform cost passes the approval limit) and builds the funding review checks. Edits lock until Finance decides.\n\n**Permission:** `promotions.campaigns.manage`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `promotions.campaign.submitted`\n\n**Screens:** admin/promotion-new",
         "security": [
           {
             "bearer": []
@@ -86266,7 +86276,7 @@
           "Admin API · Promotions"
         ],
         "summary": "Finance confirms funding",
-        "description": "A budget above the Marketing limit or above the confirming Finance member's limit raises an approval request (access); the campaign stays in review until it is decided. Separation of duties (G65a): the person who created the campaign or sent it to Finance can't confirm its funding (SAME_REVIEWER).\n\n**Permission:** `promotions.funding.confirm`\n\n**Approval:** Approval action promotions.budgets.approve: budget above the Marketing approval limit needs a Finance member whose limit covers it; above that, a second reviewer\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `promotions.campaign.funding_confirmed`\n\n**Screens:** admin/promotion-new",
+        "description": "A budget above the Marketing limit or above the confirming Finance member's limit raises an approval request (access); the campaign stays in review until it is decided. Separation of duties (G65a): the person who created the campaign or sent it to Finance can't confirm its funding (SAME_REVIEWER), and an approval of the budget request decided by that person in the Approvals Inbox is ignored: the campaign stays in review and the request is closed, so another Finance member confirms again. Platform and shared funding without a budget is refused (VALIDATION_FAILED). Confirming saves the flash items' deal price, deal stock and purchase limit as approved.\n\n**Permission:** `promotions.funding.confirm`\n\n**Approval:** Approval action promotions.budgets.approve: budget above the Marketing approval limit needs a Finance member whose limit covers it; above that, a second reviewer\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `promotions.campaign.funding_confirmed`\n\n**Screens:** admin/promotion-new",
         "security": [
           {
             "bearer": []
