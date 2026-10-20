@@ -1,7 +1,7 @@
 # Plan: faster MongoDB search for tens of thousands of products
 
-Status (2026-10-20): **steps 1–4 built** on branch `perf/search-speed` (see §8 for results and what differed from the
-plan); step 5 not started. Scope: the MongoDB search engine (`backend/src/modules/search/mongo-engine.ts`), the
+Status (2026-10-20): **steps 1–5 built** on branch `perf/search-speed` (see §8 and §9 for results and what differed
+from the plan). Scope: the MongoDB search engine (`backend/src/modules/search/mongo-engine.ts`), the
 search copy it reads (`search_documents`, `search_offers`) and a few service steps in `service/queries.ts`.
 No API changes: the store website and the Android app keep calling the same endpoints and get the same answers.
 
@@ -174,6 +174,35 @@ What differed from the plan:
   the featured offer even when it is out of stock, so the count can be below what selecting "In stock" returns.
   Fixing it means changing the facet in both engines.
 
-What is left at 50,000 products in one category: choosing each product's card offer (~0.3 s) and scoring and
-sorting every product for the "Recommended" order (~0.3 s). Step 5's stored card offer and stored ranking factors
-address both, if needed.
+What was left at 50,000 products in one category: choosing each product's card offer (~0.3 s) and scoring and
+sorting every product for the "Recommended" order (~0.3 s). Step 5 (§9) addresses both.
+
+## 9. Step 5 (2026-10-20)
+
+- **Stored card offers** (`cards.ts`): each search document stores its card offer and offer count for the two usual
+  offer filters — none (`card_all`) and in stock only (`card_in_stock`). They are computed in the database from the
+  document's offers and featured offer by every write that changes either (the four offer methods, a rebuilt
+  document, a featured-offer change), by the start-up sync and by a migration. The engine uses them whenever the
+  query's offer filters are one of those two; any other offer filter (seller, condition, price, delivery) still picks
+  the card offer per document.
+- **Stored listing ranks**: `rank_all` / `rank_in_stock` hold the recommended-sort score of a listing (no words) with
+  each card offer, computed by the same `scoreStages` as live ranking, under the weights named in `rank_key`. Writes
+  that change an input (offers, featured offer, rating, popularity, rebuild) set `rank_key` to null; before a
+  recommended listing the engine recomputes the documents whose `rank_key` differs (indexed: usually a handful, all
+  of them once after a new ranking policy or a deploy) and reads the page in index order (category, rank, id). A
+  product changed in the same instant can sort by its previous rank for that one request.
+- **Filter count cache**: facets, summary and price ranges are kept per query for `SEARCH_FACET_CACHE_MS` (default
+  30 s; 0 = off; always off in tests). Product lists are never cached; counts can trail a change by up to the window.
+- Smaller: per-seller and per-condition counts group each document's distinct values first; price presets are
+  counted alongside the other filter counts instead of after them.
+
+| Request (50,000 products in one category) | Before step 5 | After |
+|---|---|---|
+| Category page: product list | 596 ms | 172 ms |
+| Category page: filter counts, first visit | 1,205 ms | 616 ms |
+| Category page: filter counts, repeated within the window | 1,205 ms | ~0 ms |
+| Category with a price filter, by price | 247 ms | 321 ms (noise level; this path doesn't use the stored values) |
+| 20,000 products: list / filter counts | 260 / 510 ms | 61 / 345 ms |
+
+Tests: stored card offers equal the rule through every write; listings equal the computed order for both stock
+states, with extra filters, over several pages, after products change and under new weights; the cache window.
