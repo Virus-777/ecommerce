@@ -276,6 +276,7 @@ async function testEndpoint(module: string, id: string, d: EndpointDef) {
     // the stream opened (send() hung up after the head): 200 with text/event-stream
     const type = r.headers.get('content-type') ?? '';
     record(op, 'right token', r.status === 200 && type.startsWith('text/event-stream') ? headerProblems(r, url) : `expected 200 text/event-stream, got ${brief(r)} (${type})`);
+    results.at(-1)!.detail ??= `→ ${r.status} event stream`;
     return;
   }
   // the middleware's refusals; a handler may still refuse for business reasons on made-up data (403 without these, 400 with its own message)
