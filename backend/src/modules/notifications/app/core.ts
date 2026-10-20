@@ -414,6 +414,11 @@ export class Core {
   /* ---------------------------------------------------------------- audit */
 
   async audit(entry: Omit<audit.RecordInput, 'actor' | 'module' | 'requestId'>, by: { actor: Actor; requestId?: string }) {
-    await this.ctx.tryUse('audit')?.record({ ...entry, actor: by.actor, module: this.ctx.name, requestId: by.requestId });
+    try {
+      await this.ctx.tryUse('audit')?.record({ ...entry, actor: by.actor, module: this.ctx.name, requestId: by.requestId });
+    } catch (err) {
+      // the change is committed; a missing audit entry is logged, never turned into a failed request
+      this.ctx.log[isNotImplemented(err) ? 'debug' : 'error']({ err, action: entry.action }, 'audit entry not recorded');
+    }
   }
 }

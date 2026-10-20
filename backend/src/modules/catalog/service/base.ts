@@ -3,7 +3,7 @@
  * small validation helpers. The use cases build on it (views → taxonomy → products → admin → service).
  */
 import type { Principal } from '../../../kernel/auth/index.js';
-import { AppError, isAppError } from '../../../kernel/errors/index.js';
+import { AppError, isAppError, isNotImplemented } from '../../../kernel/errors/index.js';
 import type { ModuleContext } from '../../../kernel/module-system/index.js';
 import type * as audit from '../../../spec/audit.js';
 import type * as common from '../../../spec/common.js';
@@ -121,7 +121,12 @@ export class CatalogBase {
   }
 
   protected async audit(entry: Omit<audit.RecordInput, 'actor' | 'module' | 'requestId'>, by: By) {
-    await this.ctx.tryUse('audit')?.record({ ...entry, actor: by.actor, module: this.ctx.name, requestId: by.requestId ?? null });
+    try {
+      await this.ctx.tryUse('audit')?.record({ ...entry, actor: by.actor, module: this.ctx.name, requestId: by.requestId ?? null });
+    } catch (err) {
+      // the change is committed; a missing audit entry is logged, never turned into a failed request
+      this.ctx.log[isNotImplemented(err) ? 'debug' : 'error']({ err, action: entry.action }, 'audit entry not recorded');
+    }
   }
 
   /* ---------------------------------------------------------------- media */

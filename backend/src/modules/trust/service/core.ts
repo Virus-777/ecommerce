@@ -4,7 +4,7 @@
  * detection).
  */
 import type { Principal } from '../../../kernel/auth/index.js';
-import { AppError, isAppError } from '../../../kernel/errors/index.js';
+import { AppError, isAppError, isNotImplemented } from '../../../kernel/errors/index.js';
 import type { EventMap } from '../../../kernel/events/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type { ModuleContext, PublicApiMap } from '../../../kernel/module-system/index.js';
@@ -102,7 +102,12 @@ export class Core {
   }
 
   async audit(entry: Omit<audit.RecordInput, 'actor' | 'module' | 'requestId' | 'category'> & { category?: audit.RecordInput['category'] }, by: By) {
-    await this.ctx.tryUse('audit')?.record({ category: 'other', ...entry, actor: by.actor, module: this.ctx.name, requestId: by.requestId ?? null });
+    try {
+      await this.ctx.tryUse('audit')?.record({ category: 'other', ...entry, actor: by.actor, module: this.ctx.name, requestId: by.requestId ?? null });
+    } catch (err) {
+      // the change is committed; a missing audit entry is logged, never turned into a failed request
+      this.ctx.log[isNotImplemented(err) ? 'debug' : 'error']({ err, action: entry.action }, 'audit entry not recorded');
+    }
   }
 
   /** An optional module's answer; off, not built or failing → undefined (the caller degrades) */

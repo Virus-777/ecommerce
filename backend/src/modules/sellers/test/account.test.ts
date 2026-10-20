@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { devClaims } from '../../../kernel/auth/dev.js';
 import { token } from '../../../testing/app.js';
-import { ADMIN, approvedSeller, boot, member, owner, payoutInput, SELLER, staff, STORE, type Kit } from './helpers.js';
+import { ADMIN, approvedSeller, auditOutage, boot, member, owner, payoutInput, SELLER, staff, STORE, type Kit } from './helpers.js';
 
 let kit: Kit;
 beforeAll(async () => {
@@ -361,5 +361,16 @@ describe('admin views', () => {
     expect(JSON.stringify(invitation)).not.toContain(code);
     expect((await kit.call('POST', `${ADMIN}/seller-invitations/${invitation.id}/revoke`, staff())).body.state).toBe('revoked');
     expect((await kit.call('POST', `${ADMIN}/seller-invitations/${invitation.id}/revoke`, staff())).status).toBe(409);
+  });
+
+  it('a change still succeeds when its audit entry cannot be written (logged, never a failed request)', async () => {
+    auditOutage.on = true;
+    try {
+      const res = await kit.call('POST', `${ADMIN}/seller-invitations`, staff(), { email: 'outage@shop.example.com', businessName: 'Outage Shop' });
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect(res.body.invitation.state).toBe('sent');
+    } finally {
+      auditOutage.on = false;
+    }
   });
 });

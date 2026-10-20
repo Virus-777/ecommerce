@@ -18,6 +18,9 @@ export const STORE = '/api/store/sellers';
 export const SELLER = '/api/seller/sellers';
 export const ADMIN = '/api/admin/sellers';
 
+/** Set on to make the audit API fail (an audit store outage) */
+export const auditOutage = { on: false };
+
 export type Decision = 'allowed' | 'approval_required' | 'denied';
 
 export interface Kit {
@@ -98,6 +101,7 @@ export async function boot(o: { apiStubs?: NonNullable<Parameters<typeof buildTe
       },
       audit: {
         record: async (entry: audit.RecordInput) => {
+          if (auditOutage.on) throw new Error('audit store unavailable');
           audits.push(entry);
           return newId();
         },

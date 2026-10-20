@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { SYSTEM_ACTOR } from '../../kernel/auth/index.js';
-import { AppError } from '../../kernel/errors/index.js';
+import { AppError, isNotImplemented } from '../../kernel/errors/index.js';
 import type { EventPayload } from '../../kernel/events/index.js';
 import { newId, isUuid } from '../../kernel/lib/ids.js';
 import { dateInZone } from '../../kernel/lib/clock.js';
@@ -1483,7 +1483,12 @@ export class SettingsService implements SettingsPublicApi {
   }
 
   async #audit(entry: Omit<audit.RecordInput, 'actor' | 'module' | 'requestId' | 'category'> & { category?: audit.RecordInput['category'] }, by: By): Promise<void> {
-    await this.ctx.tryUse('audit')?.record({ category: 'settings', ...entry, actor: by.actor, module: this.ctx.name, requestId: by.requestId ?? null });
+    try {
+      await this.ctx.tryUse('audit')?.record({ category: 'settings', ...entry, actor: by.actor, module: this.ctx.name, requestId: by.requestId ?? null });
+    } catch (err) {
+      // the change is committed; a missing audit entry is logged, never turned into a failed request
+      this.ctx.log[isNotImplemented(err) ? 'debug' : 'error']({ err, action: entry.action }, 'audit entry not recorded');
+    }
   }
 }
 
