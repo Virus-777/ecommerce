@@ -1011,6 +1011,7 @@ button.chart-legend-item:hover { background: var(--surface-2); }
 .chart-tip-row.is-compare { color: var(--text-3); padding-left: 0; }
 .chart-frame .card-head { flex-wrap: wrap; gap: var(--sp-2); }
 .chart-frame-actions { flex-wrap: wrap; }
+.chart-frame-actions .btn-sm { min-height: var(--ctl-xs); font-size: var(--fs-sm); }
 .chart-frame-body.is-refreshing { opacity: 0.55; transition: opacity var(--dur-fast) var(--ease); }
 .chart-empty { margin: 0; padding: var(--sp-6) 0; text-align: center; }
 .chart-steps-key { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); margin: 0; }
