@@ -67,9 +67,15 @@ const PT = 'America/Los_Angeles';
 /** A calendar date from the API (YYYY-MM-DD), read without time-zone shifts. */
 const day = (d: string) => new Date(`${d.slice(0, 10)}T12:00:00Z`);
 
-/** "Fri, Oct 16, 2026" (date-only fields). */
-export const fmtDay = (d?: string | null, o: { weekday?: boolean; year?: boolean } = { weekday: true, year: true }) =>
-  d ? day(d).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', ...(o.weekday ? { weekday: 'short' } : {}), ...(o.year ? { year: 'numeric' } : {}) }) : '';
+/**
+ * "Fri, Oct 16, 2026": a date-only field (YYYY-MM-DD) as written, a timestamp as its market (Pacific) date — cutting
+ * a timestamp to its first 10 characters would give the UTC date, a day late in the evening.
+ */
+export const fmtDay = (d?: string | null, o: { weekday?: boolean; year?: boolean } = { weekday: true, year: true }) => {
+  if (!d) return '';
+  const timestamp = d.length > 10;
+  return (timestamp ? new Date(d) : day(d)).toLocaleDateString('en-US', { timeZone: timestamp ? PT : 'UTC', month: 'short', day: 'numeric', ...(o.weekday ? { weekday: 'short' } : {}), ...(o.year ? { year: 'numeric' } : {}) });
+};
 
 /** "Oct 8, 9:14 AM" (timestamps, market time). */
 export const fmtTime = (iso?: string | null, o: { year?: boolean; weekday?: boolean } = {}) =>
