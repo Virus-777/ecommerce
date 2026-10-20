@@ -1,11 +1,11 @@
 // Blocks the purchase-flow screens share (cart, checkout, review changes, payment result, confirmation),
 // rendered from the cart/checkout API types: packages per seller, compact lines, checkout steps.
+import { productHref as productLink } from '@/api/search';
 import { Fragment, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { formatMoney, initials, tileTint, CONDITION_LABEL, type Condition } from '@marketly/web-shared/lib/format';
 import { useScrollRegion } from '@marketly/web-shared/lib/hooks';
-import { href } from '@marketly/web-shared/routes';
 import type { components } from '@marketly/web-shared/api';
 import { Badge, Icon, Img, LogoTile, SellerBadge, Stars } from '@marketly/web-shared/ui';
 
@@ -29,7 +29,7 @@ export function ItemImg({ image, className }: { image?: MediaRef | null; classNa
 }
 
 /** Product page link (the slug is cosmetic; routes carry the id). */
-export const productHref = (productId: string, slug?: string | null) => href('store/product', '', { slug: slug || 'item', id: productId });
+export const productHref = (productId: string, slug?: string | null) => productLink({ id: productId, slug });
 
 /** Package header (.buy-pkg-head): seller tile, name + badge, "Package i of N · Ships from", arrival and shipping. */
 export function PkgHead({ seller, label, shipsFrom, arrives, shipNote }: { seller: SellerLabel; label: string; shipsFrom: string; arrives?: string | null; shipNote?: ReactNode }) {

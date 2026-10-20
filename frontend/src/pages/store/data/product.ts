@@ -1,6 +1,7 @@
 // API access for the product detail page and its sub-pages (offers, reviews, questions):
 // catalog product, purchase box, rating summary, category trail, add to cart, Buy now.
 // Product routes carry the id (/p/:slug/:id); the slug is cosmetic (BACKEND-REQUESTS G1).
+import { productHref as productLink } from '@/api/search';
 import { date } from '@marketly/web-shared/lib/dates';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -29,7 +30,7 @@ export function useProductParams() {
   return { slug, id };
 }
 
-export const productHref = (slug: string, id: string, view?: string, query?: Record<string, string>) => href('store/product', view, { slug, id }, query);
+export const productHref = (slug: string, id: string, view?: string, query?: Record<string, string>) => productLink({ id, slug }, view, query);
 
 /** Sign-in link that comes back to `next` (the current page by default). */
 export function useSignInHref() {

@@ -1,6 +1,7 @@
 // Orders, tracking, cancellations and returns for My account: GraphQL screen queries (OrderList,
 // OrderDetail, ReturnDetail, AccountOverview), their result types, and the date, money and status
 // helpers the account order screens share. See web-shared/docs/API.md.
+import { productHref as productLink } from '@/api/search';
 import { slugify as slugText, humanize, initials } from '@marketly/web-shared/lib/format';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
@@ -472,7 +473,7 @@ export function groupTone(status: string): Tone {
 export const slugify = (s: string) => slugText(s, 'product');
 
 /** Product page link: the API's product slug, else one made from the title (OrderDetail doesn't select OrderItem.productSlug yet). */
-export const productHref = (productId: string, title: string, slug?: string | null) => href('store/product', '', { slug: slug || slugify(title), id: productId });
+export const productHref = (productId: string, title: string, slug?: string | null) => productLink({ id: productId, slug, title });
 export const orderHref = (ref: string) => href('account/order', '', { ref });
 export const returnHref = (ref: string) => href('account/return', '', { ref });
 export const caseHref = (ref: string) => href('help/case', '', { ref });

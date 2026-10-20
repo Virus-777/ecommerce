@@ -1,3 +1,4 @@
+import { slugify } from '@marketly/web-shared/lib/format';
 import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { call, useApi, type components, type paths } from '@marketly/web-shared/api';
 import { useIsPhone } from '@marketly/web-shared/lib/hooks';
@@ -48,7 +49,12 @@ export interface StoreCard {
   offerId?: string | null;
 }
 
-export const productHref = (p: { id: string; slug?: string | null }, view = '') => href('store/product', view, { slug: p.slug || 'product', id: p.id });
+/**
+ * A product page link. The route resolves by id; the slug is for people, so without one the title gives it (else
+ * "product"). Every product link in the store is built here.
+ */
+export const productHref = (p: { id: string; slug?: string | null; title?: string | null }, view = '', query?: Record<string, string>) =>
+  href('store/product', view, { slug: p.slug || slugify(p.title ?? '', 'product'), id: p.id }, query);
 
 /** The date part of a delivery cue ("Free delivery Mon, Oct 26" → "Mon, Oct 26"): the card adds its own label. */
 const cue = (s?: string | null) => (s ? s.replace(/^(Arrives|Free delivery)\s+/i, '') : null);
