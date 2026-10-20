@@ -52,12 +52,30 @@ export class LiveHub {
   async serve(reader: Reader, stream: EventStream, lastEventId: string | undefined): Promise<void> {
     const { core, inbox } = this.deps;
     const owner = await inbox.owner(reader);
+    // Listen before reading the catch-up: a notice saved while the catch-up is read would otherwise be in neither.
+    // Live notices wait in `held` until the catch-up is out; one the catch-up already sent is not sent twice.
+    let held: Notice[] | null = [];
+    const sent = new Set<string>();
+    if (owner && owner.kind !== 'customer') {
+      stream.onClose(
+        this.listen(owner, (n) => {
+          if (held) held.push(n);
+          else stream.send('notice', n, n.id);
+        }),
+      );
+    }
     const now = core.now();
     const since = new Date(now.getTime() - CATCH_UP_MS);
     const missed = owner && lastEventId && isUuid(lastEventId) ? await core.repo.inboxAfter(owner, lastEventId, since, CATCH_UP_MAX) : [];
-    if (owner) for (const n of await inbox.toNotices(missed, owner)) stream.send('notice', n, n.id);
+    if (owner) {
+      for (const n of await inbox.toNotices(missed, owner)) {
+        sent.add(n.id);
+        stream.send('notice', n, n.id);
+      }
+    }
     stream.send('ready', { at: now.toISOString(), caughtUp: missed.length });
-    if (owner && owner.kind !== 'customer') stream.onClose(this.listen(owner, (n) => stream.send('notice', n, n.id)));
+    for (const n of held) if (!sent.has(n.id)) stream.send('notice', n, n.id);
+    held = null;
   }
 
   /** Adds a stream; returns the function that removes it (call it when the stream closes) */
