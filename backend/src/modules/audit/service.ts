@@ -310,6 +310,12 @@ export class AuditService implements AuditPublicApi {
     return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : DEFAULT_MAX_EXPORT_ROWS;
   }
 
+  /** At boot, so the export screen shows the dataset's title and columns before anyone exports (retried on the first export) */
+  async registerExportDataset(): Promise<void> {
+    const api = this.ctx.tryUse('reports');
+    if (api) await this.registerDataset(api);
+  }
+
   /** reports reads the rows through exportRows; the dataset is registered once, before the first export */
   private registerDataset(api: reports.ReportsPublicApi) {
     this.#datasetRegistered ??= api

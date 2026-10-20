@@ -966,6 +966,12 @@ export class AccountsPart extends Part {
 
   /* ---------------------------------------------------------------- exports */
 
+  /** At boot, so the export screen shows the dataset's title and columns before anyone exports (retried on the first export) */
+  async registerExportDataset(): Promise<void> {
+    const api = this.ctx.tryUse('reports');
+    if (api) await this.registerDataset(api);
+  }
+
   private registerDataset(api: reports.ReportsPublicApi) {
     this.#datasetRegistered ??= api
       .registerDataset({
