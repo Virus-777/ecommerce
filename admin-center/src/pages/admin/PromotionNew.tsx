@@ -336,18 +336,22 @@ interface CategoryNode {
   children?: CategoryNode[];
 }
 
+/** Categories a promotion can target: second-level ones as "Parent › Child", or a top level without children */
+function promotableCategories(data: unknown): Cat[] {
+  const out: Cat[] = [];
+  for (const top of data as CategoryNode[]) for (const c of top.children?.length ? top.children : [top]) out.push({ id: c.id, name: c === top ? top.name : `${top.name} › ${c.name}`, offers: c.offerCount });
+  return out;
+}
+
 export default function PromotionNew() {
   const [params] = useSearchParams();
   const id = params.get('id') ?? '';
   const { api } = useApi();
+  // the cache keeps the tree as the API sends it (other pages share this key); the list is derived in select
   const cats = useQuery({
     queryKey: ['catalog', 'categories', 'admin'],
-    queryFn: async () => {
-      const tree = (await call(api.GET('/api/admin/catalog/categories'))) as unknown as CategoryNode[];
-      const out: Cat[] = [];
-      for (const top of tree) for (const c of top.children?.length ? top.children : [top]) out.push({ id: c.id, name: c === top ? top.name : `${top.name} › ${c.name}`, offers: c.offerCount });
-      return out;
-    },
+    queryFn: () => call(api.GET('/api/admin/catalog/categories')),
+    select: promotableCategories,
   });
   const campaign = useQuery({ queryKey: ['promotions', 'campaign', id], enabled: !!id, queryFn: () => call(api.GET('/api/admin/promotions/campaigns/{id}', { params: { path: { id } } })) });
 
