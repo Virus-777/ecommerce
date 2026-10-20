@@ -1,5 +1,6 @@
 // Cart and checkout API helpers for the purchase-flow screens: types, queries, the URL params each
 // checkout page carries, Idempotency-Key handling and the development payment tokens (gap G9).
+import { useAppConfig } from '@marketly/web-shared/api';
 import { useQuery } from '@tanstack/react-query';
 import { useRef } from 'react';
 import { call, newIdempotencyKey, toApiError, useApi, type components } from '@marketly/web-shared/api';
@@ -84,15 +85,8 @@ export function usePaymentIntent(id: string | null | undefined) {
   });
 }
 
-/** Support phone and hours, guest checkout switch (GET /api/public/settings/app-config). */
-export function useAppConfig() {
-  const { api } = useApi();
-  return useQuery({
-    queryKey: ['settings', 'app-config'],
-    queryFn: () => call(api.GET('/api/public/settings/app-config')),
-    staleTime: 5 * 60_000,
-  });
-}
+/** Support phone and hours, guest checkout switch (GET /api/public/settings/app-config): the shared query and cache key. */
+export { useAppConfig };
 
 /* ---------------- Idempotency ---------------- */
 

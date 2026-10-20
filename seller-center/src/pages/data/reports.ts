@@ -1,3 +1,4 @@
+import { meterFill } from '@marketly/web-shared/lib/format';
 import type { components } from '@marketly/web-shared/api';
 import type { MoneyValue } from '@marketly/web-shared/lib/format';
 
@@ -94,13 +95,8 @@ export function statDelta(k?: Kpi) {
 /** The four service metrics the design shows, in its order (GET /api/seller/sellers/performance). */
 export const SERVICE_KEYS: Array<PerformanceMetric['key']> = ['dispatch_reliability', 'cancellation_rate', 'response_time', 'valid_tracking'];
 
-/** Meter fill: the value for "at least" rates; the value's share of the limit for "at most" targets (capped). */
-export function meterPct(m: PerformanceMetric): number {
-  const t = m.target;
-  if (t.comparator === 'gte') return Math.max(0, Math.min(100, m.value));
-  if (!t.threshold) return m.value > 0 ? 100 : 0;
-  return Math.max(0, Math.min(100, (m.value / t.threshold) * 100));
-}
+/** Meter fill: the value for "at least" rates; the share of the limit used for "at most" targets. */
+export const meterPct = (m: PerformanceMetric): number => meterFill(m.value, m.target);
 
 /** "Pacific Time" for the market time zone. */
 export const zoneLabel = (tz?: string) => (tz === 'America/Los_Angeles' ? 'Pacific Time' : (tz ?? ''));

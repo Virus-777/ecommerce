@@ -89,3 +89,17 @@ export const CONDITION_LABEL: Record<Condition, string> = {
   used_acceptable: 'Used – Acceptable',
   refurbished: 'Refurbished',
 };
+
+/**
+ * How full a performance meter is (0–100), the same on every screen: for an "at least" percent target the value
+ * itself, for another "at least" target the share of it reached; for an "at most" target how much of the allowance
+ * is used. Without a target, the value as a percent.
+ */
+export function meterFill(value: number, target?: { comparator?: string | null; threshold?: number | null; unit?: string | null } | null): number {
+  const clamp = (n: number) => Math.max(0, Math.min(100, Math.round(n)));
+  if (!target) return clamp(value);
+  const { comparator, threshold, unit } = target;
+  if (comparator === 'gte') return clamp(unit === 'percent' ? value : threshold ? (value / threshold) * 100 : 100);
+  if (!threshold) return value > 0 ? 100 : 0;
+  return clamp((value / threshold) * 100);
+}
