@@ -3,7 +3,7 @@
 import { Fragment, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { cx } from '@marketly/web-shared/lib/cx';
-import { formatMoney, initials, tileTint } from '@marketly/web-shared/lib/format';
+import { formatMoney, initials, tileTint, CONDITION_LABEL, type Condition } from '@marketly/web-shared/lib/format';
 import { useScrollRegion } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import type { components } from '@marketly/web-shared/api';
@@ -16,15 +16,8 @@ export type SearchCard = S['search.ProductCard'];
 
 export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-const CONDITION: Record<string, string> = {
-  new: 'New',
-  used_like_new: 'Used – like new',
-  used_good: 'Used – good',
-  used_acceptable: 'Used – acceptable',
-  refurbished: 'Refurbished',
-};
-/** Cart conditions are enum values; checkout and confirmation already send the label. */
-export const conditionLabel = (c: string) => CONDITION[c] ?? c;
+/** Cart conditions are enum values; checkout and confirmation already send the label (the same words). */
+export const conditionLabel = (c: string) => CONDITION_LABEL[c as Condition] ?? c;
 
 /** A stable tile tint for a seller name (the API sends no brand colour): the same on every screen */
 export const tintFor = (name: string) => tileTint(name);

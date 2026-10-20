@@ -1,7 +1,7 @@
 // Shared pieces of the Seller Center catalog, offer and inventory screens (Products, CatalogMatch,
 // ProductNew, Offer, Inventory, BulkUpdate): load/skeleton states, labels for API enums, money input
 // helpers, dates, CSV and export downloads, the seller-visible settings.
-import { parseCents } from '@marketly/web-shared/lib/format';
+import { parseCents, CONDITION_LABEL, type Condition } from '@marketly/web-shared/lib/format';
 import { shortDate } from '@marketly/web-shared/lib/dates';
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -101,15 +101,9 @@ export function useInView<T extends HTMLElement>(onVisible: () => void, enabled:
 
 /* ---------------- labels for API enums ---------------- */
 
-export type Condition = 'new' | 'used_like_new' | 'used_good' | 'used_acceptable' | 'refurbished';
+export type { Condition };
 export const CONDITIONS: Condition[] = ['new', 'used_like_new', 'used_good', 'used_acceptable', 'refurbished'];
-export const CONDITION_LABEL: Record<Condition, string> = {
-  new: 'New',
-  used_like_new: 'Used – Like new',
-  used_good: 'Used – Good',
-  used_acceptable: 'Used – Acceptable',
-  refurbished: 'Refurbished',
-};
+export { CONDITION_LABEL };
 export const conditionLabel = (c?: string | null) => CONDITION_LABEL[(c ?? '').toLowerCase() as Condition] ?? c ?? '';
 
 export type Review = 'Approved' | 'Draft' | 'Submitted' | 'Changes requested' | 'Rejected';

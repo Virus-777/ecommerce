@@ -79,3 +79,13 @@ export function humanize(key?: string | null): string {
   const t = (key ?? '').replace(/[_.-]+/g, ' ').trim().toLowerCase();
   return t ? t[0]!.toUpperCase() + t.slice(1) : '';
 }
+
+/** Offer conditions as the API names them (offers' CONDITION_LABEL): the cart, checkout and Seller Center read the same */
+export type Condition = 'new' | 'used_like_new' | 'used_good' | 'used_acceptable' | 'refurbished';
+export const CONDITION_LABEL: Record<Condition, string> = {
+  new: 'New',
+  used_like_new: 'Used – Like new',
+  used_good: 'Used – Good',
+  used_acceptable: 'Used – Acceptable',
+  refurbished: 'Refurbished',
+};
