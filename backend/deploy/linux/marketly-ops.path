@@ -1,0 +1,11 @@
+# Starts the backup service (marketly-ops.service) whenever the Marketly server leaves a request in
+# /var/lib/marketly/ops/requests: Admin Center → Backups (back up now, an approved restore, a schedule change).
+[Unit]
+Description=Marketly backup service requests
+
+[Path]
+PathExistsGlob=/var/lib/marketly/ops/requests/*.json
+Unit=marketly-ops.service
+
+[Install]
+WantedBy=paths.target

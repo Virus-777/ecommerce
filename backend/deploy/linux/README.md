@@ -21,8 +21,9 @@ the server on a USB stick.
 | HTTPS certificate | `/etc/marketly/tls/` (`server.crt`, `server.key`, `marketly-root-ca.crt`; the root's key in `ca/`) |
 | Uploaded files | `/var/lib/marketly/media` |
 | Database files | `/var/lib/mongodb` (MongoDB's own) |
-| Backups | `/var/backups/marketly` (14 days) |
-| Logs | `journalctl -u marketly` (server), `journalctl -u marketly-backup` (backups), `/var/log/mongodb/mongod.log` |
+| Backups | `/var/backups/marketly` (14 days, or Admin Center → Settings → Backups) |
+| Backup service | `/var/lib/marketly/ops` (requests from the Admin Center and their status), `/var/lib/marketly/backup-uploads` (uploaded backups) |
+| Logs | `journalctl -u marketly` (server), `journalctl -u marketly-backup` (nightly backups), `journalctl -u marketly-ops` (Admin Center backups and restores), `/var/log/mongodb/mongod.log` |
 
 The scripts are in this folder (`deploy/linux/`, also at `/opt/marketly/current/deploy/linux/` once installed):
 
@@ -32,9 +33,10 @@ The scripts are in this folder (`deploy/linux/`, also at `/opt/marketly/current/
 | `make-cert.sh` | makes the HTTPS certificate (first install, and before it expires) |
 | `check.sh` | checks everything (`sudo marketly check`) |
 | `backup.sh`, `restore.sh` | one backup now, restore a backup |
+| `ops.sh`, `ops-request.mjs` | the backup service: does what staff ask in Admin Center → Backups (run by `marketly-ops.path`) |
 | `rollback.sh` | back to the previous release |
 | `marketly` | the everyday command, installed as `/usr/local/bin/marketly`: `sudo marketly help` |
-| `marketly.service`, `marketly-backup.service`, `marketly-backup.timer` | the systemd units install.sh installs |
+| `marketly.service`, `marketly-backup.service`, `marketly-backup.timer`, `marketly-ops.path`, `marketly-ops.service` | the systemd units install.sh installs |
 | `mongod.conf` | MongoDB's settings (install.sh puts it in place) |
 
 ---
@@ -213,25 +215,37 @@ finds it.
 
 ### Backups
 
-Every night at 02:30 (`systemctl list-timers marketly-backup.timer` shows the next run) `backup.sh` writes three
-files to `/var/backups/marketly`:
+Every night at 02:30 (`systemctl list-timers marketly-backup.timer` shows the next run) `backup.sh` writes these
+files to `/var/backups/marketly` (`<id>` is the time stamp, e.g. `2026-10-15_023000`):
 
-- `<date>.archive.gz`: the whole database (`mongodump --archive --gzip --oplog`, consistent at one moment);
-- `<date>.media.tar.gz`: the uploaded files;
-- `<date>.config.tar.gz`: `/etc/marketly`, the settings with the keys and the certificates. A restored database
-  needs the same `APP_SECRET`, so keep this file with the backups, and keep it as safe as a password.
+- `<id>.archive.gz`: the whole database (`mongodump --archive --gzip --oplog`, consistent at one moment);
+- `<id>.media.tar.gz`: the uploaded files;
+- `<id>.config.tar.gz`: `/etc/marketly`, the settings with the keys and the certificates. A restored database
+  needs the same `APP_SECRET`, so keep this file with the backups, and keep it as safe as a password. It is root
+  only (mode 600): the Marketly server can't read it, so it can never be downloaded through the Admin Center;
+- `<id>.manifest.json`: nightly, manual (Admin Center) or safety (taken just before a restore).
 
-Backups older than 14 days are deleted. They are on the same disk as the data, so **copy them off the server
+Backups older than 14 days are deleted. The time and the days kept are settings (Admin Center → Settings →
+Backups); the backup service applies a change within a minute. They are on the same disk as the data, so **copy them off the server
 every week**: plug in a USB disk, then
 
 ```bash
 sudo rsync -a /var/backups/marketly/ /media/$USER/<disk>/marketly-backups/
 ```
 
-A backup now: `sudo marketly backup`.
+A backup now: `sudo marketly backup`, or **Back up now** in Admin Center → Backups.
 
-**Restoring** (after a mistake, or on a new server): this replaces the whole database and the uploaded files with
-the backup; everything since is lost.
+**From the Admin Center** (Admin Center → Backups; Business Owner, and the Platform Administrator for viewing and
+backing up): the list of backups, a backup now, downloads of the database and uploaded files (password again; never
+the settings and keys file), uploads of a backup copied back from a USB disk, and restores. A restore needs the
+Business Owner's password, the word RESTORE, a reason and a second person's approval (a Platform Administrator or
+another Business Owner, who confirms with their password too). The server never does this itself: it leaves a
+request in `/var/lib/marketly/ops/requests`, and the root backup service (`ops.sh`, started by
+`marketly-ops.path`) checks it, takes a **safety backup**, stops the server, restores, and starts it again. Its log:
+`journalctl -u marketly-ops`.
+
+**Restoring by hand** (when the Admin Center can't be used, or on a new server): this replaces the whole database
+and the uploaded files with the backup; everything since is lost.
 
 ```bash
 ls -lt /var/backups/marketly

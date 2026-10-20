@@ -1,0 +1,14 @@
+# The backup service: runs as root what staff asked for in Admin Center → Backups (deploy/linux/ops.sh): a backup
+# now, an approved restore (it stops and starts the Marketly server), the nightly schedule from Settings.
+# Started by marketly-ops.path; by hand: sudo systemctl start marketly-ops   log: journalctl -u marketly-ops
+[Unit]
+Description=Marketly backup service (Admin Center backups and restores)
+After=mongod.service
+Requires=mongod.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/marketly/current/deploy/linux/ops.sh
+# a restore of a large database takes a while; it must never be cut off halfway
+TimeoutStartSec=infinity
+Nice=5

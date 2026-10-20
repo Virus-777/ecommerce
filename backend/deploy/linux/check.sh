@@ -32,7 +32,7 @@ cert=$(env_value "$ENV_FILE" TLS_CERT_FILE)
 ca=$TLS_DIR/marketly-root-ca.crt
 
 # ---------------------------------------------------------------- services
-for unit in mongod marketly marketly-backup.timer; do
+for unit in mongod marketly marketly-backup.timer marketly-ops.path; do
   if systemctl is-active --quiet "$unit"; then ok "$unit is running"; else fail "$unit is not running (systemctl status $unit)"; fi
 done
 release=$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)

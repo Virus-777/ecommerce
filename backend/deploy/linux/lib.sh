@@ -7,7 +7,9 @@
 #   /etc/marketly/marketly.env      settings and keys (owner marketly, mode 600)
 #   /etc/marketly/tls/              HTTPS certificate and key; tls/ca/ holds the local root CA (root only)
 #   /var/lib/marketly/media         uploaded files
-#   /var/backups/marketly           daily backups (database, media, settings), 14 days
+#   /var/backups/marketly           daily backups (database, media, settings), 14 days (Admin Center → Settings)
+#   /var/lib/marketly/ops           the backup service's requests and status (Admin Center → Backups)
+#   /var/lib/marketly/backup-uploads backups uploaded in the Admin Center, until restored
 
 MARKETLY_USER=marketly
 OPT_DIR=/opt/marketly
@@ -22,6 +24,12 @@ CA_DIR=$TLS_DIR/ca
 DATA_DIR=/var/lib/marketly
 MEDIA_DIR=$DATA_DIR/media
 BACKUP_DIR=/var/backups/marketly
+# the backup service (ops.sh): requests from the server and their status; backups uploaded in the Admin Center
+OPS_DIR=$DATA_DIR/ops
+UPLOAD_DIR=$DATA_DIR/backup-uploads
+OPS_LOCK=/run/marketly-ops.lock
+# where ops.sh writes the nightly time from Settings (a drop-in of marketly-backup.timer)
+TIMER_DROPIN_DIR=/etc/systemd/system/marketly-backup.timer.d
 
 info() { printf '%s\n' "$*"; }
 warn() { printf 'WARNING: %s\n' "$*" >&2; }
@@ -73,4 +81,15 @@ url_host() {
   local rest=${1#*://}
   rest=${rest%%/*}
   printf '%s' "${rest%:*}"
+}
+
+# A mongodb:// URI without the database name (mongodump --oplog and mongorestore work on the whole server):
+# mongodb://host/marketly?replicaSet=rs0 -> mongodb://host/?replicaSet=rs0
+server_uri_of() {
+  local uri=$1 base query hosts
+  base=${uri%%\?*}
+  query=${uri#"$base"}
+  hosts=${base#mongodb://}
+  hosts=${hosts%%/*}
+  printf 'mongodb://%s/%s' "$hosts" "$query"
 }
