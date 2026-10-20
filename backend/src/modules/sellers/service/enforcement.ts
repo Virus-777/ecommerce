@@ -10,11 +10,9 @@ import type * as common from '../../../spec/common.js';
 import type { Appeal, AppealInput, AppealRoute, Restriction, RestrictionInput, RestrictionScope, SellerWarning, SuspensionImpact, SuspensionInput } from '../../../spec/sellers.js';
 import {
   type Activity,
-  addBusinessDays,
   addDays,
   affectedSummary,
   DEFAULT_STILL_WORKS,
-  isoDate,
   normalizeScope,
   restrictionBlocks,
 } from '../domain/rules.js';
@@ -542,7 +540,7 @@ export class EnforcementPart extends Part {
     const evidence = [...new Set(input.evidenceIds ?? [])];
     const id = newId();
     if (evidence.length) await this.attachEvidence(evidence, input.owner, id, `Appeal ${input.subject}`);
-    const decideBy = addBusinessDays(now, await this.core.setting('appealDecisionBusinessDays'));
+    const decideBy = this.core.addBusinessDays(now, await this.core.setting('appealDecisionBusinessDays'));
     let row: AppealRec;
     try {
       row = await this.repo.insert('appeals', {
@@ -739,7 +737,7 @@ export class EnforcementPart extends Part {
     const offers = await this.core.optional('offers', 'offers', unavailable, async (o) => (await o.listOffersAdmin({ sellerId, status: ['active'] }, { page: 1, limit: 1 })).total ?? 0);
     const orders = await this.core.optional('orders', 'orders', unavailable, async (o) => (await o.countOrdersForSellers([sellerId]))[sellerId]);
     const returns = await this.core.optional('returns', 'returns', unavailable, (r) => r.sellerQueueCounts(sellerId));
-    const range = { from: isoDate(addDays(this.now(), -365)), to: this.core.today() };
+    const range = { from: this.core.today(addDays(this.now(), -365)), to: this.core.today() };
     const cases = await this.core.optional('support', 'cases', unavailable, (s) => s.sellerCaseStats(sellerId, range));
     const balances = await this.core.optional('finance', 'balances', unavailable, (f) => f.getSellerBalances(sellerId));
     const openOrders = orders?.open ?? 0;
@@ -1092,7 +1090,7 @@ export class EnforcementPart extends Part {
           stillWorks: p.stillWorks ?? null,
           toResolve: p.toResolve ?? 'Contact your Seller Manager or appeal with documents that answer the findings.',
           appealDays: p.appealDays ?? null,
-          reviewDate: typeof p.reviewDate === 'string' && p.reviewDate >= this.core.today() ? p.reviewDate : isoDate(addDays(this.now(), 30)),
+          reviewDate: typeof p.reviewDate === 'string' && p.reviewDate >= this.core.today() ? p.reviewDate : this.core.today(addDays(this.now(), 30)),
           endsAt: p.endsAt ?? null,
           trustReportId: e.reportId,
           trustEnforcementId: e.enforcementId,
@@ -1113,7 +1111,7 @@ export class EnforcementPart extends Part {
           {
             reasonCode: p.reasonCode ?? 'policy_violation',
             reason: p.reason ?? e.reason,
-            reviewDate: typeof p.reviewDate === 'string' ? p.reviewDate : isoDate(addDays(this.now(), 30)),
+            reviewDate: typeof p.reviewDate === 'string' ? p.reviewDate : this.core.today(addDays(this.now(), 30)),
             openOrders: p.openOrders ?? 'seller_keeps_fulfilling',
             secondReviewerId: p.secondReviewerId ?? NIL,
             trustReportId: e.reportId,

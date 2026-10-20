@@ -29,7 +29,6 @@ import type {
 import {
   ACTIVE_STATUSES,
   actorFrom,
-  addBusinessDays,
   addDays,
   customerStatusLabel,
   deadline,
@@ -156,7 +155,7 @@ export class Views {
   inspectBy(agg: Agg): Date | null {
     const received = this.core.receivedAt(agg);
     if (!received || !is(['received', 'awaiting_remedy', 'completed'], agg.ret.status)) return null;
-    return addBusinessDays(received, agg.ret.terms_snapshot.meta.targets.inspectionBusinessDays, this.core.tz);
+    return this.core.addBusinessDays(received, agg.ret.terms_snapshot.meta.targets.inspectionBusinessDays);
   }
 
   refundBy(agg: Agg): Date | null {
@@ -165,7 +164,7 @@ export class Views {
     const decided = agg.ret.decision?.decidedAt ? new Date(agg.ret.decision.decidedAt) : null;
     const from = inspected ?? decided;
     if (!from) return null;
-    return addBusinessDays(from, agg.ret.terms_snapshot.meta.targets.refundBusinessDays, this.core.tz);
+    return this.core.addBusinessDays(from, agg.ret.terms_snapshot.meta.targets.refundBusinessDays);
   }
 
   deadlines(agg: Agg): ReturnCase['deadlines'] {
@@ -315,7 +314,7 @@ export class Views {
       approvedAt,
       sentAt: rr.sent_at?.toISOString() ?? null,
       failedReason: rr.failed_reason,
-      expectedBy: approvedAt && status !== 'sent' ? addBusinessDays(new Date(approvedAt), agg.ret.terms_snapshot.meta.targets.refundBusinessDays + 3, this.core.tz).toISOString() : null,
+      expectedBy: approvedAt && status !== 'sent' ? this.core.addBusinessDays(new Date(approvedAt), agg.ret.terms_snapshot.meta.targets.refundBusinessDays + 3).toISOString() : null,
       bankReference: null,
       explanation: refundExplanation(status),
     };

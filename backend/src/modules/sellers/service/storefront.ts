@@ -7,7 +7,7 @@ import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type { ChangeRequest, CollectionInput, ContactOptions, FeaturedCollection, ProfileCategory, PublicClaim, SellerSummary, StoreProfile, StoreProfileInput, Storefront, StorefrontClaim } from '../../../spec/sellers.js';
-import { addBusinessDays, isWholeAccount, locationOf, normalizeScope, sameStoreName, type StoredVerification } from '../domain/rules.js';
+import { isWholeAccount, locationOf, normalizeScope, sameStoreName, type StoredVerification } from '../domain/rules.js';
 import { changeRequestMachine, publicClaimMachine } from '../domain/state-machines.js';
 import * as map from '../mappers.js';
 import type { ChangeRequestRec, ClaimRec, ProfileRec, SellerRec } from '../ports.js';
@@ -54,7 +54,7 @@ export class StorefrontPart extends Part {
 
   /** Review target for a store name change or a public claim (setting claimReviewBusinessDays): the work item's deadline */
   private async claimReviewBy(): Promise<string> {
-    return addBusinessDays(this.now(), await this.core.setting('claimReviewBusinessDays')).toISOString();
+    return this.core.addBusinessDays(this.now(), await this.core.setting('claimReviewBusinessDays')).toISOString();
   }
 
   private contactOf(p: ProfileRec): ContactOptions {

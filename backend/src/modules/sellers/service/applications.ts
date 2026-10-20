@@ -37,13 +37,11 @@ import type {
 } from '../../../spec/sellers.js';
 import { PROGRAM } from '../domain/catalogue.js';
 import {
-  addBusinessDays,
   addDays,
   completedSteps,
   DATA_STEPS,
   deadline,
   holderMatches,
-  isoDate,
   missingFields,
   nextStep,
   percentComplete,
@@ -524,7 +522,7 @@ export class ApplicationsPart extends Part {
     const acc = sec.account!;
     const v = sec.verification!;
     const risky = riskCategoriesIn(`${b.plannedProducts ?? ''} ${b.shippingPlan ?? ''}`, (await this.core.setting('riskReviewCategories')) as readonly string[]);
-    const target = addBusinessDays(now, await this.core.setting('decisionTargetBusinessDays'));
+    const target = this.core.addBusinessDays(now, await this.core.setting('decisionTargetBusinessDays'));
     const sellerRef = await this.ctx.refs.next('SL', { daily: false });
     // duplicate checks: keyed hashes only (never the tax id), against every other application and seller
     const taxIdHash = a.tax_id_hash ?? this.taxHashOf(v);
@@ -608,7 +606,7 @@ export class ApplicationsPart extends Part {
         reviewed_by: null,
         reviewed_at: null,
       });
-      await this.core.timeline(tx, seller.id, { kind: 'applied', title: 'Application submitted', detail: `Decision target ${isoDate(target)}`, actor: by.actor, ref: locked.ref });
+      await this.core.timeline(tx, seller.id, { kind: 'applied', title: 'Application submitted', detail: `Decision target ${this.core.today(target)}`, actor: by.actor, ref: locked.ref });
       return { after, seller };
     });
     this.core.publish(
@@ -748,7 +746,7 @@ export class ApplicationsPart extends Part {
   /** An overturned rejection reopens the application under review */
   async reopenOnAppeal(applicationId: string, by: By) {
     const now = this.now();
-    const target = addBusinessDays(now, await this.core.setting('decisionTargetBusinessDays'));
+    const target = this.core.addBusinessDays(now, await this.core.setting('decisionTargetBusinessDays'));
     await this.repo.transaction(async (tx) => {
       const a = await this.byId(applicationId, tx, true);
       if (a.state !== 'rejected') return;
@@ -1126,7 +1124,7 @@ export class ApplicationsPart extends Part {
       const sec = this.sections(a);
       const owner = await this.parts.members.createOwner(tx, seller, { accountId: a.applicant_account_id, name: sec.account?.contactName ?? seller.legal_name, email: sec.account?.workEmail ?? '' });
       await this.parts.storefront.createProfile(tx, seller);
-      for (const d of await tx.find('application_documents', { application_id: a.id, kind: 'owner_id' })) await tx.update('application_documents', d.id, { delete_after: isoDate(addDays(now, retention)) });
+      for (const d of await tx.find('application_documents', { application_id: a.id, kind: 'owner_id' })) await tx.update('application_documents', d.id, { delete_after: this.core.today(addDays(now, retention)) });
       const app = await tx.update('applications', a.id, { state, decision: decision as never, reviewer_id: a.reviewer_id ?? by.actor.id ?? null });
       let payout: Awaited<ReturnType<typeof this.parts.accounts.submitDestination>> | undefined;
       const details = sec.payout?.current;
@@ -1184,7 +1182,7 @@ export class ApplicationsPart extends Part {
     const now = this.now();
     const retention = await this.core.setting('documentRetentionDays');
     const window = await this.core.setting('appealWindowDays');
-    const canReapplyFrom = reapplyFrom(body.reapply, now);
+    const canReapplyFrom = reapplyFrom(body.reapply, now, this.core.tz);
     const decision = {
       outcome: 'rejected',
       reasonCode: body.reasonCode,
@@ -1201,7 +1199,7 @@ export class ApplicationsPart extends Part {
       const a = await this.byId(id, tx, true);
       const state = this.core.step(sellerApplicationMachine, a.state, 'reject');
       const row = await tx.update('applications', a.id, { state, decision: decision as never, can_reapply_from: canReapplyFrom, reviewer_id: a.reviewer_id ?? by.actor.id ?? null });
-      for (const d of await tx.find('application_documents', { application_id: a.id })) await tx.update('application_documents', d.id, { delete_after: isoDate(addDays(now, retention)) });
+      for (const d of await tx.find('application_documents', { application_id: a.id })) await tx.update('application_documents', d.id, { delete_after: this.core.today(addDays(now, retention)) });
       if (a.seller_id) {
         const s = await this.core.seller(a.seller_id, { repo: tx, forUpdate: true });
         await tx.update('sellers', s.id, { status: this.core.step(sellerAccountStatusMachine, s.status, 'reject'), status_since: now, closed_reason: 'application_rejected', updated_at: now });
@@ -1354,7 +1352,7 @@ export class ApplicationsPart extends Part {
       await this.repo.update('information_requests', r.id, { reminded_at: now });
       const a = await this.repo.get('applications', r.application_id);
       if (!a?.seller_id) continue;
-      await this.core.timeline(this.repo, a.seller_id, { kind: 'information_reminder', title: `Reminder: send the requested information by ${isoDate(r.due_at)}`, ref: a.ref });
+      await this.core.timeline(this.repo, a.seller_id, { kind: 'information_reminder', title: `Reminder: send the requested information by ${this.core.today(r.due_at)}`, ref: a.ref });
       const openItems = ((r.items ?? []) as unknown as { status?: string }[]).filter((i) => !i.status || i.status === 'open' || i.status === 'rejected').length;
       this.core.publish('sellers.application.information_reminder', { applicationId: a.id, ref: a.ref, sellerId: a.seller_id, applicantAccountId: a.applicant_account_id, dueAt: r.due_at.toISOString(), openItems });
     }

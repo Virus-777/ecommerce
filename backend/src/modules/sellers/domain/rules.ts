@@ -2,6 +2,7 @@
  * Pure rules of the sellers module (no I/O): application completeness, payout details, dates and
  * deadlines, restriction scope matching, labels. Everything here is deterministic and unit-testable.
  */
+import { dateInZone } from '../../../kernel/lib/clock.js';
 import type * as common from '../../../spec/common.js';
 import type {
   ApplicationAccountInput,
@@ -190,20 +191,8 @@ export function riskCategoriesIn(text: string | null | undefined, categories: re
 
 /* ------------------------------------------------------------------ dates */
 
-export const isoDate = (d: Date) => d.toISOString().slice(0, 10);
+// market days and business days: Core.today(at) and Core.addBusinessDays (the market's calendar), never the UTC day
 export const addDays = (d: Date, days: number) => new Date(d.getTime() + days * DAY);
-
-/** Adds business days (Monday–Friday) */
-export function addBusinessDays(from: Date, days: number): Date {
-  let d = new Date(from.getTime());
-  let left = Math.max(0, Math.round(days));
-  while (left > 0) {
-    d = new Date(d.getTime() + DAY);
-    const wd = d.getUTCDay();
-    if (wd !== 0 && wd !== 6) left--;
-  }
-  return d;
-}
 
 /** Deadline state: overdue once past, due soon within a day */
 export function deadline(dueAt: Date | string, now: Date): common.Deadline {
@@ -212,9 +201,10 @@ export function deadline(dueAt: Date | string, now: Date): common.Deadline {
   return { dueAt: due.toISOString(), state: left < 0 ? 'overdue' : left <= DAY ? 'due_soon' : 'on_time' };
 }
 
-export function reapplyFrom(rule: 'immediately' | 'after_30_days' | 'after_90_days' | 'not_eligible', now: Date): string | null {
+/** The market day from which a rejected applicant may apply again; null when never */
+export function reapplyFrom(rule: 'immediately' | 'after_30_days' | 'after_90_days' | 'not_eligible', now: Date, timeZone: string): string | null {
   if (rule === 'not_eligible') return null;
-  return isoDate(addDays(now, rule === 'after_30_days' ? 30 : rule === 'after_90_days' ? 90 : 0));
+  return dateInZone(addDays(now, rule === 'after_30_days' ? 30 : rule === 'after_90_days' ? 90 : 0), timeZone);
 }
 
 /* ------------------------------------------------------------------ restrictions */

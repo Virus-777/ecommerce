@@ -22,7 +22,6 @@ import type {
 import { returnMachine, returnShipmentMachine } from '../domain/state-machines.js';
 import {
   ACTIVE_STATUSES,
-  addBusinessDays,
   computeBreakdown,
   is,
   itemVerdict,
@@ -416,7 +415,7 @@ export class Requests {
           handled_by: official ? 'official_store' : service ? 'marketplace_support' : 'seller',
           terms_snapshot: { terms: g.terms, meta },
           shipping_paid_by: g.payer.paidBy,
-          response_due_at: addBusinessDays(now, responseDays, this.core.tz),
+          response_due_at: this.core.addBusinessDays(now, responseDays),
           info_request: null,
           decision: null,
           platform_handling: service,

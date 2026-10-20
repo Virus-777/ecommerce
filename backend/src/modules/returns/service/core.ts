@@ -5,6 +5,7 @@
 import type { Principal } from '../../../kernel/auth/index.js';
 import { AppError, isAppError, isNotImplemented } from '../../../kernel/errors/index.js';
 import type { EventMap } from '../../../kernel/events/index.js';
+import { BusinessDays } from '../../../kernel/lib/business-days.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type { ModuleContext, PublicApiMap } from '../../../kernel/module-system/index.js';
 import type * as audit from '../../../spec/audit.js';
@@ -102,6 +103,15 @@ export class Core {
   get tz() {
     return this.ctx.config.market.timeZone;
   }
+
+  /** Business days for response, inspection and refund deadlines: the market's calendar (business hours, closures) */
+  readonly businessDays = new BusinessDays({
+    load: async () => this.ctx.tryUse('settings')?.businessCalendar(),
+    timeZone: () => this.tz,
+    now: () => this.now(),
+    onError: (err) => this.ctx.log.warn({ err }, 'returns: business calendar unavailable, counting weekdays'),
+  });
+  addBusinessDays = (from: Date, days: number) => this.businessDays.add(from, days);
   get currency() {
     return this.ctx.config.market.currency || 'USD';
   }

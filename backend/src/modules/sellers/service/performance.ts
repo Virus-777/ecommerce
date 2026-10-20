@@ -6,7 +6,7 @@ import type * as common from '../../../spec/common.js';
 import type { PerformanceMetric, PerformanceSummary, PerformanceTarget, PerformanceTargetsChange } from '../../../spec/sellers.js';
 import { METRIC_INFO, METRICS, targetDisplay, type MetricKey } from '../domain/catalogue.js';
 import { computeMetrics, emptyCounts, isMiss, overallOf, type PerformanceCounts } from '../domain/metrics.js';
-import { addDays, HOUR, isoDate } from '../domain/rules.js';
+import { addDays, HOUR } from '../domain/rules.js';
 import * as map from '../mappers.js';
 import type { PerfEventRec, SellerRec, SnapshotRec } from '../ports.js';
 import { invalid, Part, SYSTEM, type By } from './core.js';
@@ -262,7 +262,7 @@ export class PerformancePart extends Part {
           id: newId(),
           seller_id: seller.id,
           computed_at: now,
-          window_from: isoDate(addDays(now, -window)),
+          window_from: this.core.today(addDays(now, -window)),
           window_to: this.core.today(now),
           order_count: counts.orders,
           metrics: Object.fromEntries(metrics.map((m) => [m.key, m])) as never,
@@ -307,7 +307,7 @@ export class PerformancePart extends Part {
       metrics = live.metrics;
       overall = live.overall;
       orderCount = live.counts.orders;
-      period = { from: isoDate(addDays(now, -(await this.core.setting('performanceWindowDays')))), to: this.core.today(now) };
+      period = { from: this.core.today(addDays(now, -(await this.core.setting('performanceWindowDays')))), to: this.core.today(now) };
       updatedAt = now.toISOString();
     }
     return { period, orderCount, overall, metrics, feedback: await this.feedback(seller), warnings: await this.warnings(sellerId), history: await this.history(sellerId), updatedAt };

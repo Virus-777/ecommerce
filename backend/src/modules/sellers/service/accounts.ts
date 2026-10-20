@@ -32,7 +32,7 @@ import type {
   VerificationLabel,
 } from '../../../spec/sellers.js';
 import { AGREEMENT_KEYS, type AgreementKey } from '../domain/catalogue.js';
-import { addBusinessDays, addDays, holderMatches, locationOf, payoutLabel, payoutProblems, type StoredPayout, type StoredPayoutDetails, type StoredVerification } from '../domain/rules.js';
+import { addDays, holderMatches, locationOf, payoutLabel, payoutProblems, type StoredPayout, type StoredPayoutDetails, type StoredVerification } from '../domain/rules.js';
 import { launchReadinessReviewMachine, payoutReadinessMachine, sellerAccountStatusMachine, verifiedSellerLabelMachine } from '../domain/state-machines.js';
 import * as map from '../mappers.js';
 import type { ApplicationRec, SellerListFilter, SellerRec } from '../ports.js';
@@ -292,7 +292,7 @@ export class AccountsPart extends Part {
     const after = await this.repo.update('sellers', s.id, { launch_review: { ...lr, state, requestedAt: this.now().toISOString(), note: note?.trim() || null, issues: [] } as never, updated_at: this.now() });
     await this.core.timeline(this.repo, s.id, { kind: 'launch_review_requested', title: 'Launch readiness review requested', detail: note ?? null, actor: by.actor });
     // the review target (setting launchReviewBusinessDays) becomes the work item's deadline
-    const reviewBy = addBusinessDays(this.now(), await this.core.setting('launchReviewBusinessDays')).toISOString();
+    const reviewBy = this.core.addBusinessDays(this.now(), await this.core.setting('launchReviewBusinessDays')).toISOString();
     this.core.publish('sellers.launch_review.requested', { sellerId: s.id, reviewBy }, by);
     return map.launchReview(after);
   }

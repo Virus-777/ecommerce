@@ -7,6 +7,7 @@ import { createHash, createHmac } from 'node:crypto';
 import type { Principal } from '../../../kernel/auth/index.js';
 import { AppError, isNotImplemented } from '../../../kernel/errors/index.js';
 import type { EventMap } from '../../../kernel/events/index.js';
+import { BusinessDays } from '../../../kernel/lib/business-days.js';
 import { dateInZone } from '../../../kernel/lib/clock.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import { secretFor } from '../../../kernel/lib/secrets.js';
@@ -80,6 +81,18 @@ export class Core {
   now = () => this.ctx.clock.now();
   /** Market date YYYY-MM-DD */
   today = (at: Date = this.now()) => dateInZone(at, this.ctx.config.market.timeZone);
+  get tz() {
+    return this.ctx.config.market.timeZone;
+  }
+
+  /** Business days for review and decision targets: the market's calendar (business hours, closures) */
+  readonly businessDays = new BusinessDays({
+    load: async () => this.ctx.tryUse('settings')?.businessCalendar(),
+    timeZone: () => this.tz,
+    now: () => this.now(),
+    onError: (err) => this.ctx.log.warn({ err }, 'sellers: business calendar unavailable, counting weekdays'),
+  });
+  addBusinessDays = (from: Date, days: number) => this.businessDays.add(from, days);
   setting = <K extends Parameters<ModuleContext<'sellers'>['settings']['get']>[0]>(key: K) => this.ctx.settings.get(key);
 
   publish<N extends OwnEvent>(name: N, payload: EventMap[N], by: { actor?: common.Actor; requestId?: string } = {}) {

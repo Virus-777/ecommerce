@@ -63,6 +63,8 @@ export default defineModule({
     });
     // the Seller performance targets section of the settings page (G76)
     ctx.afterBoot(() => service.registerSettingsSection());
+    // the business calendar for review and decision targets, read once now (then refreshed every few minutes)
+    ctx.afterBoot(() => void service.core.businessDays.refresh());
 
     // Background jobs (spec jobs)
     ctx.jobs.handle("sellers.run-verification-checks", () => service.runVerificationChecks());
