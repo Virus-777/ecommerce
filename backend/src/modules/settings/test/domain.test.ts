@@ -69,6 +69,19 @@ describe('values', () => {
     expect(valueText(def('checkout.guestCheckoutEnabled'), false)).toBe('Off');
     expect(valueText(def('shipping.officialCutoff'), '14:00')).toBe('2:00 PM');
   });
+
+  it('writes json values as words, never JSON', () => {
+    const json = (key: string) => ({ key, valueType: 'json' as const, unit: null });
+    expect(valueText(json('market.defaultDeliveryLocation'), { postalCode: '97205', label: 'Portland, OR 97205' })).toBe('Portland, OR 97205');
+    expect(valueText(json('market.defaultDeliveryLocation'), { postalCode: '97205', label: 'Portland' })).toBe('Portland (97205)');
+    expect(valueText(json('sellers.riskReviewCategories'), ['e-bike batteries', 'high-value electronics'])).toBe('e-bike batteries, high-value electronics');
+    expect(valueText(json('content.reviewRequired'), { page: false, article: true })).toBe('Page: Off · Article: On');
+    expect(valueText(json('media.limitsByPurpose'), { product_image: { maxMB: 20, types: ['jpeg', 'png'] } })).toBe('Product image (Max MB: 20, Types: jpeg, png)');
+    expect(valueText(json('search.pricePresets'), [2500, 5000])).toBe('$25.00, $50.00');
+    expect(valueText(json('shipping.sellerHandlingRange'), [0, 3])).toBe('0 to 3 business days');
+    expect(valueText(json('offers.minimumPriceByCategory'), {})).toBe('None');
+    expect(valueText(json('reports.exportDatasets'), [{ key: 'a.b', owner: 'a' }])).toBe('1 item: a.b');
+  });
 });
 
 describe('calendar and flags', () => {

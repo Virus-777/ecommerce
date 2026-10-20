@@ -216,7 +216,7 @@ export const payoutInput = (accountNumber = '000123457731', holder = 'Northwind 
 export async function invitation(kit: Kit, email = `shop.${newId().slice(-6)}@example.com`) {
   const res = await kit.call('POST', `${ADMIN}/seller-invitations`, staff(), { email, businessName: 'Northwind Audio LLC' });
   expect(res.status, JSON.stringify(res.body)).toBe(201);
-  return { id: res.body.id as string, code: kit.svc.applications.invitationCode(res.body.id) };
+  return { id: res.body.invitation.id as string, code: res.body.code as string };
 }
 
 /** Starts and completes every step, then submits. Returns the application and the applicant. */

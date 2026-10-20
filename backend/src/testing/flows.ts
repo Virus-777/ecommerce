@@ -228,8 +228,8 @@ export function flows(app: FastifyInstance, clock: { now(): Date; advance(ms: nu
       const workEmail = `owner@${storeName.toLowerCase().replace(/[^a-z]+/g, '')}.example.com`;
       const invited = await call('POST', `${ADMIN}/seller-invitations`, { token: sellerManager.accessToken, body: { email: workEmail, businessName: `${storeName} LLC` } });
       expect(invited.status, JSON.stringify(invited.body)).toBe(201);
-      // the emailed code (spec gap: the code is in no event or response yet, so read it as the email would carry it)
-      const invitationCode = (app.kernel.boot.apis.get('sellers') as any).applications.invitationCode(invited.body.id) as string;
+      // the code the inviter hands over (returned once with the invitation)
+      const invitationCode = invited.body.code as string;
       const t = applicant.accessToken;
       const start = await call('POST', `${STORE}/applications`, {
         token: t,

@@ -30,6 +30,7 @@ import type {
   RiskReview,
   SellerApplication,
   SellerInvitation,
+  SellerInvitationSent,
   SellerNote,
   SellerProgram,
   VerificationCheck,
@@ -1414,7 +1415,8 @@ export class ApplicationsPart extends Part {
 
   /* ---------------------------------------------------------------- invitations to apply */
 
-  async inviteSeller(body: { email: string; businessName: string; message?: string | null }, by: By): Promise<SellerInvitation> {
+  /** Returns the code once, for the inviter to hand over (an offline server sends no email) */
+  async inviteSeller(body: { email: string; businessName: string; message?: string | null }, by: By): Promise<SellerInvitationSent> {
     if (!body.businessName?.trim()) throw invalid([{ path: 'businessName', message: 'Enter the business name' }]);
     const now = this.now();
     const id = newId();
@@ -1427,14 +1429,15 @@ export class ApplicationsPart extends Part {
       code_hash: this.codeHash(code),
       invited_by: map.actorText(by.actor),
       sent_at: now,
-      expires_at: addDays(now, await this.core.setting('sellerInvitationValidDays')),
+      // every invitation (staff, seller team, invitation to apply) lasts identity's invitation link lifetime
+      expires_at: addDays(now, Number(await this.ctx.settings.read('identity.invitationTtlDays'))),
       state: sellerInvitationMachine.initial,
       application_id: null,
     });
     // the plain code travels in-process to notifications only (the invitation keeps its hash)
     this.core.publish('sellers.invitation.sent', { invitationId: row.id, email: row.email, businessName: row.business_name, code, expiresAt: row.expires_at.toISOString() }, by);
     await this.core.audit({ action: 'sellers.invitation.send', actionLabel: 'Invited a business to apply', category: 'other', target: { type: 'seller_invitation', id: row.id, label: row.business_name, screen: 'admin/seller-invitations' }, after: { email: row.email } }, by);
-    return map.invitation(row);
+    return { invitation: map.invitation(row), code };
   }
 
   async listSellerInvitations(state: SellerInvitation['state'] | undefined, page: PageRequest): Promise<common.Page<SellerInvitation>> {
