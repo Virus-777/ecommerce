@@ -1,3 +1,4 @@
+import { slugify as slugText } from '@marketly/web-shared/lib/format';
 import { dayKey } from '@marketly/web-shared/lib/dates';
 
 // Dates for the account screens, shown in the market time zone (America/Los_Angeles, API.md 4.5).
@@ -56,9 +57,4 @@ export function ageGroup(iso: string | Date): 'Today' | 'This week' | 'Earlier' 
 export const cardExpiry = (m: number, y: number) => `${String(m).padStart(2, '0')}/${String(y % 100).padStart(2, '0')}`;
 
 /** A URL-safe slug for product links (product routes carry the id; the slug is cosmetic, gap G1). */
-export const slugify = (s: string) =>
-  s
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 80) || 'product';
+export const slugify = (s: string) => slugText(s, 'product');

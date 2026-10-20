@@ -46,3 +46,20 @@ export function parseCents(text: string | null | undefined): number | null {
   if (!/^\d+(\.\d{1,2})?$/.test(t) && !/^\.\d{1,2}$/.test(t)) return null;
   return Math.round(Number(t) * 100);
 }
+
+/**
+ * A URL slug, the same rule the backend saves (kernel slugify): accents dropped, "&" read as "and", anything else not
+ * a letter or digit becomes one hyphen, at most 80 characters. Text with no letters or digits gives `fallback`.
+ */
+export function slugify(text: string, fallback = ''): string {
+  const slug = text
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80)
+    .replace(/-+$/g, '');
+  return slug || fallback;
+}

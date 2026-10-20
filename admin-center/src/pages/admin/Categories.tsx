@@ -1,3 +1,4 @@
+import { slugify as slugText } from '@marketly/web-shared/lib/format';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react';
 import { call, errorMessage, resolveProductImageSpec, uploadMedia, useApi } from '@marketly/web-shared/api';
@@ -25,7 +26,8 @@ type CatStatus = 'visible' | 'hidden' | 'soon';
 type AttrSet = { attrs: CategoryAttribute[]; rules: ImageRule[] };
 
 const catStatus = (c: CategoryNode): CatStatus => (!c.visible ? 'hidden' : c.count === 0 ? (c.empty === 'soon' ? 'soon' : 'hidden') : 'visible');
-const slugify = (s: string) => s.toLowerCase().replace(/&/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+/** The slug the backend will save for a new category (the same rule) */
+const slugify = (s: string) => slugText(s, 'item');
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 function TreeBadge({ status }: { status: CatStatus }) {
