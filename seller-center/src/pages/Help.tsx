@@ -32,11 +32,11 @@ const has = (s: string | null | undefined, q: string) => (s ?? '').toLowerCase()
 /** Case status → badge tone (statusLabel is the text). */
 const CASE_TONE: Record<string, Tone> = {
   open: 'info',
-  reopened: 'info',
+  reopened: 'warning',
   waiting_on_seller: 'warning',
-  waiting_on_customer: '',
+  waiting_on_customer: 'warning',
   escalated: 'danger',
-  decision_made: 'info',
+  decision_made: 'success',
   appealed: 'warning',
   resolved: 'success',
   closed: '',

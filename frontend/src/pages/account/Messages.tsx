@@ -5,7 +5,7 @@ import { AccountLayout } from '@/layouts';
 import { ApiError, call, errorMessage, useApi, uploadMedia } from '@marketly/web-shared/api';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Badge, Button, EmptyState, Icon, IconButton, Img, LogoTile, SearchInput, Select, SellerBadge, type Tone } from '@marketly/web-shared/ui';
+import { Alert, Badge, Button, EmptyState, Icon, IconButton, Img, LogoTile, SearchInput, Select, SellerBadge, STATUS_TONE, type Tone } from '@marketly/web-shared/ui';
 import {
   aboutLink,
   aboutOf,
@@ -46,12 +46,14 @@ function ThreadLogo({ c, md }: { c: Counterparty; md?: boolean }) {
   return <LogoTile initials={t.initials} tint={t.tint} size={md ? 'md' : undefined} />;
 }
 
-/** Badge tone for the subject's status label (labels come from the order/return/case modules). */
+/** Badge tone for the subject's status label (labels come from the order/return/case modules): the shared tones, else a guess from the words. */
 function statusTone(label: string): Tone {
+  if (label in STATUS_TONE) return STATUS_TONE[label]!;
   const l = label.toLowerCase();
   if (/delay|late|waiting|action|overdue|failed|problem/.test(l)) return 'warning';
-  if (/cancel|declin|reject|closed/.test(l)) return 'danger';
-  if (/deliver|approv|refunded|resolved|complete/.test(l)) return 'success';
+  if (/declin|reject/.test(l)) return 'danger';
+  if (/cancel|closed|refunded/.test(l)) return '';
+  if (/deliver|approv|resolved|complete/.test(l)) return 'success';
   return 'info';
 }
 

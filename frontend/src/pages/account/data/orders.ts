@@ -462,14 +462,10 @@ export const returnTone = (status: string | null | undefined): Tone => RETURN_TO
 const REFUND_TONE: Record<string, Tone> = { REQUESTED: 'info', PROCESSING: 'info', SENT: 'success', FAILED: 'danger', CANCELLED: '', NONE: '' };
 export const refundTone = (status: string | null | undefined): Tone => REFUND_TONE[(status ?? '').toUpperCase()] ?? '';
 
-/** Package-card tone: delivered green, late amber, failed red, cancelled neutral, otherwise blue. */
-export function groupTone(status: string): 'success' | 'info' | 'warning' | 'danger' | '' {
+/** Package-card tone: the same as the package's status badge (stateTone); a status it doesn't know is blue. */
+export function groupTone(status: string): Tone {
   const s = status.toUpperCase();
-  if (s === 'DELIVERED' || s === 'COMPLETED') return 'success';
-  if (s === 'DELAYED' || s === 'PAYMENT_PENDING') return 'warning';
-  if (s.includes('FAILED') || s === 'EXCEPTION') return 'danger';
-  if (s.includes('CANCELLED') || s.includes('REFUNDED')) return '';
-  return 'info';
+  return s in STATE_TONE ? STATE_TONE[s]! : 'info';
 }
 
 /** "Halden Aurora ANC Wireless Headphones" -> "halden-aurora-anc-wireless-headphones": the stand-in slug where a screen has no product slug (product routes resolve by id). */
