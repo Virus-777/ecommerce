@@ -598,6 +598,7 @@ One full reindex at a time (REINDEX_ALREADY_RUNNING). Scoped jobs only mark docu
 | title_norm | text (for trigram) |
 | version | bigint |
 | indexed_at | timestamptz |
+| offers | jsonb? (the product's offers as search_offers stores them, kept in step by the repository; the MongoDB engine reads them here instead of joining search_offers on every query, docs/07-search-speed-plan.md) |
 | best_seller_rank | int? (rank in best_seller_category_id by sales_30d; null outside the top 100) |
 | best_seller_category_id | uuid? |
 
