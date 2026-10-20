@@ -7,14 +7,15 @@ import { useView } from '@marketly/web-shared/lib/hooks';
 import { DEFAULT_PRESETS, type PeriodPreset } from '@marketly/web-shared/lib/period';
 import { href } from '@marketly/web-shared/routes';
 import {
-  Alert, BarsChart, Button, Card, ChartFrame, Dialog, Drawer, EmptyState, Field, fmtCount, fmtCountCompact, fmtForUnit, Icon, IconButton, KeyValue, OptionCard, PageHeader, PeriodControl, rowsFrom, SegmentedControl, Select, seriesFromReport,
-  seriesTable, Stat, StatusBadge, TableWrap, Textarea, TrendChart, announce, usePeriod,
+  Alert, BarsChart, Button, Card, ChartFrame, Drawer, EmptyState, Field, fmtCount, fmtCountCompact, fmtForUnit, Icon, IconButton, KeyValue, PageHeader, PeriodControl, rowsFrom, SegmentedControl, Select, seriesFromReport,
+  seriesTable, StatusBadge, TableWrap, Textarea, TrendChart, announce, usePeriod,
 } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { date, dateTime, LoadError, shortDate, SkeletonLines } from '@/app/parts';
 import { useReportExport } from './data/report-export';
+import { Freshness, ReportExportDialog, ReportKpis, ReportNotices, ReportTableCard, type ExportFormat } from './data/report-parts';
 import {
-  ago, breakdownsOf, calloutsOf, DATE_BASIS, deltaOf, fmtCell, metaOf, SOLD_BY, tableOf,
+  breakdownsOf, DATE_BASIS, fmtCell, metaOf, SOLD_BY, tableOf,
   type ExportJob, type MetricDefinition, type ReportDefinition, type ReportGroup, type ReportQuery, type ReportResult,
 } from './data/reports';
 import './Report.css';
@@ -28,7 +29,6 @@ import './Report.css';
 // report key (e.g. commerce.sales).
 
 type View = 'export' | 'definitions';
-type ExportFormat = 'csv' | 'xlsx';
 
 const UNIT_LABEL: Record<string, string> = { money: 'Money (USD)', count: 'Count', percent: 'Percent', ratio: 'Ratio', duration_hours: 'Hours', days: 'Days' };
 
@@ -164,12 +164,11 @@ function ReportPage({ r, defs, group }: { r: ReportDefinition; defs: MetricDefin
   };
 
   /* ----- Export dialog ----- */
-  const [format, setFormat] = useState<ExportFormat>('csv');
   const openExport = () => {
     exp.reset();
     setView('export');
   };
-  const runExport = async () => {
+  const runExport = async (format: ExportFormat) => {
     setView('');
     setToast('Export started. It will be ready under Exports, and we will notify you.');
     announce('Export started in the background');
@@ -267,30 +266,13 @@ function ReportPage({ r, defs, group }: { r: ReportDefinition; defs: MetricDefin
                   {cmpText ? <>, compared with {cmpText}</> : null}. USD, tax {meta.taxIncluded ? 'included' : 'excluded'}.
                 </span>
               </span>
-              {meta.freshAsOf && (
-                <span className="rpd-fresh">
-                  <Icon name="refresh-cw" />
-                  <span>
-                    Data updated {ago(meta.freshAsOf)} <span className="muted">· {dateTime(meta.freshAsOf)} PT</span>
-                  </span>
-                </span>
-              )}
+              <Freshness at={meta.freshAsOf} />
             </div>
           )}
         </div>
       </section>
 
-      {res &&
-        calloutsOf(res).map((c) => (
-          <Alert key={c.title} tone={c.kind === 'warning' ? 'warning' : 'info'} title={c.title}>
-            {c.body}
-          </Alert>
-        ))}
-      {res && res.unavailable.length > 0 && (
-        <Alert tone="warning" title="Some figures aren’t available">
-          {res.unavailable.join(', ')} can’t be shown right now because the module that supplies them is off.
-        </Alert>
-      )}
+      <ReportNotices res={res} />
       {notice && (
         <Alert tone={notice.tone} title={notice.title}>
           {notice.body}
@@ -308,29 +290,7 @@ function ReportPage({ r, defs, group }: { r: ReportDefinition; defs: MetricDefin
       )}
       {result.error && <LoadError error={result.error} onRetry={() => void result.refetch()} />}
 
-      <div className="ac-kpis">
-        {res
-          ? res.kpis.map((k) => {
-              const dl = deltaOf(k);
-              return (
-                <div className="panel rpd-kpi" key={k.metricKey}>
-                  <Stat
-                    label={k.label}
-                    value={k.display}
-                    {...(dl && dl.direction !== 'flat' && compare !== 'none'
-                      ? { delta: `${Math.abs(dl.value).toFixed(1)}${dl.unit === 'pct' ? '%' : ' pts'}`, dir: dl.direction, good: dl.good, note: cmpText ? `vs ${cmpText}` : undefined }
-                      : { note: k.note ?? undefined })}
-                  />
-                </div>
-              );
-            })
-          : !result.error &&
-            Array.from({ length: 4 }, (_, i) => (
-              <div className="panel rpd-kpi" key={i}>
-                <SkeletonLines rows={1} />
-              </div>
-            ))}
-      </div>
+      <ReportKpis res={res} compared={compare !== 'none'} cmpText={cmpText} error={!!result.error} />
 
       {activeSeries ? (
         <ChartFrame
@@ -392,10 +352,11 @@ function ReportPage({ r, defs, group }: { r: ReportDefinition; defs: MetricDefin
       ))}
 
       {table && (
-        <Card
+        <ReportTableCard
+          table={table}
           title="The same numbers as a table"
           sub={`${table.rows.length} rows · ${scopeText}`}
-          flush
+          label={`${r.title} table`}
           actions={
             canExport ? (
               <Button variant="ghost" size="sm" icon="download" onClick={openExport}>
@@ -403,48 +364,7 @@ function ReportPage({ r, defs, group }: { r: ReportDefinition; defs: MetricDefin
               </Button>
             ) : undefined
           }
-        >
-          <TableWrap label={`${r.title} table`}>
-            <table className="table">
-              <thead>
-                <tr>
-                  {table.columns.map((c) => (
-                    <th key={c.key} className={c.align === 'right' ? 'r' : undefined} scope="col">
-                      {c.label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {table.rows.map((row, i) => (
-                  <tr key={String(row.period ?? row.productId ?? row.campaignId ?? row.sellerId ?? i)}>
-                    {table.columns.map((c) => (
-                      <td key={c.key} className={c.align === 'right' ? 'r nowrap' : 'nowrap'}>
-                        {c.key === 'period' ? String(row.label ?? row.period) : fmtCell(row[c.key], c.unit)}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-                {table.rows.length === 0 && (
-                  <tr>
-                    <td colSpan={table.columns.length} className="muted">
-                      No records in this period.
-                    </td>
-                  </tr>
-                )}
-                {table.totals && (
-                  <tr className="ac-total">
-                    {table.columns.map((c, i) => (
-                      <td key={c.key} className={c.align === 'right' ? 'r nowrap' : undefined}>
-                        {i === 0 ? 'Total' : table.totals![c.key] !== undefined ? fmtCell(table.totals![c.key], c.unit) : ''}
-                      </td>
-                    ))}
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </TableWrap>
-        </Card>
+        />
       )}
 
       {canExport && (
@@ -533,38 +453,7 @@ function ReportPage({ r, defs, group }: { r: ReportDefinition; defs: MetricDefin
         </section>
       )}
 
-      <Dialog
-        open={view === 'export'}
-        onClose={() => setView('')}
-        title={`Export ${r.title}`}
-        size="lg"
-        foot={
-          <>
-            <Button variant="ghost" onClick={() => setView('')}>
-              Cancel
-            </Button>
-            <Button icon="download" onClick={() => void runExport()} disabled={exp.busy}>
-              Start export
-            </Button>
-          </>
-        }
-      >
-        <p className="small sub">
-          {rangeText} (inclusive) · Pacific Time · {scopeText}
-        </p>
-        <fieldset className="stack gap-2 fieldset-reset">
-          <legend className="label">Format</legend>
-          <OptionCard id="rx-plain" name="rx-format" title={<span className="small strong">CSV</span>} body="UTF-8 text, for Excel, Google Sheets, scripts and databases" checked={format === 'csv'} onChange={() => setFormat('csv')} />
-          <OptionCard id="rx-excel" name="rx-format" title={<span className="small strong">Excel workbook (.xlsx)</span>} body="Opens in Excel with columns already typed" checked={format === 'xlsx'} onChange={() => setFormat('xlsx')} />
-        </fieldset>
-        <div className="panel rpd-delivery">
-          <Icon name="hourglass" />
-          <span>
-            <b>Runs in the background.</b> The file downloads when it is ready, usually within a minute, and stays under Exports on this page until the link expires. Columns your role may not see are left out.
-          </span>
-        </div>
-        <p className="xs muted">Exports of seller data are recorded in Action history with your name, the period and the filters.</p>
-      </Dialog>
+      <ReportExportDialog open={view === 'export'} onClose={() => setView('')} title={r.title} scope={`${rangeText} (inclusive) · Pacific Time · ${scopeText}`} busy={exp.busy} onStart={(f) => void runExport(f)} />
 
       <Drawer
         open={view === 'definitions'}

@@ -64,6 +64,7 @@ export const ADMIN_NAV: NavEntry[] = [
   ] },
   { grp: 'Finance', items: [
     { key: 'finance', label: 'Payments and fees', icon: 'landmark', id: 'admin/finance' },
+    { key: 'finance-statistics', label: 'Financial statistics', icon: 'chart-line', id: 'admin/finance-statistics' },
     { key: 'payouts', label: 'Payouts', icon: 'wallet', id: 'admin/payouts', count: 2, hot: true },
   ] },
   { grp: 'Customers and service', items: [
