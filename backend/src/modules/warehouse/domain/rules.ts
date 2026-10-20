@@ -200,3 +200,14 @@ export function upcoming(times: string[], at: (time: string) => Date, now: Date)
     .filter((d) => d.getTime() > now.getTime())
     .sort((a, b) => a.getTime() - b.getTime());
 }
+
+/**
+ * Inside market business hours by the settings calendar (auto-wave runs only then). No calendar, or one that never
+ * opens because no hours are set, counts as open: the job then runs every time, as it did before hours existed.
+ */
+export function inBusinessHours(cal: { isOpen(at: string): boolean; nextOpen(after: string): string } | undefined, now: Date): boolean {
+  if (!cal) return true;
+  const at = now.toISOString();
+  // a calendar that never opens answers nextOpen with the time asked about
+  return cal.isOpen(at) || cal.nextOpen(at) === at;
+}

@@ -22,7 +22,7 @@
     "Seller packing: sellers pack and ship their own orders at launch (seller fulfilment tasks live in orders and shipping)"
   ],
   "dependsOn": ["inventory", "orders"],
-  "optionalDeps": ["shipping", "returns", "purchasing", "media", "audit", "finance", "fulfillment-service", "workqueues"],
+  "optionalDeps": ["shipping", "returns", "purchasing", "media", "audit", "finance", "fulfillment-service", "workqueues", "settings"],
   "publicApi": [
     { "name": "getShippedSerials", "signature": "(orderItemIds: uuid[]) => map<string[]>", "desc": "Serial numbers recorded at packing per order item, for the return inspection checklist ('Serial number matches order')", "usedBy": ["returns"] },
     { "name": "getFulfillmentForOrder", "signature": "(orderId: uuid) => Fulfillment | null", "desc": "Warehouse progress for an order's Official Store group (picking, packed, on hold)", "usedBy": ["orders", "support"] },
@@ -365,7 +365,7 @@
   ],
   "jobs": [
     { "name": "warehouse.flag-at-risk", "schedule": "every 15 min", "does": "Publish warehouse.fulfillment.at_risk for fulfillments not packed within atRiskMinutes of ship-by (work queue for the Warehouse and Shipping Managers)" },
-    { "name": "warehouse.auto-wave", "schedule": "every 30 min during business hours (when enabled)", "does": "Create waves from fulfillments awaiting pick ahead of each carrier pickup time" },
+    { "name": "warehouse.auto-wave", "schedule": "every 30 min during business hours (when enabled)", "does": "Create waves from fulfillments awaiting pick ahead of each carrier pickup time. Business hours are the market's (settings); with none set, or settings off, it runs every time" },
     { "name": "warehouse.overdue-return-parcels", "schedule": "daily 08:00 market time", "does": "List expected return parcels past their expected date for returns follow-up" }
   ],
   "settings": [

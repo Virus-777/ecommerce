@@ -1715,7 +1715,7 @@ export const spec = defineModuleSpec({
   chapters: [9,12,13],
   summary: "Physical work for Official Store stock: bins, put-away of received goods, pick waves and pick lists by order with bin locations and scanning, packing stations (item checklist, box and weight, carrier label through shipping, packing slip), shortage and damage reports, and receipt of return parcels handed over to returns inspection.",
   dependsOn: ["inventory","orders"],
-  optionalDeps: ["shipping","returns","purchasing","media","audit","finance","fulfillment-service","workqueues"],
+  optionalDeps: ["shipping","returns","purchasing","media","audit","finance","fulfillment-service","workqueues","settings"],
   publicApi: ["getShippedSerials","getFulfillmentForOrder","suggestBin","getTasksForOrderGroups","getTodaySummary"],
   permissions: [
     {
@@ -1948,7 +1948,7 @@ export const spec = defineModuleSpec({
     },
     "warehouse.auto-wave": {
       "schedule": "every 30 min during business hours (when enabled)",
-      "does": "Create waves from fulfillments awaiting pick ahead of each carrier pickup time"
+      "does": "Create waves from fulfillments awaiting pick ahead of each carrier pickup time. Business hours are the market's (settings); with none set, or settings off, it runs every time"
     },
     "warehouse.overdue-return-parcels": {
       "schedule": "daily 08:00 market time",
