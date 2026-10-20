@@ -18434,7 +18434,9 @@ export interface paths {
         };
         /**
          * Reports available to sellers
-         * @description **Screens:** seller/reports
+         * @description Only the reports the caller may open: one with a permission of its own (finance.balances.view for Earnings and profit and Profit by product) is left out without it.
+         *
+         *     **Screens:** seller/reports
          */
         get: operations["reports.getSellerCatalogue"];
         put?: never;
@@ -18455,8 +18457,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Run a seller report (product sales, order trend, returns by reason, service performance)
-         * @description Always scoped to the caller's seller; sellerId, soldBy and other sellers' data are never accepted. Figures by order date, market time zone, stating how each metric is calculated.
+         * Run a seller report (product sales, order trend, returns by reason, service performance, earnings and profit, profit by product)
+         * @description Always scoped to the caller's seller; sellerId, soldBy and other sellers' data are never accepted. Figures by order date, market time zone, stating how each metric is calculated. A report with a permission of its own (seller.earnings and seller.profit_by_product: finance.balances.view) is FORBIDDEN without it.
          *
          *     **Permission:** `reports.seller.view`
          *
@@ -41269,8 +41271,11 @@ export interface components {
             reports: components["schemas"]["reports.ReportDefinition"][];
         };
         "reports.ReportQuery": {
-            /** @enum {string|null} */
-            preset?: "today" | "last_7_days" | "last_14_days" | "last_30_days" | "last_90_days" | "month_to_date" | "custom" | null;
+            /**
+             * @description Days ending today in market time; quarter_to_date from the first day of the calendar quarter, year_to_date from 1 January, last_12_months from the day after the same date last year (at most maxRangeDays)
+             * @enum {string|null}
+             */
+            preset?: "today" | "last_7_days" | "last_14_days" | "last_30_days" | "last_90_days" | "month_to_date" | "quarter_to_date" | "year_to_date" | "last_12_months" | "custom" | null;
             range?: components["schemas"]["DateRange"] | null;
             /** @enum {string|null} */
             dateBasis?: "placement" | "payment" | "shipment" | "completion" | null;
@@ -41285,10 +41290,16 @@ export interface components {
             /** @description USD only at launch */
             currency?: string | null;
             timeZone?: string | null;
-            /** @enum {string|null} */
+            /**
+             * @description Series buckets (weeks start on Monday). Default: day up to 31 days, week up to 92, month beyond
+             * @enum {string|null}
+             */
             granularity?: "day" | "week" | "month" | null;
-            /** @enum {string|null} */
-            compare?: "none" | "previous_period" | null;
+            /**
+             * @description previous_period: the same number of days just before the range; same_period_last_year: the same calendar dates one year earlier (29 February becomes 28 February). Gives KPI deltas, meta.compareRange and a <key>:compare twin of every series
+             * @enum {string|null}
+             */
+            compare?: "none" | "previous_period" | "same_period_last_year" | null;
             /** @description Report-specific filters from FilterSpec */
             filters?: unknown;
         };
@@ -41303,13 +41314,14 @@ export interface components {
             note?: string | null;
         };
         "reports.Series": {
+            /** @description With a comparison, every series has a twin keyed <key>:compare */
             key: string;
             label: string;
-            /** @description { x: date, y: number } */
+            /** @description { x: date (first day of the bucket), y: number, label } . On a <key>:compare twin x and label are the current period's bucket at the same position (so both draw on one axis), y is the comparison period's value (null when the comparison has no bucket there) and compareX is the comparison bucket's own first day */
             points: unknown[];
         };
         "reports.ReportResult": {
-            /** @description { reportKey, title, range, dateBasis, currency, timeZone, taxIncluded, freshAsOf, mayStillChange, definitionsVersion, compareRange?, scope: platform|seller } */
+            /** @description { reportKey, title, range, dateBasis, dateBasisLabel, currency, timeZone, taxIncluded, freshAsOf, mayStillChange, definitionsVersion, compare?: previous_period|same_period_last_year, compareRange? (the dates the :compare twins hold), granularity, scope: platform|seller } */
             meta: unknown;
             kpis: components["schemas"]["reports.KpiValue"][];
             series: components["schemas"]["reports.Series"][];
