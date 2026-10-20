@@ -25,14 +25,6 @@ export const STATUS_FILTERS: Array<{ value: string; label: string; query: { stat
   { value: 'low', label: 'Low stock', query: { stockState: 'low_stock' } },
 ];
 
-export type Period = '7' | '14' | '30';
-
-/** The calendar range (Pacific dates) of the last `days` days, today included. */
-export function periodRange(days: number, now = new Date()): { from: string; to: string } {
-  const day = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-  return { from: day(new Date(now.getTime() - (days - 1) * 86_400_000)), to: day(now) };
-}
-
 /** The price-change limit (percent) of the staff member's roles: null = no limit, 0 = not permitted. */
 export function priceLimitPct(limits: Array<{ action: { key: string }; value: { authority: string; limitNumber?: number | null } }> | undefined): number | null {
   const mine = (limits ?? []).filter((l) => l.action.key === 'offers.prices.change' && l.value.authority === 'permitted');

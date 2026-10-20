@@ -6,7 +6,7 @@ import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { formatMoney } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, announce, BarChart, Badge, Breadcrumbs, Button, Card, Dialog, Icon, SearchInput, Select, Stat, StatusBadge, TableWrap, type IconName } from '@marketly/web-shared/ui';
+import { Alert, announce, BarsChart, Badge, Breadcrumbs, Button, Card, Dialog, fmtCount, fmtCountCompact, Icon, SearchInput, Select, Stat, StatusBadge, TableWrap, type IconName } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { dateTime, LoadError, shortDate, SkeletonLines } from '@/app/parts';
 import { ACTION_LABEL, ACTION_PERMISSION, CampaignActionDialog, NEEDS_INPUT, runCampaignAction, type CampaignAction, type PendingAction } from './data/ad-actions';
@@ -342,11 +342,13 @@ export default function Ads() {
                     ))}
                   </div>
                   {perf.daily.length > 0 && (
-                    <BarChart
-                      labels={perf.daily.map((x) => shortDate(x.date))}
-                      data={perf.daily.map((x) => x.displays / 1000)}
-                      fmt={(v) => (v >= 1 ? `${Math.round(v)}k` : `${Math.round(v * 1000)}`)}
-                      label="Daily ad displays in thousands"
+                    <BarsChart
+                      rows={perf.daily.map((x) => ({ x: x.date, label: shortDate(x.date), displays: x.displays }))}
+                      series={[{ key: 'displays', label: 'Ad displays' }]}
+                      fmt={fmtCount}
+                      axisFmt={fmtCountCompact}
+                      height={200}
+                      label="Daily ad displays"
                     />
                   )}
                   <p className="ab-note">

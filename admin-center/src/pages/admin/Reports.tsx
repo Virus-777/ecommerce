@@ -6,12 +6,14 @@ import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { formatMoney } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, announce, Breadcrumbs, Button, Field, Icon, Legend, LineChart, Select, SplitBar, Stat, SummaryRow, TableWrap } from '@marketly/web-shared/ui';
+import {
+  Alert, announce, Breadcrumbs, Button, Field, fmtMoney, fmtMoneyCompact, Icon, Select, seriesFromReport, ShareBar, Stat, SummaryRow, TableWrap, TrendChart,
+} from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { date, dateTime, LoadError, SkeletonLines } from '@/app/parts';
 import { useReportExport } from './data/report-export';
 import {
-  calloutsOf, cellNumber, DATE_BASIS, deltaOf, fmtCell, groupIcon, metaOf, ownerLabel, pointsOf, PRESETS, SOLD_BY, splitOf, tableOf,
+  calloutsOf, cellNumber, DATE_BASIS, deltaOf, fmtCell, groupIcon, metaOf, ownerLabel, PRESETS, SOLD_BY, splitOf, tableOf,
   type AdminDashboard, type Preset, type ReportGroup, type ReportQuery, type ReportResult,
 } from './data/reports';
 
@@ -76,8 +78,8 @@ export default function Reports() {
   const split = r ? splitOf(r) : [];
   const official = split.find((s) => s.key === 'official');
   const market = split.find((s) => s.key === 'marketplace');
-  const series = r?.series ?? [];
-  const labels = series[0] ? pointsOf(series[0]).map((p) => p.label ?? date(p.x)) : [];
+  const series = (r?.series ?? []).filter((s) => !s.key.endsWith(':compare'));
+  const chart = seriesFromReport(r, series.map((s) => s.key));
   const nReports = (catalogue.data ?? []).reduce((a, g) => a + g.reports.length, 0);
   const feeKpi = dash.data?.kpis.find((x) => x.metricKey === 'marketplace.fee_income');
   const writeError = saveView.error ?? schedule.error ?? exp.error;
@@ -231,33 +233,27 @@ export default function Reports() {
                       })}
                     </div>
                     <div className="stack gap-2">
-                      <div className="row between">
-                        <Legend items={series.map((s) => s.label)} />
-                        <span className="xs muted">Daily sales, USD</span>
-                      </div>
-                      {labels.length > 1 ? (
-                        <LineChart
-                          labels={labels}
-                          series={series.map((s) => ({ name: s.label, data: pointsOf(s).map((p) => p.y / 100000) }))}
-                          height={240}
-                          fmt={(v) => `$${v >= 10 ? Math.round(v) : v.toFixed(1)}k`}
-                          label={`Daily ${series.map((s) => s.label.toLowerCase()).join(' and ')}, ${labels[0]} to ${labels[labels.length - 1]}`}
+                      <span className="xs muted">Sales per {meta.granularity ?? 'day'}, USD</span>
+                      {chart.rows.length > 1 ? (
+                        <TrendChart
+                          rows={chart.rows}
+                          series={chart.series}
+                          fmt={fmtMoney}
+                          axisFmt={fmtMoneyCompact}
+                          compareLabel={chart.compareLabel}
+                          label={`${series.map((s) => s.label).join(' and ')} per ${meta.granularity ?? 'day'}, ${chart.rows[0].label} to ${chart.rows[chart.rows.length - 1].label}`}
                         />
                       ) : (
                         <p className="small muted">One day selected: see the table below.</p>
                       )}
                       {official && market && (
-                        <>
-                          <div className="row between xs sub">
-                            <span>
-                              {official.label} {k(official.amount.amount / 100)} · {Math.round(official.sharePct)}%
-                            </span>
-                            <span>
-                              {market.label} {k(market.amount.amount / 100)} · {Math.round(market.sharePct)}%
-                            </span>
-                          </div>
-                          <SplitBar a={Math.round(official.sharePct)} b={100 - Math.round(official.sharePct)} />
-                        </>
+                        <ShareBar
+                          label="Share of sales"
+                          parts={[
+                            { key: 'official', label: official.label, pct: official.sharePct, value: k(official.amount.amount / 100) },
+                            { key: 'marketplace', label: market.label, pct: 100 - official.sharePct, value: k(market.amount.amount / 100) },
+                          ]}
+                        />
                       )}
                     </div>
                   </>

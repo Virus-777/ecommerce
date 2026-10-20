@@ -7,7 +7,7 @@ import { cx } from '@marketly/web-shared/lib/cx';
 import { formatMoney, num } from '@marketly/web-shared/lib/format';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Avatar, Button, Card, Deadline, Dialog, Field, Icon, KeyValue, Legend, Meter, PageHeader, SegmentedControl, SplitBar, Stat, StatusBadge, TableWrap, Tabs, Textarea, announce, type IconName } from '@marketly/web-shared/ui';
+import { Alert, Avatar, Button, Card, Deadline, Dialog, Field, Icon, KeyValue, Meter, PageHeader, SegmentedControl, ShareBar, Stat, StatusBadge, TableWrap, Tabs, Textarea, announce, type IconName } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { LoadError, SkeletonLines, date, dateTime, deadlineLabel, deadlineTone } from '@/app/parts';
 import { exportNote, useDatasetExport } from './data/dataset-export';
@@ -602,14 +602,13 @@ export default function Finance() {
                       </div>
                     ))}
                   </div>
-                  <div className="stack gap-2">
-                    <div className="row between xs sub">
-                      <span>Official Store {companyPct}%</span>
-                      <span>Marketplace sellers {salesBase ? 100 - companyPct : 0}%</span>
-                    </div>
-                    <SplitBar a={companyPct} b={salesBase ? 100 - companyPct : 0} />
-                    <Legend items={['Official Store', 'Marketplace sellers']} />
-                  </div>
+                  <ShareBar
+                    label="Share of sales"
+                    parts={[
+                      { key: 'official', label: 'Official Store', pct: companyPct },
+                      { key: 'sellers', label: 'Marketplace sellers', pct: salesBase ? 100 - companyPct : 0 },
+                    ]}
+                  />
                 </>
               ) : null}
               <p className="ab-note">

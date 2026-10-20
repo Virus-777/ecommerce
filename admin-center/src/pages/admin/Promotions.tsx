@@ -5,7 +5,9 @@ import { call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { formatMoney, num } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, BarChart, Badge, Button, Card, Icon, Meter, PageHeader, SearchInput, Select, Stat, StatusBadge, TableWrap, Tabs, announce, type IconName } from '@marketly/web-shared/ui';
+import {
+  Alert, Badge, BarsChart, Button, Card, ChartFrame, fmtMoney, fmtMoneyCompact, Icon, Meter, PageHeader, SearchInput, Select, seriesTable, Stat, StatusBadge, TableWrap, Tabs, announce, type ChartRow, type IconName,
+} from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { LoadError, SkeletonLines, shortDate } from '@/app/parts';
 import { ExportButton, ExportNotice } from './data/export-button';
@@ -22,6 +24,8 @@ import { StopCampaign } from './PromotionStop';
 
 const pct1 = (n?: number | null) => (n == null ? '—' : `${Math.round(n * 10) / 10}%`);
 const pts = (n?: number | null) => (n == null ? '—' : `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(Math.round(n * 10) / 10)} pts`);
+
+const COST_SERIES = [{ key: 'cost', label: 'Discount cost' }];
 
 function kpis(d: PromotionsDashboard, range: string): Array<{ icon: IconName; label: string; value: string; note: string }> {
   const c = d.discountCost;
@@ -79,6 +83,7 @@ export default function Promotions() {
   const d = dash.data;
   const range = d ? `${shortDate(d.range.from)}–${shortDate(d.range.to)}` : '';
   const daily = (d?.dailyCost ?? []).slice(-14);
+  const costRows: ChartRow[] = daily.map((x) => ({ x: x.date, label: shortDate(x.date), cost: x.value.amount }));
   const partial = daily.find((x) => x.partial);
 
   return (
@@ -311,18 +316,20 @@ export default function Promotions() {
               </div>
             )}
           </Card>
-          <Card title="Daily discount cost" titleAs="h3" sub={`${daily.length ? `${shortDate(daily[0].date)}–${shortDate(daily[daily.length - 1].date)}` : range} · all campaigns · USD`}>
-            {d ? (
-              <BarChart labels={daily.map((x) => shortDate(x.date))} data={daily.map((x) => x.value.amount / 100)} height={200} fmt={(v) => `$${num(Math.round(v))}`} label="Daily discount cost" />
-            ) : (
-              <SkeletonLines rows={4} />
-            )}
+          <ChartFrame
+            title="Daily discount cost"
+            sub={`${daily.length ? `${shortDate(daily[0].date)}–${shortDate(daily[daily.length - 1].date)}` : range} · all campaigns · USD`}
+            loading={!d}
+            height={200}
+            table={seriesTable(costRows, COST_SERIES, fmtMoney, { xLabel: 'Day' })}
+          >
+            <BarsChart rows={costRows} series={COST_SERIES} fmt={fmtMoney} axisFmt={fmtMoneyCompact} height={200} label="Daily discount cost" />
             {partial && (
               <p className="ab-note">
                 <Icon name="info" className="ic-sm" /> {shortDate(partial.date)} is partial, through the latest update.
               </p>
             )}
-          </Card>
+          </ChartFrame>
         </div>
       )}
     </AdminLayout>

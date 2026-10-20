@@ -7,7 +7,9 @@ import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { formatMoney, isoInText } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Avatar, Badge, Button, Card, Deadline, EmptyState, Icon, Legend, LineChart, SegmentedControl, SplitBar, Stat, StatusBadge, TableWrap, announce } from '@marketly/web-shared/ui';
+import {
+  Alert, Avatar, Badge, Button, Card, ChartFrame, Deadline, EmptyState, fmtMoney, Icon, SegmentedControl, seriesTable, ShareBar, Stat, StatusBadge, TableWrap, TrendChart, announce, type ChartRow,
+} from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { LoadError, SkeletonLines, deadlineLabel, deadlineTone, longDate, screenHref, time, weekdayDate } from '@/app/parts';
 import {
@@ -72,6 +74,12 @@ export default function Dashboard() {
   const sellers = d?.series.find((s) => s.key !== 'official');
   const splitOfficial = d?.split.find((s) => s.key === 'official');
   const splitSellers = d?.split.find((s) => s.key !== 'official');
+  // daily sales of both sides on one row per day (values in cents)
+  const splitRows: ChartRow[] = (official?.points ?? []).map((p, i) => ({ x: p.date, label: p.label, official: p.value, sellers: sellers?.points[i]?.value ?? null }));
+  const splitSeries = [
+    { key: 'official', label: official?.label ?? 'Official Store' },
+    { key: 'sellers', label: sellers?.label ?? 'Marketplace sellers' },
+  ];
   const firstName = name.split(' ')[0];
   const adList = ads ? [...ads.live, ...ads.upcomingStarts].slice(0, 3) : [];
   const canRemind = can('shipping.exceptions.manage');
@@ -118,7 +126,8 @@ export default function Dashboard() {
 
       <div className="ad-main">
         <div className="stack gap-5">
-          <Card
+          <ChartFrame
+            titleAs="h2"
             title="Sales split"
             sub={`Last ${official?.points.length ?? 14} days · ${d?.currency ?? 'USD'}`}
             actions={
@@ -126,40 +135,24 @@ export default function Dashboard() {
                 Open report
               </Link>
             }
+            loading={dash.isPending}
+            height={230}
+            empty={official && sellers ? false : 'Sales figures are not available right now.'}
+            table={seriesTable(splitRows, splitSeries, fmtMoney, { xLabel: 'Day' })}
           >
-            {official && sellers ? (
-              <>
-                <Legend items={[official.label, sellers.label]} />
-                <LineChart
-                  labels={official.points.map((p) => p.label)}
-                  series={[
-                    { name: 'Official', data: official.points.map((p) => p.value) },
-                    { name: 'Sellers', data: sellers.points.map((p) => p.value) },
+            <div className="stack gap-3">
+              <TrendChart rows={splitRows} series={splitSeries} fmt={fmtMoney} axisFmt={compactMoney} height={230} label="Daily sales, Official Store vs marketplace sellers" />
+              {splitOfficial && splitSellers && (
+                <ShareBar
+                  label="Share of sales"
+                  parts={[
+                    { key: 'official', label: 'Official Store', pct: splitOfficial.sharePct, value: moneyText(splitOfficial.amount, formatMoney) },
+                    { key: 'sellers', label: 'Sellers', pct: 100 - splitOfficial.sharePct, value: moneyText(splitSellers.amount, formatMoney) },
                   ]}
-                  height={230}
-                  fmt={compactMoney}
-                  label="Daily sales, Official Store vs marketplace sellers"
                 />
-                {splitOfficial && splitSellers && (
-                  <div className="stack gap-2">
-                    <div className="row between xs sub">
-                      <span>
-                        Official Store {Math.round(splitOfficial.sharePct)}% · {moneyText(splitOfficial.amount, formatMoney)}
-                      </span>
-                      <span>
-                        Sellers {Math.round(splitSellers.sharePct)}% · {moneyText(splitSellers.amount, formatMoney)}
-                      </span>
-                    </div>
-                    <SplitBar a={Math.round(splitOfficial.sharePct)} b={100 - Math.round(splitOfficial.sharePct)} />
-                  </div>
-                )}
-              </>
-            ) : dash.isPending ? (
-              <div className="sk sk-card" style={{ height: 230 }} aria-hidden="true" />
-            ) : (
-              <p className="small muted">Sales figures are not available right now.</p>
-            )}
-          </Card>
+              )}
+            </div>
+          </ChartFrame>
 
           <Card
             titleAs="h3"

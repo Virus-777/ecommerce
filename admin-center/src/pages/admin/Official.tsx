@@ -9,13 +9,13 @@ import { useView } from '@marketly/web-shared/lib/hooks';
 import { formatMoney, money, num } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
 import {
-  Alert, Button, Card, Dialog, EmptyState, Field, Icon, Img, Legend, LineChart, PageHeader, Pager, Price, SearchInput, SegmentedControl, Select, Stat,
+  Alert, Button, Card, ChartFrame, Dialog, EmptyState, Field, fmtMoney, fmtMoneyCompact, Icon, Img, PageHeader, Pager, PeriodControl, Price, SearchInput, Select, seriesTable, Stat, TrendChart, usePeriod, type ChartRow,
   StatusBadge, SummaryRow, TableWrap, Textarea, TextInput, type IconName,
 } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { date, dateTime, LoadError, shortDate, SkeletonLines } from '@/app/parts';
 import { flattenCategories, type CategoryNode } from './data/catalog';
-import { pendingNote, periodRange, priceLimitPct, STATUS_FILTERS, STATUS_LABEL, type OfficialRow, type Period, type PriceChange } from './data/official';
+import { pendingNote, priceLimitPct, STATUS_FILTERS, STATUS_LABEL, type OfficialRow, type PriceChange } from './data/official';
 
 // Design: pages/admin/admin-official.html (trading + company offers) ·
 // view "price-change" = the Change price dialog (?view=price-change&offer=<offerId>).
@@ -25,11 +25,10 @@ import { pendingNote, periodRange, priceLimitPct, STATUS_FILTERS, STATUS_LABEL, 
 
 type View = 'price-change';
 
-const PERIOD_ITEMS: Array<{ value: Period; label: string }> = [
-  { value: '7', label: '7 days' },
-  { value: '14', label: '14 days' },
-  { value: '30', label: '30 days' },
-];
+// GET finance/trading takes any from–to range and compares with the days just before it, so the period control
+// offers ranges only (no grain, no comparison choice).
+const TRADING_PRESETS = ['today', 'last_7_days', 'last_14_days', 'last_30_days', 'last_90_days', 'month_to_date', 'quarter_to_date', 'year_to_date', 'last_12_months', 'custom'] as const;
+const SALES_SERIES = [{ key: 'sales', label: 'Official Store' }];
 
 const STOREFRONT: Array<{ icon: IconName; label: string; link: string; to: string }> = [
   { icon: 'layout-template', label: 'Official Store page', link: 'View', to: href('store/official') },
@@ -108,7 +107,7 @@ export default function Official() {
   const canView = can('offers.official.view');
   const [view] = useView<View>();
   const [params, setParams] = useSearchParams();
-  const [period, setPeriod] = useState<Period>('14');
+  const period = usePeriod({ preset: 'last_14_days' });
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
   const [cat, setCat] = useState('');
@@ -116,12 +115,13 @@ export default function Official() {
   const [notice, setNotice] = useState<{ title: string; body: string } | null>(null);
 
   /* ----- Trading ----- */
-  const days = Number(period);
-  const range = periodRange(days);
+  const days = period.days;
+  const range = period.range;
   const trading = useQuery({
     queryKey: ['finance', 'trading', range],
     enabled: can('finance.trading.view'),
     queryFn: () => call(api.GET('/api/admin/finance/trading', { params: { query: range } })),
+    placeholderData: (prev) => prev,
   });
   const t = trading.data;
   const sales = t?.productSales.amount ?? 0;
@@ -229,6 +229,7 @@ export default function Official() {
   };
 
   const daily = t?.daily ?? [];
+  const salesRows: ChartRow[] = daily.map((d) => ({ x: d.date, label: shortDate(d.date), sales: d.sales.amount }));
   const catOptions = [{ value: '', label: 'All categories' }, ...flattenCategories((cats.data ?? []) as CategoryNode[])
       // The offers filter matches the exact category (no roll-up of subcategories), so only subcategories are offered.
       .filter((c) => c.label.includes(' › '))
@@ -242,7 +243,7 @@ export default function Official() {
         sub={`Company trading · ${date(range.from)} – ${date(range.to)}${t ? ` · cost basis: ${t.costBasis}` : ''}`}
         actions={
           <>
-            <SegmentedControl items={PERIOD_ITEMS} active={period} onChange={setPeriod} label="Period" />
+            <PeriodControl period={period} presets={[...TRADING_PRESETS]} noGrain noCompare idPrefix="ot" />
             <Button variant="secondary" size="sm" icon="chart-column" to={href('admin/report', '', { key: 'product-sales-and-margin' })}>
               Trading report
             </Button>
@@ -284,14 +285,9 @@ export default function Official() {
           </div>
 
           <div className="aa-split">
-            <Card title="Company sales by day" sub="Official Store only · USD">
-              <Legend items={['Official Store']} />
-              {t ? (
-                <LineChart labels={daily.map((d) => shortDate(d.date))} series={[{ name: 'Official Store', data: daily.map((d) => d.sales.amount / 100_000) }]} height={210} area fmt={(v) => `$${v.toFixed(1)}k`} label="Official Store daily sales" />
-              ) : (
-                <SkeletonLines rows={4} />
-              )}
-            </Card>
+            <ChartFrame titleAs="h2" title="Company sales by day" sub="Official Store only · USD" loading={!t} refreshing={trading.isPlaceholderData} height={210} table={seriesTable(salesRows, SALES_SERIES, fmtMoney, { xLabel: 'Day' })}>
+              <TrendChart rows={salesRows} series={SALES_SERIES} fmt={fmtMoney} axisFmt={fmtMoneyCompact} area height={210} label="Official Store daily sales" />
+            </ChartFrame>
             <div className="stack gap-5">
               <Card title="Marketplace fee income" sub="Reported separately · not company trading" titleAs="h3">
                 <span className="small sub">Marketplace fees on seller sales are not company revenue and are not in the figures on the left.</span>

@@ -3,15 +3,19 @@ import { Link, useParams } from 'react-router';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
-import { useElementWidth, useView } from '@marketly/web-shared/lib/hooks';
+import { useView } from '@marketly/web-shared/lib/hooks';
+import { DEFAULT_PRESETS, type PeriodPreset } from '@marketly/web-shared/lib/period';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, BarChart, Button, Card, Dialog, Drawer, EmptyState, Field, Icon, IconButton, KeyValue, Legend, LineChart, OptionCard, PageHeader, SegmentedControl, Select, Stat, StatusBadge, TableWrap, Textarea, announce } from '@marketly/web-shared/ui';
+import {
+  Alert, BarsChart, Button, Card, ChartFrame, Dialog, Drawer, EmptyState, Field, fmtCount, fmtCountCompact, fmtForUnit, Icon, IconButton, KeyValue, OptionCard, PageHeader, PeriodControl, rowsFrom, SegmentedControl, Select, seriesFromReport,
+  seriesTable, Stat, StatusBadge, TableWrap, Textarea, TrendChart, announce, usePeriod,
+} from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { date, dateTime, LoadError, shortDate, SkeletonLines } from '@/app/parts';
 import { useReportExport } from './data/report-export';
 import {
-  ago, breakdownsOf, calloutsOf, DATE_BASIS, deltaOf, fmtCell, metaOf, pointsOf, PRESETS, SOLD_BY, tableOf,
-  type ExportJob, type MetricDefinition, type Preset, type ReportDefinition, type ReportGroup, type ReportQuery, type ReportResult,
+  ago, breakdownsOf, calloutsOf, DATE_BASIS, deltaOf, fmtCell, metaOf, SOLD_BY, tableOf,
+  type ExportJob, type MetricDefinition, type ReportDefinition, type ReportGroup, type ReportQuery, type ReportResult,
 } from './data/reports';
 import './Report.css';
 
@@ -28,10 +32,8 @@ type ExportFormat = 'csv' | 'xlsx';
 
 const UNIT_LABEL: Record<string, string> = { money: 'Money (USD)', count: 'Count', percent: 'Percent', ratio: 'Ratio', duration_hours: 'Hours', days: 'Days' };
 
-function chartFmt(unit: string) {
-  return (v: number) =>
-    unit === 'percent' ? `${Math.round(v)}%` : unit === 'duration_hours' ? `${Math.round(v)} h` : unit === 'money' ? (v >= 1000 ? `$${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k` : `$${Math.round(v)}`) : v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k` : String(Math.round(v));
-}
+/** The breakdown chart draws one value per row (requests, count or share). */
+const BREAKDOWN_SERIES = [{ key: 'value', label: 'Value' }];
 
 const EXPORT_STATE: Record<ExportJob['state'], { label: string; tone: 'success' | 'info' | 'danger' | '' }> = {
   queued: { label: 'Queued', tone: 'info' },
@@ -98,12 +100,12 @@ function ReportPage({ r, defs, group }: { r: ReportDefinition; defs: MetricDefin
   const qc = useQueryClient();
   const { can } = useStaffSession();
   const [view, setView] = useView<View>();
-  // Draw the chart at the card's real width so its text keeps the design's size in a full-width card.
-  const [chartRef, measured] = useElementWidth<HTMLDivElement>();
-  const chartWidth = Math.max(640, measured);
   const filter = (k: string) => r.filters.find((f) => f.key === k);
-  const [preset, setPreset] = useState<Preset>(((filter('range')?.default as string) ?? 'last_14_days') as Preset);
-  const [compare, setCompare] = useState<'previous_period' | 'none'>('previous_period');
+  // the period lives in the URL (PeriodControl); the report's own default preset (often 14 days) stays offered
+  const defaultPreset = ((filter('range')?.default as string) ?? 'last_14_days') as PeriodPreset;
+  const period = usePeriod({ preset: defaultPreset });
+  const presets = DEFAULT_PRESETS.includes(defaultPreset) ? DEFAULT_PRESETS : [defaultPreset, ...DEFAULT_PRESETS];
+  const compare = period.compare;
   const [seller, setSeller] = useState('all');
   const [basis, setBasis] = useState(((filter('dateBasis')?.default as string) ?? 'placement') as string);
   const [soldBy, setSoldBy] = useState(((filter('soldBy')?.default as string) ?? 'all') as string);
@@ -113,8 +115,8 @@ function ReportPage({ r, defs, group }: { r: ReportDefinition; defs: MetricDefin
   const exp = useReportExport();
 
   const query: ReportQuery = {
-    preset,
-    compare,
+    // new presets and comparisons (docs/09 §3.3) are not in the generated types until the backend lands
+    ...(period.query as ReportQuery),
     ...(filter('dateBasis') ? { dateBasis: basis as ReportQuery['dateBasis'] } : {}),
     ...(filter('soldBy') ? { soldBy: soldBy as ReportQuery['soldBy'] } : {}),
     ...(filter('sellerId') && seller !== 'all' ? { sellerId: seller } : {}),
@@ -184,20 +186,25 @@ function ReportPage({ r, defs, group }: { r: ReportDefinition; defs: MetricDefin
 
   const res = result.data;
   const meta = res ? metaOf(res) : null;
-  const series = res?.series ?? [];
+  const series = (res?.series ?? []).filter((s) => !s.key.endsWith(':compare'));
   const activeSeries = series.find((s) => s.key === chartKey) ?? series[0];
   const breakdowns = res ? breakdownsOf(res) : [];
   const table = res ? tableOf(res) : null;
   const defList = res?.definitions.length ? res.definitions : defs;
   const unitOfSeries = (k: string) => defList.find((d) => d.key.endsWith(`.${k}`))?.unit ?? (table?.columns.find((c) => k.startsWith(c.key))?.unit ?? 'count');
   const seriesUnit = activeSeries ? unitOfSeries(activeSeries.key) : 'count';
-  const toY = (y: number) => (seriesUnit === 'money' ? y / 100 : y);
+  const [unitFmt, unitAxisFmt] = fmtForUnit(seriesUnit);
+  const chart = seriesFromReport(res, activeSeries ? [activeSeries.key] : []);
   const rangeText = meta ? `${date(meta.range.from)} – ${date(meta.range.to)}` : '';
   const cmpText = meta?.compareRange ? `${shortDate(meta.compareRange.from)} – ${date(meta.compareRange.to)}` : '';
   const scopeText = seller !== 'all' ? (sellers.data?.items.find((s) => s.id === seller)?.storeName ?? 'One seller') : filter('soldBy') ? SOLD_BY[soldBy] : 'All sellers and the Official Store';
   const owner = group ? (group.owner ? `${group.owner.name}` : group.ownerRole) : '';
   const myExports = (exportsList.data?.items ?? []).filter((e) => e.reportKey === r.key);
   const firstBreakdown = breakdowns[0];
+  const breakdownRows = rowsFrom(
+    (firstBreakdown?.rows ?? []).map((x) => x.label),
+    { value: (firstBreakdown?.rows ?? []).map((x) => Number(x.requests ?? x.count ?? x.sharePct ?? 0)) },
+  );
   const definitionsVersion = [...new Set(defList.map((d) => d.version))].map((v) => `Version ${v}`).join(', ');
 
   return (
@@ -230,21 +237,8 @@ function ReportPage({ r, defs, group }: { r: ReportDefinition; defs: MetricDefin
 
       <section className="card" aria-label="Report filters">
         <div className="card-body">
+          <PeriodControl period={period} presets={presets} idPrefix="rp" />
           <div className="rpd-filters">
-            <Field label="Date range" hint={rangeText ? `${rangeText} · dates inclusive` : undefined}>
-              <Select id="rp-range" options={PRESETS} value={preset} onChange={(e) => setPreset(e.target.value as Preset)} />
-            </Field>
-            <Field label="Compare to" hint={cmpText || 'Deltas hidden'}>
-              <Select
-                id="rp-compare"
-                options={[
-                  { value: 'previous_period', label: 'Previous period' },
-                  { value: 'none', label: 'No comparison' },
-                ]}
-                value={compare}
-                onChange={(e) => setCompare(e.target.value as 'previous_period' | 'none')}
-              />
-            </Field>
             {filter('sellerId') ? (
               <Field label="Sellers" hint={seller === 'all' && filter('soldBy') ? 'Includes the Official Store' : undefined}>
                 <Select id="rp-seller" options={[{ value: 'all', label: 'All sellers' }, ...(sellers.data?.items ?? []).map((s) => ({ value: s.id, label: s.storeName }))]} value={seller} onChange={(e) => setSeller(e.target.value)} />
@@ -339,9 +333,10 @@ function ReportPage({ r, defs, group }: { r: ReportDefinition; defs: MetricDefin
       </div>
 
       {activeSeries ? (
-        <Card
+        <ChartFrame
+          titleAs="h2"
           title={`${activeSeries.label} by ${meta?.granularity ?? 'day'}`}
-          sub={`${rangeText} · ${scopeText}`}
+          sub={`${rangeText} · ${scopeText}${seriesUnit === 'money' ? ' · USD' : ''}`}
           actions={
             series.length > 1 ? (
               <div className="rpd-seg">
@@ -349,32 +344,16 @@ function ReportPage({ r, defs, group }: { r: ReportDefinition; defs: MetricDefin
               </div>
             ) : undefined
           }
+          refreshing={result.isPlaceholderData}
+          empty={chart.rows.length > 1 ? false : 'One day selected: see the table below.'}
+          table={seriesTable(chart.rows, chart.series, unitFmt, { compareLabel: chart.compareLabel })}
         >
-          <div className="rpd-chart-head">
-            <Legend items={[rangeText]} />
-            <span className="xs muted">{cmpText ? 'Comparison is in the KPIs' : seriesUnit === 'money' ? 'USD' : ''}</span>
-          </div>
-          <div ref={chartRef}>
-            {pointsOf(activeSeries).length > 1 ? (
-              <LineChart
-                width={chartWidth}
-                labels={pointsOf(activeSeries).map((p) => p.label ?? shortDate(p.x))}
-                series={[{ name: rangeText, data: pointsOf(activeSeries).map((p) => toY(p.y)) }]}
-                height={240}
-                fmt={chartFmt(seriesUnit)}
-                label={`${activeSeries.label}, ${rangeText}`}
-              />
-            ) : (
-              <p className="small muted">One day selected: see the table below.</p>
-            )}
-          </div>
-        </Card>
+          <TrendChart rows={chart.rows} series={chart.series} fmt={unitFmt} axisFmt={unitAxisFmt} compareLabel={chart.compareLabel} label={`${activeSeries.label}, ${rangeText}`} />
+        </ChartFrame>
       ) : firstBreakdown ? (
-        <Card title={firstBreakdown.label} sub={`${rangeText} · ${scopeText}`}>
-          <div ref={chartRef}>
-            <BarChart width={chartWidth} labels={firstBreakdown.rows.map((x) => x.label)} data={firstBreakdown.rows.map((x) => Number(x.requests ?? x.count ?? x.sharePct ?? 0))} height={220} fmt={chartFmt('count')} label={`${firstBreakdown.label}, ${rangeText}`} />
-          </div>
-        </Card>
+        <ChartFrame titleAs="h2" title={firstBreakdown.label} sub={`${rangeText} · ${scopeText}`} refreshing={result.isPlaceholderData} table={seriesTable(breakdownRows, BREAKDOWN_SERIES, fmtCount, { xLabel: 'Item' })}>
+          <BarsChart rows={breakdownRows} series={BREAKDOWN_SERIES} fmt={fmtCount} axisFmt={fmtCountCompact} horizontal label={`${firstBreakdown.label}, ${rangeText}`} />
+        </ChartFrame>
       ) : null}
 
       {breakdowns.map((b) => (
