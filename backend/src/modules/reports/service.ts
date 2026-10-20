@@ -120,6 +120,11 @@ export class ReportsService implements ReportsPublicApi {
 
   /* ---------------------------------------------------------------- events consumed */
 
+  /** offers.offer.cost_changed: re-cost the seller's rows of that offer from the day the cost starts */
+  async onCostChangedFromOffers(event: EventPayload<'offers.offer.cost_changed'>, env?: Partial<Env>): Promise<void> {
+    return this.readModels.onOfferCostChanged(event, this.env(env));
+  }
+
   /** orders.order.placed: fact_order_items rows with placement date; fact_customers */
   async onOrderPlacedFromOrders(event: EventPayload<'orders.order.placed'>, env?: Partial<Env>): Promise<void> {
     return this.readModels.onOrderPlaced(event, this.env(env));

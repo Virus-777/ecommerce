@@ -13,7 +13,7 @@ import type * as identity from '../../../spec/identity.js';
 import type * as orders from '../../../spec/orders.js';
 import type { ReadModelStatus } from '../../../spec/reports.js';
 import { isOfficialSeller, OFFICIAL_KEY, READ_MODELS, readModelDef } from '../domain/catalogue.js';
-import { addDays, customerKey, marketDay, splitRefund } from '../domain/rules.js';
+import { addDays, customerKey, instantsOf, marketDay, splitRefund } from '../domain/rules.js';
 import type { OrderItemFact } from '../ports.js';
 import { LEDGER_COLUMN_DEFAULTS } from '../repository.js';
 import { invalid, notFound, type Caller, type ReportsCore } from './core.js';
@@ -139,6 +139,7 @@ export class ReadModels {
     const inventory = this.core.api('inventory');
     const categories = new Map<string, string | null>();
     const key = customerKey(hint.customerId ?? order.contact?.customerId ?? null, hint.email ?? order.contact?.email ?? null);
+    const sellerCosts = await this.sellerUnitCosts(order);
     const rows: OrderItemFact[] = [];
     for (const g of order.groups) {
       const ownerType = g.seller.ownerType;
@@ -152,6 +153,10 @@ export class ReadModels {
         if (ownerType === 'official' && inventory) {
           const unit = await this.core.soft('inventory.getUnitCost', () => inventory.getUnitCost(i.stockItemId));
           if (unit) cost = unit.amount * i.quantity;
+        }
+        if (ownerType === 'seller') {
+          const unit = sellerCosts?.get(i.id);
+          if (unit) cost = unit * i.quantity;
         }
         rows.push({
           order_item_id: i.id,
@@ -188,6 +193,49 @@ export class ReadModels {
       }
     }
     return rows;
+  }
+
+  /**
+   * The seller's own unit cost in force when the order was placed, per seller item (offers.unitCostsAt, one call per
+   * order). Private to the seller: only its own reports read buying_cost_minor on seller rows. null when offers is off
+   * or did not answer (a rebuild then keeps the costs the rows have).
+   */
+  private async sellerUnitCosts(order: orders.OrderDetail): Promise<Map<string, number> | null> {
+    const out = new Map<string, number>();
+    const offers = this.core.api('offers');
+    const items = order.groups.filter((g) => g.seller.ownerType === 'seller').flatMap((g) => g.items);
+    if (!items.length) return out;
+    if (!offers) return null;
+    const costs = await this.core.soft('offers.unitCostsAt', () => offers.unitCostsAt(items.map((i) => ({ offerId: i.offer.offerId, at: order.placedAt }))));
+    if (!costs) return null;
+    items.forEach((i, n) => {
+      const unit = costs?.[n];
+      if (unit) out.set(i.id, unit.amount);
+    });
+    return out;
+  }
+
+  /**
+   * offers.offer.cost_changed: the seller's rows of that offer placed on or after the market day the cost starts are
+   * costed again from offers.unitCostsAt at each row's placed_at, so a row after a later cost keeps that one, and
+   * events arriving out of order end in the same figures. Sets values: safe to run twice.
+   */
+  async onOfferCostChanged(p: EventPayload<'offers.offer.cost_changed'>, env: Env) {
+    const offers = this.core.api('offers');
+    if (offers) {
+      const since = instantsOf({ from: p.effectiveFrom, to: p.effectiveFrom }, await this.tz()).start;
+      let after: string | null = null;
+      for (;;) {
+        const rows = await this.repo.sellerRowsOfOffer(p.sellerId, p.offerId, since, after, 500);
+        if (!rows.length) break;
+        const costs = await this.core.soft('offers.unitCostsAt', () => offers.unitCostsAt(rows.map((r) => ({ offerId: r.offer_id, at: r.placed_at.toISOString() }))));
+        if (!costs) break;
+        for (const [n, r] of rows.entries()) await this.repo.updateOrderItems({ itemIds: [r.order_item_id] }, { buying_cost_minor: costs[n] ? costs[n]!.amount * r.quantity : null });
+        after = rows.at(-1)!.order_item_id;
+        if (rows.length < 500) break;
+      }
+    }
+    await this.touch(['order_items'], env);
   }
 
   async onOrderPlaced(p: EventPayload<'orders.order.placed'>, env: Env) {
@@ -881,6 +929,7 @@ export class ReadModels {
     if (!order) return;
     const existing = await this.repo.getOrderItems(orderId);
     const fresh = await this.factsOf(order, {});
+    const sellerCostsKnown = (await this.sellerUnitCosts(order)) !== null;
     const missing = fresh.filter((f) => !existing.some((e) => e.order_item_id === f.order_item_id)).map((f) => ({ ...f, customer_key: existing[0]?.customer_key ?? f.customer_key }));
     if (missing.length) await this.repo.insertOrderItems(missing);
     for (const f of fresh) {
@@ -888,7 +937,8 @@ export class ReadModels {
       if (!e) continue;
       await this.repo.updateOrderItems(
         { itemIds: [f.order_item_id] },
-        { category_id: f.category_id ?? e.category_id, delivered_at: e.delivered_at ?? f.delivered_at, buying_cost_minor: e.buying_cost_minor ?? f.buying_cost_minor, fulfilled_by: e.fulfilled_by ?? f.fulfilled_by },
+        // a seller row takes its cost from offers again (the seller may have set or changed it); an Official Store row keeps the cost it has
+        { category_id: f.category_id ?? e.category_id, delivered_at: e.delivered_at ?? f.delivered_at, buying_cost_minor: f.owner_type === 'seller' && sellerCostsKnown ? f.buying_cost_minor : (e.buying_cost_minor ?? f.buying_cost_minor), fulfilled_by: e.fulfilled_by ?? f.fulfilled_by },
       );
     }
   }

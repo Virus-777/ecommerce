@@ -351,6 +351,11 @@ export class ReportsRepository {
     return rows.map((r) => r._id);
   }
 
+  /** A seller's rows of one offer placed at or after `since`, by order item id after `after` (re-costing on a cost change) */
+  sellerRowsOfOffer(sellerId: string, offerId: string, since: Date, after: string | null, limit: number): Promise<OrderItemFact[]> {
+    return this.#items.find({ seller_id: sellerId, placed_at: { $gte: since }, offer_id: offerId, owner_type: 'seller', ...(after ? { order_item_id: { $gt: after } } : {}) }, { sort: { order_item_id: 1 }, limit });
+  }
+
   officialItemsWithoutCost(since: Date, limit: number): Promise<OrderItemFact[]> {
     return this.#items.find({ owner_type: 'official', buying_cost_minor: null, placed_at: { $gte: since } }, { sort: { placed_at: -1 }, limit });
   }

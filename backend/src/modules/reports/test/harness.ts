@@ -74,6 +74,8 @@ export async function harness() {
   /** catalog.getProducts / getProduct: title and main image */
   const products = new Map<string, { title: string; imageUrl?: string }>();
   const unitCosts = new Map<string, number>();
+  /** offers.unitCostsAt: a seller's unit costs per offer, each from an instant (the latest from on or before `at` applies) */
+  const offerCosts = new Map<string, { from: string; amount: number }[]>();
   const exportRowsCalls: { dataset: string; filters: unknown; principal: unknown; cursor?: string }[] = [];
   /** finance.companyCostsByDay, support.caseStatsByDay and messaging.replyStatsByDay answer these rows (by date and seller) */
   const companyCosts: finance.DailyCompanyCost[] = [];
@@ -147,6 +149,11 @@ export async function harness() {
       offers: {
         getOffer: async (id) => (offerProducts.has(id) ? ({ id, productId: offerProducts.get(id)! } as never) : null),
         getOffers: async (ids) => Object.fromEntries(ids.map((id) => [id, offerProducts.has(id) ? ({ id, productId: offerProducts.get(id)!, sellerSku: offerSkus.get(id) ?? '' } as never) : null])),
+        unitCostsAt: async (items) =>
+          items.map(({ offerId, at }) => {
+            const cost = (offerCosts.get(offerId) ?? []).filter((c) => c.from <= at).sort((a, b) => a.from.localeCompare(b.from)).at(-1);
+            return cost ? usd(cost.amount) : null;
+          }),
       },
       promotions: {
         priceOffers: async (ids) => ids.map((offerId) => ({ offerId, regularPrice: usd(5000), price: usd(discountedOffers.has(offerId) ? 4000 : 5000), badges: [], sellerPromos: [] })),
@@ -273,7 +280,7 @@ export async function harness() {
     visitor: () => callers.visitor(),
   };
 
-  return { app, service, clock, audits, files, staff, denied, ordersById, sellerCounts, rows, settings, income, adPerf, zeroResults, offerProducts, offerSkus, discountedOffers, products, unitCosts, exportRowsCalls, companyCosts, caseStats, replyStats, responseApis, call, gql, person, order, placed, accepted, publish, drain, tokens };
+  return { app, service, clock, audits, files, staff, denied, ordersById, sellerCounts, rows, settings, income, adPerf, zeroResults, offerProducts, offerSkus, discountedOffers, products, unitCosts, offerCosts, exportRowsCalls, companyCosts, caseStats, replyStats, responseApis, call, gql, person, order, placed, accepted, publish, drain, tokens };
 }
 
 export type Harness = Awaited<ReturnType<typeof harness>>;

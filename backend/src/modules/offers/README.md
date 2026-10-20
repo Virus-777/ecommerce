@@ -1170,7 +1170,7 @@ Indexes: `(offer_id, effective_from desc, created_at desc)`, `(seller_id, create
 | `offers.featured.changed` | The featured offer for a variant and zone changes | `{ productId: uuid, variantId: uuid, conditionGroup: string, zoneKey: string, fromOfferId: uuid?, toOfferId: uuid? }` | search |
 | `offers.featured_rule.published` | A new featured-offer rule version is published | `{ version: int, effectiveFrom: datetime }` | - |
 | `offers.bulk_update.applied` | A bulk file is applied | `{ jobId: uuid, ownerType: string, sellerId: uuid?, applied: int, skipped: int, pendingApproval: int }` | - |
-| `offers.offer.cost_changed` | A seller saves a unit cost for an offer (PUT /offers/{id}/cost, POST /costs, a bulk file's unit_cost column): once per saved row, after the commit | `{ offerId: uuid, sellerId: uuid, productId: uuid, unitCost: Money, effectiveFrom: date }` | - |
+| `offers.offer.cost_changed` | A seller saves a unit cost for an offer (PUT /offers/{id}/cost, POST /costs, a bulk file's unit_cost column): once per saved row, after the commit | `{ offerId: uuid, sellerId: uuid, productId: uuid, unitCost: Money, effectiveFrom: date }` | reports |
 
 | Consumes | From | Does |
 |---|---|---|

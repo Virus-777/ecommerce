@@ -30,6 +30,7 @@ export default defineModule({
 
     // Events this module reacts to (spec events.consumes)
     ctx.events.on("orders.order.placed", (e) => service.onOrderPlacedFromOrders(e.payload, e));
+    ctx.events.on("offers.offer.cost_changed", (e) => service.onCostChangedFromOffers(e.payload, e));
     ctx.events.on("orders.order.accepted", (e) => service.onOrderAcceptedFromOrders(e.payload, e));
     ctx.events.on("payments.payment.captured", (e) => service.onPaymentCapturedFromPayments(e.payload, e));
     ctx.events.on("shipping.shipment.dispatched", (e) => service.onShipmentDispatchedFromShipping(e.payload, e));

@@ -824,6 +824,7 @@ Indexes: `pk (kind, ref_id)`
 | Consumes | From | Does |
 |---|---|---|
 | `orders.order.placed` | orders | fact_order_items rows with placement date; fact_customers |
+| `offers.offer.cost_changed` | offers | Re-cost the seller's fact_order_items rows of that offer placed on or after effectiveFrom (unit cost in force at placed_at from offers.unitCostsAt × quantity, so rows after a later cost keep it). Seller costs stay private: only that seller's reports read them |
 | `orders.order.accepted` | orders | Mark items accepted (orders count from acceptance) |
 | `payments.payment.captured` | payments | Payment date basis |
 | `shipping.shipment.dispatched` | shipping | Shipment date basis; on-time dispatch in fact_service_daily, or in fact_marketly_fulfillment_daily when fulfilledBy is marketly_service (never in the seller's row) |

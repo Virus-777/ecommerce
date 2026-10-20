@@ -290,8 +290,17 @@ export class FinancialReports {
   }
 
   /** The unit cost in effect now on each of the seller's offers (offers.unitCostsAt; empty while offers cannot answer) */
-  private async currentUnitCosts(_offerIds: string[]): Promise<Map<string, Money>> {
-    return new Map();
+  private async currentUnitCosts(offerIds: string[]): Promise<Map<string, Money>> {
+    const out = new Map<string, Money>();
+    const offers = this.core.api('offers');
+    if (!offers || !offerIds.length) return out;
+    const at = this.core.now().toISOString();
+    const costs = await this.core.soft('offers.unitCostsAt', () => offers.unitCostsAt(offerIds.map((offerId) => ({ offerId, at }))));
+    offerIds.forEach((id, n) => {
+      const cost = costs?.[n];
+      if (cost) out.set(id, cost);
+    });
+    return out;
   }
 
   /* ---------------------------------------------------------------- finance.platform_income */
