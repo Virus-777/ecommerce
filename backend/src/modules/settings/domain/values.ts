@@ -294,11 +294,58 @@ export function valueText(def: Pick<Definition, 'valueType' | 'unit' | 'key'>, v
     case 'enum':
       return clip(String(value));
     case 'json':
-      if (def.key === 'market.serviceRegion') return (value as ServiceRegion).label ?? clip(JSON.stringify(value));
+      if (def.key === 'market.serviceRegion') return (value as ServiceRegion).label ?? clip(jsonText(value), 160);
       if (def.key === 'apps.maintenance') {
         const m = value as MaintenanceNotice;
         return m.active ? clip(`${m.kind === 'incident' ? 'Incident' : 'Maintenance'}: ${m.message ?? ''}`) : 'Off';
       }
-      return clip(JSON.stringify(value));
+      if (def.key === 'market.defaultDeliveryLocation') {
+        const l = value as { postalCode?: string; label?: string };
+        return l.label && l.postalCode && !l.label.includes(l.postalCode) ? `${l.label} (${l.postalCode})` : (l.label ?? l.postalCode ?? 'Not set');
+      }
+      if (def.key === 'search.pricePresets' && Array.isArray(value)) return clip(value.map((c) => (typeof c === 'number' ? moneyText({ amount: c, currency: 'USD' }) : String(c))).join(', ') || 'None', 160);
+      if (def.key === 'shipping.sellerHandlingRange' && Array.isArray(value) && value.length === 2) return `${value[0]} to ${value[1]} business days`;
+      if (def.key === 'notifications.retryBackoffMinutes' && Array.isArray(value)) return value.length ? `${value.join(', ')} minutes` : 'None';
+      // maps keyed by category id: the ids mean nothing to a reader
+      if (def.key.endsWith('ByCategory') && value && typeof value === 'object' && !Array.isArray(value)) {
+        const n = Object.keys(value).length;
+        return n ? `${n} ${n === 1 ? 'category' : 'categories'}` : 'None';
+      }
+      return clip(jsonText(value), 160);
   }
+}
+
+/** "postalCode" → "Postal code", "maxMB" → "Max MB", "line1" → "Line 1", "product_image" → "Product image" */
+function words(key: string): string {
+  const s = key
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Za-z])(\d)/g, '$1 $2')
+    .split(/[\s_.-]+/)
+    .filter(Boolean)
+    .map((w) => (w.length > 1 && w === w.toUpperCase() ? w : w.toLowerCase()))
+    .join(' ');
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** Readable text of a json value (never JSON): "Postal code: 97205 · Label: Portland, OR 97205", "visa, amex" */
+function jsonText(v: unknown, nested = false): string {
+  if (v === null || v === undefined) return 'not set';
+  if (typeof v === 'boolean') return v ? 'On' : 'Off';
+  if (typeof v === 'number') return v.toLocaleString('en-US');
+  if (typeof v === 'string') return v;
+  if (Array.isArray(v)) {
+    if (!v.length) return 'None';
+    if (v.every((x) => x === null || typeof x !== 'object')) return v.map((x) => jsonText(x, true)).join(', ');
+    // a list of records: name each by its label, name or key
+    const names = v.map((x) => {
+      const o = (x ?? {}) as Record<string, unknown>;
+      const name = o.label ?? o.name ?? o.title ?? o.key;
+      return typeof name === 'string' ? name : jsonText(x, true);
+    });
+    return `${v.length} ${v.length === 1 ? 'item' : 'items'}: ${names.join(', ')}`;
+  }
+  const entries = Object.entries(v as Record<string, unknown>);
+  if (!entries.length) return 'None';
+  const parts = entries.map(([k, x]) => (x && typeof x === 'object' && !Array.isArray(x) ? `${words(k)} (${jsonText(x, true)})` : `${words(k)}: ${jsonText(x, true)}`));
+  return parts.join(nested ? ', ' : ' · ');
 }
