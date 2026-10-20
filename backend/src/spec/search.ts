@@ -1069,6 +1069,20 @@ export interface SearchDb {
     indexed_at: Date;
     /** the product's offers as search_offers stores them, kept in step by the repository; the MongoDB engine reads them here instead of joining search_offers on every query, docs/07-search-speed-plan.md */
     offers: Json | null;
+    /** MongoDB engine: the card offer among all offers — featured first, then in stock, cheapest, offer id — with its featured flag; recomputed from offers and featured_offer_id on every change */
+    card_all: Json | null;
+    /** number of offers */
+    card_all_n: number | null;
+    /** the card offer among the in-stock offers, same order; null when none is in stock */
+    card_in_stock: Json | null;
+    /** number of in-stock offers */
+    card_in_stock_n: number | null;
+    /** MongoDB engine: the recommended-sort score of a listing (no words) with card_all, under the ranking weights of rank_key; a number */
+    rank_all: Json | null;
+    /** the same with card_in_stock (in-stock only listings); a number */
+    rank_in_stock: Json | null;
+    /** the ranking weights rank_all and rank_in_stock were computed with; null when an input changed since, and the engine recomputes them before a listing */
+    rank_key: string | null;
     /** rank in best_seller_category_id by sales_30d; null outside the top 100 */
     best_seller_rank: number | null;
     best_seller_category_id: string | null;
@@ -1864,6 +1878,13 @@ export const spec = defineModuleSpec({
         "version",
         "indexed_at",
         "offers",
+        "card_all",
+        "card_all_n",
+        "card_in_stock",
+        "card_in_stock_n",
+        "rank_all",
+        "rank_in_stock",
+        "rank_key",
         "best_seller_rank",
         "best_seller_category_id"
       ],
@@ -1884,6 +1905,13 @@ export const spec = defineModuleSpec({
         "rating",
         "terms",
         "offers",
+        "card_all",
+        "card_all_n",
+        "card_in_stock",
+        "card_in_stock_n",
+        "rank_all",
+        "rank_in_stock",
+        "rank_key",
         "best_seller_rank",
         "best_seller_category_id"
       ],
@@ -2134,6 +2162,32 @@ export const spec = defineModuleSpec({
               "bsonType": "date"
             },
             "offers": {},
+            "card_all": {},
+            "card_all_n": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "card_in_stock": {},
+            "card_in_stock_n": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "rank_all": {},
+            "rank_in_stock": {},
+            "rank_key": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
             "best_seller_rank": {
               "bsonType": [
                 "int",
@@ -2213,6 +2267,28 @@ export const spec = defineModuleSpec({
           "name": "search_documents_sales_30d_5ac83c",
           "key": {
             "sales_30d": 1
+          }
+        },
+        {
+          "name": "search_documents_rank_key_8d11cf",
+          "key": {
+            "rank_key": 1
+          }
+        },
+        {
+          "name": "search_documents_category_path_ids_rank_in_stock__id_5cafaa",
+          "key": {
+            "category_path_ids": 1,
+            "rank_in_stock": -1,
+            "_id": 1
+          }
+        },
+        {
+          "name": "search_documents_category_path_ids_rank_all__id_fa2efc",
+          "key": {
+            "category_path_ids": 1,
+            "rank_all": -1,
+            "_id": 1
           }
         }
       ],

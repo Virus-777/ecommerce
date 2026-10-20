@@ -7,7 +7,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { spec } from '../../../spec/search.js';
-import { base, createMongoSearchEngine } from '../mongo-engine.js';
+import { DEFAULT_FACTORS, weightsOf } from '../domain/ranking.js';
+import { base, createMongoSearchEngine, scoreStages } from '../mongo-engine.js';
 import type { DocRow, DocWrite, EngineFilters, EngineQuery, FacetOmit, OfferRow } from '../ports.js';
 import { SearchRepository } from '../repository.js';
 import { schemas } from '../schema.js';
@@ -198,5 +199,122 @@ describe('the pipeline over embedded offers', () => {
       const expected = await Promise.all(ranges.map((r) => count({ ...noPrice, ...(r.min !== null ? { priceMin: r.min } : {}), ...(r.max !== null ? { priceMax: r.max } : {}) })));
       expect(await engine.priceRangeCounts!(q, ranges), `${label} price ranges`).toEqual(expected);
     }
+  });
+});
+
+/* ------------------------------------------------------------------ step 5: stored card offers and listing ranks */
+
+describe('stored card offers and listing ranks', () => {
+  type Off = { _id: string; in_stock: boolean; price: number };
+  /** The card offer rule (cards.ts) in plain code: featured first, then in stock, cheapest, offer id */
+  const cardOfList = (offers: Off[], featured: string | null) =>
+    [...offers].sort((a, b) => Number(b._id === featured) - Number(a._id === featured) || Number(b.in_stock) - Number(a.in_stock) || a.price - b.price || (a._id < b._id ? -1 : a._id > b._id ? 1 : 0))[0];
+  const expectCardsInStep = async () => {
+    const docs = await docsTable().aggregate<any>([{ $project: { offers: 1, featured_offer_id: 1, card_all: 1, card_all_n: 1, card_in_stock: 1, card_in_stock_n: 1 } }]);
+    for (const d of docs) {
+      const offers = (d.offers ?? []) as Off[];
+      const stock = offers.filter((o) => o.in_stock);
+      expect(d.card_all?._id ?? null, `${d._id} card_all`).toBe(cardOfList(offers, d.featured_offer_id ?? null)?._id ?? null);
+      expect(d.card_in_stock?._id ?? null, `${d._id} card_in_stock`).toBe(cardOfList(stock, d.featured_offer_id ?? null)?._id ?? null);
+      expect(d.card_all_n, `${d._id} card_all_n`).toBe(offers.length);
+      expect(d.card_in_stock_n, `${d._id} card_in_stock_n`).toBe(stock.length);
+      if (d.card_all) expect(d.card_all.featured).toBe(d.card_all._id === (d.featured_offer_id ?? null));
+    }
+  };
+
+  const weights = weightsOf(DEFAULT_FACTORS);
+  let category = '';
+  const sellers = [newId(), newId()];
+  let s = 23;
+  const rnd = () => (s = (s * 1103515245 + 12345) % 2 ** 31) / 2 ** 31;
+
+  it('stay equal to the rule through every write, including a change of featured offer', async () => {
+    const template = (await docsTable().find())[0]!;
+    category = template.category_path_ids[0]!;
+    const { terms: _t, version: _v, indexed_at: _i, offers: _o, ...rest } = template;
+    for (let i = 0; i < 150; i++) {
+      const id = newId();
+      const offers = Array.from({ length: 1 + Math.floor(rnd() * 3) }, () =>
+        offer(id, { official: rnd() > 0.5, seller_id: rnd() > 0.5 ? null : sellers[Math.floor(rnd() * 2)]!, price: 500 + Math.floor(rnd() * 10) * 250, in_stock: rnd() > 0.35, dispatch_days: Math.floor(rnd() * 4) }),
+      );
+      const write = {
+        ...rest,
+        product_id: id,
+        slug: `rank-${i}`,
+        brand_id: rnd() > 0.5 ? template.brand_id : newId(),
+        rating: 1 + Math.floor(rnd() * 5),
+        rating_count: Math.floor(rnd() * 6),
+        popularity: String(Math.floor(rnd() * 50)),
+        featured_offer_id: rnd() > 0.25 ? offers[0]!.offer_id : null,
+        texts: { title: `Ranked ${i}`, brand: '', category: '', attributes: '', description: '' },
+      } as unknown as DocWrite;
+      await repo().upsertDocument(write, offers, new Date());
+    }
+    await expectCardsInStep();
+    const [a] = await docsTable().find({ product_id: { $in: (await docsTable().find()).map((d) => d.product_id) } }, { limit: 1 });
+    const rows = await repo().offerRows([a!.product_id]);
+    await repo().updateOfferRow(rows[0]!.offer_id, { in_stock: false, price: 99999 });
+    await repo().updateDocument(a!.product_id, { featured_offer_id: rows.at(-1)!.offer_id }, new Date());
+    await repo().upsertOfferRow(offer(a!.product_id, { price: 1, in_stock: true }));
+    await expectCardsInStep();
+    // every write leaves the changed document's rank stale
+    expect((await docsTable().get(a!.product_id))!.rank_key).toBeNull();
+    await docsTable().updateMany({}, { $set: { card_all: null, card_in_stock: null, card_all_n: null, card_in_stock_n: null } });
+    await repo().embedAllOffers();
+    await expectCardsInStep();
+  });
+
+  it('give a listing exactly the order of the computed recommended score, before and after products change', async () => {
+    const engine = createMongoSearchEngine(store(), createMongoTermLookup(store()));
+    const project = { $project: { _id: 1 } };
+    // the reference: the earlier join, the score computed for every document, sorted
+    const reference = async (q: EngineQuery, offset: number, limit: number) =>
+      (await docsTable().aggregate<{ _id: string }>([...refBase(q), ...(scoreStages(q, weights) as Record<string, unknown>[]), { $sort: { score: -1, _id: 1 } }, { $skip: offset }, { $limit: limit }, project])).map((d) => d._id);
+    const listing = async (q: EngineQuery, offset: number, limit: number) => (await engine.search(q, 'recommended', weights, { offset, limit })).hits.map((h) => h.doc.product_id);
+    const queries: EngineQuery[] = [
+      { text: null, filters: { inStockOnly: true, categoryIds: [category] }, marketTime: '12:00' },
+      { text: null, filters: { inStockOnly: false, categoryIds: [category] }, marketTime: '12:00' },
+      { text: null, filters: { inStockOnly: true, categoryIds: [category], minRating: 3 }, marketTime: '12:00' },
+      { text: null, filters: { inStockOnly: true }, marketTime: '12:00' },
+    ];
+    const compare = async () => {
+      for (const q of queries) for (const [offset, limit] of [[0, 24], [24, 24], [0, 500]] as const) expect(await listing(q, offset, limit), JSON.stringify({ q: q.filters, offset })).toEqual(await reference(q, offset, limit));
+    };
+    await compare();
+    expect(await docsTable().count({ rank_key: null })).toBe(0);
+    // products change: their ranks go stale and the next listing brings them back in order
+    const ids = (await docsTable().find({}, { limit: 20 })).map((d) => d.product_id);
+    for (const [i, id] of ids.entries()) {
+      const rows = await repo().offerRows([id]);
+      if (rows[0]) await repo().updateOfferRow(rows[0].offer_id, { in_stock: i % 2 === 0, dispatch_days: i % 4 });
+      await repo().updateDocument(id, { rating: String(1 + (i % 5)), rating_count: 3 + (i % 3) }, new Date());
+    }
+    await repo().recordSales('2026-10-20', ids.slice(0, 5).map((productId) => ({ productId, units: 7 })), 1, new Date());
+    expect(await docsTable().count({ rank_key: null })).toBeGreaterThan(0);
+    await compare();
+    // new weights: every rank is recomputed
+    const other = { ...weights, rating: 0.5, conversion: 0 };
+    const q = queries[0]!;
+    expect((await engine.search(q, 'recommended', other, { offset: 0, limit: 50 })).hits.map((h) => h.doc.product_id)).toEqual(
+      (await docsTable().aggregate<{ _id: string }>([...refBase(q), ...(scoreStages(q, other) as Record<string, unknown>[]), { $sort: { score: -1, _id: 1 } }, { $limit: 50 }, project])).map((d) => d._id),
+    );
+  });
+
+  it('keep filter counts per query for the cache window only, computing each once even when asked at the same time', async () => {
+    const q: EngineQuery = { text: null, filters: { inStockOnly: true, categoryIds: [category] }, marketTime: '12:00' };
+    const withCache = createMongoSearchEngine(store(), createMongoTermLookup(store()), { facetCacheMs: 60_000 });
+    const without = createMongoSearchEngine(store(), createMongoTermLookup(store()));
+    const [a, b] = await Promise.all([withCache.facets(q, []), withCache.facets(q, [])]);
+    expect(b).toBe(a);
+    const before = await without.summary(q);
+    // a product leaves the listing: the cached counts stay for their window, uncached ones see it at once
+    const gone = (await docsTable().find({ category_path_ids: category, card_in_stock: { $ne: null } }, { limit: 1 }))[0]!;
+    const cachedSummary = await withCache.summary(q);
+    for (const r of await repo().offerRows([gone.product_id])) await repo().updateOfferRow(r.offer_id, { in_stock: false });
+    expect(await withCache.summary(q)).toBe(cachedSummary);
+    expect(cachedSummary.total).toBe(before.total);
+    expect((await without.summary(q)).total).toBe(before.total - 1);
+    // another query is its own entry
+    expect(await withCache.facets({ ...q, filters: { ...q.filters, minRating: 4 } }, [])).not.toBe(a);
   });
 });

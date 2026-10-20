@@ -15,7 +15,8 @@
  */
 import type { ModuleStore } from '../../kernel/mongo/index.js';
 import type { RankingFactorKey } from './domain/ranking.js';
-import { MIN_RATINGS_FOR_RANK } from './domain/ranking.js';
+import { MIN_RATINGS_FOR_RANK, RANKING_FACTOR_KEYS } from './domain/ranking.js';
+import { cardOf } from './cards.js';
 import type { SortKey } from './domain/types.js';
 import type { DocRow, EngineFilters, EngineHit, EngineQuery, FacetCounts, FacetOmit, OfferRow, SearchEngine, TermKind, TermRow } from './ports.js';
 import { similarity, trigrams } from './providers/opensearch/trigram.js';
@@ -73,24 +74,25 @@ export function wordSimilarity(a: string, text: string): number {
  * Conditions on an offer, each in two forms that must agree: a query on an offer (`$elemMatch` over the document's
  * embedded offers, which skips documents early) and an expression on `$$o` (`$filter`, which keeps the matching ones).
  */
-function offerConditions(f: EngineFilters, omit?: FacetOmit): { query: Doc; expr: Doc }[] {
-  const c: { query: Doc; expr: Doc }[] = [];
+function offerConditions(f: EngineFilters, omit?: FacetOmit): { key: string; query: Doc; expr: Doc }[] {
+  const c: { key: string; query: Doc; expr: Doc }[] = [];
   if (omit !== 'seller' && (f.sellerIds?.length || f.official)) {
     c.push({
+      key: 'seller',
       query: { $or: [...(f.sellerIds?.length ? [{ seller_id: { $in: f.sellerIds } }] : []), ...(f.official ? [{ official: true }] : [])] },
       expr: { $or: [...(f.sellerIds?.length ? [{ $in: ['$$o.seller_id', f.sellerIds] }] : []), ...(f.official ? [{ $eq: ['$$o.official', true] }] : [])] },
     });
   }
-  if (omit !== 'condition' && f.conditions?.length) c.push({ query: { condition: { $in: f.conditions } }, expr: { $in: ['$$o.condition', f.conditions] } });
+  if (omit !== 'condition' && f.conditions?.length) c.push({ key: 'condition', query: { condition: { $in: f.conditions } }, expr: { $in: ['$$o.condition', f.conditions] } });
   if (omit !== 'price') {
-    if (f.priceMin !== undefined) c.push({ query: { price: { $gte: f.priceMin } }, expr: { $gte: ['$$o.price', f.priceMin] } });
-    if (f.priceMax !== undefined) c.push({ query: { price: { $lte: f.priceMax } }, expr: { $lte: ['$$o.price', f.priceMax] } });
+    if (f.priceMin !== undefined) c.push({ key: 'price_min', query: { price: { $gte: f.priceMin } }, expr: { $gte: ['$$o.price', f.priceMin] } });
+    if (f.priceMax !== undefined) c.push({ key: 'price_max', query: { price: { $lte: f.priceMax } }, expr: { $lte: ['$$o.price', f.priceMax] } });
   }
-  if (omit !== 'availability' && f.inStockOnly) c.push({ query: { in_stock: true }, expr: { $eq: ['$$o.in_stock', true] } });
+  if (omit !== 'availability' && f.inStockOnly) c.push({ key: 'in_stock', query: { in_stock: true }, expr: { $eq: ['$$o.in_stock', true] } });
   if (omit !== 'delivery') {
-    if (f.freeDelivery) c.push({ query: { free_delivery: true }, expr: { $eq: ['$$o.free_delivery', true] } });
-    if (f.shipsToday) c.push({ query: { dispatch_days: 0 }, expr: { $eq: ['$$o.dispatch_days', 0] } });
-    if (f.maxDispatchDays !== undefined) c.push({ query: { dispatch_days: { $lte: f.maxDispatchDays } }, expr: { $lte: ['$$o.dispatch_days', f.maxDispatchDays] } });
+    if (f.freeDelivery) c.push({ key: 'free_delivery', query: { free_delivery: true }, expr: { $eq: ['$$o.free_delivery', true] } });
+    if (f.shipsToday) c.push({ key: 'ships_today', query: { dispatch_days: 0 }, expr: { $eq: ['$$o.dispatch_days', 0] } });
+    if (f.maxDispatchDays !== undefined) c.push({ key: 'max_dispatch', query: { dispatch_days: { $lte: f.maxDispatchDays } }, expr: { $lte: ['$$o.dispatch_days', f.maxDispatchDays] } });
   }
   return c;
 }
@@ -127,43 +129,61 @@ function docMatch(q: EngineQuery, omit?: FacetOmit): Doc {
   return c.length ? { $and: c } : {};
 }
 
-/**
- * Documents with their matching offers (m) and the card offer (eo); documents without a matching offer are left out.
- * The offers come from the document itself (`offers`, kept in step with search_offers by the repository), so there is
- * no join per document (docs/07-search-speed-plan.md). Exported for the comparison test.
- */
-export function base(q: EngineQuery, omit?: FacetOmit): Stage[] {
+/** The query's three steps (base) and which stored card offer stands for its offer filters, if one does */
+interface Plan {
+  /** which documents pass: alone it decides membership */
+  match: Stage;
+  /** m: the document's offers that pass the offer filters */
+  offers: Stage;
+  /** eo, the card offer, and matching, the number of matching offers */
+  card: Stage;
+  /** no offer filter (all) or only in stock (in_stock): eo and matching are stored on the document (cards.ts) */
+  stored: 'all' | 'in_stock' | null;
+}
+
+function plan(q: EngineQuery, omit?: FacetOmit): Plan {
   const conds = offerConditions(q.filters, omit);
   const hasOffer = conds.length ? { offers: { $elemMatch: conds.length === 1 ? conds[0]!.query : { $and: conds.map((c) => c.query) } } } : { 'offers.0': { $exists: true } };
   const doc = docMatch(q, omit);
-  return [
-    { $match: Object.keys(doc).length ? { $and: [doc, hasOffer] } : hasOffer },
-    { $set: { m: conds.length ? { $filter: { input: '$offers', as: 'o', cond: conds.length === 1 ? conds[0]!.expr : { $and: conds.map((c) => c.expr) } } } : '$offers' } },
-    {
-      $set: {
-        matching: { $size: '$m' },
-        eo: {
-          $first: {
-            $sortArray: {
-              input: { $map: { input: '$m', as: 'o', in: { $mergeObjects: ['$$o', { featured: { $eq: ['$$o._id', '$featured_offer_id'] } }] } } },
-              sortBy: { featured: -1, in_stock: -1, price: 1, _id: 1 },
-            },
-          },
-        },
-      },
-    },
-  ];
+  const stored = conds.length === 0 ? 'all' : conds.length === 1 && conds[0]!.key === 'in_stock' ? 'in_stock' : null;
+  return {
+    match: { $match: Object.keys(doc).length ? { $and: [doc, hasOffer] } : hasOffer },
+    offers: { $set: { m: conds.length ? { $filter: { input: '$offers', as: 'o', cond: conds.length === 1 ? conds[0]!.expr : { $and: conds.map((c) => c.expr) } } } : '$offers' } },
+    card: stored ? { $set: { matching: `$card_${stored}_n`, eo: `$card_${stored}` } } : { $set: { matching: { $size: '$m' }, eo: cardOf('$m') } },
+    stored,
+  };
+}
+
+/**
+ * Documents with their matching offers (m) and the card offer (eo); documents without a matching offer are left out.
+ * The offers come from the document itself (`offers`, kept in step with search_offers by the repository), so there is
+ * no join per document; with no offer filter or only "in stock" the card offer is the one stored on the document
+ * (docs/07-search-speed-plan.md). Exported for the comparison test.
+ */
+export function base(q: EngineQuery, omit?: FacetOmit): Stage[] {
+  const p = plan(q, omit);
+  return [p.match, p.offers, p.card];
+}
+
+/**
+ * base() as far as a step reads: document fields only ($match), the matching offers m as well, or the card offer eo
+ * as well (a stored card offer needs no m)
+ */
+function through(q: EngineQuery, omit: FacetOmit | undefined, reads: 'doc' | 'offers' | 'card'): Stage[] {
+  const p = plan(q, omit);
+  if (reads === 'doc') return [p.match];
+  if (reads === 'offers') return [p.match, p.offers];
+  return p.stored ? [p.match, p.card] : [p.match, p.offers, p.card];
 }
 
 /** Just base()'s first stage: it alone decides which documents pass (counts need nothing more) */
-const matchOnly = (q: EngineQuery, omit?: FacetOmit): Stage[] => base(q, omit).slice(0, 1);
+const matchOnly = (q: EngineQuery, omit?: FacetOmit): Stage[] => through(q, omit, 'doc');
 
-/**
- * One count over the documents that pass base(q, omit): its stages after base, and what they read: document fields
- * only (base's $match), the matching offers m (+ the $filter), or the card offer eo too (all of base)
- */
+/** One count over the documents that pass base(q, omit): its stages after base, and what they read (through) */
 type CountPart = { omit?: FacetOmit; reads: 'doc' | 'offers' | 'card'; stages: Stage[] };
-const STAGES_FOR: Record<CountPart['reads'], number> = { doc: 1, offers: 2, card: 3 };
+
+/** Derived fields a result never carries out of the database */
+const DERIVED_OUT = { terms: 0, m: 0, offers: 0, card_all: 0, card_all_n: 0, card_in_stock: 0, card_in_stock_n: 0, rank_all: 0, rank_in_stock: 0, rank_key: 0 };
 
 /** Text relevance 0..1: the summed weights r of the query's stems found in the document, as r / (r + 1) */
 function textRelevance(q: EngineQuery): unknown {
@@ -176,8 +196,8 @@ function textRelevance(q: EngineQuery): unknown {
   return { $let: { vars: { r: { $add: list.map(weightOf) } }, in: { $divide: ['$$r', { $add: ['$$r', 1] }] } } };
 }
 
-/** Weighted ranking factors of the recommended sort, each 0..weight, and their sum (score) */
-function scoreStages(q: EngineQuery, w: Record<RankingFactorKey, number>): Stage[] {
+/** Weighted ranking factors of the recommended sort, each 0..weight, and their sum (score). Exported for tests */
+export function scoreStages(q: EngineQuery, w: Record<RankingFactorKey, number>): Stage[] {
   const gtin = q.text?.gtin;
   return [
     {
@@ -209,13 +229,51 @@ const ORDER: Record<SortKey, Record<string, 1 | -1>> = {
 
 const byKey = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
-export function createMongoSearchEngine(store: ModuleStore, terms: TermLookup): SearchEngine {
+/** The ranking weights a stored rank was computed with (rank_key) */
+const rankKeyOf = (w: Record<RankingFactorKey, number>) => JSON.stringify(RANKING_FACTOR_KEYS.map((k) => w[k] ?? 0));
+/** A listing (no words): the query the stored ranks stand for */
+const LISTING: EngineQuery = { text: null, filters: { inStockOnly: false }, marketTime: '00:00' };
+/**
+ * Update pipeline storing both listing ranks: the recommended-sort score with each stored card offer, computed by
+ * scoreStages itself, so the stored order is the computed one
+ */
+const storeRanks = (w: Record<RankingFactorKey, number>): Stage[] => [
+  { $set: { eo: '$card_in_stock' } },
+  ...scoreStages(LISTING, w),
+  { $set: { rank_in_stock: '$score' } },
+  { $set: { eo: '$card_all' } },
+  ...scoreStages(LISTING, w),
+  { $set: { rank_all: '$score', rank_key: rankKeyOf(w) } },
+  { $unset: ['eo', 'f', 'score'] },
+];
+
+/**
+ * facetCacheMs: how long filter counts (facets, summary, price ranges) are kept per query, 0 = not at all. They are
+ * the same for every shopper, so a popular page computes them once per window; results (the product list) are never
+ * cached. Concurrent identical requests share one computation.
+ */
+export function createMongoSearchEngine(store: ModuleStore, terms: TermLookup, opts: { facetCacheMs?: number } = {}): SearchEngine {
   const docs = store.table<DocRow>('search_documents');
   const offers = store.table<OfferRow>('search_offers');
   const termRows = store.table<TermRow>('suggestion_terms');
   const agg = <T = Doc>(pipeline: Stage[]) => docs.aggregate<T>(pipeline);
+  const cacheMs = opts.facetCacheMs ?? 0;
+  const cache = new Map<string, { at: number; value: Promise<unknown> }>();
+  const cached = <T>(name: string, key: unknown, compute: () => Promise<T>): Promise<T> => {
+    if (!(cacheMs > 0)) return compute();
+    const k = `${name}:${JSON.stringify(key, (_k, v: unknown) => (v instanceof RegExp ? v.toString() : v))}`;
+    const now = Date.now();
+    const hit = cache.get(k);
+    if (hit && now - hit.at < cacheMs) return hit.value as Promise<T>;
+    const value = compute();
+    cache.set(k, { at: now, value });
+    value.catch(() => cache.delete(k));
+    // a bounded number of queries: the oldest goes first
+    if (cache.size > 500) cache.delete(cache.keys().next().value!);
+    return value;
+  };
   /** A stored document as a read-model row (its search terms and embedded offers left out) */
-  const docOut = (d: Doc): DocRow => ({ ...docs.fromDoc(d), terms: null, offers: null });
+  const docOut = (d: Doc): DocRow => ({ ...docs.fromDoc(d), terms: null, offers: null, card_all: null, card_all_n: null, card_in_stock: null, card_in_stock_n: null, rank_all: null, rank_in_stock: null, rank_key: null });
   const count = async (pipeline: Stage[]) => (await agg<{ n: number }>([...pipeline, { $count: 'n' }]))[0]?.n ?? 0;
   const exists = async (match: Doc) => (await agg([{ $match: match }, { $limit: 1 }, { $project: { _id: 1 } }])).length > 0;
 
@@ -251,6 +309,16 @@ export function createMongoSearchEngine(store: ModuleStore, terms: TermLookup): 
   }
 
   /**
+   * Brings the stored listing ranks up to these weights: the documents whose rank_key differs (an input changed since,
+   * or the weights did) get theirs recomputed from their own fields in one update. Usually a handful (rank_key is
+   * indexed); every document once after a new ranking policy or a deploy. A product changed in the same instant may
+   * sort by its previous rank for that one request.
+   */
+  async function ensureRanks(weights: Record<RankingFactorKey, number>): Promise<void> {
+    await docs.model.updateMany({ rank_key: { $ne: rankKeyOf(weights) } }, storeRanks(weights) as never);
+  }
+
+  /**
    * Runs counts over base(q, omit): counts that read the same documents the same way (their omitted filter isn't set,
    * the usual case, and they read as far into base) share one pass ($facet); the passes run at once, so the database
    * spreads them over its threads, and a pass reading document fields only skips the offer stages.
@@ -258,7 +326,7 @@ export function createMongoSearchEngine(store: ModuleStore, terms: TermLookup): 
   async function countParts(q: EngineQuery, parts: Record<string, CountPart>): Promise<Record<string, Doc[]>> {
     const passes = new Map<string, { pipeline: Stage[]; names: string[] }>();
     for (const [name, part] of Object.entries(parts)) {
-      const pipeline = base(q, part.omit).slice(0, STAGES_FOR[part.reads]);
+      const pipeline = through(q, part.omit, part.reads);
       const key = JSON.stringify(pipeline, (_k, v: unknown) => (v instanceof RegExp ? v.toString() : v));
       const pass = passes.get(key) ?? { pipeline, names: [] };
       pass.names.push(name);
@@ -272,6 +340,95 @@ export function createMongoSearchEngine(store: ModuleStore, terms: TermLookup): 
       }),
     );
     return out;
+  }
+
+  /** Every filter count of a query (FacetCounts), in shared passes (countParts) */
+  async function facetsOf(q: EngineQuery, attributeKeys: string[]): Promise<FacetCounts> {
+    const f = q.filters;
+    const brandIds = (await termRows.distinct<string>('target_id', { kind: 'brand', target_id: { $ne: null } })).filter(Boolean);
+
+    /** Products per value of an offer field, over the offers that pass the other filters: each document's distinct values, then counted */
+    const perOffer = (field: string): Stage[] => [{ $project: { v: { $setUnion: [`$m.${field}`, []] } } }, { $unwind: '$v' }, { $group: { _id: '$v', n: { $sum: 1 } } }];
+    const attrStages = (keys: string[]): Stage[] => [
+      { $project: { a: { $objectToArray: { $ifNull: ['$attributes', {}] } } } },
+      { $unwind: '$a' },
+      { $match: { 'a.k': { $in: keys }, 'a.v': { $type: 'array' } } },
+      { $unwind: '$a.v' },
+      { $group: { _id: { k: '$a.k', v: '$a.v', p: '$_id' } } },
+      { $group: { _id: { k: '$_id.k', v: '$_id.v' }, n: { $sum: 1 } } },
+    ];
+    const filtered = new Set((f.attributes ?? []).map((a) => a.key));
+    const unfilteredKeys = attributeKeys.filter((k) => !filtered.has(k));
+
+    // each count over the documents that pass the other filters (its own left out), and what it reads (CountPart)
+    const parts: Record<string, CountPart> = {
+      categories: { omit: 'category', reads: 'doc', stages: [{ $unwind: '$category_path_ids' }, { $group: { _id: '$category_path_ids', n: { $sum: 1 } } }] },
+      brands: { omit: 'brand', reads: 'doc', stages: [{ $match: { brand_id: { $in: brandIds } } }, { $group: { _id: '$brand_id', name: { $max: '$brand_name' }, n: { $sum: 1 } } }, { $sort: { n: -1, name: 1 } }] },
+      sellers: { omit: 'seller', reads: 'offers', stages: perOffer('seller_id') },
+      official: { omit: 'seller', reads: 'offers', stages: [{ $match: { 'm.official': true } }, { $count: 'n' }] },
+      conditions: { omit: 'condition', reads: 'offers', stages: perOffer('condition') },
+      ratings: { omit: 'rating', reads: 'doc', stages: [{ $group: Object.fromEntries([['_id', null], ...[1, 2, 3, 4, 5].map((n) => [`r${n}`, { $sum: { $cond: [{ $gte: ['$rating', n] }, 1, 0] } }])]) }] },
+      availability: { omit: 'availability', reads: 'card', stages: [{ $group: { _id: null, in_stock: { $sum: { $cond: ['$eo.in_stock', 1, 0] } }, total: { $sum: 1 } } }] },
+      // free delivery and ships today count products with such an offer among those passing the other filters (m)
+      delivery: {
+        omit: 'delivery',
+        reads: 'offers',
+        stages: [
+          {
+            $group: {
+              _id: null,
+              free: { $sum: { $cond: [{ $in: [true, '$m.free_delivery'] }, 1, 0] } },
+              today: {
+                $sum: {
+                  $cond: [{ $and: [{ $in: [0, '$m.dispatch_days'] }, { $or: [{ $eq: [{ $ifNull: ['$same_day_cutoff', null] }, null] }, { $gt: ['$same_day_cutoff', q.marketTime] }] }] }, 1, 0],
+                },
+              },
+            },
+          },
+        ],
+      },
+      price: { omit: 'price', reads: 'card', stages: [{ $group: { _id: null, min: { $min: '$eo.price' }, max: { $max: '$eo.price' } } }] },
+      // attributes: the unfiltered ones together, each filtered one without its own filter
+      ...(unfilteredKeys.length ? { attr: { reads: 'doc' as const, stages: attrStages(unfilteredKeys) } } : {}),
+      ...Object.fromEntries(attributeKeys.filter((k) => filtered.has(k)).map((k) => [`attr:${k}`, { omit: `attr:${k}` as FacetOmit, reads: 'doc' as const, stages: attrStages([k]) }])),
+    };
+    const rows = await countParts(q, parts);
+    type Row = Record<string, any>;
+    const one = (name: string): Row | undefined => rows[name]?.[0];
+
+    const categories = new Map((rows.categories as Row[]).map((r) => [r._id, r.n]));
+    type AttrRow = { _id: { k: string; v: string }; n: number };
+    const attrRows = Object.keys(rows).filter((n) => n === 'attr' || n.startsWith('attr:')).map((n) => rows[n] as AttrRow[]);
+    const sellerRows = rows.sellers as { _id: string | null; n: number }[];
+    const conditionRows = rows.conditions as { _id: string | null; n: number }[];
+    const brands = rows.brands as { _id: string; name: string | null; n: number }[];
+    const official = Number(one('official')?.n ?? 0);
+    const ratingRow = one('ratings');
+    const availRow = one('availability');
+    const deliveryRow = one('delivery');
+    const priceRow = one('price');
+    const attributes = new Map<string, Map<string, number>>();
+    for (const r of attrRows.flat() as AttrRow[]) {
+      const m = attributes.get(r._id.k) ?? new Map<string, number>();
+      m.set(String(r._id.v), (m.get(String(r._id.v)) ?? 0) + r.n);
+      attributes.set(r._id.k, m);
+    }
+
+    const result: FacetCounts = {
+      categories,
+      brands: brands.map((b) => ({ id: b._id, name: b.name ?? '', count: b.n })),
+      sellers: new Map(sellerRows.filter((r) => r._id).map((r) => [r._id!, r.n])),
+      official,
+      conditions: new Map(conditionRows.filter((r) => r._id).map((r) => [r._id!, r.n])),
+      ratings: new Map([1, 2, 3, 4, 5].map((n) => [n, ratingRow?.[`r${n}`] ?? 0])),
+      inStock: availRow?.in_stock ?? 0,
+      includingOutOfStock: availRow?.total ?? 0,
+      freeDelivery: deliveryRow?.free ?? 0,
+      shipsToday: deliveryRow?.today ?? 0,
+      price: { min: priceRow?.min == null ? null : Number(priceRow.min), max: priceRow?.max == null ? null : Number(priceRow.max) },
+      attributes,
+    };
+    return result;
   }
 
   /**
@@ -298,130 +455,53 @@ export function createMongoSearchEngine(store: ModuleStore, terms: TermLookup): 
     name: 'mongo-text',
 
     async search(q, sort, weights, window) {
-      const pipeline = base(q);
       if (window.limit <= 0) return { hits: [], total: await count(matchOnly(q)) };
+      const p = plan(q);
+      const pageOf = [{ $skip: window.offset }, { $limit: window.limit }];
+      let page: Stage[];
+      if (sort === 'recommended' && !q.text && p.stored) {
+        // a listing in the recommended order: the stored ranks (computed by scoreStages, so the same order), read in
+        // index order; only the page is scored, for its factors
+        await ensureRanks(weights);
+        page = [p.match, { $sort: { [`rank_${p.stored}`]: -1, _id: 1 } }, ...pageOf, p.card, ...scoreStages(q, weights)];
+      } else page = [...through(q, undefined, 'card'), ...scoreStages(q, weights), { $sort: ORDER[sort] }, ...pageOf];
       // the count and the page at once (a page of nothing is cheap)
-      const [total, found] = await Promise.all([
-        count(matchOnly(q)),
-        agg([...pipeline, ...scoreStages(q, weights), { $sort: ORDER[sort] }, { $skip: window.offset }, { $limit: window.limit }, { $project: { terms: 0, m: 0, offers: 0 } }]),
-      ]);
+      const [total, found] = await Promise.all([count(matchOnly(q)), agg([...page, { $project: DERIVED_OUT }])]);
       return { hits: total ? found.map(toHit) : [], total };
     },
 
+    prepareRanking: (weights) => ensureRanks(weights),
+
     count: (q) => count(matchOnly(q)),
 
-    async summary(q) {
-      const pipeline = base(q);
-      const [total, [s]] = await Promise.all([
-        count(matchOnly(q)),
-        agg<{ sellers: string[]; official: boolean | null }>([
-          ...pipeline,
-          { $unwind: '$m' },
-          { $group: { _id: null, sellers: { $addToSet: { $ifNull: ['$m.seller_id', 'official'] } }, official: { $max: '$m.official' } } },
-        ]),
-      ]);
-      return { total, sellers: s?.sellers.length ?? 0, official: Boolean(s?.official) };
-    },
+    summary: (q) =>
+      cached('summary', q, async () => {
+        const [total, [s]] = await Promise.all([
+          count(matchOnly(q)),
+          agg<{ sellers: string[]; official: boolean | null }>([
+            ...through(q, undefined, 'offers'),
+            // each document's distinct sellers first (the Official Store as 'official'), then across documents
+            { $project: { s: { $setUnion: [{ $map: { input: '$m', in: { $ifNull: ['$$this.seller_id', 'official'] } } }, []] }, o: { $anyElementTrue: [{ $ifNull: ['$m.official', []] }] } } },
+            { $unwind: '$s' },
+            { $group: { _id: null, sellers: { $addToSet: '$s' }, official: { $max: '$o' } } },
+          ]),
+        ]);
+        return { total, sellers: s?.sellers.length ?? 0, official: Boolean(s?.official) };
+      }),
 
-    async priceRangeCounts(q, ranges) {
-      if (!ranges.length) return [];
-      // the documents with an offer passing the other filters (price left out) and priced within each range: the
-      // same as counting with each range as the price filter, in one pass
-      const within = (r: { min: number | null; max: number | null }) => ({
-        $anyElementTrue: [{ $map: { input: '$m', as: 'o', in: { $and: [...(r.min !== null ? [{ $gte: ['$$o.price', r.min] }] : []), ...(r.max !== null ? [{ $lte: ['$$o.price', r.max] }] : [])] } } }],
-      });
-      const [row] = await agg<Record<string, number>>([...base(q, 'price'), { $group: Object.fromEntries([['_id', null], ...ranges.map((r, i) => [`r${i}`, { $sum: { $cond: [within(r), 1, 0] } }])]) }]);
-      return ranges.map((_, i) => Number(row?.[`r${i}`] ?? 0));
-    },
+    priceRangeCounts: (q, ranges) =>
+      cached('prices', [q, ranges], async () => {
+        if (!ranges.length) return [];
+        // the documents with an offer passing the other filters (price left out) and priced within each range: the
+        // same as counting with each range as the price filter, in one pass
+        const within = (r: { min: number | null; max: number | null }) => ({
+          $anyElementTrue: [{ $map: { input: '$m', as: 'o', in: { $and: [...(r.min !== null ? [{ $gte: ['$$o.price', r.min] }] : []), ...(r.max !== null ? [{ $lte: ['$$o.price', r.max] }] : [])] } } }],
+        });
+        const [row] = await agg<Record<string, number>>([...through(q, 'price', 'offers'), { $group: Object.fromEntries([['_id', null], ...ranges.map((r, i) => [`r${i}`, { $sum: { $cond: [within(r), 1, 0] } }])]) }]);
+        return ranges.map((_, i) => Number(row?.[`r${i}`] ?? 0));
+      }),
 
-    async facets(q, attributeKeys) {
-      const f = q.filters;
-      const brandIds = (await termRows.distinct<string>('target_id', { kind: 'brand', target_id: { $ne: null } })).filter(Boolean);
-
-      /** Products per value of an offer field, over the offers that pass the other filters */
-      const perOffer = (field: string): Stage[] => [{ $unwind: '$m' }, { $group: { _id: { v: `$m.${field}`, p: '$_id' } } }, { $group: { _id: '$_id.v', n: { $sum: 1 } } }];
-      const attrStages = (keys: string[]): Stage[] => [
-        { $project: { a: { $objectToArray: { $ifNull: ['$attributes', {}] } } } },
-        { $unwind: '$a' },
-        { $match: { 'a.k': { $in: keys }, 'a.v': { $type: 'array' } } },
-        { $unwind: '$a.v' },
-        { $group: { _id: { k: '$a.k', v: '$a.v', p: '$_id' } } },
-        { $group: { _id: { k: '$_id.k', v: '$_id.v' }, n: { $sum: 1 } } },
-      ];
-      const filtered = new Set((f.attributes ?? []).map((a) => a.key));
-      const unfilteredKeys = attributeKeys.filter((k) => !filtered.has(k));
-
-      // each count over the documents that pass the other filters (its own left out), and what it reads (CountPart)
-      const parts: Record<string, CountPart> = {
-        categories: { omit: 'category', reads: 'doc', stages: [{ $unwind: '$category_path_ids' }, { $group: { _id: '$category_path_ids', n: { $sum: 1 } } }] },
-        brands: { omit: 'brand', reads: 'doc', stages: [{ $match: { brand_id: { $in: brandIds } } }, { $group: { _id: '$brand_id', name: { $max: '$brand_name' }, n: { $sum: 1 } } }, { $sort: { n: -1, name: 1 } }] },
-        sellers: { omit: 'seller', reads: 'offers', stages: perOffer('seller_id') },
-        official: { omit: 'seller', reads: 'offers', stages: [{ $match: { 'm.official': true } }, { $count: 'n' }] },
-        conditions: { omit: 'condition', reads: 'offers', stages: perOffer('condition') },
-        ratings: { omit: 'rating', reads: 'doc', stages: [{ $group: Object.fromEntries([['_id', null], ...[1, 2, 3, 4, 5].map((n) => [`r${n}`, { $sum: { $cond: [{ $gte: ['$rating', n] }, 1, 0] } }])]) }] },
-        availability: { omit: 'availability', reads: 'card', stages: [{ $group: { _id: null, in_stock: { $sum: { $cond: ['$eo.in_stock', 1, 0] } }, total: { $sum: 1 } } }] },
-        // free delivery and ships today count products with such an offer among those passing the other filters (m)
-        delivery: {
-          omit: 'delivery',
-          reads: 'offers',
-          stages: [
-            {
-              $group: {
-                _id: null,
-                free: { $sum: { $cond: [{ $in: [true, '$m.free_delivery'] }, 1, 0] } },
-                today: {
-                  $sum: {
-                    $cond: [{ $and: [{ $in: [0, '$m.dispatch_days'] }, { $or: [{ $eq: [{ $ifNull: ['$same_day_cutoff', null] }, null] }, { $gt: ['$same_day_cutoff', q.marketTime] }] }] }, 1, 0],
-                  },
-                },
-              },
-            },
-          ],
-        },
-        price: { omit: 'price', reads: 'card', stages: [{ $group: { _id: null, min: { $min: '$eo.price' }, max: { $max: '$eo.price' } } }] },
-        // attributes: the unfiltered ones together, each filtered one without its own filter
-        ...(unfilteredKeys.length ? { attr: { reads: 'doc' as const, stages: attrStages(unfilteredKeys) } } : {}),
-        ...Object.fromEntries(attributeKeys.filter((k) => filtered.has(k)).map((k) => [`attr:${k}`, { omit: `attr:${k}` as FacetOmit, reads: 'doc' as const, stages: attrStages([k]) }])),
-      };
-      const rows = await countParts(q, parts);
-      type Row = Record<string, any>;
-      const one = (name: string): Row | undefined => rows[name]?.[0];
-
-      const categories = new Map((rows.categories as Row[]).map((r) => [r._id, r.n]));
-      type AttrRow = { _id: { k: string; v: string }; n: number };
-      const attrRows = Object.keys(rows).filter((n) => n === 'attr' || n.startsWith('attr:')).map((n) => rows[n] as AttrRow[]);
-      const sellerRows = rows.sellers as { _id: string | null; n: number }[];
-      const conditionRows = rows.conditions as { _id: string | null; n: number }[];
-      const brands = rows.brands as { _id: string; name: string | null; n: number }[];
-      const official = Number(one('official')?.n ?? 0);
-      const ratingRow = one('ratings');
-      const availRow = one('availability');
-      const deliveryRow = one('delivery');
-      const priceRow = one('price');
-      const attributes = new Map<string, Map<string, number>>();
-      for (const r of attrRows.flat() as AttrRow[]) {
-        const m = attributes.get(r._id.k) ?? new Map<string, number>();
-        m.set(String(r._id.v), (m.get(String(r._id.v)) ?? 0) + r.n);
-        attributes.set(r._id.k, m);
-      }
-
-      const result: FacetCounts = {
-        categories,
-        brands: brands.map((b) => ({ id: b._id, name: b.name ?? '', count: b.n })),
-        sellers: new Map(sellerRows.filter((r) => r._id).map((r) => [r._id!, r.n])),
-        official,
-        conditions: new Map(conditionRows.filter((r) => r._id).map((r) => [r._id!, r.n])),
-        ratings: new Map([1, 2, 3, 4, 5].map((n) => [n, ratingRow?.[`r${n}`] ?? 0])),
-        inStock: availRow?.in_stock ?? 0,
-        includingOutOfStock: availRow?.total ?? 0,
-        freeDelivery: deliveryRow?.free ?? 0,
-        shipsToday: deliveryRow?.today ?? 0,
-        price: { min: priceRow?.min == null ? null : Number(priceRow.min), max: priceRow?.max == null ? null : Number(priceRow.max) },
-        attributes,
-      };
-      return result;
-    },
-
+    facets: (q, attributeKeys) => cached('facets', [q, attributeKeys], () => facetsOf(q, attributeKeys)),
     async correctWord(word, threshold) {
       if (word.length < 3 || /\d/.test(word)) return null;
       const st = stems(word);
@@ -489,7 +569,7 @@ export function createMongoSearchEngine(store: ModuleStore, terms: TermLookup): 
       }
       const ids = chosen.map((d) => d._id as string);
       if (!ids.length) return [];
-      const byId = new Map((await agg([{ $match: { _id: { $in: ids } } }, { $project: { terms: 0, offers: 0 } }])).map((d) => [d._id as string, d]));
+      const byId = new Map((await agg([{ $match: { _id: { $in: ids } } }, { $project: DERIVED_OUT }])).map((d) => [d._id as string, d]));
       return ids.flatMap((id) => (byId.has(id) ? [docOut(byId.get(id)!)] : []));
     },
 
@@ -506,7 +586,7 @@ export function createMongoSearchEngine(store: ModuleStore, terms: TermLookup): 
     },
 
     async similar(productId, limit) {
-      const [b] = await agg([{ $match: { _id: productId } }, { $project: { terms: 0, offers: 0 } }]);
+      const [b] = await agg([{ $match: { _id: productId } }, { $project: DERIVED_OUT }]);
       if (!b) return [];
       const titleWords = [...new Set(String(b.title_norm).split(/\s+/).filter(Boolean))];
       const related: Doc[] = [
@@ -516,7 +596,7 @@ export function createMongoSearchEngine(store: ModuleStore, terms: TermLookup): 
         ...(titleWords.length ? [{ title_norm: { $regex: `(^| )(${titleWords.map(escapeRegExp).join('|')})( |$)` } }] : []),
       ];
       if (!related.length) return [];
-      const found = await agg([{ $match: { _id: { $ne: productId }, offer_count: { $gt: 0 }, in_stock: true, $or: related } }, { $project: { terms: 0, offers: 0 } }]);
+      const found = await agg([{ $match: { _id: { $ne: productId }, offer_count: { $gt: 0 }, in_stock: true, $or: related } }, { $project: DERIVED_OUT }]);
       const overlap = (d: Doc) => (d.category_path_ids ?? []).some((c: string) => (b.category_path_ids ?? []).includes(c));
       return found
         .map((d) => ({ d, s: similarity(d.title_norm, b.title_norm) }))
@@ -582,7 +662,7 @@ export function createMongoSearchEngine(store: ModuleStore, terms: TermLookup): 
         { $set: { _gtin: gtin ? { $in: [gtin, { $ifNull: ['$gtins', []] }] } : false, _starts: { $eq: [{ $indexOfCP: ['$title_norm', norm] }, 0] } } },
         { $sort: { _gtin: -1, _starts: -1, popularity: -1, title: 1 } },
         { $limit: limit },
-        { $project: { terms: 0, offers: 0, _gtin: 0, _starts: 0 } },
+        { $project: { ...DERIVED_OUT, _gtin: 0, _starts: 0 } },
       ]);
       return found.map(docOut);
     },

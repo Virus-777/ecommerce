@@ -54,6 +54,13 @@ const search_documents = new Schema(
     version: { type: Number, required: true, validate: integer },
     indexed_at: { type: Date, required: true },
     offers: { type: Schema.Types.Mixed, default: null }, // the product's offers as search_offers stores them, kept in step by the repository; the MongoDB engine reads them here instead of joining sea
+    card_all: { type: Schema.Types.Mixed, default: null }, // MongoDB engine: the card offer among all offers — featured first, then in stock, cheapest, offer id — with its featured flag; recomputed fro
+    card_all_n: { type: Number, default: null, validate: integer }, // number of offers
+    card_in_stock: { type: Schema.Types.Mixed, default: null }, // the card offer among the in-stock offers, same order; null when none is in stock
+    card_in_stock_n: { type: Number, default: null, validate: integer }, // number of in-stock offers
+    rank_all: { type: Schema.Types.Mixed, default: null }, // MongoDB engine: the recommended-sort score of a listing (no words) with card_all, under the ranking weights of rank_key; a number
+    rank_in_stock: { type: Schema.Types.Mixed, default: null }, // the same with card_in_stock (in-stock only listings); a number
+    rank_key: { type: String, default: null }, // the ranking weights rank_all and rank_in_stock were computed with; null when an input changed since, and the engine recomputes them before a
     best_seller_rank: { type: Number, default: null, validate: integer }, // rank in best_seller_category_id by sales_30d; null outside the top 100
     best_seller_category_id: { type: String, default: null },
     /** lock-by-write counter (kernel/mongo/table.ts) */
@@ -71,6 +78,9 @@ search_documents.index({"first_listed_at":1}, {"name":"search_documents_first_li
 search_documents.index({"rating":1,"rating_count":1}, {"name":"search_documents_rating_rating_count_ab0d13"});
 search_documents.index({"brand_id":1}, {"name":"search_documents_brand_id_ca2fee"});
 search_documents.index({"sales_30d":1}, {"name":"search_documents_sales_30d_5ac83c"});
+search_documents.index({"rank_key":1}, {"name":"search_documents_rank_key_8d11cf"});
+search_documents.index({"category_path_ids":1,"rank_in_stock":-1,"_id":1}, {"name":"search_documents_category_path_ids_rank_in_stock__id_5cafaa"});
+search_documents.index({"category_path_ids":1,"rank_all":-1,"_id":1}, {"name":"search_documents_category_path_ids_rank_all__id_fa2efc"});
 
 /** Offer-level rows so seller, condition and price filters show the matching seller's price (e.g. Official Store filter shows company offers) */
 const search_offers = new Schema(

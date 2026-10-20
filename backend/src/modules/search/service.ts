@@ -61,6 +61,11 @@ export class SearchService extends SearchAdmin implements SearchPublicApi {
     return this.resultSet({ ...(query ?? {}), q: null, filters: { ...filters, categorySlug: slug } }, { kind: 'category' }, toPageRequest(page ?? {}));
   }
 
+  /** Lets the engine prepare the recommended order for the published ranking weights (after a start; searches do it too) */
+  async prepareRanking(): Promise<void> {
+    await this.engine.prepareRanking?.(await this.weights());
+  }
+
   /** Suggestions while typing: queries, categories, brands, stores, products and recent searches */
   async getSuggestions(prefix: string, session?: { customerId?: string; guestSessionId?: string }): Promise<Suggestions> {
     return this.suggestions(prefix, session);

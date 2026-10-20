@@ -28,9 +28,16 @@ export default defineModule({
     ctx.provide(service);
     // an engine with its own index: a new or outdated index is filled by a queued full reindex (in the background: never blocks startup)
     if (engine.feed) ctx.afterBoot(() => void service.bootstrapEngineIndex().catch((err) => ctx.log.warn({ err }, 'search: could not check the search engine index')));
-    // documents keep their offers (docs/07): the release before this one may have changed offer rows while the new one
-    // was being installed, so they are copied in again once after each start (in the background)
-    ctx.afterBoot(() => void repo.embedAllOffers().catch((err) => ctx.log.warn({ err }, 'search: could not copy the offers into the search documents')));
+    // documents keep their offers and card offers (docs/07): the release before this one may have changed offer rows
+    // while the new one was being installed, so they are copied in again once after each start, then the stored
+    // recommended-order ranks are brought up to date (in the background)
+    ctx.afterBoot(
+      () =>
+        void repo
+          .embedAllOffers()
+          .then(() => service.prepareRanking())
+          .catch((err) => ctx.log.warn({ err }, 'search: could not copy the offers into the search documents or rank them')),
+    );
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
 

@@ -4,6 +4,7 @@
  * providers/opensearch/ (production: its own index, fed from the repository's writes through SearchIndexFeed).
  * The engine is chosen by SEARCH_ENGINE (engine-config.ts); repository.ts is the read model either way.
  */
+import type { DERIVED_FIELDS } from './cards.js';
 import type { SearchDb } from '../../spec/search.js';
 import type { ConditionGroup, SortKey } from './domain/types.js';
 import type { RankingFactorKey } from './domain/ranking.js';
@@ -27,8 +28,8 @@ export interface DocTexts {
   description: string;
 }
 
-/** A document as the indexer writes it (terms, version, indexed_at and the embedded offers are set by the repository) */
-export type DocWrite = Omit<DocRow, 'terms' | 'version' | 'indexed_at' | 'offers'> & { texts: DocTexts };
+/** A document as the indexer writes it (terms, version, indexed_at and the derived fields of cards.ts are set by the repository) */
+export type DocWrite = Omit<DocRow, 'terms' | 'version' | 'indexed_at' | (typeof DERIVED_FIELDS)[number]> & { texts: DocTexts };
 
 /* ------------------------------------------------------------------ search engine port */
 
@@ -130,6 +131,8 @@ export interface SearchEngine {
    * filter (its own price filter left out). Optional: without it the service counts each range with count().
    */
   priceRangeCounts?(q: EngineQuery, ranges: readonly { min: number | null; max: number | null }[]): Promise<number[]>;
+  /** Brings whatever the engine keeps for the recommended order up to these weights (optional; searches do it too) */
+  prepareRanking?(weights: Record<RankingFactorKey, number>): Promise<void>;
   /** Most similar known word (titles, brands, categories, popular queries) above the threshold, null when the word is known */
   correctWord(word: string, threshold: number): Promise<string | null>;
   /** Whether a known word (titles, brands, categories, popular queries) starts with this text */

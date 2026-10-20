@@ -4,6 +4,7 @@ import { contains, type Filter, type ModuleStore } from '../../kernel/mongo/inde
 import type { SearchDb } from '../../spec/search.js';
 import type { DocRow, DocWrite, OfferRow, PolicyRow, QueryLogRow, RecentRow, ReindexJobRow, SynonymRow, TermKind, TermRow } from './ports.js';
 import { termsOf } from './text.js';
+import { DERIVED_FIELDS, STORE_CARDS } from './cards.js';
 
 type ClickRow = SearchDb['click_log'];
 type SalesRow = SearchDb['product_sales_daily'];
@@ -99,7 +100,7 @@ export const EMBED_OFFERS_PIPELINE: readonly Record<string, unknown>[] = [
     $merge: {
       into: 'search.search_documents',
       on: '_id',
-      whenMatched: [{ $set: { offers: { $cond: [{ $eq: [{ $ifNull: ['$offers', null] }, '$$new._read'] }, '$$new.offers', '$offers'] } } }],
+      whenMatched: [{ $set: { offers: { $cond: [{ $eq: [{ $ifNull: ['$offers', null] }, '$$new._read'] }, '$$new.offers', '$offers'] } } }, STORE_CARDS],
       whenNotMatched: 'discard',
     },
   },
@@ -152,8 +153,10 @@ export class SearchRepository {
 
   /** Insert or replace a document; `offers` replaces its offer rows and embedded offers (null keeps them) */
   async upsertDocument(doc: DocWrite, offers: OfferRow[] | null, at: Date): Promise<void> {
-    // embedded offers come from the offer rows only (a document read back and written again must not bring old ones)
-    const { texts, product_id, offers: _embedded, ...cols } = doc as DocWrite & { offers?: unknown };
+    // derived fields (embedded offers, card offers, ranks) come from the rows and this repository only: a document
+    // read back and written again must not bring old ones
+    const { texts, product_id, ...written } = doc as DocWrite & Record<string, unknown>;
+    const cols = Object.fromEntries(Object.entries(written).filter(([k]) => !(DERIVED_FIELDS as readonly string[]).includes(k)));
     // version: 1 for a new document, one more for a replaced one. One atomic upsert with $set and $inc, which the
     // Table helpers do not combine (upsert sets, increment only adds), so through the model
     await this.#t.docs.model.updateOne(
@@ -161,24 +164,27 @@ export class SearchRepository {
       { $set: this.#t.docs.toDoc({ ...cols, terms: termsOf(texts), indexed_at: at, ...(offers ? { offers: embeddedList(offers) } : {}) }), $inc: { version: 1 } },
       { upsert: true, session: this.#session, runValidators: true },
     );
-    if (offers) {
+    if (offers?.length) {
+      // an offer moved from another product (merge): its old row goes, and so does that product's embedded copy
+      const moved = await this.#t.offers.find({ offer_id: oneOf(offers.map((o) => o.offer_id)) });
       await this.#t.offers.deleteMany({ product_id });
-      if (offers.length) {
-        // an offer moved from another product (merge): its old row goes, and so does that product's embedded copy
-        const moved = await this.#t.offers.find({ offer_id: oneOf(offers.map((o) => o.offer_id)) });
-        await this.#t.offers.deleteMany({ offer_id: oneOf(offers.map((o) => o.offer_id)) });
-        await this.#t.offers.insertMany(offers);
-        await this.#embedOffers(moved.map((r) => r.product_id));
-      }
-    }
+      await this.#t.offers.deleteMany({ offer_id: oneOf(offers.map((o) => o.offer_id)) });
+      await this.#t.offers.insertMany(offers);
+      await this.#embedOffers(moved.map((r) => r.product_id).filter((id) => id !== product_id));
+    } else if (offers) await this.#t.offers.deleteMany({ product_id });
+    // the featured offer or the offers may have changed: the stored card offers follow (and the ranks go stale)
+    await this.#t.docs.model.updateOne({ _id: product_id }, [STORE_CARDS], { session: this.#session });
   }
 
-  /** Copies the offer rows of these products into their documents' `offers` (after any offer row write) */
+  /** Copies the offer rows of these products into their documents' `offers`, and their card offers (after any offer row write) */
   async #embedOffers(productIds: readonly string[]): Promise<void> {
     const ids = [...new Set(productIds)];
     if (!ids.length) return;
     const rows = await this.#t.offers.find({ product_id: oneOf(ids) });
-    for (const id of ids) await this.#t.docs.updateOne({ product_id: id }, { $set: { offers: embeddedList(rows.filter((r) => r.product_id === id)) } });
+    for (const id of ids) {
+      const list = embeddedList(rows.filter((r) => r.product_id === id));
+      await this.#t.docs.model.updateOne({ _id: id }, [{ $set: { offers: { $literal: list } } }, STORE_CARDS], { session: this.#session });
+    }
   }
 
   /** Rebuilds every document's `offers` from the offer rows (EMBED_OFFERS_PIPELINE) */
@@ -192,7 +198,9 @@ export class SearchRepository {
   }
 
   async updateDocument(productId: string, patch: Partial<Omit<DocRow, 'product_id' | 'terms'>>, at: Date): Promise<void> {
-    await this.#t.docs.updateOne({ product_id: productId }, { $set: { ...patch, indexed_at: at }, $inc: { version: 1 } });
+    // any field may feed the stored ranks (rating, featured offer…): they go stale
+    await this.#t.docs.updateOne({ product_id: productId }, { $set: { ...patch, indexed_at: at, rank_key: null }, $inc: { version: 1 } });
+    if ('featured_offer_id' in patch) await this.#t.docs.model.updateOne({ _id: productId }, [STORE_CARDS], { session: this.#session });
   }
 
   async offerRows(productIds: string[]): Promise<OfferRow[]> {
@@ -312,6 +320,8 @@ export class SearchRepository {
           $set: {
             popularity: { $toDecimal: { $max: [{ $add: ['$popularity', n] }, 0] } },
             sales_30d: { $max: [{ $add: ['$sales_30d', n] }, 0] },
+            // popularity feeds the stored ranks
+            rank_key: null,
           },
         },
       ]);
@@ -323,9 +333,10 @@ export class SearchRepository {
     const sums = await this.#t.sales.aggregate<{ _id: string; units: number }>([{ $match: { day: { $gte: from } } }, { $group: { _id: '$product_id', units: { $sum: '$units' } } }]);
     const units = new Map(sums.filter((s) => s.units !== 0).map((s) => [s._id, s.units]));
     // documents without sales in the window: 0
-    await this.#t.docs.updateMany({ product_id: { $nin: [...units.keys()] }, $or: [{ sales_30d: { $ne: 0 } }, { popularity: { $ne: '0' } }] }, { sales_30d: 0, popularity: '0' });
+    // popularity feeds the stored ranks: a changed document's go stale
+    await this.#t.docs.updateMany({ product_id: { $nin: [...units.keys()] }, $or: [{ sales_30d: { $ne: 0 } }, { popularity: { $ne: '0' } }] }, { sales_30d: 0, popularity: '0', rank_key: null });
     const ops = [...units].map(([id, n]) => ({
-      updateOne: { filter: { _id: id, $or: [{ sales_30d: { $ne: n } }, { popularity: { $ne: n } }] }, update: { $set: { sales_30d: n, popularity: this.#t.docs.toDoc({ popularity: String(n) }).popularity } } },
+      updateOne: { filter: { _id: id, $or: [{ sales_30d: { $ne: n } }, { popularity: { $ne: n } }] }, update: { $set: { sales_30d: n, popularity: this.#t.docs.toDoc({ popularity: String(n) }).popularity, rank_key: null } } },
     }));
     for (let i = 0; i < ops.length; i += 500) await this.#t.docs.model.bulkWrite(ops.slice(i, i + 500) as never, { session: this.#session });
   }

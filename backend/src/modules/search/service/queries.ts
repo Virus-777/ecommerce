@@ -485,7 +485,7 @@ export class SearchQueries extends SearchIndexer {
     return values.filter((v) => v.count > 0 || v.selected);
   }
 
-  protected async facetsOf(p: Prepared, counts: FacetCounts, sellers: Map<string, { name: string; slug: string | null }>): Promise<Facet[]> {
+  protected async facetsOf(p: Prepared, counts: FacetCounts, sellers: Map<string, { name: string; slug: string | null }>, presets: FacetValue[]): Promise<Facet[]> {
     const f = p.engineQuery.filters;
     const currency = this.ctx.config.market.currency;
     const facets: Facet[] = [];
@@ -508,7 +508,7 @@ export class SearchQueries extends SearchIndexer {
       group: 'universal',
       kind: 'price',
       multiSelect: false,
-      values: await this.pricePresets(p, currency),
+      values: presets,
       range: {
         min: counts.price.min !== null ? money(counts.price.min, currency) : null,
         max: counts.price.max !== null ? money(counts.price.max, currency) : null,
@@ -693,7 +693,8 @@ export class SearchQueries extends SearchIndexer {
 
   /** Everything around the results: total, correction, applied filters, facets, sorts, store match, category, guidance */
   async context(p: Prepared, searchId: string): Promise<SearchContext> {
-    const [summary, counts, storeMatch] = await Promise.all([this.engine.summary(p.engineQuery), this.engine.facets(p.engineQuery, p.attributeKeys), this.storeMatchOf(p)]);
+    // independent reads at once (the price presets count each range: they need no other count)
+    const [summary, counts, storeMatch, presets] = await Promise.all([this.engine.summary(p.engineQuery), this.engine.facets(p.engineQuery, p.attributeKeys), this.storeMatchOf(p), this.pricePresets(p, this.ctx.config.market.currency)]);
     const sellerIds = [...counts.sellers.keys(), ...(p.engineQuery.filters.sellerIds ?? [])];
     const sellers = await this.sellerLabels(sellerIds);
     const names = new Map([...sellers].map(([id, s]) => [id, s.name]));
@@ -719,7 +720,7 @@ export class SearchQueries extends SearchIndexer {
         ? 'No results'
         : `${total} ${total === 1 ? 'result' : 'results'} from ${summary.sellers} ${summary.sellers === 1 ? 'seller' : 'sellers'}${summary.official ? (summary.sellers === 1 ? ', the Official Store' : ', including the Official Store') : ''}`;
     const [facets, category, emptyGuidance] = await Promise.all([
-      this.facetsOf(p, counts, sellers),
+      this.facetsOf(p, counts, sellers, presets),
       this.categoryContextOf(p, counts, summary.sellers),
       total === 0 ? this.emptyGuidanceOf(p, applied) : null,
     ]);

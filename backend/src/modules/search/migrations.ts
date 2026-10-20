@@ -3,6 +3,7 @@
  * spec exist, and is recorded in the kernel's migrations collection.
  */
 import type { MongoMigration } from '../../kernel/mongo/schema.js';
+import { STORE_CARDS } from './cards.js';
 import { EMBED_OFFERS_PIPELINE } from './repository.js';
 
 /**
@@ -16,4 +17,15 @@ export const embedOffers: MongoMigration = {
   },
 };
 
-export const mongoMigrations: readonly MongoMigration[] = [embedOffers];
+/**
+ * Search documents keep their card offers for the two usual offer filters (cards.ts, docs/07 step 5): fills them on
+ * documents written before, from their offers and featured offer; the stored ranks follow on the first listing.
+ */
+export const storeCards: MongoMigration = {
+  id: '2026-10-20-store-cards',
+  async up(db) {
+    await db.collection('search.search_documents').updateMany({}, [STORE_CARDS]);
+  },
+};
+
+export const mongoMigrations: readonly MongoMigration[] = [embedOffers, storeCards];
