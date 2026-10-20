@@ -4,7 +4,9 @@ import { Link, useSearchParams } from 'react-router';
 import { call, useApi } from '@marketly/web-shared/api';
 import { formatMoney, type MoneyValue } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { BarChart, Button, Card, Legend, LineChart, SegmentedControl, Stat, TableWrap } from '@marketly/web-shared/ui';
+import {
+  BarsChart, Button, Card, ChartFrame, chartColor, fmtCount, fmtMoney, fmtMoneyCompact, fmtPercent, fmtPercentCompact, rowsFrom, SegmentedControl, seriesTable, Stat, TableWrap, TrendChart, type ChartRow,
+} from '@marketly/web-shared/ui';
 import { useSellerSession } from '@/app/session';
 import { dayKey, LoadError, SkeletonLines } from './home';
 import { breakdownsOf, kpiOf, REPORT, statDelta, tableOf, type Kpi, type ProductSalesRow, type ReportQuery, type ReportResult } from './reports';
@@ -114,7 +116,6 @@ function quarterRates(rate: Point[], volume: Point[]): Point[] {
 }
 
 const money = (cents: number) => formatMoney({ amount: cents, currency: 'USD' });
-const kmoney = (dollars: number) => (dollars >= 1000 ? `$${(dollars / 1000).toFixed(1)}k` : `$${Math.round(dollars)}`);
 const num = (n: number) => n.toLocaleString('en-US');
 
 function KpiCard({ k, label, value, note, loading }: { k?: Kpi; label: string; value?: string; note?: string; loading: boolean }) {
@@ -192,6 +193,14 @@ export function PeriodPerformance({ part = 'summary', today: todaySales }: { par
   const productRows = (tableOf<ProductSalesRow>(products.data)?.rows ?? []).slice().sort((a, b) => b.gross.amount - a.gross.amount).slice(0, 5);
   const reasons = breakdownsOf(returns.data).find((b) => b.key === 'reason')?.rows ?? [];
   const failed = [trend, products, returns, service].find((q) => q.isError);
+  // chart rows: gross (cents) and orders per period, reasons as a ranking, the dispatch rate per period
+  const salesRows: ChartRow[] = rows.map((x) => ({ x: x.period, label: x.label, gross: x.gross.amount, orders: x.orders }));
+  const reasonRows = rowsFrom(reasons.map((x) => x.label), { requests: reasons.map((x) => x.requests) });
+  const dispatchRows = rowsFrom(dispatch.map((p) => p.label), { onTime: dispatch.map((p) => Math.round(p.y * 10) / 10) }, dispatch.map((p) => p.x));
+  const SALES = [{ key: 'gross', label: 'Gross sales' }];
+  const ORDERS = [{ key: 'orders', label: 'Orders' }];
+  const REASONS = [{ key: 'requests', label: 'Return requests', color: chartColor(1) }];
+  const ON_TIME = [{ key: 'onTime', label: 'Dispatched on time' }];
   const compareNote = 'vs the period before';
 
   if (part === 'details') {
@@ -262,15 +271,16 @@ export function PeriodPerformance({ part = 'summary', today: todaySales }: { par
               </div>
             )}
           </Card>
-          <Card title="Returns by reason" titleAs="h3" sub={returns.data ? `${num(returnReqs?.value ?? 0)} return request${returnReqs?.value === 1 ? '' : 's'} · ${r.title.toLowerCase()}` : undefined}>
-            {returns.isPending ? (
-              <SkeletonLines rows={3} />
-            ) : reasons.length === 0 ? (
-              <p className="small sub">No returns in this period.</p>
-            ) : (
-              <BarChart labels={reasons.map((x) => x.label)} data={reasons.map((x) => x.requests)} height={180} s2 label="Return requests by reason" />
-            )}
-          </Card>
+          <ChartFrame
+            title="Returns by reason"
+            sub={returns.data ? `${num(returnReqs?.value ?? 0)} return request${returnReqs?.value === 1 ? '' : 's'} · ${r.title.toLowerCase()}` : undefined}
+            loading={returns.isPending}
+            height={180}
+            empty={reasons.length === 0 ? 'No returns in this period.' : false}
+            table={seriesTable(reasonRows, REASONS, fmtCount, { xLabel: 'Reason' })}
+          >
+            <BarsChart rows={reasonRows} series={REASONS} fmt={fmtCount} horizontal label="Return requests by reason" />
+          </ChartFrame>
         </div>
         <div className="stack gap-5">
           <Card
@@ -329,24 +339,21 @@ export function PeriodPerformance({ part = 'summary', today: todaySales }: { par
               </TableWrap>
             )}
           </Card>
-          <Card
+          <ChartFrame
             title="Dispatch on time"
-            titleAs="h3"
             sub={`Packages dispatched by the deadline, per ${grain === 'day' ? 'week' : r.unit.toLowerCase()}`}
             actions={
               <Link className="small strong" to={href('seller/performance')}>
                 Account health
               </Link>
             }
+            loading={service.isPending}
+            height={180}
+            empty={!shipped.some((n) => n > 0) ? 'No packages dispatched in this period yet.' : false}
+            table={seriesTable(dispatchRows, ON_TIME, fmtPercent, { xLabel: grain === 'day' ? 'Week' : r.unit })}
           >
-            {service.isPending ? (
-              <SkeletonLines rows={3} />
-            ) : !shipped.some((n) => n > 0) ? (
-              <p className="small sub">No packages dispatched in this period yet.</p>
-            ) : (
-              <LineChart labels={dispatch.map((p) => p.label)} series={[{ name: 'On time', data: dispatch.map((p) => Math.round(p.y * 10) / 10) }]} fmt={(v) => `${Math.round(v)}%`} height={180} label="On-time dispatch rate" />
-            )}
-          </Card>
+            <TrendChart rows={dispatchRows} series={ON_TIME} fmt={fmtPercent} axisFmt={fmtPercentCompact} height={180} label="On-time dispatch rate" />
+          </ChartFrame>
         </div>
       </div>
     );
@@ -381,27 +388,26 @@ export function PeriodPerformance({ part = 'summary', today: todaySales }: { par
         <KpiCard k={onTime} label="On-time dispatch" loading={service.isPending} />
       </div>
       <div className="grid lg2 gap-5">
-        <Card title={`Sales per ${r.unit.toLowerCase()}`} titleAs="h3" sub={trend.data ? `${money(totals.gross)} · ${r.title.toLowerCase()}` : undefined}>
-          {trend.isPending ? (
-            <SkeletonLines rows={5} />
-          ) : !hasSales ? (
-            <p className="small sub">No sales in this period yet.</p>
-          ) : (
-            <>
-              <Legend items={['Gross sales']} />
-              <LineChart labels={rows.map((x) => x.label)} series={[{ name: 'Sales', data: rows.map((x) => x.gross.amount / 100) }]} fmt={kmoney} area height={220} label={`Gross sales per ${r.unit.toLowerCase()}, ${r.title.toLowerCase()}`} />
-            </>
-          )}
-        </Card>
-        <Card title={`Orders per ${r.unit.toLowerCase()}`} titleAs="h3" sub={trend.data ? `${num(totals.orders)} order${totals.orders === 1 ? '' : 's'} · ${num(totals.units)} unit${totals.units === 1 ? '' : 's'}` : undefined}>
-          {trend.isPending ? (
-            <SkeletonLines rows={5} />
-          ) : !hasSales ? (
-            <p className="small sub">No orders in this period yet.</p>
-          ) : (
-            <BarChart labels={rows.map((x) => x.label)} data={rows.map((x) => x.orders)} height={220} label={`Orders per ${r.unit.toLowerCase()}, ${r.title.toLowerCase()}`} />
-          )}
-        </Card>
+        <ChartFrame
+          title={`Gross sales per ${r.unit.toLowerCase()}`}
+          sub={trend.data ? `${money(totals.gross)} · ${r.title.toLowerCase()}` : undefined}
+          loading={trend.isPending}
+          height={220}
+          empty={hasSales ? false : 'No sales in this period yet.'}
+          table={seriesTable(salesRows, SALES, fmtMoney, { xLabel: r.unit })}
+        >
+          <TrendChart rows={salesRows} series={SALES} fmt={fmtMoney} axisFmt={fmtMoneyCompact} area height={220} label={`Gross sales per ${r.unit.toLowerCase()}, ${r.title.toLowerCase()}`} />
+        </ChartFrame>
+        <ChartFrame
+          title={`Orders per ${r.unit.toLowerCase()}`}
+          sub={trend.data ? `${num(totals.orders)} order${totals.orders === 1 ? '' : 's'} · ${num(totals.units)} unit${totals.units === 1 ? '' : 's'}` : undefined}
+          loading={trend.isPending}
+          height={220}
+          empty={hasSales ? false : 'No orders in this period yet.'}
+          table={seriesTable(salesRows, ORDERS, fmtCount, { xLabel: r.unit })}
+        >
+          <BarsChart rows={salesRows} series={ORDERS} fmt={fmtCount} height={220} label={`Orders per ${r.unit.toLowerCase()}, ${r.title.toLowerCase()}`} />
+        </ChartFrame>
       </div>
     </section>
   );

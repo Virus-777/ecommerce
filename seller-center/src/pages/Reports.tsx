@@ -1,17 +1,19 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { useMemo, useState, type CSSProperties } from 'react';
+import { useMemo, type CSSProperties } from 'react';
 import { Link } from 'react-router';
 import { call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { SellerLayout } from '@marketly/web-shared/layouts';
 import { formatMoney, money, num } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, announce, Badge, BarChart, Button, Card, Img, Legend, LineChart, Meter, PageHeader, SegmentedControl, Stat, StatusBadge, TableWrap, TextInput } from '@marketly/web-shared/ui';
+import {
+  Alert, announce, Badge, BarsChart, Button, Card, ChartFrame, fmtCount, Img, Meter, PageHeader, PeriodControl, rowsFrom, seriesFromReport, seriesTable, Stat, StatusBadge, TableWrap, TrendChart, usePeriod,
+} from '@marketly/web-shared/ui';
 import { useSellerSession } from '@/app/session';
 import { amt, download, fmtPeriod, fmtTime, waitForExport } from './data/finance';
-import { breakdownsOf, kpiOf, meterPct, metaOf, PERIODS, REPORT, SERVICE_KEYS, statDelta, tableOf, zoneLabel, type Period, type ProductSalesRow } from './data/reports';
+import { breakdownsOf, kpiOf, meterPct, metaOf, REPORT, SERVICE_KEYS, statDelta, tableOf, zoneLabel, type ProductSalesRow, type ReportQuery } from './data/reports';
 
-// Design: pages/seller/seller-reports.html (no views). The 7/30/90-day segment runs the seller reports
-// for that preset (POST reports/reports/{key}/query, compared with the previous period): order trend
+// Design: pages/seller/seller-reports.html (no views). The period control (URL ?preset=&from=&to=&grain=&compare=)
+// runs the seller reports for that period (POST reports/reports/{key}/query, with the chosen comparison): order trend
 // (gross sales and orders KPIs, orders chart), product sales (units and return-rate KPIs, product table
 // with SKUs, images, live discounts and returns per product) and returns by reason (reasons chart). Service performance is the account-health
 // summary (GET sellers/performance, last 30 days). Export CSV runs an async report export
@@ -24,20 +26,20 @@ export default function Reports() {
   const { sellerId, storeName, can } = useSellerSession();
   const canView = can('reports.seller.view');
   const canExport = can('reports.seller.export');
-  const [period, setPeriod] = useState<Period>('30d');
-  const p = PERIODS.find((x) => x.value === period)!;
+  const period = usePeriod();
+  // the new presets and comparisons (docs/09 §3.3) are not in the generated types until the backend lands
+  const query = period.query as ReportQuery;
 
-  const run = (key: string) =>
-    call(api.POST('/api/seller/reports/reports/{key}/query', { params: { path: { key } }, body: { preset: p.preset, compare: 'previous_period' } }));
-  const trend = useQuery({ queryKey: ['reports', REPORT.trend, sellerId, period], queryFn: () => run(REPORT.trend), enabled: canView });
-  const products = useQuery({ queryKey: ['reports', REPORT.products, sellerId, period], queryFn: () => run(REPORT.products), enabled: canView });
-  const returns = useQuery({ queryKey: ['reports', REPORT.returns, sellerId, period], queryFn: () => run(REPORT.returns), enabled: canView });
+  const run = (key: string) => call(api.POST('/api/seller/reports/reports/{key}/query', { params: { path: { key } }, body: query }));
+  const trend = useQuery({ queryKey: ['reports', REPORT.trend, sellerId, query], queryFn: () => run(REPORT.trend), enabled: canView, placeholderData: (prev) => prev });
+  const products = useQuery({ queryKey: ['reports', REPORT.products, sellerId, query], queryFn: () => run(REPORT.products), enabled: canView, placeholderData: (prev) => prev });
+  const returns = useQuery({ queryKey: ['reports', REPORT.returns, sellerId, query], queryFn: () => run(REPORT.returns), enabled: canView, placeholderData: (prev) => prev });
   const performance = useQuery({ queryKey: ['sellers', 'performance', sellerId], queryFn: () => call(api.GET('/api/seller/sellers/performance')) });
 
   const exportCsv = useMutation({
     mutationFn: async () => {
-      const job = await call(api.POST('/api/seller/reports/exports', { body: { reportKey: REPORT.products, query: { preset: p.preset }, format: 'csv' } }));
-      announce(`Exporting ${p.label} report as CSV`);
+      const job = await call(api.POST('/api/seller/reports/exports', { body: { reportKey: REPORT.products, query, format: 'csv' } }));
+      announce(`Exporting the report for ${period.label} as CSV`);
       const ready = await waitForExport(() => call(api.GET('/api/seller/reports/exports/{id}', { params: { path: { id: job.id } } })), job);
       download(ready.downloadUrl!);
       return ready;
@@ -48,34 +50,38 @@ export default function Reports() {
   const view = useMemo(() => {
     const t = trend.data;
     const meta = metaOf(t);
-    const ordersSeries = t?.series.find((s) => s.key === 'orders');
-    const points = (ordersSeries?.points ?? []) as Array<{ x: string; y: number; label?: string }>;
+    const ordersChart = seriesFromReport(t, [{ key: 'orders', label: `${storeName || 'Your'} orders` }]);
     const productRows = [...(tableOf<ProductSalesRow>(products.data)?.rows ?? [])].sort((a, b) => b.gross.amount - a.gross.amount);
     const reasons = breakdownsOf(returns.data).find((b) => b.key === 'reason')?.rows ?? [];
     const ordersKpi = kpiOf(t, 'commerce.orders');
     const unitsKpi = kpiOf(products.data, 'commerce.units_sold');
     return {
       meta,
-      labels: points.map((pt) => pt.label ?? pt.x),
-      orderPoints: points.map((pt) => pt.y),
+      ordersChart,
       products: productRows,
       reasons,
+      reasonRows: rowsFrom(
+        reasons.map((r) => r.label),
+        { requests: reasons.map((r) => r.requests) },
+        reasons.map((r) => r.key ?? r.label),
+      ),
       reasonTotal: reasons.reduce((a, r) => a + r.requests, 0),
       orders: ordersKpi?.value ?? 0,
       units: unitsKpi?.value ?? 0,
     };
-  }, [trend.data, products.data, returns.data]);
+  }, [trend.data, products.data, returns.data, storeName]);
 
   const gross = kpiOf(trend.data, 'commerce.gross_sales');
   const orders = kpiOf(trend.data, 'commerce.orders');
   const units = kpiOf(products.data, 'commerce.units_sold');
   const returnRate = kpiOf(products.data, 'service.return_rate');
-  const compare = view.meta?.compareRange ? `vs prior ${p.label}` : undefined;
+  const compare = view.meta?.compareRange ? `vs ${fmtPeriod(view.meta.compareRange)}` : undefined;
   const meta = view.meta;
   const failed = [trend, products, returns].find((q) => q.isError);
   const service = SERVICE_KEYS.map((k) => performance.data?.metrics.find((m) => m.key === k)).filter((m) => !!m);
-  const hasOrders = view.orderPoints.some((v) => v > 0);
+  const hasOrders = view.ordersChart.rows.some((r) => Number(r.orders) > 0);
   const hasReasons = view.reasons.some((r) => r.requests > 0);
+  const reasonSeries = [{ key: 'requests', label: 'Return requests' }];
 
   const sk = (
     <div className="stack gap-2">
@@ -102,11 +108,7 @@ export default function Reports() {
         sub={meta ? `Figures ${(meta.dateBasisLabel ?? 'by order date').replace(/^By/, 'by')}, ${zoneLabel(meta.timeZone)}.${meta.freshAsOf ? ` Refreshed ${fmtTime(meta.freshAsOf)}.` : ''}` : 'Figures by order date, Pacific Time.'}
         actions={
           <>
-            <SegmentedControl items={PERIODS.map(({ label, value }) => ({ label, value }))} active={period} onChange={setPeriod} label="Report period" />
-            <label className="sr-only" htmlFor="rp-range">
-              Date range
-            </label>
-            <TextInput id="rp-range" icon="calendar" value={meta ? fmtPeriod(meta.range, true) : ''} placeholder="" readOnly />
+            <PeriodControl period={period} idPrefix="rp" />
             {canExport && (
               <Button variant="secondary" size="sm" icon="download" onClick={() => exportCsv.mutate()} disabled={exportCsv.isPending}>
                 {exportCsv.isPending ? 'Preparing CSV…' : 'Export CSV'}
@@ -135,26 +137,34 @@ export default function Reports() {
         <div className="card pad">{products.data ? <Stat label="Return rate" value={returnRate?.display ?? pct(returnRate?.value ?? 0)} {...statDelta(returnRate)} note={returnRate?.note ?? undefined} /> : sk}</div>
       </div>
       <div className="grid lg2 gap-5">
-        <Card title={`Orders per ${meta?.granularity ?? 'day'}`} sub={meta ? `${num(view.orders)} orders · ${fmtPeriod(meta.range)}` : undefined}>
-          <Legend items={[`${storeName || 'Your'} orders`]} />
-          {!trend.data ? (
-            <span className="sk h-46" />
-          ) : hasOrders && view.orderPoints.length > 1 ? (
-            <LineChart labels={view.labels} series={[{ name: 'Orders', data: view.orderPoints }]} area label={`Orders per ${meta?.granularity ?? 'day'}, ${fmtPeriod(meta?.range).replace(' – ', ' to ')}`} />
-          ) : (
-            <p className="small muted">No orders in this period.</p>
-          )}
-        </Card>
-        <Card titleAs="h3" title="Returns by reason" sub={returns.data ? `${view.reasonTotal} return${view.reasonTotal === 1 ? '' : 's'} in the period` : undefined}>
-          {!returns.data ? (
-            <span className="sk h-46" />
-          ) : hasReasons ? (
-            <BarChart labels={view.reasons.map((r) => r.label)} data={view.reasons.map((r) => r.requests)} height={220} label="Returns by reason" />
-          ) : (
-            <p className="small muted">No return requests in this period.</p>
-          )}
-          {hasReasons && <span className="xs muted">Return requests on your items by the reason customers gave.</span>}
-        </Card>
+        <ChartFrame
+          titleAs="h2"
+          title={`Orders per ${meta?.granularity ?? 'day'}`}
+          sub={meta ? `${num(view.orders)} orders · ${fmtPeriod(meta.range)}` : undefined}
+          loading={!trend.data}
+          refreshing={trend.isPlaceholderData}
+          empty={hasOrders ? false : 'No orders in this period.'}
+          table={seriesTable(view.ordersChart.rows, view.ordersChart.series, fmtCount, { compareLabel: view.ordersChart.compareLabel })}
+        >
+          <TrendChart
+            rows={view.ordersChart.rows}
+            series={view.ordersChart.series}
+            fmt={fmtCount}
+            area
+            compareLabel={view.ordersChart.compareLabel}
+            label={`Orders per ${meta?.granularity ?? 'day'}, ${fmtPeriod(meta?.range).replace(' – ', ' to ')}`}
+          />
+        </ChartFrame>
+        <ChartFrame
+          title="Returns by reason"
+          sub={returns.data ? `${view.reasonTotal} return${view.reasonTotal === 1 ? '' : 's'} in the period · by the reason customers gave` : undefined}
+          loading={!returns.data}
+          refreshing={returns.isPlaceholderData}
+          empty={hasReasons ? false : 'No return requests in this period.'}
+          table={seriesTable(view.reasonRows, reasonSeries, fmtCount, { xLabel: 'Reason' })}
+        >
+          <BarsChart rows={view.reasonRows} series={reasonSeries} fmt={fmtCount} horizontal label="Return requests by reason" />
+        </ChartFrame>
       </div>
       <Card flush titleAs="h3" title="Product sales" sub="Sorted by gross sales">
         <TableWrap label="Product sales table">
