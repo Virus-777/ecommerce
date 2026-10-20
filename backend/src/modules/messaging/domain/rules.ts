@@ -2,6 +2,7 @@
  * Pure messaging rules: the content filter (contact details and outside links masked, promotional content refused),
  * reply deadlines and the labels the inbox shows. No I/O.
  */
+import { durationText } from '../../../kernel/lib/dates.js';
 import { OFFICIAL_STORE_ID, OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import type * as common from '../../../spec/common.js';
 
@@ -110,17 +111,7 @@ export const preview = (body: string, max = 120) => {
 export function deadline(dueAt: Date | null, now: Date, overdue = false): common.Deadline | null {
   if (!dueAt) return null;
   const left = dueAt.getTime() - now.getTime();
-  return { dueAt: dueAt.toISOString(), state: overdue || left <= 0 ? 'overdue' : left <= DUE_SOON_MS ? 'due_soon' : 'on_time' };
-}
-
-/** 95 minutes → "1 h 35 min", 30 → "30 min", 26 h → "1 d 2 h" */
-export function duration(ms: number): string {
-  const min = Math.max(0, Math.round(ms / MINUTE));
-  if (min < 60) return `${min} min`;
-  const h = Math.floor(min / 60);
-  if (h < 24) return min % 60 && h < 10 ? `${h} h ${min % 60} min` : `${h} h`;
-  const days = Math.floor(h / 24);
-  return h % 24 ? `${days} d ${h % 24} h` : `${days} d`;
+  return { dueAt: dueAt.toISOString(), state: overdue || left < 0 ? 'overdue' : left <= DUE_SOON_MS ? 'due_soon' : 'on_time' };
 }
 
 /** e.g. Oct 9, 8:15 AM in the market time zone */
@@ -135,9 +126,9 @@ export function replyLabel(
   now: Date,
   timeZone: string,
 ): string | null {
-  if (c.reply_state === 'overdue' && c.reply_due_at) return `Overdue ${duration(now.getTime() - c.reply_due_at.getTime())}`;
+  if (c.reply_state === 'overdue' && c.reply_due_at) return `Overdue ${durationText(now.getTime() - c.reply_due_at.getTime())}`;
   if (c.reply_state === 'awaiting_seller' && c.reply_due_at) return `Reply by ${shortDateTime(c.reply_due_at, timeZone)}`;
-  if (c.reply_state === 'replied' && lastReplyMs !== null) return `Replied in ${duration(lastReplyMs)}`;
+  if (c.reply_state === 'replied' && lastReplyMs !== null) return `Replied in ${durationText(lastReplyMs)}`;
   return null;
 }
 

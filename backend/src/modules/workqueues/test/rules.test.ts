@@ -10,7 +10,9 @@ describe('deadline and labels', () => {
   it('moves on_time → due_soon → overdue', () => {
     expect(deadlineState(new Date(now.getTime() + 2 * 3_600_000), now, 60)).toBe('on_time');
     expect(deadlineState(new Date(now.getTime() + 30 * 60_000), now, 60)).toBe('due_soon');
-    expect(deadlineState(now, now, 60)).toBe('overdue');
+    // the same rule as every module: due at exactly now is still due soon, overdue once it has passed
+    expect(deadlineState(now, now, 60)).toBe('due_soon');
+    expect(deadlineState(new Date(now.getTime() - 1), now, 60)).toBe('overdue');
   });
 
   it('labels ages and durations', () => {

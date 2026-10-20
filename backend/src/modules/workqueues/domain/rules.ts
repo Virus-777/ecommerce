@@ -9,7 +9,7 @@ export type DeadlineState = 'on_time' | 'due_soon' | 'overdue';
 
 export function deadlineState(dueAt: Date, now: Date, dueSoonMinutes: number): DeadlineState {
   const left = dueAt.getTime() - now.getTime();
-  if (left <= 0) return 'overdue';
+  if (left < 0) return 'overdue';
   if (left <= dueSoonMinutes * 60_000) return 'due_soon';
   return 'on_time';
 }

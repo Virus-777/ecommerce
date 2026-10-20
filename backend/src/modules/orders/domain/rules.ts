@@ -2,6 +2,7 @@
  * Pure order rules (no I/O): status derivation, labels, money splits, refund previews, deadlines.
  * Everything here works on plain values so it can be tested and reused by every view.
  */
+import { durationText } from '../../../kernel/lib/dates.js';
 import { allocate, format as formatMoney, money, sum } from '../../../kernel/lib/money.js';
 import { dateInZone, zonedTimeToUtc } from '../../../kernel/lib/clock.js';
 import type * as common from '../../../spec/common.js';
@@ -299,13 +300,6 @@ export function deadline(dueAt: Date, now: Date, open: boolean, dueSoonMinutes: 
   return { dueAt: dueAt.toISOString(), state };
 }
 
-export const human = (ms: number) => {
-  const h = Math.round(ms / HOUR);
-  if (h < 1) return `${Math.max(1, Math.round(ms / MINUTE))} min`;
-  if (h < 48) return `${h} h`;
-  return `${Math.round(ms / DAY)} d`;
-};
-
 export const shortDate = (d: Date | string, timeZone: string) =>
   new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(d));
 export const monthDay = (d: Date | string, timeZone: string) => new Intl.DateTimeFormat('en-US', { timeZone, month: 'short', day: 'numeric' }).format(new Date(d));
@@ -319,10 +313,10 @@ export const dayLabel = (ymd: string) => new Intl.DateTimeFormat('en-US', { time
 export function deadlineLabel(dueAt: Date, now: Date, shippedAt: Date | null, open: boolean, timeZone: string): string {
   if (shippedAt) {
     const late = shippedAt.getTime() - dueAt.getTime();
-    return late > 0 ? `Shipped ${monthDay(shippedAt, timeZone)} · ${human(late)} late` : `Shipped ${monthDay(shippedAt, timeZone)} · on time`;
+    return late > 0 ? `Shipped ${monthDay(shippedAt, timeZone)} · ${durationText(late)} late` : `Shipped ${monthDay(shippedAt, timeZone)} · on time`;
   }
   if (!open) return `Was due ${monthDay(dueAt, timeZone)}`;
-  if (now.getTime() > dueAt.getTime()) return `Overdue ${human(now.getTime() - dueAt.getTime())}`;
+  if (now.getTime() > dueAt.getTime()) return `Overdue ${durationText(now.getTime() - dueAt.getTime())}`;
   const today = dateInZone(now, timeZone);
   const due = dateInZone(dueAt, timeZone);
   if (due === today) return `Due today ${clockTime(dueAt, timeZone)}`;
@@ -334,7 +328,7 @@ export function deadlineLabel(dueAt: Date, now: Date, shippedAt: Date | null, op
 export function dispatchResult(dueAt: Date, shippedAt: Date | null): string | null {
   if (!shippedAt) return null;
   const late = shippedAt.getTime() - dueAt.getTime();
-  return late > 0 ? `Shipped ${human(late)} late` : 'Shipped on time';
+  return late > 0 ? `Shipped ${durationText(late)} late` : 'Shipped on time';
 }
 
 /** End of the market day of an instant (start of the next day) */

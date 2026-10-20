@@ -41,3 +41,13 @@ export function isTimeZone(tz: unknown): tz is string {
     return false;
   }
 }
+
+/** A length of time for people: 95 minutes → "1 h 35 min", 30 → "30 min", 5 h 20 min → "5 h 20 min", 26 h → "1 d 2 h" */
+export function durationText(ms: number): string {
+  const min = Math.max(1, Math.round(Math.abs(ms) / MINUTE));
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return min % 60 && h < 10 ? `${h} h ${min % 60} min` : `${h} h`;
+  const days = Math.floor(h / 24);
+  return h % 24 ? `${days} d ${h % 24} h` : `${days} d`;
+}

@@ -2,6 +2,7 @@
  * Builds the API shapes from the stored order (frozen snapshots, item states, projections). Documents and
  * order pages read only these copies. One place per type; every area picks what it may show.
  */
+import { durationText } from '../../../kernel/lib/dates.js';
 import { allocate, money } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
 import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
@@ -53,7 +54,6 @@ import {
   dispatchResult,
   displayStatus,
   fmt,
-  human,
   is,
   isMarketlyService,
   maskEmail,
@@ -908,7 +908,7 @@ export class Views {
     const LABEL: Record<string, string> = {
       payment_failed: 'Payment failed',
       payment_checking: 'Payment being checked',
-      overdue_dispatch: overdue.length ? `Overdue ${human(now.getTime() - Math.min(...overdue.map((g) => g.dispatch_by.getTime())))}` : 'Overdue dispatch',
+      overdue_dispatch: overdue.length ? `Overdue ${durationText(now.getTime() - Math.min(...overdue.map((g) => g.dispatch_by.getTime())))}` : 'Overdue dispatch',
       due_soon: 'Dispatch due soon',
       cancellation_requested: 'Cancellation requested',
       return_requested: 'Return requested',
@@ -925,7 +925,7 @@ export class Views {
     const out: GroupAlert[] = [];
     for (const g of agg.groups) {
       if (this.groupOpen(agg, g) && g.dispatch_by.getTime() < now) {
-        out.push({ tone: 'danger', title: 'Overdue dispatch', message: `Package ${g.position} is ${human(now - g.dispatch_by.getTime())} past its dispatch deadline (${g.seller_name}).` });
+        out.push({ tone: 'danger', title: 'Overdue dispatch', message: `Package ${g.position} is ${durationText(now - g.dispatch_by.getTime())} past its dispatch deadline (${g.seller_name}).` });
       }
       const a = this.alert(agg, g);
       if (a && a.tone === 'danger') out.push({ ...a, message: `Package ${g.position}: ${a.message}` });
@@ -1055,7 +1055,7 @@ export class Views {
       paymentState: this.adminPaymentState(agg),
       fulfillmentStatus: DISPLAY_LABEL[status.value],
       fulfillmentNote: live.length ? `${delivered} of ${plural(live.length, 'package')} delivered` : 'All items cancelled',
-      lateBy: overdue ? `Overdue ${human(now - overdue.dispatch_by.getTime())}` : null,
+      lateBy: overdue ? `Overdue ${durationText(now - overdue.dispatch_by.getTime())}` : null,
       owner: overdue ? (overdue.owner_type === 'official' ? 'Official Store warehouse' : isMarketlyService(overdue) ? `Marketly warehouse (Fulfilled by Marketly for ${overdue.seller_name})` : overdue.seller_name) : null,
       flags: this.flags(agg),
       openExceptionIds: this.openExceptionIds(agg, exceptions),
