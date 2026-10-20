@@ -343,13 +343,14 @@ describe('admin views', () => {
 
   it('invitations to apply can be revoked and expire', async () => {
     const res = await kit.call('POST', `${ADMIN}/seller-invitations`, staff(), { email: 'new@shop.example.com', businessName: 'New Shop' });
-    // the plain code goes to notifications in the event; only its hash is stored
-    const code = kit.svc.applications.invitationCode(res.body.id);
-    expect(kit.last('sellers.invitation.sent')).toEqual({ invitationId: res.body.id, email: 'new@shop.example.com', businessName: 'New Shop', code, expiresAt: res.body.expiresAt });
-    const stored = await kit.svc.core.repo.get('seller_invitations', res.body.id);
+    // the inviter gets the code once; notifications get it in the event; only its hash is stored
+    const { invitation, code } = res.body;
+    expect(code).toBe(kit.svc.applications.invitationCode(invitation.id));
+    expect(kit.last('sellers.invitation.sent')).toEqual({ invitationId: invitation.id, email: 'new@shop.example.com', businessName: 'New Shop', code, expiresAt: invitation.expiresAt });
+    const stored = await kit.svc.core.repo.get('seller_invitations', invitation.id);
     expect(JSON.stringify(stored)).not.toContain(code);
-    expect(JSON.stringify(res.body)).not.toContain(code);
-    expect((await kit.call('POST', `${ADMIN}/seller-invitations/${res.body.id}/revoke`, staff())).body.state).toBe('revoked');
-    expect((await kit.call('POST', `${ADMIN}/seller-invitations/${res.body.id}/revoke`, staff())).status).toBe(409);
+    expect(JSON.stringify(invitation)).not.toContain(code);
+    expect((await kit.call('POST', `${ADMIN}/seller-invitations/${invitation.id}/revoke`, staff())).body.state).toBe('revoked');
+    expect((await kit.call('POST', `${ADMIN}/seller-invitations/${invitation.id}/revoke`, staff())).status).toBe(409);
   });
 });

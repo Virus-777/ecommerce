@@ -2624,7 +2624,7 @@ export const spec = defineModuleSpec({
     },
     "invitationTtlDays": {
       "default": 7,
-      "desc": "Invitation link lifetime",
+      "desc": "Invitation link lifetime, for every invitation: staff and seller team links, and the code to apply as a seller",
       "type": "duration",
       "min": 1,
       "max": 30,

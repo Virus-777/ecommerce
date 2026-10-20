@@ -2633,7 +2633,7 @@
     {
       "key": "invitationTtlDays", "type": "duration",
       "default": 7,
-      "desc": "Invitation link lifetime", "unit": "days", "min": 1, "max": 30, "approval": "second_reviewer"
+      "desc": "Invitation link lifetime, for every invitation: staff and seller team links, and the code to apply as a seller", "unit": "days", "min": 1, "max": 30, "approval": "second_reviewer"
     },
     {
       "key": "guestSessionTtlDays", "type": "duration",

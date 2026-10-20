@@ -82,8 +82,8 @@ describe('the marketplace, end to end', () => {
     // applications are invite-only: the Seller Manager invites Northwind
     const invited = await f.call('POST', '/api/admin/sellers/seller-invitations', { token: sellerManager.accessToken, body: { email: 'ana@northwind.example.com', businessName: 'Northwind Audio LLC' } });
     expect(invited.status, JSON.stringify(invited.body)).toBe(201);
-    // the emailed code (spec gap: the code is in no event or response yet, so read it as the email would carry it)
-    const invitationCode = (app.kernel.boot.apis.get('sellers') as any).applications.invitationCode(invited.body.id) as string;
+    // the code the inviter hands over (returned once with the invitation)
+    const invitationCode = invited.body.code as string;
     const start = await f.call('POST', `${STORE}/applications`, {
       token: t,
       body: { accountMode: 'existing_member', contactName: 'Ana Lopez', contactPhone: '+15035550101', workEmail: 'ana@northwind.example.com', storeName, sellerType: 'business', market: 'US', invitationCode },

@@ -2561,6 +2561,19 @@ export const SellerInvitation: z.ZodType<SellerInvitation> = z.object({
   applicationId: z.uuid().nullish(),
 }).register(common.apiTypes, { id: "sellers.SellerInvitation" });
 
+export interface SellerInvitationSent {
+  invitation: SellerInvitation;
+  /** SENSITIVE: the invitation code the business enters when it applies (also emailed where email works). Only its hash is stored; it is never in a log or the audit trail */
+  code: string;
+}
+
+export const SellerInvitationSent: z.ZodType<SellerInvitationSent> = z.object({
+  get invitation() {
+    return SellerInvitation;
+  },
+  code: z.string().describe("SENSITIVE: the invitation code the business enters when it applies (also emailed where email works). Only its hash is stored; it is never in a log or the audit trail"),
+}).register(common.apiTypes, { id: "sellers.SellerInvitationSent" });
+
 /* ------------------------------------------------------------------ events */
 
 /** sellers.application.submitted: An applicant submits */
@@ -4173,7 +4186,7 @@ export const endpoints = defineEndpoints({
     permission: "sellers.staff.manage",
     scope: "own-seller",
     summary: "Invite a staff member",
-    desc: "Owner only. identity.inviteSellerMember sends a link valid for invitationValidDays. Owner-only and non-delegable permissions are refused (NOT_DELEGABLE).",
+    desc: "Owner only. identity.inviteSellerMember sends a link valid for identity invitationTtlDays. Owner-only and non-delegable permissions are refused (NOT_DELEGABLE).",
     body: () => InviteMemberInput,
     response: () => SellerMember,
     status: 201,
@@ -5353,12 +5366,13 @@ export const endpoints = defineEndpoints({
     permission: "sellers.invitations.manage",
     scope: "staff",
     summary: "Invite a business to apply (invite-only launch)",
+    desc: "Returns the invitation code once, for the inviter to hand over (no email is sent from an offline server; no-store). The code works for identity invitationTtlDays, like every invitation. The code is also emailed through sellers.invitation.sent.",
     body: () => z.object({
       email: z.email(),
       businessName: z.string(),
       message: z.string().nullish(),
     }),
-    response: () => SellerInvitation,
+    response: () => SellerInvitationSent,
     status: 201,
     audited: true,
     events: ["sellers.invitation.sent"],
@@ -6249,23 +6263,6 @@ export const spec = defineModuleSpec({
       "min": 30,
       "unit": "days",
       "approval": "second_reviewer",
-      "sellerVisible": false
-    },
-    "invitationValidDays": {
-      "default": 7,
-      "desc": "Seller member invitation lifetime",
-      "type": "duration",
-      "min": 1,
-      "max": 30,
-      "unit": "days",
-      "sellerVisible": false
-    },
-    "sellerInvitationValidDays": {
-      "default": 30,
-      "desc": "Invitation to apply lifetime",
-      "type": "duration",
-      "min": 1,
-      "unit": "days",
       "sellerVisible": false
     },
     "performanceWindowDays": {

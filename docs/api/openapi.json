@@ -113664,7 +113664,7 @@
           "Seller API · Sellers"
         ],
         "summary": "Invite a staff member",
-        "description": "Owner only. identity.inviteSellerMember sends a link valid for invitationValidDays. Owner-only and non-delegable permissions are refused (NOT_DELEGABLE).\n\n**Permission:** `sellers.staff.manage`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `sellers.member.invited`\n\n**Screens:** seller/staff\n\n**Launch phase:** 2",
+        "description": "Owner only. identity.inviteSellerMember sends a link valid for identity invitationTtlDays. Owner-only and non-delegable permissions are refused (NOT_DELEGABLE).\n\n**Permission:** `sellers.staff.manage`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `sellers.member.invited`\n\n**Screens:** seller/staff\n\n**Launch phase:** 2",
         "security": [
           {
             "bearer": []
@@ -120120,7 +120120,7 @@
           "Admin API · Sellers"
         ],
         "summary": "Invite a business to apply (invite-only launch)",
-        "description": "**Permission:** `sellers.invitations.manage`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `sellers.invitation.sent`\n\n**Screens:** admin/sellers",
+        "description": "Returns the invitation code once, for the inviter to hand over (no email is sent from an offline server; no-store). The code works for identity invitationTtlDays, like every invitation. The code is also emailed through sellers.invitation.sent.\n\n**Permission:** `sellers.invitations.manage`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `sellers.invitation.sent`\n\n**Screens:** admin/sellers",
         "security": [
           {
             "bearer": []
@@ -120161,7 +120161,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/sellers.SellerInvitation"
+                  "$ref": "#/components/schemas/sellers.SellerInvitationSent"
                 }
               }
             }
@@ -210288,6 +210288,22 @@
           "sentAt",
           "expiresAt",
           "state"
+        ]
+      },
+      "sellers.SellerInvitationSent": {
+        "type": "object",
+        "properties": {
+          "invitation": {
+            "$ref": "#/components/schemas/sellers.SellerInvitation"
+          },
+          "code": {
+            "type": "string",
+            "description": "SENSITIVE: the invitation code the business enters when it applies (also emailed where email works). Only its hash is stored; it is never in a log or the audit trail"
+          }
+        },
+        "required": [
+          "invitation",
+          "code"
         ]
       },
       "settings.DayHours": {

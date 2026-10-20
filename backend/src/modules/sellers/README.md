@@ -134,7 +134,7 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | POST | `/api/admin/sellers/claims/{id}/revoke` | Remove an approved claim found to be false _(audited)_ | staff<br>`sellers.storefronts.review` | `{ reason: text, recordViolation: bool }` → `PublicClaim` |
 | GET | `/api/admin/sellers/performance-targets` | Current and scheduled performance targets | staff<br>`sellers.accounts.view` | `PerformanceTarget[]` |
 | PUT | `/api/admin/sellers/performance-targets` | Change targets with an effective date _(audited)_ | staff<br>`sellers.performance.manage` | `{ targets: PerformanceTarget[], reason: text }` → `PerformanceTargetsChange` |
-| POST | `/api/admin/sellers/seller-invitations` | Invite a business to apply (invite-only launch) _(audited)_ | staff<br>`sellers.invitations.manage` | `{ email: email, businessName: string, message: text? }` → `SellerInvitation` |
+| POST | `/api/admin/sellers/seller-invitations` | Invite a business to apply (invite-only launch) _(audited)_ | staff<br>`sellers.invitations.manage` | `{ email: email, businessName: string, message: text? }` → `SellerInvitationSent` |
 | GET | `/api/admin/sellers/seller-invitations` | Invitations sent and whether they applied | staff<br>`sellers.invitations.manage` | Page<SellerInvitation> |
 | POST | `/api/admin/sellers/seller-invitations/{id}/revoke` | Revoke an unused invitation _(audited)_ | staff<br>`sellers.invitations.manage` | `SellerInvitation` |
 | POST | `/api/admin/sellers/sellers/exports` | Export the filtered seller list _(audited)_ | staff<br>`sellers.accounts.export` | `{ filters: json, format: enum(csv|xlsx)? }` → `reports.ExportJob` |
@@ -1410,6 +1410,13 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | state | `enum(sent|applied|expired|revoked)` |
 | applicationId | `uuid?` |
 
+### SellerInvitationSent
+
+| Field | Type |
+|---|---|
+| invitation | `SellerInvitation` |
+| code | `string` SENSITIVE: the invitation code the business enters when it applies (also emailed where email works). Only its hash is stored; it is never in a log or the audit trail |
+
 ## Status flows
 
 ### Seller account status (`SellerAccount.status`)
@@ -2271,8 +2278,6 @@ Checked through the access module (limits per role, second reviewer).
 | appealWindowDays | `14` | duration, days, 7–…, approval: second reviewer, seller-visible | Days a seller has to appeal |
 | appealDecisionBusinessDays | `5` | duration, business days, 1–…, seller-visible | Target to decide an appeal |
 | documentRetentionDays | `90` | duration, days, 30–…, approval: second reviewer | ID documents and rejected application documents are deleted after this |
-| invitationValidDays | `7` | duration, days, 1–30 | Seller member invitation lifetime |
-| sellerInvitationValidDays | `30` | duration, days, 1–… | Invitation to apply lifetime |
 | performanceWindowDays | `30` | duration, days, 7–…, approval: second reviewer, seller-visible | Window for performance metrics |
 | violationWindowDays | `90` | duration, days, 30–…, approval: second reviewer, seller-visible | Window for policy violations |
 | defaultTargets | `{"dispatch_reliability":95,"cancellation_rate":2.5,"valid_tracking":95,"return_rate":8,"response_time_hours":24,"unresolved_cases_past_deadline":0,"policy_violations":0}` | json, approval: second reviewer, seller-visible | Example targets until the business confirms them |

@@ -974,7 +974,7 @@ Indexes: `(expires_at)`
 | staffMinPasswordLength | `12` | int, characters, 12–64, approval: second reviewer | Staff accounts |
 | passwordHistoryCount | `5` | int, 0–24, approval: second reviewer | Recent passwords that cannot be reused |
 | trustedDeviceDays | `30` | duration, days, 0–90, approval: second reviewer | Members can skip 2-step on a remembered device |
-| invitationTtlDays | `7` | duration, days, 1–30, approval: second reviewer | Invitation link lifetime |
+| invitationTtlDays | `7` | duration, days, 1–30, approval: second reviewer | Invitation link lifetime, for every invitation: staff and seller team links, and the code to apply as a seller |
 | guestSessionTtlDays | `30` | duration, days, 1–…, approval: second reviewer | Guest session lifetime after last activity |
 | maxDevicesPerAccount | `20` | int, 1–…, approval: second reviewer | Oldest sessions are revoked beyond this |
 | securityEventRetentionDays | `400` | duration, days, 30–…, approval: second reviewer | Security activity kept per account (screen shows 30 days) |
