@@ -3,6 +3,7 @@
  * rules, labels shown on lists, frequency caps and dismissal suppression, rotation, creative formats
  * and the actions a campaign offers in each status. No I/O.
  */
+import { format as moneyFormat } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
 import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import type { AdBudget, AdvertiserRef, Audience, CreativeFormat, DismissalRule, FrequencyCap, GlobalRules, Placement, PopupTrigger, RotationRule } from '../../../spec/advertising.js';
@@ -331,7 +332,7 @@ export function rotationLabel(r: Pick<RotationRule, 'mode' | 'carouselSeconds' |
 
 export const shortDate = (at: Date, timeZone: string) => new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone }).format(at);
 const dateTime = (at: Date, timeZone: string) => new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone, timeZoneName: 'short' }).format(at);
-export const formatMoney = (amount: number, currency: string) => new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount / 100);
+export const formatMoney = (amount: number, currency: string) => moneyFormat({ amount, currency });
 const moneyShort = (amount: number, currency: string) => {
   const s = formatMoney(amount, currency);
   return s.endsWith('.00') ? s.slice(0, -3) : s;

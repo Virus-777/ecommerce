@@ -1,3 +1,4 @@
+import { format as moneyFormat } from '../../kernel/lib/money.js';
 import type { Scope } from '../../kernel/auth/scope.js';
 import { AppError, isAppError } from '../../kernel/errors/index.js';
 import type { EventPayload } from '../../kernel/events/index.js';
@@ -403,7 +404,7 @@ export class CheckoutService implements CheckoutPublicApi {
     if (!wallet) throw this.core.error('INSUFFICIENT_CREDIT', 'Store credit is not available', { available: m(0, e.session.currency) });
     const balance = await wallet.getBalance(e.session.customer_id);
     if (body.amount && (body.amount.amount < 0 || body.amount.currency !== e.session.currency)) throw invalid([{ path: 'amount', message: `Enter a positive ${e.session.currency} amount` }], 'Check the credit amount');
-    if (body.use && body.amount && body.amount.amount > balance.available.amount) throw this.core.error('INSUFFICIENT_CREDIT', `You have ${new Intl.NumberFormat('en-US', { style: 'currency', currency: balance.available.currency }).format(balance.available.amount / 100)} of store credit`, { available: balance.available });
+    if (body.use && body.amount && body.amount.amount > balance.available.amount) throw this.core.error('INSUFFICIENT_CREDIT', `You have ${moneyFormat(balance.available)} of store credit`, { available: balance.available });
     const { draftSession, patch } = await this.reopen(e);
     const d = await this.quoter.draftOf(draftSession);
     d.credit = { use: body.use, amount: body.use ? (body.amount?.amount ?? null) : null, available: balance.available.amount, sourceNote: balance.usableOn };

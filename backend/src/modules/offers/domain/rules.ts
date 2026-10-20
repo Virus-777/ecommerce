@@ -2,6 +2,7 @@
  * Pure offer rules (no I/O): condition labels and groups, dispatch / return / warranty wording,
  * price-change maths, was-price checks, restriction scope, eligibility reasons and the featured-offer ranking.
  */
+import { format as moneyFormat } from '../../../kernel/lib/money.js';
 import { csvLine } from '../../../kernel/lib/csv.js';
 import type * as common from '../../../spec/common.js';
 import type { FeaturedRuleParameters, IneligibilityReason, ReturnTerms, WarrantyInput, WarrantyTerms } from '../../../spec/offers.js';
@@ -76,11 +77,7 @@ export function changePct(from: number, to: number): number {
 export const discountPct = (was: number, now: number) => (was > now && was > 0 ? Math.round(((was - now) / was) * 100) : null);
 
 export function formatMoney(m: common.Money): string {
-  try {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: m.currency }).format(m.amount / 100);
-  } catch {
-    return `${(m.amount / 100).toFixed(2)} ${m.currency}`;
-  }
+  return moneyFormat(m);
 }
 
 /** Price history row in force at some point of a window */

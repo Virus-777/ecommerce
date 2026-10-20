@@ -2,6 +2,7 @@
  * Pure promotion rules (no I/O): money labels, funding split, scope matching, eligibility, earnings,
  * validation of campaign and discount input. Money is integer minor units throughout.
  */
+import { format as moneyFormat } from '../../../kernel/lib/money.js';
 import { money as checkedMoney } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
 import type { DiscountRule, EarningsImpact, Eligibility, Funding, Limits, ParticipationSettings, DealsPlacement, Scope, StackingRules, TargetRef } from '../../../spec/promotions.js';
@@ -68,7 +69,7 @@ export function moneyLabel(amount: number, currency = 'USD'): string {
 }
 
 /** $100.00 */
-export const moneyFull = (amount: number, currency = 'USD') => new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount / 100);
+export const moneyFull = (amount: number, currency = 'USD') => moneyFormat({ amount, currency });
 
 /** 2000 → 20%, 1250 → 12.5% */
 export const bpsLabel = (bps: number) => `${Number((bps / 100).toFixed(2))}%`;

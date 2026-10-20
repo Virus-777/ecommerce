@@ -8,6 +8,7 @@
  * (finance.creditSeller, any size; above finance's creditSecondReviewerThreshold they wait for Finance approval).
  * The ledger entry is kept on the charge as ledger_entry_id.
  */
+import { format as moneyFormat } from '../../../kernel/lib/money.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
@@ -23,7 +24,7 @@ export const REVERSE_ACTION = 'fulfillment-service.charges.reverse';
 export const SCHEDULE_TARGET = 'fulfillment_fee_schedule';
 export const CHARGE_TARGET = 'fulfillment_fee_charge';
 
-const fmt = (amount: number, currency: string) => new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount / 100);
+const fmt = (amount: number, currency: string) => moneyFormat({ amount, currency });
 
 export class FeesPart extends Part {
   /* ---------------------------------------------------------------- schedules */

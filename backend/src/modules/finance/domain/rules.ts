@@ -2,6 +2,7 @@
  * Pure finance rules: fee calculation, ledger vocabulary, statement sections, payout schedule dates
  * and small helpers. No I/O.
  */
+import { format as moneyFormat } from '../../../kernel/lib/money.js';
 import { money as checkedMoney } from '../../../kernel/lib/money.js';
 import { createHash } from 'node:crypto';
 import { dateInZone, zonedTimeToUtc } from '../../../kernel/lib/clock.js';
@@ -22,12 +23,7 @@ export const m = (amount: number, currency: string): common.Money => checkedMone
 
 /** Display money, e.g. $184.00 or -$5.90 */
 export function fmt(amount: number, currency = 'USD'): string {
-  let s: string;
-  try {
-    s = new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(Math.abs(amount) / 100);
-  } catch {
-    s = `${(Math.abs(amount) / 100).toFixed(2)} ${currency}`;
-  }
+  const s = moneyFormat({ amount: Math.abs(amount), currency });
   return amount < 0 ? `-${s}` : s;
 }
 
