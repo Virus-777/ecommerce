@@ -2,6 +2,7 @@
  * Creating and editing offers (seller and Official Store) and their lifecycle: publish, pause, resume,
  * end, delete drafts, and the staff actions remove, hold, release and reinstate.
  */
+import { isIsoDate } from '../../../kernel/lib/dates.js';
 import { format as formatMoney } from '../../../kernel/lib/money.js';
 import { AppError, isAppError } from '../../../kernel/errors/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
@@ -764,7 +765,7 @@ export class ManagePart extends Part {
 
   async hold(id: string, body: HoldOfferRequest, by: By): Promise<OfferRec> {
     if (!body.reason?.trim()) throw invalidField('reason', 'Give the reason for the hold');
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(body.reviewDate ?? '') || body.reviewDate < this.core.today()) throw invalidField('reviewDate', 'The review date is today or later');
+    if (!isIsoDate(body.reviewDate) || body.reviewDate < this.core.today()) throw invalidField('reviewDate', 'The review date is today or later');
     const text = body.reference ? `${body.reason.trim()} (${body.reference})` : body.reason.trim();
     const reason = this.core.statusReason('staff_hold', text, by, { reviewDate: body.reviewDate, appealRoute: null });
     const t = await this.core.move(id, { event: 'makeIneligible', by, reason, source: { kind: 'staff', id: by.actor.id ?? null }, log: { reasonCode: 'staff_hold', reason: text, reviewDate: body.reviewDate } });

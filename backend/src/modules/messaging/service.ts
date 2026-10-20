@@ -1,3 +1,4 @@
+import { isIsoDate } from '../../kernel/lib/dates.js';
 import { AppError } from '../../kernel/errors/index.js';
 import type { EventPayload } from '../../kernel/events/index.js';
 import { dateInZone, zonedTimeToUtc } from '../../kernel/lib/clock.js';
@@ -850,8 +851,7 @@ export class MessagingService implements MessagingPublicApi {
    * rounds that started in it (looked up to 14 days on).
    */
   async replyStatsByDay(range: common.DateRange, sellerId?: string): Promise<DailyReplyStats[]> {
-    const day = /^\d{4}-\d{2}-\d{2}$/;
-    if (!day.test(range?.from ?? '') || !day.test(range?.to ?? '') || range.from > range.to) throw invalid([{ path: 'range', message: 'Dates are YYYY-MM-DD, from on or before to' }]);
+    if (!isIsoDate(range?.from) || !isIsoDate(range?.to) || range.from > range.to) throw invalid([{ path: 'range', message: 'Dates are YYYY-MM-DD, from on or before to' }]);
     const cfg = await this.core.cfg();
     const tz = this.core.tz;
     const from = zonedTimeToUtc(range.from, '00:00', tz);

@@ -4,6 +4,7 @@
  * Every status change goes through `transition`, which locks the row, writes the timeline and publishes
  * advertising.campaign.status_changed after the commit.
  */
+import { isTimeZone } from '../../../kernel/lib/dates.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
@@ -41,15 +42,6 @@ const LIVE_STATES: readonly string[] = ['scheduled', 'live', 'paused'];
 const OPEN_STATES: readonly string[] = ['in_review', 'approved', 'scheduled', 'live', 'paused'];
 const toDate = (s: string | null | undefined) => (s ? new Date(s) : null);
 const validDate = (d: Date | null) => d !== null && !Number.isNaN(d.getTime());
-
-function validZone(tz: string): boolean {
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz });
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 export class CampaignsPart extends Part {
   /* ================================================================ reads */
@@ -252,7 +244,7 @@ export class CampaignsPart extends Part {
     else if (validDate(startsAt) && endsAt!.getTime() <= startsAt!.getTime()) issues.push({ path: 'endsAt', message: 'The end must be after the start' });
     else if (endsAt!.getTime() <= this.now().getTime()) issues.push({ path: 'endsAt', message: 'The end is in the past' });
     const timeZone = input.timeZone?.trim() || this.core.tz();
-    if (!validZone(timeZone)) issues.push({ path: 'timeZone', message: 'Unknown time zone' });
+    if (!isTimeZone(timeZone)) issues.push({ path: 'timeZone', message: 'Unknown time zone' });
     if (!Number.isInteger(input.priority) || input.priority < 1 || input.priority > 3) issues.push({ path: 'priority', message: 'Priority is 1 (low), 2 (normal) or 3 (high)' });
     if (!input.name?.trim()) issues.push({ path: 'name', message: 'Name the campaign' });
     else if (input.name.trim().length > 120) issues.push({ path: 'name', message: '120 characters at most' });

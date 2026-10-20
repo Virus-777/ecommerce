@@ -1,4 +1,5 @@
 /** Company stock locations (warehouse sites). */
+import { isTimeZone } from '../../../kernel/lib/dates.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type * as common from '../../../spec/common.js';
@@ -30,11 +31,7 @@ export class Locations {
   }
 
   #checkTimeZone(tz: string) {
-    try {
-      new Intl.DateTimeFormat('en-US', { timeZone: tz });
-    } catch {
-      throw invalid('timeZone', 'Not a known time zone');
-    }
+    if (!isTimeZone(tz)) throw invalid('timeZone', 'Not a known time zone (an IANA name such as America/Los_Angeles)');
   }
 
   /** One sellable warehouse at launch; a second one is operational expansion (phase 4) */

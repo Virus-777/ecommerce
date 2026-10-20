@@ -2,6 +2,7 @@
  * Report queries and dashboards from the read models. Every result states its range, date basis,
  * currency, time zone, tax treatment, freshness and the definition versions it used (plan ch. 19).
  */
+import { isIsoDate, isTimeZone } from '../../../kernel/lib/dates.js';
 import type { MediaRef, Money } from '../../../spec/common.js';
 import type { AdminDashboard, KpiValue, MetricDefinition, ReportQuery, ReportResult, Series, SellerDashboard, SellerWorkTile } from '../../../spec/reports.js';
 import { OFFICIAL_KEY, metricSeed } from '../domain/catalogue.js';
@@ -15,8 +16,6 @@ import {
   display,
   displayMoney,
   instantsOf,
-  isDay,
-  isTimeZone,
   marketDay,
   pct,
   presetRange,
@@ -130,7 +129,7 @@ export class Queries {
       if (!query.range) issues.push({ path: 'range', message: 'Choose the first and last day' });
       range = query.range ?? presetRange('last_14_days', today);
     } else range = query.range && query.preset == null ? query.range : presetRange(preset, today);
-    if (!isDay(range.from) || !isDay(range.to)) issues.push({ path: 'range', message: 'Dates are YYYY-MM-DD' });
+    if (!isIsoDate(range.from) || !isIsoDate(range.to)) issues.push({ path: 'range', message: 'Dates are YYYY-MM-DD' });
     else if (range.from > range.to) issues.push({ path: 'range.from', message: 'The first day is after the last day' });
     const currency = (query.currency ?? cfg.currency).toUpperCase();
     if (currency !== cfg.currency) issues.push({ path: 'currency', message: `Reports are in ${cfg.currency}; one currency at launch` });

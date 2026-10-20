@@ -3,6 +3,7 @@
  * (coverage, dispatch schedule, label preference, versioned by effective date), closures, what customers see,
  * the storefront shipping section and the record-shipment setup.
  */
+import { isIsoDate } from '../../../kernel/lib/dates.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import { money } from '../../../kernel/lib/money.js';
@@ -26,7 +27,7 @@ import type {
   ShippingProfile,
   TransitRange,
 } from '../../../spec/shipping.js';
-import { businessDaysLabel, clockLabel, dayLabel, handlingLabel, isDate, isTime, WEEKDAYS } from '../domain/calendar.js';
+import { businessDaysLabel, clockLabel, dayLabel, handlingLabel, isTime, WEEKDAYS } from '../domain/calendar.js';
 import { destinationOf, locationLabel } from '../domain/geo.js';
 import { formatShort, methodIssues, priceLabel, ruleStatus } from '../domain/rates.js';
 import { shippingProfileVersionMachine } from '../domain/state-machines.js';
@@ -439,7 +440,7 @@ export class Profiles {
   async addClosure(sellerId: string, body: { name: string; from: string; to: string }, by: By): Promise<Closure> {
     const issues: Issue[] = [];
     if (!body.name?.trim()) issues.push({ path: 'name', message: 'Name the closure, e.g. Thanksgiving' });
-    if (!isDate(body.from) || !isDate(body.to)) issues.push({ path: 'from', message: 'Dates are YYYY-MM-DD' });
+    if (!isIsoDate(body.from) || !isIsoDate(body.to)) issues.push({ path: 'from', message: 'Dates are YYYY-MM-DD' });
     else if (body.from > body.to) issues.push({ path: 'to', message: 'The closure ends before it starts' });
     if (issues.length) throw invalid(issues);
     const row = await this.repo.insert('closures', { id: newId(), owner_type: 'seller', seller_id: sellerId, name: body.name.trim(), from_date: body.from, to_date: body.to });

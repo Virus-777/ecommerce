@@ -1,3 +1,4 @@
+import { isIsoDate } from '../../kernel/lib/dates.js';
 import { createHash } from 'node:crypto';
 import { SYSTEM_ACTOR } from '../../kernel/auth/index.js';
 import { AppError, isNotImplemented } from '../../kernel/errors/index.js';
@@ -360,7 +361,7 @@ export class SettingsService implements SettingsPublicApi {
     return {
       isOpen: (at) => cal.isOpen(date(at, 'at')),
       isBusinessDay: (day) => {
-        if (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new AppError('VALIDATION_FAILED', 'Invalid day', { issues: [{ path: 'day', message: 'not a date (YYYY-MM-DD)' }] });
+        if (!isIsoDate(day)) throw new AppError('VALIDATION_FAILED', 'Invalid day', { issues: [{ path: 'day', message: 'not a date (YYYY-MM-DD)' }] });
         return cal.isBusinessDay(day);
       },
       addBusinessMinutes: (from, minutes) => (cal.addBusinessMinutes(date(from, 'from'), minutes) ?? date(from, 'from')).toISOString(),

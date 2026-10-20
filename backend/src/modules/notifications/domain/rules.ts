@@ -73,12 +73,6 @@ export function deadlineOf(dueAt: Date | null | undefined, now: Date): Deadline 
   return { dueAt: dueAt.toISOString(), state: left < 0 ? 'overdue' : left < 24 * 3_600_000 ? 'due_soon' : 'on_time' };
 }
 
-export function addMonths(d: Date, months: number): Date {
-  const out = new Date(d);
-  out.setUTCMonth(out.getUTCMonth() + months);
-  return out;
-}
-
 export const formatDate = (iso: string | Date | null | undefined, timeZone: string, withTime = false) => {
   if (!iso) return '';
   const d = typeof iso === 'string' ? new Date(iso) : iso;

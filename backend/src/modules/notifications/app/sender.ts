@@ -4,11 +4,12 @@
  * delivery rows per channel (queued, skipped, suppressed), dispatch through the providers with
  * retries and backoff, provider events (delivered, bounced, complained) and the suppression list.
  */
+import { addMonths } from '../../../kernel/lib/dates.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import type { NoticeLink } from '../../../spec/notifications.js';
 import { topicDef, type Audience, type DeliveryChannel, type TopicDef } from '../domain/catalog.js';
-import { backoffMs, effectiveGroups, hashAddress, maskAddress, memberEmails, memberReceives, quietHoursEnd, defaultMemberChannel, addMonths } from '../domain/rules.js';
+import { backoffMs, effectiveGroups, hashAddress, maskAddress, memberEmails, memberReceives, quietHoursEnd, defaultMemberChannel } from '../domain/rules.js';
 import { deliveryMachine } from '../domain/state-machines.js';
 import { redact, render } from '../domain/templates.js';
 import type { DeliveryRow, NoticeRow, ProviderResult, ProviderSyncEvent, RecipientRow, TemplateData } from '../ports.js';

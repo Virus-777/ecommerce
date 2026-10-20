@@ -14,7 +14,6 @@ export const HOUR_MS = 3_600_000;
 
 export const weekdayOf = (date: string): Weekday => WEEKDAYS[new Date(`${date}T12:00:00Z`).getUTCDay()]!;
 export const addDays = (date: string, n: number): string => new Date(new Date(`${date}T12:00:00Z`).getTime() + n * DAY_MS).toISOString().slice(0, 10);
-export const isDate = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
 export const isTime = (s: unknown): s is string => typeof s === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(s);
 
 /** HH:mm of an instant in a time zone */

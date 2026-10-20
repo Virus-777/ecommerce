@@ -3,6 +3,7 @@
  * trading of the Official Store with its targets, the admin seller list and seller account, ledger
  * exports through reports and the export rows of finance's datasets.
  */
+import { isIsoDate } from '../../../kernel/lib/dates.js';
 import type { Principal } from '../../../kernel/auth/index.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
@@ -12,7 +13,7 @@ import type * as common from '../../../spec/common.js';
 import type * as identity from '../../../spec/identity.js';
 import type { DailyCompanyCost, DailySellerIncome, FinanceOverview, MarketplaceIncome, SellerFinanceDetail, SellerFinanceRow, TradingSummary, TradingTarget, TradingTargetInput } from '../../../spec/finance.js';
 import type * as reports from '../../../spec/reports.js';
-import { addDays, dayStart, daysBetween, daysInMonth, encodeActor, isDate, isPeriod, marketDate, TYPE_LABELS, type EntryType } from '../domain/rules.js';
+import { addDays, dayStart, daysBetween, daysInMonth, encodeActor, isPeriod, marketDate, TYPE_LABELS, type EntryType } from '../domain/rules.js';
 import { toOwed, toTarget } from '../mappers.js';
 import type { FundingRec, TargetRec, TradingRec } from '../ports.js';
 import type { Where } from '../../../kernel/mongo/index.js';
@@ -29,7 +30,7 @@ const pctOf = (part: number, whole: number) => (whole ? round2((part / whole) * 
 
 export class ReportsPart extends Part {
   range(from: string, to: string) {
-    if (!isDate(from) || !isDate(to) || to < from) throw invalid([{ path: 'to', message: 'A date range: from on or before to' }]);
+    if (!isIsoDate(from) || !isIsoDate(to) || to < from) throw invalid([{ path: 'to', message: 'A date range: from on or before to' }]);
     const tz = this.core.tz();
     return { from: dayStart(from, tz), to: dayStart(addDays(to, 1), tz), days: daysBetween(from, to) + 1 };
   }
@@ -349,7 +350,7 @@ export class ReportsPart extends Part {
   }
 
   async exportLedger(sellerId: string, body: { from: string; to: string; format?: 'csv' | 'xlsx' | null }, principal: Principal, by: By): Promise<reports.ExportJob> {
-    if (!isDate(body.from) || !isDate(body.to) || body.to < body.from) throw invalid([{ path: 'to', message: 'A date range: from on or before to' }]);
+    if (!isIsoDate(body.from) || !isIsoDate(body.to) || body.to < body.from) throw invalid([{ path: 'to', message: 'A date range: from on or before to' }]);
     const api = this.ctx.tryUse('reports');
     if (!api) throw new AppError('NOT_IMPLEMENTED', 'Exports need the reports module', { reason: 'module_off' });
     const job = await api.requestExport({ dataset: 'finance.seller.ledger', filters: { from: body.from, to: body.to }, format: body.format ?? 'csv', principal: principal as identity.Principal, sellerId });
@@ -382,8 +383,8 @@ export class ReportsPart extends Part {
       const [afterAt, afterId] = cursor?.split('|') ?? [];
       const rows = await this.repo.ledgerBatch({
         sellerId,
-        from: f.from && isDate(f.from) ? dayStart(f.from, tz) : undefined,
-        to: f.to && isDate(f.to) ? dayStart(addDays(f.to, 1), tz) : undefined,
+        from: f.from && isIsoDate(f.from) ? dayStart(f.from, tz) : undefined,
+        to: f.to && isIsoDate(f.to) ? dayStart(addDays(f.to, 1), tz) : undefined,
         after: afterAt && afterId ? { at: new Date(afterAt), id: afterId } : undefined,
         limit: limit + 1,
       });
@@ -400,14 +401,14 @@ export class ReportsPart extends Part {
       return { rows: rows.slice(0, limit).map((r) => ({ payout: r.ref, seller: names.get(r.seller_id)?.name ?? r.seller_id, amount: money(r.amount), status: r.status, failure: r.failure_reason ?? '' })), ...(rows.length > limit ? { nextCursor: String(offset + limit) } : {}) };
     }
     if (dataset === OVERVIEW_DATASET) return { rows: await this.overviewRows(f as { from?: string; to?: string; basis?: string }) };
-    const rows = await this.repo.find('recon_items', f.date && isDate(f.date) ? { date: f.date } : {}, { orderBy: [['detected_at', 'desc'], ['id', 'asc']], offset, limit: limit + 1 });
+    const rows = await this.repo.find('recon_items', f.date && isIsoDate(f.date) ? { date: f.date } : {}, { orderBy: [['detected_at', 'desc'], ['id', 'asc']], offset, limit: limit + 1 });
     return { rows: rows.slice(0, limit).map((r) => ({ date: r.date, check: r.check, subject: r.subject, expected: money(r.expected), actual: money(r.actual), credit: money(r.credit), difference: money(r.difference), status: r.status })), ...(rows.length > limit ? { nextCursor: String(offset + limit) } : {}) };
   }
 
   /** G72: the finance overview of a range as one row per figure (the range defaults to the last 30 market days) */
   async overviewRows(f: { from?: string; to?: string; basis?: string }): Promise<{ figure: string; value: string; count: string }[]> {
-    const to = f.to && isDate(f.to) ? f.to : this.core.today();
-    const from = f.from && isDate(f.from) ? f.from : addDays(to, -29);
+    const to = f.to && isIsoDate(f.to) ? f.to : this.core.today();
+    const from = f.from && isIsoDate(f.from) ? f.from : addDays(to, -29);
     const o = await this.overview({ from, to, basis: f.basis === 'order_date' ? 'order_date' : 'payment_date' });
     const amount = (m: common.Money) => (m.amount / 100).toFixed(2);
     const row = (figure: string, value: common.Money | null, count?: number | null) => ({ figure, value: value ? amount(value) : '', count: count === undefined || count === null ? '' : String(count) });

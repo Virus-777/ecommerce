@@ -219,7 +219,6 @@ export const marketDate = (at: Date, tz: string) => dateInZone(at, tz);
 export const dayStart = (date: string, tz: string) => zonedTimeToUtc(date, '00:00', tz);
 export const daysBetween = (from: string, to: string) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY);
 export const weekday = (date: string) => new Date(`${date}T12:00:00Z`).getUTCDay();
-export const isDate = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(`${s}T00:00:00Z`));
 export const isPeriod = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(s);
 export const daysInMonth = (period: string) => {
   const [y, mo] = period.split('-').map(Number) as [number, number];

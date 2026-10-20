@@ -2,6 +2,7 @@
  * Staff configuration: carriers and their services, platform methods, zones, dispatch targets, free-shipping
  * rules and the holiday and service-interruption calendar (with its preview), plus the admin summary.
  */
+import { isIsoDate } from '../../../kernel/lib/dates.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
@@ -24,7 +25,7 @@ import type {
   Zone,
   ZoneInput,
 } from '../../../spec/shipping.js';
-import { addDays, isDate, isTime, arrivesLabel, WEEKDAYS } from '../domain/calendar.js';
+import { addDays, isTime, arrivesLabel, WEEKDAYS } from '../domain/calendar.js';
 import { destinationOf } from '../domain/geo.js';
 import { serviceNoticeMachine } from '../domain/state-machines.js';
 import { ruleStatus } from '../domain/rates.js';
@@ -321,7 +322,7 @@ export class Setup {
   private noticeRow(input: NoticeInput): Omit<NoticeRec, 'id' | 'status' | 'created_by' | 'updated_at'> {
     const issues: Issue[] = [];
     if (!input.title?.trim()) issues.push({ path: 'title', message: 'Title is required' });
-    if (!isDate(input.from) || !isDate(input.to)) issues.push({ path: 'from', message: 'Dates are YYYY-MM-DD' });
+    if (!isIsoDate(input.from) || !isIsoDate(input.to)) issues.push({ path: 'from', message: 'Dates are YYYY-MM-DD' });
     else if (input.from > input.to) issues.push({ path: 'to', message: 'The notice ends before it starts' });
     if (!input.customerMessage?.trim()) issues.push({ path: 'customerMessage', message: 'Write the message customers see' });
     if (!input.surfaces.length) issues.push({ path: 'surfaces', message: 'Choose where the notice shows' });

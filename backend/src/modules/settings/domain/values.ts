@@ -2,6 +2,7 @@
  * Value rules (pure): validation of a proposed value against its definition, and the human text
  * shown on the settings page, in change items and in history.
  */
+import { isTimeZone } from '../../../kernel/lib/dates.js';
 import { z } from 'zod';
 import type { Closure, DayHours, MaintenanceNotice, ServiceRegion } from '../../../spec/settings.js';
 import type { Definition } from './catalogue.js';
@@ -48,14 +49,6 @@ const maintenance = z
 
 const money = z.object({ amount: z.number().int().min(0), currency: z.string().regex(/^[A-Z]{3}$/) }).strict();
 
-const isTimeZone = (tz: string) => {
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz });
-    return tz.includes('/') || tz === 'UTC';
-  } catch {
-    return false;
-  }
-};
 const isLocale = (l: string) => {
   try {
     return Intl.getCanonicalLocales(l).length === 1;

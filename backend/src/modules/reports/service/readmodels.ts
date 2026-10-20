@@ -6,6 +6,7 @@
  * return), counters record the natural key of what they counted (shipment, case, payout, hold…) before
  * adding, and an event about an order reports has not seen yet first loads the order from orders.
  */
+import { isIsoDate } from '../../../kernel/lib/dates.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
 import type * as identity from '../../../spec/identity.js';
@@ -533,7 +534,7 @@ export class ReadModels {
   }
 
   async onChargePosted(p: EventPayload<'advertising.charge.posted'>, env: Env) {
-    const day = /^\d{4}-\d{2}-\d{2}$/.test(p.day) ? p.day : await this.day(env.at);
+    const day = isIsoDate(p.day) ? p.day : await this.day(env.at);
     await this.repo.transaction(async (tx) => {
       if (!(await tx.claim(`charge:${p.chargeId}`))) return;
       await tx.rememberCampaign('charge', p.chargeId, p.campaignId, new Date(env.at));

@@ -187,15 +187,6 @@ export function scheduleLabel(from: Date | null, to: Date | null, timeZone: stri
   return opts.followsCampaign ? 'Follows campaign' : 'Always on';
 }
 
-export function isValidTimeZone(tz: string | null | undefined): boolean {
-  if (!tz) return false;
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz });
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 /** Inside [from, to) at a moment */
 export const inWindow = (at: Date, from: Date | string | null | undefined, to: Date | string | null | undefined) =>

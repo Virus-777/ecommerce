@@ -4,6 +4,7 @@
  * moves) or corrected with a reason (second reviewer above the caller's correction limit in access), then the
  * day is signed off.
  */
+import { isIsoDate } from '../../../kernel/lib/dates.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
@@ -11,7 +12,7 @@ import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import { zonedTimeToUtc } from '../../../kernel/lib/clock.js';
 import type * as common from '../../../spec/common.js';
 import type { Correction, CorrectionInput, ReconChecklistItem, ReconDay, ReconItem, Reference } from '../../../spec/finance.js';
-import { addDays, dayStart, decodeActor, detId, encodeActor, fmt, isDate, SYSTEM } from '../domain/rules.js';
+import { addDays, dayStart, decodeActor, detId, encodeActor, fmt, SYSTEM } from '../domain/rules.js';
 import { reconciliationItemMachine } from '../domain/state-machines.js';
 import { reference } from '../mappers.js';
 import type { AccountRec, ReconDayRec, ReconItemRec } from '../ports.js';
@@ -88,7 +89,7 @@ export class ReconPart extends Part {
   }
 
   async day(date: string): Promise<ReconDay> {
-    if (!isDate(date)) throw invalid([{ path: 'date', message: 'A date' }]);
+    if (!isIsoDate(date)) throw invalid([{ path: 'date', message: 'A date' }]);
     const row = await this.repo.findOne('recon_days', { date });
     const owners = row ? { owner: row.owner_staff_id, backup: row.backup_staff_id } : await this.owners();
     const items = await this.repo.find('recon_items', { date });
@@ -136,7 +137,7 @@ export class ReconPart extends Part {
   }
 
   async complete(date: string, note: string | null | undefined, by: By): Promise<ReconDay> {
-    if (!isDate(date)) throw invalid([{ path: 'date', message: 'A date' }]);
+    if (!isIsoDate(date)) throw invalid([{ path: 'date', message: 'A date' }]);
     const row = await this.ensureDay(date);
     if (row.status === 'completed') throw new AppError('ILLEGAL_TRANSITION', 'The day is already signed off', { from: 'completed', event: 'complete' });
     const open = await this.repo.find('recon_items', { date, status: OPEN });
