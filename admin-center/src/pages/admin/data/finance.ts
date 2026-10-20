@@ -3,7 +3,6 @@
 // /finance/reconciliation/items, /payments/disputes and /payments/refunds. The approval and step-up helpers at
 // the bottom are shared by the other finance and support screens.
 import { ApiError, type components } from '@marketly/web-shared/api';
-import { dayKey } from '@/app/parts';
 
 type S = components['schemas'];
 export type FinanceOverview = S['finance.FinanceOverview'];
@@ -15,30 +14,16 @@ export type Refund = S['payments.Refund'];
 export type Money = { amount: number; currency: string };
 
 export type Edge = 'flagged' | 'warn' | '';
-export type Period = 'today' | '7d' | 'mtd';
-
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-/** Pacific calendar days for a period: from and to (inclusive), and the label the header shows. */
-export function periodRange(period: Period, now = new Date()): { from: string; to: string; label: string } {
-  const to = dayKey(now);
-  const from = period === 'today' ? to : period === '7d' ? dayKey(new Date(now.getTime() - 6 * 86_400_000)) : `${to.slice(0, 8)}01`;
-  const [fy, fm, fd] = from.split('-').map(Number);
-  const [ty, tm, td] = to.split('-').map(Number);
-  const label =
-    from === to
-      ? `${MONTHS[tm - 1]} ${td}, ${ty}`
-      : fm === tm && fy === ty
-        ? `${MONTHS[fm - 1]} ${fd}–${td}, ${ty}`
-        : `${MONTHS[fm - 1]} ${fd} – ${MONTHS[tm - 1]} ${td}, ${ty}`;
-  return { from, to, label };
+/**
+ * Change of a range figure against the comparison range (Finance overview KPIs, docs/09 §4.3): "12.5%" with its
+ * direction, and whether that direction is good. Null when there is nothing to compare with.
+ */
+export function overviewDelta(now: Money, before: Money | undefined, higherIsBetter = true): { delta: string; dir: 'up' | 'down'; good: boolean } | null {
+  if (!before || before.amount === 0 || now.amount === before.amount) return null;
+  const pct = ((now.amount - before.amount) / Math.abs(before.amount)) * 100;
+  const dir = pct > 0 ? 'up' : 'down';
+  return { delta: `${Math.abs(pct).toFixed(1)}%`, dir, good: (dir === 'up') === higherIsBetter };
 }
-
-export const PERIODS: Array<{ value: Period; label: string }> = [
-  { value: 'today', label: 'Today' },
-  { value: '7d', label: '7 days' },
-  { value: 'mtd', label: 'Month to date' },
-];
 
 const BASIS: Record<FeeRuleSet['basis'], string> = {
   after_seller_discounts: 'Item price after seller-funded discounts',
