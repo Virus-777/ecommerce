@@ -7094,8 +7094,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Company trading: product sales, buying cost, discounts, shipping, returns and margin
-         * @description **Permission:** `finance.trading.view`
+         * Company trading: product sales, cost of goods sold, stock bought, discounts, shipping, returns and margin
+         * @description The margin uses the cost of goods sold (booked when an order is accepted), never the stock bought: a goods receipt raises stockBought and leaves the margin alone.
+         *
+         *     **Permission:** `finance.trading.view`
          *
          *     **Screens:** admin/official, admin/reports
          */
@@ -34744,6 +34746,7 @@ export interface components {
             /** Format: date */
             date: string;
             sales: components["schemas"]["Money"];
+            /** @description Sales less the cost of goods sold of the day */
             margin: components["schemas"]["Money"];
         };
         "finance.TradingTarget": {
@@ -34783,11 +34786,21 @@ export interface components {
         };
         "finance.TradingSummary": {
             range: components["schemas"]["DateRange"];
-            /** @description e.g. weighted average buying cost at receipt */
+            /** @description How costOfGoodsSold is valued, e.g. weighted average buying cost when the order was accepted */
             costBasis: string;
+            /** @description Official Store item sales before discounts, less cancellations, by booking day */
             productSales: components["schemas"]["Money"];
+            /** @description Unit cost (inventory weighted average buying cost) × quantity of the items sold, booked when the order is accepted and reversed in proportion on cancellation. Items with no unit cost add nothing: see uncostedSales */
+            costOfGoodsSold: components["schemas"]["Money"];
+            /** @description The part of productSales whose items had no unit cost when sold (inventory off or no cost recorded): counted in the margin with no cost */
+            uncostedSales: components["schemas"]["Money"];
+            /** @description Buying cost of goods received from suppliers and other buying costs booked (purchasing receipts). Stock bought, not the cost of what was sold: never taken off the margin */
+            stockBought: components["schemas"]["Money"];
+            /** @description Deprecated: equals costOfGoodsSold (until 2026-10-21 it was the stock bought). Read costOfGoodsSold or stockBought */
             buyingCost: components["schemas"]["Money"];
+            /** @description productSales − costOfGoodsSold */
             grossMargin: components["schemas"]["Money"];
+            /** @description grossMargin as % of productSales */
             grossMarginPct: number;
             /** @description Company-funded discounts on Official Store items */
             discounts: components["schemas"]["Money"];
@@ -34795,6 +34808,7 @@ export interface components {
             returnsCost: components["schemas"]["Money"];
             writeOffs: components["schemas"]["Money"];
             chargebackLosses: components["schemas"]["Money"];
+            /** @description grossMargin − discounts − shippingExpense − returnsCost − writeOffs − chargebackLosses + supplier credits */
             netMargin: components["schemas"]["Money"];
             returnsPctOfSales: number;
             /** @description Change of returnsPctOfSales vs the prior period of the same length, in percentage points (negative = fewer returns) */

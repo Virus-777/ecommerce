@@ -15,7 +15,7 @@ import {
 import { useStaffSession } from '@/app/session';
 import { date, dateTime, LoadError, shortDate, SkeletonLines } from '@/app/parts';
 import { flattenCategories, type CategoryNode } from './data/catalog';
-import { pendingNote, priceLimitPct, STATUS_FILTERS, STATUS_LABEL, type OfficialRow, type PriceChange } from './data/official';
+import { pendingNote, priceLimitPct, STATUS_FILTERS, STATUS_LABEL, uncostedNote, type OfficialRow, type PriceChange } from './data/official';
 
 // Design: pages/admin/admin-official.html (trading + company offers) ·
 // view "price-change" = the Change price dialog (?view=price-change&offer=<offerId>).
@@ -125,6 +125,7 @@ export default function Official() {
   });
   const t = trading.data;
   const sales = t?.productSales.amount ?? 0;
+  const uncosted = uncostedNote(t, formatMoney);
 
   /* ----- Offers table ----- */
   const me = useQuery({ queryKey: ['access', 'me', accountId], queryFn: () => call(api.GET('/api/admin/access/me')) });
@@ -265,7 +266,7 @@ export default function Official() {
       )}
       {can('finance.trading.view') && (
         <>
-          <div className="aa-kpis">
+          <div className="aa-kpis c5">
             <Card pad>
               {t ? (
                 <Stat label="Company sales" value={k(sales)} delta={t.salesChangePct != null ? pct(Math.abs(t.salesChangePct)) : undefined} dir={t.salesChangePct != null && t.salesChangePct < 0 ? 'down' : 'up'} good={(t.salesChangePct ?? 0) >= 0} note={`vs prior ${days} days`} />
@@ -273,7 +274,9 @@ export default function Official() {
                 <SkeletonLines rows={1} />
               )}
             </Card>
-            <Card pad>{t ? <Stat label="Gross margin" value={pct(t.grossMarginPct ?? 0)} note={`${k(t.grossMargin.amount)} after buying cost`} /> : <SkeletonLines rows={1} />}</Card>
+            {/* the margin takes off the cost of the units sold; stock bought from suppliers is shown on its own, as on the Official Store P&L */}
+            <Card pad>{t ? <Stat label="Gross margin" value={pct(t.grossMarginPct ?? 0)} note={`${k(t.grossMargin.amount)} after ${k(t.costOfGoodsSold.amount)} cost of goods sold`} /> : <SkeletonLines rows={1} />}</Card>
+            <Card pad>{t ? <Stat label="Stock bought" value={k(t.stockBought.amount)} note="Not taken off the margin" /> : <SkeletonLines rows={1} />}</Card>
             <Card pad>{t ? <Stat label="Discounts given" value={k(t.discounts.amount)} note={`${sales ? pct((t.discounts.amount / sales) * 100) : '0.0%'} of sales · company-funded`} /> : <SkeletonLines rows={1} />}</Card>
             <Card pad>
               {t ? (
@@ -283,6 +286,12 @@ export default function Official() {
               )}
             </Card>
           </div>
+
+          {uncosted && (
+            <Alert tone="warning" title="Some sales have no unit cost">
+              {uncosted}
+            </Alert>
+          )}
 
           <div className="aa-split">
             <ChartFrame titleAs="h2" title="Company sales by day" sub="Official Store only · USD" loading={!t} refreshing={trading.isPlaceholderData} height={210} table={seriesTable(salesRows, SALES_SERIES, fmtMoney, { xLabel: 'Day' })}>
