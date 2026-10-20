@@ -189,6 +189,59 @@
     "OrderDocument": { "id": "uuid", "kind": "enum(receipt|invoice|credit_note)", "label": { "type": "string", "desc": "'Order receipt' or 'Invoice, Pixel & Port'" }, "groupId": "uuid?", "number": "string", "format": "enum(pdf)", "issuedAt": "datetime" },
     "DocumentLink": { "url": "url", "fileName": "string", "expiresAt": "datetime" },
     "CaseRef": { "caseId": "uuid", "ref": "string", "status": "string", "itemIds": "uuid[]", "nextUpdateBy": "datetime?" },
+    "CustomerSpending": {
+      "from": { "type": "date", "desc": "First market day covered (range all: the day of the first counted order, else today)" },
+      "to": { "type": "date", "desc": "Last market day covered" },
+      "grain": { "type": "enum(day|week|month)", "desc": "Size of each series point: the grain asked for, else day up to 31 days, week up to 92, month beyond" },
+      "currency": "string",
+      "totals": "SpendingTotals",
+      "previous": { "type": "SpendingPrevious?", "desc": "The same number of days just before from; null for range all" },
+      "series": { "type": "SpendingPoint[]", "desc": "One point per day, week (starting Monday) or month from from to to, zeros included" },
+      "byCategory": { "type": "SpendingShare[]", "desc": "Top-level categories by amount, at most 5 plus Other" },
+      "bySeller": { "type": "SpendingShare[]", "desc": "Sellers by amount (key official for the Marketly Official Store), at most 5 plus Other" },
+      "byPaymentMethod": { "type": "SpendingShare[]", "desc": "By payment method label, e.g. Visa •••• 4242" },
+      "byWeekday": { "type": "SpendingWeekday[]", "desc": "Monday to Sunday by the day orders were placed (market time zone)" },
+      "topProducts": { "type": "SpendingProduct[]", "desc": "At most 5, by amount" }
+    },
+    "SpendingTotals": {
+      "spent": { "type": "Money", "desc": "What the customer paid for items not cancelled, minus refunds on them (shipping and tax shares included)" },
+      "refunded": { "type": "Money", "desc": "Refunds on items not cancelled (returns, partial refunds)" },
+      "cancelled": { "type": "Money", "desc": "Value of items cancelled before or after charging (not in spent)" },
+      "savings": { "type": "Money", "desc": "Discounts on items not cancelled (coupons, promotions)" },
+      "shipping": { "type": "Money", "desc": "Shipping share of items not cancelled" },
+      "tax": { "type": "Money", "desc": "Tax share of items not cancelled" },
+      "orders": { "type": "int", "desc": "Orders with at least one item not cancelled" },
+      "units": { "type": "int", "desc": "Units not cancelled" },
+      "averageOrder": { "type": "Money", "desc": "spent ÷ orders (0 without orders)" },
+      "largestOrder": "SpendingOrderRef?"
+    },
+    "SpendingOrderRef": { "orderId": "uuid", "ref": "string", "placedAt": "datetime", "amount": { "type": "Money", "desc": "What counts toward spent for this order" } },
+    "SpendingPrevious": { "from": "date", "to": "date", "spent": "Money", "orders": "int", "changePct": { "type": "number?", "desc": "Change of spent against the previous period in %, one decimal; null when the previous period spent nothing" } },
+    "SpendingPoint": {
+      "start": { "type": "date", "desc": "First day of the point (Monday for weeks, the 1st for months; never before from)" },
+      "label": { "type": "string", "desc": "e.g. Oct 14, Week of Oct 13, Oct 2026" },
+      "spent": "Money",
+      "refunded": "Money",
+      "orders": "int"
+    },
+    "SpendingShare": {
+      "key": { "type": "string", "desc": "Category id, seller id or official, payment method label, or other" },
+      "label": "string",
+      "amount": { "type": "Money", "desc": "Part of spent" },
+      "sharePct": { "type": "number", "desc": "Share of spent in %, one decimal" },
+      "orders": "int",
+      "units": "int"
+    },
+    "SpendingWeekday": { "weekday": "enum(mon|tue|wed|thu|fri|sat|sun)", "label": { "type": "string", "desc": "Mon … Sun" }, "amount": "Money", "orders": "int" },
+    "SpendingProduct": {
+      "productId": "uuid",
+      "productSlug": { "type": "string?", "desc": "For the product link; null when the catalog did not answer" },
+      "title": "string",
+      "image": "MediaRef?",
+      "units": "int",
+      "amount": { "type": "Money", "desc": "Part of spent" },
+      "lastBoughtAt": "datetime"
+    },
     "OrderSummary": {
       "id": "uuid",
       "ref": "string",
@@ -483,6 +536,7 @@
   "endpoints": [
     { "id": "listMyOrders", "area": "store", "method": "GET", "path": "/orders", "summary": "Order history with search, date range and status tab", "desc": "q matches the order reference, a product title or a seller name. Each order shows a status per package so a mixed order reads as partly delivered.", "auth": "customer", "paging": true, "query": { "q": "string?", "range": "enum(last_30_days|last_3_months|last_6_months|this_year|all)?", "from": "date?", "to": "date?", "tab": "enum(all|in_progress|delivered|returns|cancelled)?" }, "response": "OrderSummary", "screens": ["account/orders", "account/overview"] },
     { "id": "getMyOrderCounts", "area": "store", "method": "GET", "path": "/orders/counts", "summary": "Counts per status tab", "desc": "q narrows the counts like the order list search, so the tabs follow a search.", "auth": "customer", "query": { "range": "enum(last_30_days|last_3_months|last_6_months|this_year|all)?", "q": { "type": "string?", "desc": "Same search as GET /orders (order reference, product title or seller name)" } }, "response": { "all": "int", "inProgress": "int", "delivered": "int", "returns": "int", "cancelled": "int" }, "screens": ["account/orders"] },
+    { "id": "getMySpending", "area": "store", "method": "GET", "path": "/orders/spending", "summary": "What the customer spent in a period: totals, trend and breakdowns", "desc": "Orders count by the day they were placed (market time zone); refunds count on their order's day. Orders still waiting for payment are left out. from/to (both or neither) replace range; at most 3 years. Default range last_12_months.", "auth": "customer", "query": { "range": "enum(last_30_days|last_3_months|last_6_months|last_12_months|this_year|last_year|all)?", "from": "date?", "to": "date?", "grain": "enum(day|week|month)?" }, "response": "CustomerSpending", "errors": ["VALIDATION_FAILED"], "screens": ["account/statistics"] },
     { "id": "getMyOrder", "area": "store", "method": "GET", "path": "/orders/{id}", "summary": "Order detail by seller group, with item states and separate payment, delivery and returns progress", "desc": "Customers see their own orders. Guest sessions see an order when identity.hasGuestOrderAccess is true (granted to the session that placed it and by the guest lookup in customers). Others get NOT_FOUND. Payment-pending orders show the checking state.", "auth": "shopper", "params": { "id": "uuid" }, "response": "OrderDetail", "errors": ["NOT_FOUND"], "screens": ["account/order", "auth/guest-orders", "store/payment-result", "account/tracking"] },
     { "id": "getCancellationOptions", "area": "store", "method": "GET", "path": "/orders/{id}/cancellation-options", "summary": "Which items can be cancelled now and why others cannot", "auth": "shopper", "params": { "id": "uuid" }, "response": "CancellationOptions", "errors": ["NOT_FOUND"], "screens": ["account/cancel", "account/order"] },
     { "id": "previewCancellation", "area": "store", "method": "POST", "path": "/orders/{id}/cancellation-preview", "summary": "Refund estimate for the selected items and quantities", "auth": "shopper", "params": { "id": "uuid" }, "body": { "items": "CancellationLineInput[]" }, "response": "RefundPreview", "errors": ["CANCELLATION_NOT_ALLOWED", "QUANTITY_EXCEEDS_REMAINING"], "screens": ["account/cancel"] },

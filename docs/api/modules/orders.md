@@ -33,6 +33,7 @@ The accepted purchase: one order per checkout, one seller group per seller packa
 |---|---|---|---|---|
 | GET | `/api/store/orders/orders` | Order history with search, date range and status tab | customer | Page<OrderSummary> |
 | GET | `/api/store/orders/orders/counts` | Counts per status tab | customer | `{ all: int, inProgress: int, delivered: int, returns: int, cancelled: int }` |
+| GET | `/api/store/orders/orders/spending` | What the customer spent in a period: totals, trend and breakdowns | customer | `CustomerSpending` |
 | GET | `/api/store/orders/orders/{id}` | Order detail by seller group, with item states and separate payment, delivery and returns progress | shopper | `OrderDetail` |
 | GET | `/api/store/orders/orders/{id}/cancellation-options` | Which items can be cancelled now and why others cannot | shopper | `CancellationOptions` |
 | POST | `/api/store/orders/orders/{id}/cancellation-preview` | Refund estimate for the selected items and quantities | shopper | `{ items: CancellationLineInput[] }` → `RefundPreview` |
@@ -344,6 +345,99 @@ The accepted purchase: one order per checkout, one seller group per seller packa
 | status | `string` |
 | itemIds | `uuid[]` |
 | nextUpdateBy | `datetime?` |
+
+### CustomerSpending
+
+| Field | Type |
+|---|---|
+| from | `date` First market day covered (range all: the day of the first counted order, else today) |
+| to | `date` Last market day covered |
+| grain | `enum(day|week|month)` Size of each series point: the grain asked for, else day up to 31 days, week up to 92, month beyond |
+| currency | `string` |
+| totals | `SpendingTotals` |
+| previous | `SpendingPrevious?` The same number of days just before from; null for range all |
+| series | `SpendingPoint[]` One point per day, week (starting Monday) or month from from to to, zeros included |
+| byCategory | `SpendingShare[]` Top-level categories by amount, at most 5 plus Other |
+| bySeller | `SpendingShare[]` Sellers by amount (key official for the Marketly Official Store), at most 5 plus Other |
+| byPaymentMethod | `SpendingShare[]` By payment method label, e.g. Visa •••• 4242 |
+| byWeekday | `SpendingWeekday[]` Monday to Sunday by the day orders were placed (market time zone) |
+| topProducts | `SpendingProduct[]` At most 5, by amount |
+
+### SpendingTotals
+
+| Field | Type |
+|---|---|
+| spent | `Money` What the customer paid for items not cancelled, minus refunds on them (shipping and tax shares included) |
+| refunded | `Money` Refunds on items not cancelled (returns, partial refunds) |
+| cancelled | `Money` Value of items cancelled before or after charging (not in spent) |
+| savings | `Money` Discounts on items not cancelled (coupons, promotions) |
+| shipping | `Money` Shipping share of items not cancelled |
+| tax | `Money` Tax share of items not cancelled |
+| orders | `int` Orders with at least one item not cancelled |
+| units | `int` Units not cancelled |
+| averageOrder | `Money` spent ÷ orders (0 without orders) |
+| largestOrder | `SpendingOrderRef?` |
+
+### SpendingOrderRef
+
+| Field | Type |
+|---|---|
+| orderId | `uuid` |
+| ref | `string` |
+| placedAt | `datetime` |
+| amount | `Money` What counts toward spent for this order |
+
+### SpendingPrevious
+
+| Field | Type |
+|---|---|
+| from | `date` |
+| to | `date` |
+| spent | `Money` |
+| orders | `int` |
+| changePct | `number?` Change of spent against the previous period in %, one decimal; null when the previous period spent nothing |
+
+### SpendingPoint
+
+| Field | Type |
+|---|---|
+| start | `date` First day of the point (Monday for weeks, the 1st for months; never before from) |
+| label | `string` e.g. Oct 14, Week of Oct 13, Oct 2026 |
+| spent | `Money` |
+| refunded | `Money` |
+| orders | `int` |
+
+### SpendingShare
+
+| Field | Type |
+|---|---|
+| key | `string` Category id, seller id or official, payment method label, or other |
+| label | `string` |
+| amount | `Money` Part of spent |
+| sharePct | `number` Share of spent in %, one decimal |
+| orders | `int` |
+| units | `int` |
+
+### SpendingWeekday
+
+| Field | Type |
+|---|---|
+| weekday | `enum(mon|tue|wed|thu|fri|sat|sun)` |
+| label | `string` Mon … Sun |
+| amount | `Money` |
+| orders | `int` |
+
+### SpendingProduct
+
+| Field | Type |
+|---|---|
+| productId | `uuid` |
+| productSlug | `string?` For the product link; null when the catalog did not answer |
+| title | `string` |
+| image | `MediaRef?` |
+| units | `int` |
+| amount | `Money` Part of spent |
+| lastBoughtAt | `datetime` |
 
 ### OrderSummary
 

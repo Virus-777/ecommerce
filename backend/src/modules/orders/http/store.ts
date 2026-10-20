@@ -25,6 +25,8 @@ export const storeRoutes = (service: OrdersService) =>
       const c = await service.reads.countByTab(customerIdOf(scope), query.range, query.q);
       return { all: c.all, inProgress: c.inProgress, delivered: c.delivered, returns: c.returns, cancelled: c.cancelled };
     },
+    /** GET /orders/spending: What the customer spent in a period: totals, trend and breakdowns */
+    getMySpending: async ({ query, scope }) => service.spending.forCustomer(customerIdOf(scope), query),
     /** GET /orders/{id}: Order detail by seller group, with item states and separate payment, delivery and returns progress */
     getMyOrder: async ({ params, scope, principal }) => service.reads.storeDetail(await service.reads.shopperOrder(params.id, viewerOf(scope, principal))),
     /** GET /orders/{id}/cancellation-options: Which items can be cancelled now and why others cannot */

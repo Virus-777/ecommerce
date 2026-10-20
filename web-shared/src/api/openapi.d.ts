@@ -14451,6 +14451,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/store/orders/orders/spending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What the customer spent in a period: totals, trend and breakdowns
+         * @description Orders count by the day they were placed (market time zone); refunds count on their order's day. Orders still waiting for payment are left out. from/to (both or neither) replace range; at most 3 years. Default range last_12_months.
+         *
+         *     **Screens:** account/statistics
+         */
+        get: operations["orders.getMySpending"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/store/orders/orders/{id}": {
         parameters: {
             query?: never;
@@ -38623,6 +38645,123 @@ export interface components {
             itemIds: string[];
             /** Format: date-time */
             nextUpdateBy?: string | null;
+        };
+        "orders.CustomerSpending": {
+            /**
+             * Format: date
+             * @description First market day covered (range all: the day of the first counted order, else today)
+             */
+            from: string;
+            /**
+             * Format: date
+             * @description Last market day covered
+             */
+            to: string;
+            /**
+             * @description Size of each series point: the grain asked for, else day up to 31 days, week up to 92, month beyond
+             * @enum {string}
+             */
+            grain: "day" | "week" | "month";
+            currency: string;
+            totals: components["schemas"]["orders.SpendingTotals"];
+            /** @description The same number of days just before from; null for range all */
+            previous?: components["schemas"]["orders.SpendingPrevious"] | null;
+            /** @description One point per day, week (starting Monday) or month from from to to, zeros included */
+            series: components["schemas"]["orders.SpendingPoint"][];
+            /** @description Top-level categories by amount, at most 5 plus Other */
+            byCategory: components["schemas"]["orders.SpendingShare"][];
+            /** @description Sellers by amount (key official for the Marketly Official Store), at most 5 plus Other */
+            bySeller: components["schemas"]["orders.SpendingShare"][];
+            /** @description By payment method label, e.g. Visa •••• 4242 */
+            byPaymentMethod: components["schemas"]["orders.SpendingShare"][];
+            /** @description Monday to Sunday by the day orders were placed (market time zone) */
+            byWeekday: components["schemas"]["orders.SpendingWeekday"][];
+            /** @description At most 5, by amount */
+            topProducts: components["schemas"]["orders.SpendingProduct"][];
+        };
+        "orders.SpendingTotals": {
+            /** @description What the customer paid for items not cancelled, minus refunds on them (shipping and tax shares included) */
+            spent: components["schemas"]["Money"];
+            /** @description Refunds on items not cancelled (returns, partial refunds) */
+            refunded: components["schemas"]["Money"];
+            /** @description Value of items cancelled before or after charging (not in spent) */
+            cancelled: components["schemas"]["Money"];
+            /** @description Discounts on items not cancelled (coupons, promotions) */
+            savings: components["schemas"]["Money"];
+            /** @description Shipping share of items not cancelled */
+            shipping: components["schemas"]["Money"];
+            /** @description Tax share of items not cancelled */
+            tax: components["schemas"]["Money"];
+            /** @description Orders with at least one item not cancelled */
+            orders: number;
+            /** @description Units not cancelled */
+            units: number;
+            /** @description spent ÷ orders (0 without orders) */
+            averageOrder: components["schemas"]["Money"];
+            largestOrder?: components["schemas"]["orders.SpendingOrderRef"] | null;
+        };
+        "orders.SpendingOrderRef": {
+            /** Format: uuid */
+            orderId: string;
+            ref: string;
+            /** Format: date-time */
+            placedAt: string;
+            /** @description What counts toward spent for this order */
+            amount: components["schemas"]["Money"];
+        };
+        "orders.SpendingPrevious": {
+            /** Format: date */
+            from: string;
+            /** Format: date */
+            to: string;
+            spent: components["schemas"]["Money"];
+            orders: number;
+            /** @description Change of spent against the previous period in %, one decimal; null when the previous period spent nothing */
+            changePct?: number | null;
+        };
+        "orders.SpendingPoint": {
+            /**
+             * Format: date
+             * @description First day of the point (Monday for weeks, the 1st for months; never before from)
+             */
+            start: string;
+            /** @description e.g. Oct 14, Week of Oct 13, Oct 2026 */
+            label: string;
+            spent: components["schemas"]["Money"];
+            refunded: components["schemas"]["Money"];
+            orders: number;
+        };
+        "orders.SpendingShare": {
+            /** @description Category id, seller id or official, payment method label, or other */
+            key: string;
+            label: string;
+            /** @description Part of spent */
+            amount: components["schemas"]["Money"];
+            /** @description Share of spent in %, one decimal */
+            sharePct: number;
+            orders: number;
+            units: number;
+        };
+        "orders.SpendingWeekday": {
+            /** @enum {string} */
+            weekday: "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+            /** @description Mon … Sun */
+            label: string;
+            amount: components["schemas"]["Money"];
+            orders: number;
+        };
+        "orders.SpendingProduct": {
+            /** Format: uuid */
+            productId: string;
+            /** @description For the product link; null when the catalog did not answer */
+            productSlug?: string | null;
+            title: string;
+            image?: components["schemas"]["MediaRef"] | null;
+            units: number;
+            /** @description Part of spent */
+            amount: components["schemas"]["Money"];
+            /** Format: date-time */
+            lastBoughtAt: string;
         };
         "orders.OrderSummary": {
             /** Format: uuid */
@@ -92768,6 +92907,58 @@ export interface operations {
                         returns: number;
                         cancelled: number;
                     };
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "orders.getMySpending": {
+        parameters: {
+            query?: {
+                range?: "last_30_days" | "last_3_months" | "last_6_months" | "last_12_months" | "this_year" | "last_year" | "all" | null;
+                from?: string | null;
+                to?: string | null;
+                grain?: "day" | "week" | "month" | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["orders.CustomerSpending"];
                 };
             };
             /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
