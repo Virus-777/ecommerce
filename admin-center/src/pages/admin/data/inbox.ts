@@ -2,6 +2,7 @@
 // Sources: GET notifications/inbox (view all | needs_my_action | mentions, area, unreadOnly, cursor),
 // GET notifications/inbox/summary (counts, routing today), POST inbox/{id}/read, POST inbox/read-all,
 // GET/PUT notifications/my-preferences, GET/POST access/approval-requests/{id}[/approve|/reject].
+import type { QueryKey } from '@tanstack/react-query';
 import type { components } from '@marketly/web-shared/api';
 import { dayKey, screenHref } from '@/app/parts';
 
@@ -33,6 +34,17 @@ export function noticeHref(n: Notice): string | undefined {
   if (l.url) return l.url;
   const key = l.ref ?? l.id;
   return screenHref(l.screen, undefined, { ref: key, id: l.id, key, slug: key }) ?? screenHref(l.screen);
+}
+
+/**
+ * Queries a live notice may change besides ['notifications'] (app/session.tsx): a notice that asks for action is
+ * usually a new work queue item; approval notices change "approvals to decide" (access/me).
+ */
+export function liveQueryKeys(n: Notice): QueryKey[] {
+  const keys: QueryKey[] = [];
+  if (n.actionRequired) keys.push(['workqueues']);
+  if (n.topicKey.split('.')[1] === 'approval') keys.push(['access']);
+  return keys;
 }
 
 /** Notices grouped as the design does: today, then earlier. */

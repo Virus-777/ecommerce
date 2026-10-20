@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { call, errorMessage, useApi } from '@marketly/web-shared/api';
+import { call, errorMessage, LiveAlertSettings, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { formatMoney, isoInText } from '@marketly/web-shared/lib/format';
@@ -139,6 +139,8 @@ export default function Inbox() {
           </p>
         </div>
         <div className="actions">
+          {/* Desktop alerts and sound for live notices in this browser (toasts always show). */}
+          <LiveAlertSettings audience="admin" />
           <Button variant="ghost" size="sm" icon="check-check" onClick={() => markAll.mutate()} disabled={!unread || markAll.isPending}>
             Mark all as read
           </Button>

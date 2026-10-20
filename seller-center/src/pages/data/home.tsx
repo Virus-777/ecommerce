@@ -1,6 +1,8 @@
 // Shared parts of the Seller Center home screens (Setup, Dashboard, Performance, Notifications, Help):
 // Pacific-time date formatting, deadline labels, the load-error alert, skeletons, links built from the
 // API's screen ids, and the icon names the API may send.
+import type { QueryKey } from '@tanstack/react-query';
+import type { components } from '@marketly/web-shared/api';
 import { LoadError as SharedLoadError, SkeletonLines } from '@marketly/web-shared/ui';
 import { href, SCREEN_BY_ID, type ScreenId } from '@marketly/web-shared/routes';
 
@@ -35,6 +37,45 @@ export function screenHref(screen?: string | null, state?: string | null, params
   const view = id === 'seller/orders' ? ORDER_VIEWS[state ?? ''] : slug && views.includes(slug) ? slug : undefined;
   return href(id, view ?? '', params);
 }
+
+type Notice = components['schemas']['notifications.Notice'];
+
+/** Where the publishing module shows the record; the list screen when the link lacks what the detail screen needs. */
+const FALLBACK: Partial<Record<string, ScreenId>> = {
+  'seller/order': 'seller/orders',
+  'seller/return': 'seller/returns',
+  'seller/statement': 'seller/finance',
+  'seller/help-article': 'seller/help',
+};
+
+/** Where a notice opens: the Notifications page rows and the live toasts (app/session.tsx) use the same link. */
+export function noticeHref(n: Notice): string | undefined {
+  const l = n.link;
+  // Statement routes also take the statement id, so a statement notice without a ref opens the statement.
+  const ref = l.ref ?? (l.screen === 'seller/statement' ? l.id : null);
+  return screenHref(l.screen, null, ref ? { ref } : undefined) ?? (FALLBACK[l.screen] ? href(FALLBACK[l.screen]!) : undefined);
+}
+
+/**
+ * Query families a live notice may change besides ['notifications'], by the topic's subject
+ * (seller.<subject>.<event>, e.g. seller.order.new): the sidebar counts in app/session.tsx and the open lists.
+ */
+const LIVE_KEYS: Record<string, string[]> = {
+  order: ['orders'],
+  dispatch: ['orders'],
+  return: ['returns'],
+  case: ['returns', 'support'],
+  message: ['messaging'],
+  product: ['catalog', 'offers'],
+  offer: ['offers'],
+  fulfillment: ['inventory'],
+  review_report: ['reviews'],
+  payout: ['finance'],
+  statement: ['finance'],
+  hold: ['finance'],
+  balance: ['finance'],
+};
+export const liveQueryKeys = (n: Notice): QueryKey[] => (LIVE_KEYS[n.topicKey.split('.')[1] ?? ''] ?? []).map((k) => [k]);
 
 /** A failed read: the error and a Try again button (API.md rule 4). */
 export const LoadError = (p: { error: unknown; onRetry: () => void; title?: string }) => (
