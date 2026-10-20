@@ -20,10 +20,13 @@ type SessionTokens = components['schemas']['identity.SessionTokens'];
 
 export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-/** jordan.lee@example.com -> jo•••@example.com */
+/** jordan.lee@example.com -> j•••••••••@example.com, as the API masks it (emailMasked) */
 export const maskEmail = (email: string) => {
-  const [local, domain] = email.trim().split('@');
-  return domain ? `${local.slice(0, 2)}•••@${domain}` : email;
+  const e = email.trim();
+  const at = e.lastIndexOf('@');
+  if (at < 1) return e;
+  const local = e.slice(0, at);
+  return `${local[0]}${'•'.repeat(Math.max(3, local.length - 1))}${e.slice(at)}`;
 };
 
 /** The identity routes that set the refresh cookie must send credentials (API-INTEGRATION-BRIEF §1.2). */

@@ -1,7 +1,7 @@
 // Orders, tracking, cancellations and returns for My account: GraphQL screen queries (OrderList,
 // OrderDetail, ReturnDetail, AccountOverview), their result types, and the date, money and status
 // helpers the account order screens share. See web-shared/docs/API.md.
-import { slugify as slugText } from '@marketly/web-shared/lib/format';
+import { slugify as slugText, humanize } from '@marketly/web-shared/lib/format';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { useSession } from '@/app/session';
@@ -436,10 +436,7 @@ export const thisYear = () => new Date().toLocaleString('en-US', { timeZone: TZ,
 /* ---------------- Labels, tones, links ---------------- */
 
 /** "PARTLY_DELIVERED" -> "Partly delivered" */
-export const humanize = (v: string) => {
-  const s = v.toLowerCase().replace(/_/g, ' ');
-  return s.charAt(0).toUpperCase() + s.slice(1);
-};
+export { humanize };
 
 /** "+15035550148" -> "(503) 555-0148" */
 export const fmtPhone = (p: string) => {

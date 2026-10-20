@@ -63,3 +63,9 @@ export function slugify(text: string, fallback = ''): string {
     .replace(/-+$/g, '');
   return slug || fallback;
 }
+
+/** An API key as words: "PARTLY_DELIVERED" and "partly_delivered" → "Partly delivered"; "order.manager" → "Order manager" */
+export function humanize(key?: string | null): string {
+  const t = (key ?? '').replace(/[_.-]+/g, ' ').trim().toLowerCase();
+  return t ? t[0]!.toUpperCase() + t.slice(1) : '';
+}

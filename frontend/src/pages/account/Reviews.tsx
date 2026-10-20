@@ -1,3 +1,4 @@
+import { humanize } from '@marketly/web-shared/lib/format';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
@@ -55,7 +56,7 @@ const TRUST_STATUS: Record<string, { label: string; tone?: Tone }> = {
   action_taken: { label: 'Action taken', tone: 'success' },
   no_violation: { label: 'No violation' },
 };
-const sentence = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, ' ') : s);
+const sentence = (s: string) => humanize(s);
 
 function reviewRow(r: ReviewReport): ReportRow {
   const t = TARGET[r.targetType] ?? { label: r.targetType.replace(/_/g, ' '), icon: 'flag' as IconName };

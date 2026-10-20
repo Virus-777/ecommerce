@@ -7,6 +7,14 @@ import { Alert, Button } from '@marketly/web-shared/ui';
 /** Pacific-time dates and deadline labels: the same helpers in all three apps */
 export { TZ, date, dateTime, dayKey, deadlineLabel, deadlineTone, longDate, monthYear, shortDate, time, weekdayDate, type DeadlineTone } from '@marketly/web-shared/lib/dates';
 
+/** Who did something: their name, else what they are ("Marketly (system)", "Seller", "Customer", "Guest", "Staff member"); '' for no one */
+export function actorLabel(a?: { kind?: string | null; name?: string | null } | null): string {
+  if (!a) return '';
+  if (a.name) return a.name;
+  const k = (a.kind ?? '').toLowerCase();
+  return k === 'system' ? 'Marketly (system)' : k === 'seller' ? 'Seller' : k === 'customer' ? 'Customer' : k === 'visitor' || k === 'guest' ? 'Guest' : 'Staff member';
+}
+
 /**
  * Screen ids the API sends that aren't screens of their own in this app: the work happens on another list.
  * (Seller applications and appeals are tabs of the Sellers list.)

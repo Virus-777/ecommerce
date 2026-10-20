@@ -1,3 +1,4 @@
+import { actorLabel } from '@/app/parts';
 import { fromZonedInput, zonedInput } from '@marketly/web-shared/lib/dates';
 import { Fragment, useRef, useState, type ReactNode } from 'react';
 import { errorMessage, resolveProductImageSpec, uploadMedia, useApi, type components } from '@marketly/web-shared/api';
@@ -60,7 +61,7 @@ const ICON_SET = new Set<string>(CATEGORY_ICONS.map((i) => i.value));
 /** A category's icon, or the newspaper when it has none (or one this app doesn't know). */
 export const categoryIcon = (icon?: string | null): IconName => (icon && ICON_SET.has(icon) ? (icon as IconName) : 'newspaper');
 
-export const actorName = (a: unknown) => (a as { name?: string | null } | null | undefined)?.name ?? undefined;
+export const actorName = (a: unknown) => actorLabel(a as { kind?: string; name?: string | null } | null) || undefined;
 
 /* ---------------- Market time (PT) for datetime-local inputs ---------------- */
 

@@ -4,6 +4,7 @@
 // (checks that no recommendation is still with an owner team) and Dismiss = POST …/dismiss (no action); Request
 // info = an evidence request to the reported seller or customer; Restrict listing, Hold payouts and Suspend = an
 // enforcement recommendation routed to the owning team (Trust recommends, owners act).
+import { humanize } from '@marketly/web-shared/lib/format';
 import type { components } from '@marketly/web-shared/api';
 import type { IconName, TimelineEvent } from '@marketly/web-shared/ui';
 import { DISMISS_REASONS, OWNER_TEAM, type TrustReportDetail, type TrustSubject } from './trust';
@@ -67,10 +68,6 @@ export interface RiskFactorView {
   weight: 'Strong' | 'Moderate' | 'Weak';
 }
 
-const humanize = (s: string) => {
-  const t = s.replace(/[_.]+/g, ' ').trim();
-  return t.charAt(0).toUpperCase() + t.slice(1);
-};
 
 export function factorsOf(d: TrustReportDetail): RiskFactorView[] {
   return [...d.riskFactors]

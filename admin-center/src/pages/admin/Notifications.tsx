@@ -6,7 +6,7 @@ import { AdminLayout } from '@marketly/web-shared/layouts';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, announce, Badge, Button, Card, Checkbox, Field, Icon, IconButton, KeyValue, LogoMark, PageHeader, SegmentedControl, Select, Stat, Switch, TableWrap, Textarea, TextInput } from '@marketly/web-shared/ui';
-import { LoadError, SkeletonLines, dateTime } from '@/app/parts';
+import { LoadError, SkeletonLines, dateTime, actorLabel } from '@/app/parts';
 import { useStaffSession } from '@/app/session';
 import {
   AUDIENCE_LABEL, changed, CHANNEL_LABEL, editorContent, EMAIL_FIELDS, emailContent, GROUPS, INAPP_FIELDS, inappContent, MONO_VARS, sampleOf,
@@ -70,7 +70,7 @@ const lines = (ls: string[], sample: Record<string, string>) =>
     </Fragment>
   ));
 
-const actorName = (a?: { name?: string | null; kind: string } | null) => (a?.name ? a.name : a?.kind === 'system' ? 'Marketly' : 'Staff');
+const actorName = (a?: { name?: string | null; kind: string } | null) => actorLabel(a);
 
 export default function Notifications() {
   const [view] = useView<'edit-template'>();

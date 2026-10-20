@@ -9,7 +9,7 @@ import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, announce, Badge, Breadcrumbs, Button, Card, DateTimeField, Drawer, Field, Icon, IconButton, Img, ImageCropper, SegmentedControl, Select, StatusBadge, TableWrap, Textarea, TextInput, type CropWording, type IconName, type ProcessedImage } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
-import { LoadError, SkeletonLines, dateTime } from '@/app/parts';
+import { LoadError, SkeletonLines, dateTime, actorLabel } from '@/app/parts';
 import { flattenTree, type ApiCategory } from './data/categories';
 
 // Design: pages/admin/admin-content.html · view "edit-section" = edit drawer for a homepage section.
@@ -116,7 +116,7 @@ const editOf = (s?: Section): SectionEdit => {
   };
 };
 
-const actorName = (a: unknown) => (a as { name?: string; kind?: string } | null)?.name ?? ((a as { kind?: string } | null)?.kind === 'system' ? 'System' : 'Staff');
+const actorName = (a: unknown) => actorLabel(a as { kind?: string; name?: string } | null);
 
 export default function Content() {
   const { api } = useApi();

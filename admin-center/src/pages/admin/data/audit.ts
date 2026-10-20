@@ -1,3 +1,4 @@
+import { actorLabel } from '@/app/parts';
 import { useQuery } from '@tanstack/react-query';
 import { call, useApi, type components } from '@marketly/web-shared/api';
 import type { ScreenId } from '@marketly/web-shared/routes';
@@ -64,10 +65,7 @@ export function useStaffOptions(enabled = true): Map<string, string> {
 }
 
 /** The actor's name as recorded (G70); records from before names were recorded fall back to the actor kind. */
-export function actorLabel(a: AuditEntry['actor']): string {
-  if (a.name) return a.name;
-  return a.kind === 'system' ? 'Marketly (system)' : a.kind === 'seller' ? 'Seller' : a.kind === 'customer' ? 'Customer' : 'Staff member';
-}
+export { actorLabel };
 export const rolesLabel = (e: AuditEntry) => e.actorRoles.map((r) => r.name).join(', ') || (e.actor.kind === 'staff' ? 'Staff' : e.actor.kind === 'system' ? 'System' : e.actor.kind.replace(/^./, (c) => c.toUpperCase()));
 
 /** "Oct 8, 2026, 10:05 AM PT" style label pieces come from the shared Pacific-time helpers. */

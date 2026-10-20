@@ -1,3 +1,4 @@
+import { humanize } from '@marketly/web-shared/lib/format';
 import type { ReactNode } from 'react';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { Icon } from '@marketly/web-shared/ui';
@@ -44,10 +45,7 @@ export interface StaffRef {
 export const staffName = (s?: StaffRef | null, none = 'Not set') => (s?.name && s.name.trim() ? s.name : none);
 
 /** "order_manager" → "Order manager"; "in_progress" → "In progress". */
-export const humanize = (s?: string | null) => {
-  const t = (s ?? '').replace(/[_.-]+/g, ' ').trim();
-  return t ? t[0].toUpperCase() + t.slice(1) : '';
-};
+export { humanize };
 
 /** Skeleton rows for a table body while it loads. */
 export function SkeletonRows({ cols, rows = 4 }: { cols: number; rows?: number }) {

@@ -9,7 +9,7 @@ import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, announce, Badge, Breadcrumbs, Button, Card, Dialog, Field, Icon, IconButton, Pager, SearchInput, Select, Stat, StatusBadge, TableWrap, Tabs, Textarea, TextInput, type IconName } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
-import { LoadError, SkeletonLines, date, dateTime } from '@/app/parts';
+import { LoadError, SkeletonLines, date, dateTime, actorLabel } from '@/app/parts';
 
 // Design: pages/admin/admin-help-content.html · view "edit-policy" = the editor for a policy version (or a help article).
 // Data: GET /api/admin/content/help/summary (KPIs, tab counts), /help/items (the list), /help/categories, /policies.
@@ -89,7 +89,7 @@ const nextVersion = (v?: string | null) => {
   const [maj, min] = (v ?? '0.9').split('.').map(Number);
   return `${maj || 0}.${(min ?? 0) + 1}`;
 };
-const actorName = (a: unknown) => (a as { name?: string } | null | undefined)?.name;
+const actorName = (a: unknown) => actorLabel(a as { kind?: string; name?: string } | null) || undefined;
 
 /* ---------------- Shared editor parts ---------------- */
 

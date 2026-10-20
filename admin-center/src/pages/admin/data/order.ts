@@ -3,6 +3,7 @@
 // only audited staff actions), GET access/me (my refund approval limits; access/approval-actions only for holders of
 // access.roles.view), POST returns/refunds (one request per seller group), POST orders/orders/{id}/cancel-items,
 // POST orders/orders/{id}/notes, POST messaging/conversations (Contact seller).
+import { actorLabel } from '@/app/parts';
 import { parseCents } from '@marketly/web-shared/lib/format';
 import ADMIN_ORDER from '@marketly/web-shared/api/graphql/admin/AdminOrder.graphql?raw';
 import type { TimelineEvent } from '@marketly/web-shared/ui';
@@ -169,8 +170,7 @@ const WARN = /overdue|escalat|exception|failed|declined|late/i;
 export function toTimeline(rows: HistoryRow[], fmt: (iso: string) => string): TimelineEvent[] {
   return rows.map((r, i) => {
     // GraphQL actor kinds are upper case (SYSTEM, CUSTOMER …); older records have no name.
-    const kind = r.actor?.kind?.toLowerCase();
-    const who = r.actor?.name ?? (kind === 'system' ? 'System' : kind === 'seller' ? 'Seller' : kind === 'customer' ? 'Customer' : kind === 'staff' ? 'Staff' : '');
+    const who = actorLabel(r.actor);
     return { t: r.label, d: `${fmt(r.at)}${who ? ` · ${who}` : ''}`, state: WARN.test(r.label) ? 'warn' : i === 0 ? 'current' : 'done', body: r.detail ?? undefined };
   });
 }
