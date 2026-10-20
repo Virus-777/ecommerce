@@ -121,6 +121,19 @@ needs one that is off, and names it.
 **Remove something from the spec.** Remove it, regenerate, delete the code the compiler then flags.
 Removing a collection or an index from the spec does not delete it from an existing database (§6).
 
+**Live notifications.** Seller Center and Admin Center keep a stream open (`GET /api/seller|admin/notifications/stream`,
+Server-Sent Events; wire format and client rules in [docs/api/README.md](api/README.md), "Live notifications").
+The kernel part is `backend/src/kernel/http/event-stream.ts`: any spec endpoint with `"response": "event-stream"`
+gets an open stream; every 25 s it writes `: ping` and re-checks the caller (`streamGuard` in
+`kernel/auth/chain.ts`: revoked → `signed_out`, staff session idle → `session_idle`, through
+`identity.staffSessionState`, which never records activity), and shutdown ends every stream with `restart`. The
+notifications part is `modules/notifications/app/live.ts`: `LiveHub` holds the open streams and the sender
+(`app/sender.ts`) hands it every notice right after the transaction that saved it, so the stream sends exactly
+what the inbox shows. The hub lives in memory in one process: a notice created in another process (a separate
+jobs process, a second API server) reaches only the streams open in that process. Today's deployment is one
+process; if it is ever split, serve the streams from the process that sends the notices, or pass notices between
+processes (MongoDB change streams on `notifications.notices` would do).
+
 ## 6. MongoDB
 
 **Server.** Production needs a MongoDB 6.0 or newer **replica set**: transactions need one, even with a single

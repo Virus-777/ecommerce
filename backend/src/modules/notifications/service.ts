@@ -13,6 +13,7 @@ import { Announcements } from './app/announcements.js';
 import { Consumers } from './app/consumers.js';
 import { Core } from './app/core.js';
 import { Inbox, type Reader } from './app/inbox.js';
+import { LiveHub } from './app/live.js';
 import { Preferences } from './app/preferences.js';
 import { Sender, type Target } from './app/sender.js';
 import { Webhooks } from './app/webhooks.js';
@@ -74,11 +75,14 @@ export class NotificationsService implements NotificationsPublicApi {
   readonly webhooks: Webhooks;
   /** Messages from Marketly staff to sellers (live topics) */
   readonly announcements: Announcements;
+  /** Open live inbox streams; the sender pushes each saved notice to them */
+  readonly live: LiveHub;
 
   constructor(protected readonly deps: NotificationsServiceDeps) {
     this.core = new Core(deps);
-    this.sender = new Sender(this.core);
     this.inbox = new Inbox(this.core);
+    this.live = new LiveHub({ core: this.core, inbox: this.inbox });
+    this.sender = new Sender(this.core, this.live);
     this.prefs = new Preferences(this.core, this.inbox);
     this.admin = new Admin(this.core, this.sender);
     this.consumers = new Consumers(this.core, this.sender, (input, sendAt, by, claimKey) => this.#schedule(input, sendAt, by, claimKey));

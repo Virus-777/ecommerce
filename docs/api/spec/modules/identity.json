@@ -246,6 +246,14 @@
       "usedBy": [
         "kernel"
       ]
+    },
+    {
+      "name": "staffSessionState",
+      "signature": "(sessionId: uuid) => { live: bool, reason?: 'revoked' | 'expired' | 'idle' | 'unknown' }",
+      "desc": "The same answer as touchStaffSession without recording activity (never writes sessions.last_active_at). Open live notification streams (notifications streamStaffInbox) check it at every heartbeat (each server caches it 5 s per session), so a stream left open does not keep an inactive staff member signed in: staffIdleMinutes still applies.",
+      "usedBy": [
+        "kernel"
+      ]
     }
   ],
   "types": {

@@ -15,6 +15,7 @@ import type { Scope } from '../auth/scope.js';
 import { notImplemented as notImplementedError } from '../errors/index.js';
 import type { PageRequest } from '../lib/pagination.js';
 import type { Area, EndpointDef, EndpointTable } from '../spec/define.js';
+import type { EventStream } from './event-stream.js';
 
 type Out<F> = F extends () => infer S ? (S extends z.ZodType ? z.output<S> : never) : undefined;
 
@@ -50,6 +51,11 @@ export interface HandlerInput<E extends EndpointDef> {
   idempotencyKey: E['idempotent'] extends true ? string : undefined;
   /** Operation id, e.g. wishlist.saveItem */
   operationId: string;
+  /**
+   * Event-stream endpoints ("response": "event-stream"): the open stream (event-stream.ts). Send, subscribe and
+   * return; unsubscribe in stream.onClose. The handler returns nothing: the stream is the response.
+   */
+  stream: E['responseFormat'] extends 'event-stream' ? EventStream : undefined;
   request: FastifyRequest;
   reply: FastifyReply;
 }

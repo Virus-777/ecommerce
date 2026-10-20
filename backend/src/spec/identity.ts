@@ -1133,6 +1133,8 @@ export interface IdentityPublicApi {
   verifyRefreshToken(refreshToken: string): Promise<{ sessionId: string, accountId?: string, audience: string, kind: string } | null>;
   /** Middleware check on every admin request (each server caches the answer 5 s per session): whether the staff session is still live (not revoked, not past its expiry or absolute limit, and active within staffIdleMinutes), recording the activity (sessions.last_active_at, at most once a minute) that keeps it from going idle. Used by: kernel. */
   touchStaffSession(sessionId: string): Promise<{ live: boolean, reason?: 'revoked' | 'expired' | 'idle' | 'unknown' }>;
+  /** The same answer as touchStaffSession without recording activity (never writes sessions.last_active_at). Open live notification streams (notifications streamStaffInbox) check it at every heartbeat (each server caches it 5 s per session), so a stream left open does not keep an inactive staff member signed in: staffIdleMinutes still applies. Used by: kernel. */
+  staffSessionState(sessionId: string): Promise<{ live: boolean, reason?: 'revoked' | 'expired' | 'idle' | 'unknown' }>;
 }
 
 /* ------------------------------------------------------------------ tables (row types) */
@@ -2259,7 +2261,7 @@ export const spec = defineModuleSpec({
   summary: "Who someone is and how they prove it: accounts for customers, seller members and staff, credentials, email verification, sessions and refresh tokens for the website and the Android app, password recovery, 2-step verification, signed-in devices, guest sessions and the security activity log.",
   dependsOn: [],
   optionalDeps: ["audit","sellers","customers","access"],
-  publicApi: ["getAccount","getAccounts","findAccountByEmail","inviteStaff","inviteSellerMember","revokeInvitation","grantSellerContext","revokeSellerContext","revokeSessions","grantGuestOrderAccess","hasGuestOrderAccess","issueOrderLink","closeAccount","sendPasswordReset","startPhoneVerification","verifyReauthToken","accountSecurityOf","consumeReauthToken","releaseReauthToken","revocationsSince","verifyRefreshToken","touchStaffSession"],
+  publicApi: ["getAccount","getAccounts","findAccountByEmail","inviteStaff","inviteSellerMember","revokeInvitation","grantSellerContext","revokeSellerContext","revokeSessions","grantGuestOrderAccess","hasGuestOrderAccess","issueOrderLink","closeAccount","sendPasswordReset","startPhoneVerification","verifyReauthToken","accountSecurityOf","consumeReauthToken","releaseReauthToken","revocationsSince","verifyRefreshToken","touchStaffSession","staffSessionState"],
   permissions: [
     {
       "key": "identity.accounts.view",

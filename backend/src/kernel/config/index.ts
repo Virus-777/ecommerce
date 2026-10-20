@@ -126,6 +126,8 @@ export interface Config {
   jobsBackend: 'inprocess' | 'mongo';
   deployId: string | undefined;
   graphqlPersistedOnly: boolean;
+  /** Event streams (kernel/http/event-stream.ts): a `: ping` and a sign-in check this often. Not an env setting; tests make it short */
+  eventStreamHeartbeatMs: number;
   auth: { jwks: string | undefined; issuer: string; revocationPollMs: number; signingJwk?: Jwk & { kid?: string } };
   /** Root secret for module-signed links and tokens (derive per purpose with secretFor) */
   appSecret: string;
@@ -199,6 +201,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     jobsBackend: e.JOBS_BACKEND ?? (e.MONGODB_URI ? 'mongo' : 'inprocess'),
     deployId: e.DEPLOY_ID || undefined,
     graphqlPersistedOnly: e.GRAPHQL_PERSISTED_ONLY ?? prod,
+    // under the 30–60 s idle timeouts of common proxies and firewalls
+    eventStreamHeartbeatMs: 25_000,
     auth: { jwks: e.AUTH_JWKS || undefined, issuer: e.AUTH_ISSUER, revocationPollMs: e.REVOCATION_POLL_MS, signingJwk: e.AUTH_SIGNING_JWK ? JSON.parse(e.AUTH_SIGNING_JWK) : undefined },
     appSecret: e.APP_SECRET ?? (devTokens ? 'dev-app-secret-not-for-production-use-0000' : ''),
     publicUrls: {

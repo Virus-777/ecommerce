@@ -157,6 +157,11 @@ export class AuthChain {
   readonly customers: TtlCache<string | null>;
   /** Staff session liveness (identity.touchStaffSession), 5 s per session; null = identity did not answer */
   readonly staffSessions: TtlCache<StaffSessionState | null>;
+  /**
+   * The same liveness for open event streams (identity.staffSessionState, which never records activity), 5 s per
+   * session. A cache of its own: a stream's check must never stand in for, or be served by, the touching one.
+   */
+  readonly staffSessionStates: TtlCache<StaffSessionState | null>;
   /** The Android minimum version (settings), 60 s */
   readonly androidMinimum: TtlCache<Awaited<ReturnType<Authorities['androidMinimum']>>>;
 
@@ -169,6 +174,7 @@ export class AuthChain {
     this.members = new TtlCache(k.clock);
     this.customers = new TtlCache(k.clock, false); // a customer created after the first request must be in scope at once
     this.staffSessions = new TtlCache(k.clock, false, STAFF_SESSION_CACHE_MS);
+    this.staffSessionStates = new TtlCache(k.clock, false, STAFF_SESSION_CACHE_MS);
     this.androidMinimum = new TtlCache(k.clock);
   }
 
@@ -281,6 +287,22 @@ export class AuthChain {
     if (state.live) return;
     if (state.reason === 'idle') throw new AppError('UNAUTHORIZED', 'Signed out after a period without activity; sign in again', { reason: 'session_idle' });
     throw tokenRejected('revoked');
+  }
+
+  /**
+   * An open event stream (kernel/http/event-stream.ts) asks this at every heartbeat: may the caller still listen?
+   * The connect request went through authenticate() above (and counted as activity once); these checks don't
+   * touch the session, so staffIdleMinutes still signs out a person who only has a stream open.
+   * The access token is not checked again: it expires long before a stream ends, and the session is what counts.
+   */
+  async streamGuard(request: FastifyRequest): Promise<'signed_out' | 'session_idle' | null> {
+    const claims = request.auth?.claims;
+    if (!claims) return null;
+    if (this.k.revocations.isRevoked(claims)) return 'signed_out';
+    if (claims.aud !== 'admin' || claims.kind !== 'staff' || claims.dev) return null; // seller streams end with max_age instead
+    const state = await this.staffSessionStates.get(claims.sid, () => this.k.authorities.staffSessionState(claims.sid));
+    if (!state || state.live) return null; // no answer from identity: keep the stream, ask again at the next heartbeat
+    return state.reason === 'idle' ? 'session_idle' : 'signed_out';
   }
 
   /* ---------------------------------------------------------------- caller checks (REST endpoints and GraphQL) */

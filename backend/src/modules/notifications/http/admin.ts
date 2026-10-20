@@ -1,5 +1,6 @@
 import { routes } from '../../../kernel/http/index.js';
 import { endpoints } from '../../../spec/notifications.js';
+import { lastEventIdOf } from '../app/live.js';
 import type { NotificationsService } from '../service.js';
 import { accountOf } from './store.js';
 
@@ -13,6 +14,8 @@ export const adminRoutes = (service: NotificationsService) =>
     listStaffInbox: async ({ principal, query, page }) => service.listInboxFor({ principal }, { group: query.area, unreadOnly: query.unreadOnly, view: query.view, archived: query.archived }, page),
     /** GET /inbox/summary: Counts and today's routing for my roles */
     getStaffInboxSummary: async ({ principal }) => service.inbox.staffSummary({ principal }),
+    /** GET /stream: Live notices for my Admin Center inbox (Server-Sent Events); no max age (the kernel ends it when the session ends or goes idle) */
+    streamStaffInbox: async ({ principal, stream, request }) => service.live.serve({ principal }, stream, lastEventIdOf(request.headers)),
     /** POST /inbox/{id}/read: Mark one notice as read (for me) */
     markStaffRead: async ({ principal, params }) => service.inbox.markRead({ principal }, params.id),
     /** POST /inbox/read-all: Mark all as read (for me) */

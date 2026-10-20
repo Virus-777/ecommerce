@@ -47,6 +47,7 @@ Who is told what, on which channel: notification topics for customers, sellers a
 |---|---|---|---|---|
 | GET | `/api/seller/notifications/inbox` | Seller workspace notifications | seller | Page<Notice> |
 | GET | `/api/seller/notifications/inbox/summary` | Unread, needs action (sorted by deadline) | seller | `InboxSummary` |
+| GET | `/api/seller/notifications/stream` | Live notices for my Seller Center inbox (Server-Sent Events) | seller | Server-Sent Events |
 | POST | `/api/seller/notifications/inbox/{id}/read` | Mark one notice as read (for me) | seller | `Notice` |
 | POST | `/api/seller/notifications/inbox/{id}/archive` | Archive one notice (for me) | seller | `Notice` |
 | POST | `/api/seller/notifications/inbox/archive-all` | Archive all (or one group) for me | seller | `{ group: string?, readOnly: bool? }` → `{ updated: int }` |
@@ -62,6 +63,7 @@ Who is told what, on which channel: notification topics for customers, sellers a
 |---|---|---|---|---|
 | GET | `/api/admin/notifications/inbox` | My staff notices (routed by role, including roles I cover as backup) | staff | Page<Notice> |
 | GET | `/api/admin/notifications/inbox/summary` | Counts and today's routing for my roles | staff | `StaffInboxSummary` |
+| GET | `/api/admin/notifications/stream` | Live notices for my Admin Center inbox (Server-Sent Events) | staff | Server-Sent Events |
 | POST | `/api/admin/notifications/inbox/{id}/read` | Mark one notice as read (for me) | staff | `Notice` |
 | POST | `/api/admin/notifications/inbox/{id}/archive` | Archive one notice (for me) | staff | `Notice` |
 | POST | `/api/admin/notifications/inbox/archive-all` | Archive all (or one area) for me | staff | `{ area: string?, readOnly: bool? }` → `{ updated: int }` |

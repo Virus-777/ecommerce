@@ -106,7 +106,11 @@ Used in `types`, `body`, `query`, event `payload` and inline objects.
   "paging": true,                          // adds cursor/page/limit (1–100, default 24) and wraps response in Page<…>
   "body": { "note": "string?" },           // type name, inline object, "binary" (raw bytes, any content type; the handler
                                            //   gets the request stream, never buffered, and enforces its own limit), or omitted
-  "response": "Product",                   // type, "Product[]", inline object, or null for no body (204 unless status says otherwise, e.g. 202)
+  "response": "Product",                   // type, "Product[]", inline object, or null for no body (204 unless status says otherwise, e.g. 202),
+                                           //   or "event-stream": the response stays open and carries Server-Sent Events (text/event-stream,
+                                           //   status 200). GET only, no paging, not idempotent, no body; name the event types in "desc".
+                                           //   The handler gets `stream` (send, comment, end, maxAge, onClose; backend kernel/http/event-stream.ts),
+                                           //   which pings every 25 s and ends when the session is revoked or a staff session goes idle
   "status": 200,                           // success status (default 200; 201 create; 202 accepted; 204 no content)
   "errors": ["ILLEGAL_TRANSITION"],        // codes from common.json or module-specific UPPER_SNAKE
   "idempotent": false,                     // true → Idempotency-Key header required (rules in docs/api/README.md, Idempotency)

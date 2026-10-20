@@ -214,6 +214,19 @@ export class NotificationsRepository {
     return notice ? (await this.#withReadState(owner.accountId, [notice]))[0] : undefined;
   }
 
+  /**
+   * Live stream catch-up (Last-Event-ID): the inbox's notices created after the notice `afterId`, none older than
+   * `since`, the newest `limit` of them, oldest first. Nothing when `afterId` is not a notice of this inbox.
+   */
+  async inboxAfter(owner: InboxOwner, afterId: string, since: Date, limit: number): Promise<InboxRow[]> {
+    const anchor = await this.#t.notices.findOne({ $and: [await this.#inboxBase(owner), { id: afterId }] });
+    if (!anchor) return [];
+    // after the anchor in inbox order (created_at, then id: one send creates several notices at the same time)
+    const after = { $or: [{ created_at: { $gt: anchor.created_at } }, { created_at: anchor.created_at, id: { $gt: anchor.id } }] };
+    const rows = await this.#t.notices.find({ $and: [await this.#inboxFilter(owner, {}), after, { created_at: { $gte: since } }] }, { sort: { created_at: -1, id: -1 }, limit });
+    return (await this.#withReadState(owner.accountId, rows)).reverse();
+  }
+
   /** My recipient row's read state back to unread */
   async markUnread(owner: InboxOwner, noticeId: string): Promise<number> {
     return this.#t.recipients.updateMany({ account_id: owner.accountId, notice_id: noticeId, read_at: { $ne: null } }, { read_at: null });

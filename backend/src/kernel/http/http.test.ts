@@ -482,6 +482,8 @@ describe('browsers (CORS) and response headers', () => {
     const plain = await preflight('/api/public/demo/info', STORE_ORIGIN, 'GET');
     expect(plain.headers['access-control-allow-origin']).toBe(STORE_ORIGIN);
     expect(plain.headers['access-control-allow-credentials']).toBeUndefined();
+    // live notification streams reconnect with Last-Event-ID across origins
+    expect(String(plain.headers['access-control-allow-headers'])).toContain('last-event-id');
     // the real response carries the same answer as its preflight
     const started = await app.inject({ method: 'POST', url: '/api/public/demo/app-sessions', headers: { origin: STORE_ORIGIN, 'x-app-proof': 'dev' } });
     expect(started.headers['access-control-allow-credentials']).toBe('true');
