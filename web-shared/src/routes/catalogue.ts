@@ -158,6 +158,7 @@ export const SCREENS = [
   { id: 'admin/settings', app: 'admin', area: 'admin', group: "Reports and settings", title: "Settings", path: '/settings', file: 'admin-settings', views: [{ slug: '', name: "All settings" }, { slug: 'review-change', name: "Review change" }] },
   { id: 'admin/notifications', app: 'admin', area: 'admin', group: "Reports and settings", title: "Notifications", path: '/notifications', file: 'admin-notifications', views: [{ slug: '', name: "Matrix" }, { slug: 'edit-template', name: "Edit template" }] },
   { id: 'admin/audit', app: 'admin', area: 'admin', group: "Reports and settings", title: "Action history", path: '/audit', file: 'admin-audit', views: [] },
+  { id: 'admin/backups', app: 'admin', area: 'admin', group: "Reports and settings", title: "Backups", path: '/backups', file: '', views: [] },
   { id: 'admin/audit-entry', app: 'admin', area: 'admin', group: "Reports and settings", title: "Action history entry", path: '/audit/:id', sample: { id: 'AE-261008-0932' }, file: '', views: [] },
   { id: 'ops/queues', app: 'admin', area: 'ops', group: "Work queues", title: "My work queues", path: '/ops', file: 'ops-queues', views: [] },
   { id: 'ops/inventory', app: 'admin', area: 'ops', group: "Work queues", title: "Official Store stock", path: '/ops/inventory', file: 'ops-inventory', views: [{ slug: '', name: "Stock" }, { slug: 'adjust-stock', name: "Adjust stock" }] },

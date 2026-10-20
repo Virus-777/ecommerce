@@ -6,7 +6,7 @@ import { Alert, Button, Dialog, Field, TextInput } from '@marketly/web-shared/ui
 // authenticator). The request is sent as usual first; when it answers 403 STEP_UP_REQUIRED, the person types
 // their password, POST /api/admin/identity/reauth { purpose, password } gives a token (one use, 5 minutes, this
 // purpose and session), and the request is sent again with `reauthToken` in its JSON body.
-// Purposes: role-grant, staff-account, payout-destination, approval.
+// Purposes: role-grant, staff-account, payout-destination, approval, backup-download, backup-restore.
 
 /** Thrown when the person closes the password prompt; callers ignore it. */
 export class StepUpCancelled extends Error {
@@ -31,7 +31,9 @@ const PURPOSE_TEXT: Record<string, string> = {
   'role-grant': 'Changing roles and permissions',
   'staff-account': 'Changing a staff account',
   'payout-destination': 'Deciding a payout account change',
-  approval: 'Approving above your limit',
+  approval: 'Approving this request',
+  'backup-download': 'Downloading a backup (all the data)',
+  'backup-restore': 'Asking to restore a backup',
 };
 
 /**

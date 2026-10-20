@@ -169,7 +169,7 @@ export const BUILT_INS: BuiltIn[] = [
 /** Modules whose runtime settings change what sellers sell, ship or earn: changes are announced to sellers. */
 const SELLER_FACING_MODULES = new Set(['sellers', 'offers', 'orders', 'shipping', 'returns', 'finance', 'catalog', 'inventory', 'promotions', 'advertising', 'fulfillment-service']);
 /** Modules whose runtime settings touch money, security or authority: a second reviewer approves changes. */
-const SENSITIVE_MODULES = new Set(['access', 'identity', 'finance', 'payments', 'wallet', 'audit', 'trust']);
+const SENSITIVE_MODULES = new Set(['access', 'identity', 'finance', 'payments', 'wallet', 'audit', 'trust', 'backups']);
 
 const isMoney = (v: unknown): v is { amount: number; currency: string } =>
   !!v && typeof v === 'object' && !Array.isArray(v) && typeof (v as { amount?: unknown }).amount === 'number' && typeof (v as { currency?: unknown }).currency === 'string' && Object.keys(v).length === 2;

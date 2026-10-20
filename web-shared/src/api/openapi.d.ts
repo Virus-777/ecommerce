@@ -2064,6 +2064,240 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/backups/backups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Backups on the server, the schedule and what the backup service is doing
+         * @description **Permission:** `backups.view`
+         *
+         *     **Screens:** admin/backups
+         */
+        get: operations["backups.getBackups"];
+        put?: never;
+        /**
+         * Back up now
+         * @description Asks the server's backup service for a backup (database, uploaded files, settings and keys). One operation runs at a time: OPERATION_IN_PROGRESS while another backup or a restore is queued or running.
+         *
+         *     **Permission:** `backups.create`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Screens:** admin/backups
+         */
+        post: operations["backups.startBackup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/backups/backups/{id}/download-links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Download a backup (database and uploaded files)
+         * @description Signed links valid for 15 minutes. The settings and keys file is never offered: it holds APP_SECRET; copy it by USB on the server. Needs the password again (reauthToken, purpose backup-download).
+         *
+         *     **Permission:** `backups.download`
+         *
+         *     **Step-up:** single-use re-auth token in the body (purpose `backup-download`)
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Screens:** admin/backups
+         */
+        post: operations["backups.createBackupDownloadLinks"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/backups/backups/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start uploading a backup
+         * @description Then send the database file (<date>.archive.gz) and, optionally, the uploaded-files file (<date>.media.tar.gz) to the upload's two PUT endpoints.
+         *
+         *     **Permission:** `backups.restore`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Screens:** admin/backups
+         */
+        post: operations["backups.createBackupUpload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/backups/backups/uploads/{id}/database": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Send the database file of an uploaded backup
+         * @description The raw bytes of <date>.archive.gz (a gzip file), streamed to the server's disk; up to backups.maxUploadGb.
+         *
+         *     **Permission:** `backups.restore`
+         *
+         *     **Screens:** admin/backups
+         */
+        put: operations["backups.uploadBackupDatabase"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/backups/backups/uploads/{id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Send the uploaded-files file of an uploaded backup
+         * @description The raw bytes of <date>.media.tar.gz (a gzip file); up to backups.maxUploadGb.
+         *
+         *     **Permission:** `backups.restore`
+         *
+         *     **Screens:** admin/backups
+         */
+        put: operations["backups.uploadBackupFiles"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/backups/backups/uploads/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete an uploaded backup
+         * @description **Permission:** `backups.restore`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Screens:** admin/backups
+         */
+        delete: operations["backups.deleteBackupUpload"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/backups/backups/restores": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask to restore a backup
+         * @description Replaces the whole database and the uploaded files with the backup; everything done since is lost. Needs the password again (reauthToken, purpose backup-restore), confirm = RESTORE and a reason. Always needs a second staff member's approval (access action backups.restore, who confirms with their password too). After the approval the backup service takes a safety backup, stops the server, restores, and starts it again (a few minutes).
+         *
+         *     **Permission:** `backups.restore`
+         *
+         *     **Step-up:** single-use re-auth token in the body (purpose `backup-restore`)
+         *
+         *     **Approval:** Always a second staff member (Platform Administrator or another Business Owner), who confirms with their password
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Screens:** admin/backups, admin/inbox
+         */
+        post: operations["backups.requestRestore"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/backups/backups/restores/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Withdraw a restore that is still waiting for approval
+         * @description **Permission:** `backups.restore`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Screens:** admin/backups
+         */
+        post: operations["backups.cancelRestore"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/backups/backups/operations/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One backup, restore or schedule change
+         * @description **Permission:** `backups.view`
+         *
+         *     **Screens:** admin/backups
+         */
+        get: operations["backups.getBackupOperation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/store/cart/cart": {
         parameters: {
             query?: never;
@@ -30711,6 +30945,116 @@ export interface components {
             reason?: string | null;
             change: components["schemas"]["audit.ChangeText"];
         };
+        "backups.BackupFile": {
+            name: string;
+            sizeBytes: number;
+        };
+        "backups.Backup": {
+            /** @description The backup's time stamp, e.g. 2026-10-15_0230 (server time); an uploaded backup ends in -uploaded */
+            id: string;
+            /** Format: date-time */
+            createdAt: string;
+            /**
+             * @description safety: taken automatically just before a restore
+             * @enum {string}
+             */
+            kind: "nightly" | "manual" | "safety" | "uploaded";
+            database: components["schemas"]["backups.BackupFile"];
+            /** @description The uploaded files (media); missing in a database-only backup */
+            files?: components["schemas"]["backups.BackupFile"] | null;
+            /** @description The settings and keys file is on the server. It is never downloadable from the web: copy it by USB */
+            hasSettingsAndKeys: boolean;
+            note?: string | null;
+            requestedBy?: components["schemas"]["Actor"] | null;
+        };
+        "backups.BackupUpload": {
+            /** Format: uuid */
+            id: string;
+            label: string;
+            /** @enum {string} */
+            state: "receiving" | "ready" | "failed";
+            database?: components["schemas"]["backups.BackupFile"] | null;
+            files?: components["schemas"]["backups.BackupFile"] | null;
+            uploadedBy: components["schemas"]["Actor"];
+            /** Format: date-time */
+            createdAt: string;
+            error?: string | null;
+        };
+        "backups.BackupOperation": {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            kind: "backup" | "restore" | "schedule";
+            /**
+             * @description A restore waits for the second approval; the server's backup service then runs it (queued → running → done or failed)
+             * @enum {string}
+             */
+            state: "waiting_approval" | "queued" | "running" | "done" | "failed" | "rejected" | "cancelled";
+            /** @description backup: the backup made; restore: the backup restored */
+            backupId?: string | null;
+            /**
+             * Format: uuid
+             * @description restore of an uploaded backup
+             */
+            uploadId?: string | null;
+            /** @description restore: the backup taken just before it */
+            safetyBackupId?: string | null;
+            note?: string | null;
+            reason?: string | null;
+            /** @description What the backup service reported (the error when it failed) */
+            message?: string | null;
+            requestedBy: components["schemas"]["Actor"];
+            /** Format: date-time */
+            requestedAt: string;
+            /** Format: date-time */
+            startedAt?: string | null;
+            /** Format: date-time */
+            finishedAt?: string | null;
+            approval?: components["schemas"]["ApprovalInfo"] | null;
+        };
+        "backups.BackupSchedule": {
+            /** @description HH:MM in the market time zone (setting backups.time) */
+            time: string;
+            /** @description Backups older than this are deleted (setting backups.keepDays) */
+            keepDays: number;
+            timeZone: string;
+            /** Format: date-time */
+            nextRunAt?: string | null;
+            /** @description The server's backup service has this schedule (a change is applied within a minute) */
+            applied: boolean;
+        };
+        "backups.BackupOverview": {
+            /** @description False where the server has no backup service (development machines): nothing can be backed up or restored here */
+            available: boolean;
+            unavailableReason?: string | null;
+            backups: components["schemas"]["backups.Backup"][];
+            uploads: components["schemas"]["backups.BackupUpload"][];
+            schedule: components["schemas"]["backups.BackupSchedule"];
+            /** Format: date-time */
+            lastBackupAt?: string | null;
+            /** @description The backup or restore the service is working on (one at a time) */
+            running?: components["schemas"]["backups.BackupOperation"] | null;
+            /** @description A restore waiting for its second approval */
+            pendingRestore?: components["schemas"]["backups.BackupOperation"] | null;
+            recent: components["schemas"]["backups.BackupOperation"][];
+            /** @description e.g. no backup in the last 26 hours; backups are on the same disk as the data */
+            warnings: string[];
+        };
+        "backups.DownloadLink": {
+            /**
+             * Format: uri
+             * @description Signed link (GET), valid for expiresAt
+             */
+            url: string;
+            fileName: string;
+            sizeBytes: number;
+            /** Format: date-time */
+            expiresAt: string;
+        };
+        "backups.BackupDownloadLinks": {
+            database: components["schemas"]["backups.DownloadLink"];
+            files?: components["schemas"]["backups.DownloadLink"] | null;
+        };
         "cart.CartOwner": {
             /** @enum {string} */
             kind: "customer" | "guest";
@@ -35243,10 +35587,10 @@ export interface components {
         };
         "identity.ReauthRequest": {
             /**
-             * @description The reauth step-up purpose of the endpoint that will consume the token: account-closure (customers.requestClosure), email-change, two-step-removal and recovery-codes (identity), business-change, payout-account and seller-closure (sellers); for staff, role-grant (access roles and invitations), staff-account (identity staff accounts and invitations), payout-destination (finance) and approval (approving a request above access stepUpAbove). A token works only for that purpose.
+             * @description The reauth step-up purpose of the endpoint that will consume the token: account-closure (customers.requestClosure), email-change, two-step-removal and recovery-codes (identity), business-change, payout-account and seller-closure (sellers); for staff, role-grant (access roles and invitations), staff-account (identity staff accounts and invitations), payout-destination (finance), approval (approving a request above access stepUpAbove, or one whose action always needs it, e.g. a backup restore), backup-download and backup-restore (backups). A token works only for that purpose.
              * @enum {string}
              */
-            purpose: "account-closure" | "email-change" | "two-step-removal" | "recovery-codes" | "business-change" | "payout-account" | "seller-closure" | "role-grant" | "staff-account" | "payout-destination" | "approval";
+            purpose: "account-closure" | "email-change" | "two-step-removal" | "recovery-codes" | "business-change" | "payout-account" | "seller-closure" | "role-grant" | "staff-account" | "payout-destination" | "approval" | "backup-download" | "backup-restore";
             password?: string | null;
             /** @description Members: a 2-step code instead of the password. Staff always use the password (they have no 2-step) */
             code?: string | null;
@@ -43239,7 +43583,7 @@ export interface components {
             /** @enum {string} */
             kind: "owner_id" | "business_registration" | "tax_form" | "bank_letter" | "proof_of_address" | "category_certificate" | "authorization_letter" | "other";
             /** @description Null when the file is no longer available (deleted, or media could not answer) */
-            file: components["schemas"]["MediaRef"] | null;
+            file?: components["schemas"]["MediaRef"] | null;
             fileName: string;
             sizeBytes: number;
             /** Format: date-time */
@@ -54126,6 +54470,769 @@ export interface operations {
              *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
              */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "backups.getBackups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["backups.BackupOverview"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "backups.startBackup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    note?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Success */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["backups.BackupOperation"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description OPERATION_IN_PROGRESS: Another backup or restore is waiting or running; details.operationId */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description BACKUPS_UNAVAILABLE: This server has no backup service (a development machine, or BACKUP_OPS_DIR is not set) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "backups.createBackupDownloadLinks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    reauthToken: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["backups.BackupDownloadLinks"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description BACKUPS_UNAVAILABLE: This server has no backup service (a development machine, or BACKUP_OPS_DIR is not set) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "backups.createBackupUpload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    label: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["backups.BackupUpload"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description BACKUPS_UNAVAILABLE: This server has no backup service (a development machine, or BACKUP_OPS_DIR is not set) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "backups.uploadBackupDatabase": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** @description The raw bytes (any content type) */
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["backups.BackupUpload"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UPLOAD_TOO_LARGE: The file is larger than backups.maxUploadGb; details.maxBytes */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_A_BACKUP: The uploaded file is not a gzip file made by the backup service */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description BACKUPS_UNAVAILABLE: This server has no backup service (a development machine, or BACKUP_OPS_DIR is not set) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "backups.uploadBackupFiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** @description The raw bytes (any content type) */
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["backups.BackupUpload"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UPLOAD_TOO_LARGE: The file is larger than backups.maxUploadGb; details.maxBytes */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_A_BACKUP: The uploaded file is not a gzip file made by the backup service */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description BACKUPS_UNAVAILABLE: This server has no backup service (a development machine, or BACKUP_OPS_DIR is not set) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "backups.deleteBackupUpload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success, no content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description OPERATION_IN_PROGRESS: Another backup or restore is waiting or running; details.operationId */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "backups.requestRestore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description A backup on the server */
+                    backupId?: string | null;
+                    /**
+                     * Format: uuid
+                     * @description Or an uploaded backup (state ready)
+                     */
+                    uploadId?: string | null;
+                    /** @description The word RESTORE */
+                    confirm: string;
+                    reason: string;
+                    reauthToken: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Success */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["backups.BackupOperation"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description OPERATION_IN_PROGRESS: Another backup or restore is waiting or running; details.operationId */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description BACKUPS_UNAVAILABLE: This server has no backup service (a development machine, or BACKUP_OPS_DIR is not set) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "backups.cancelRestore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["backups.BackupOperation"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "backups.getBackupOperation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["backups.BackupOperation"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -117909,8 +119016,11 @@ export interface operations {
                     /** @description { title, detail, neededFor, documentKind? } */
                     items: unknown[];
                     message: string;
-                    /** Format: date-time */
-                    dueAt: string;
+                    /**
+                     * Format: date-time
+                     * @description Reply deadline; default now + infoRequestDefaultDays
+                     */
+                    dueAt?: string | null;
                     /** @enum {string} */
                     reminder: "three_days_before" | "none";
                 };
