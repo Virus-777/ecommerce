@@ -1039,7 +1039,6 @@ Checked through the access module (limits per role, second reviewer).
 | appealReplyBusinessDays | `3` | duration, business days, 1–… | Appeal review target |
 | reopenWindowDays | `30` | duration, days, 1–… | Reopen a resolved case if the promised remedy did not happen |
 | autoCloseAfterDays | `7` | duration, days, 1–… | Resolved → closed |
-| lateItemRefundAfterDays | `14` | duration, days, 1–…, approval: business owner, seller-visible | Items not shipped this long after the estimate qualify for a full refund (purchase terms) |
 | maxAttachments | `5` | int, 0–20 | Files per message |
 | maxAttachmentMb | `10` | int, MB, 1–… | Size per file |
 | priorityTargetFactors | `{"low":1.5,"medium":1,"high":0.75,"urgent":0.5}` | json, approval: second reviewer | Multiplier on the category's response and resolution targets per case priority (urgent halves them); deadlines are recalculated when the priority changes (decision D-S1) |

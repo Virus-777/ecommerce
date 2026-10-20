@@ -9,7 +9,7 @@ import type { Principal as KernelPrincipal } from '../../../kernel/auth/index.js
 import { tokenSigner } from '../../../kernel/auth/setup.js';
 import { secretFor } from '../../../kernel/lib/secrets.js';
 import { signAccessToken, type AccessClaims, type TokenKind } from '../../../kernel/auth/tokens.js';
-import { AppError } from '../../../kernel/errors/index.js';
+import { AppError, isNotImplemented } from '../../../kernel/errors/index.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type { ModuleContext } from '../../../kernel/module-system/index.js';
@@ -269,7 +269,12 @@ export class Core {
 
   /** Material staff actions also go to audit (optional dependency; security_events always has them). */
   async audit(entry: Omit<audit.RecordInput, 'actor' | 'module' | 'requestId' | 'category'> & { category?: audit.RecordInput['category'] }, by: { actor: common.Actor; requestId?: string; client?: ClientInfo }) {
-    await this.ctx.tryUse('audit')?.record({ category: 'security', ...entry, actor: by.actor, module: this.ctx.name, requestId: by.requestId ?? null, ip: by.client?.ip ?? null });
+    try {
+      await this.ctx.tryUse('audit')?.record({ category: 'security', ...entry, actor: by.actor, module: this.ctx.name, requestId: by.requestId ?? null, ip: by.client?.ip ?? null });
+    } catch (err) {
+      // the change is committed; a missing audit entry is logged, never turned into a failed request
+      this.ctx.log[isNotImplemented(err) ? 'debug' : 'error']({ err, action: entry.action }, 'audit entry not recorded');
+    }
   }
 
   async securityEvent(

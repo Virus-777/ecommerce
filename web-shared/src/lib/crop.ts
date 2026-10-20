@@ -36,15 +36,6 @@ export async function loadImage(file: Blob): Promise<LoadedImage> {
   }
 }
 
-/** The largest centred rect of the given aspect ratio inside the image. */
-export function centredCrop(img: { width: number; height: number }, ratio: { width: number; height: number }): CropRect {
-  const want = ratio.width / ratio.height;
-  const have = img.width / img.height;
-  const width = have > want ? img.height * want : img.width;
-  const height = have > want ? img.height : img.width / want;
-  return { x: (img.width - width) / 2, y: (img.height - height) / 2, width, height };
-}
-
 function canvas(width: number, height: number): HTMLCanvasElement {
   const c = document.createElement('canvas');
   c.width = width;

@@ -1,4 +1,6 @@
 /** Product drafts (sellers and the Official Store), submission for review and the automated submission checks. */
+import { stringList } from '../../../kernel/lib/text.js';
+import { slugify } from '../../../kernel/lib/text.js';
 import { AppError, isAppError } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import type * as common from '../../../spec/common.js';
@@ -17,12 +19,11 @@ import {
   PARCEL_COLUMNS,
   PARCEL_FIELDS,
   sameOptions,
-  slugify,
   titleSimilarity,
   words,
 } from '../domain/rules.js';
 import { productReviewMachine, publicationMachine } from '../domain/state-machines.js';
-import { imageRulesOfRow, stringMap, strings } from '../mappers.js';
+import { imageRulesOfRow, stringMap } from '../mappers.js';
 import type { BrandRow, CheckRow, ProductRow, SubmissionRow, VariantRow } from '../ports.js';
 import { GtinTakenError, type CatalogRepository } from '../repository.js';
 import { invalid, notFound, type By, type ReviewClock, type Taxonomy } from './base.js';
@@ -127,16 +128,16 @@ export class CatalogProducts extends CatalogTaxonomy {
     if (title.length > 200) throw invalid('title', 'The title is too long (200 characters at most)');
     const description = (keep(body.description, existing?.description) ?? '').trim();
     if (description.length > 10_000) throw invalid('description', 'The description is too long (10,000 characters at most)');
-    const keyFeatures = (keep(body.keyFeatures, existing ? strings(existing.key_features) : []) ?? []).map((f) => f.trim()).filter(Boolean);
+    const keyFeatures = (keep(body.keyFeatures, existing ? stringList(existing.key_features) : []) ?? []).map((f) => f.trim()).filter(Boolean);
     if (keyFeatures.length > 20) throw invalid('keyFeatures', 'Up to 20 key features');
-    const includedItems = (keep(body.includedItems, existing ? strings(existing.included_items) : []) ?? []).map((f) => f.trim()).filter(Boolean);
+    const includedItems = (keep(body.includedItems, existing ? stringList(existing.included_items) : []) ?? []).map((f) => f.trim()).filter(Boolean);
     if (includedItems.length > 50) throw invalid('includedItems', 'Up to 50 items in the box');
     const specs = Object.fromEntries(
       Object.entries(keep(body.specs, existing ? stringMap(existing.specs) : {}) ?? {})
         .map(([k, v]) => [k.trim(), String(v ?? '').trim()])
         .filter(([k, v]) => k && v),
     );
-    const imageIds = keep(body.imageIds, existing ? strings(existing.media_ids) : []) ?? [];
+    const imageIds = keep(body.imageIds, existing ? stringList(existing.media_ids) : []) ?? [];
     if (new Set(imageIds).size !== imageIds.length) throw invalid('imageIds', 'An image is listed twice');
     const maxImages = await this.ctx.settings.get('maxImagesPerProduct');
     if (imageIds.length > maxImages) throw invalid('imageIds', `Up to ${maxImages} images per product`);
@@ -219,7 +220,7 @@ export class CatalogProducts extends CatalogTaxonomy {
       id: productId,
       ref: existing?.ref ?? (await this.ctx.refs.next('PRD', { daily: false })),
       title,
-      slug: slugify(title),
+      slug: slugify(title, { fallback: 'item' }),
       brand_id: brandId,
       category_id: categoryId,
       description,
@@ -244,7 +245,7 @@ export class CatalogProducts extends CatalogTaxonomy {
       updated_at: now,
       listed_at: existing?.listed_at ?? null,
       // images still to re-crop: those the product keeps (a replaced image is gone from the list)
-      recrop_media_ids: keptRecrops(existing, [...imageIds, ...variants.flatMap((v) => strings(v.media_ids))]) as never,
+      recrop_media_ids: keptRecrops(existing, [...imageIds, ...variants.flatMap((v) => stringList(v.media_ids))]) as never,
     };
     row.content_score = (await this.completenessOf([row], variants, tax)).get(row.id)!.score;
 
@@ -253,9 +254,9 @@ export class CatalogProducts extends CatalogTaxonomy {
     const usage = { refId: productId, refLabel: title };
     const swaps = [];
     try {
-      swaps.push(await this.swapMedia(existing ? strings(existing.media_ids) : [], imageIds, 'product_image', 'imageIds', usage, mediaOwner));
+      swaps.push(await this.swapMedia(existing ? stringList(existing.media_ids) : [], imageIds, 'product_image', 'imageIds', usage, mediaOwner));
       swaps.push(await this.swapMedia([existing?.video_media_id ?? null], [videoId], 'product_video', 'videoId', usage, mediaOwner));
-      swaps.push(await this.swapMedia(currentVariants.flatMap((v) => strings(v.media_ids)), variants.flatMap((v) => strings(v.media_ids)), 'variant_image', 'variants.imageIds', usage, mediaOwner));
+      swaps.push(await this.swapMedia(currentVariants.flatMap((v) => stringList(v.media_ids)), variants.flatMap((v) => stringList(v.media_ids)), 'variant_image', 'variants.imageIds', usage, mediaOwner));
     } catch (err) {
       for (const s of swaps) await s.undo();
       throw err;
@@ -365,9 +366,9 @@ export class CatalogProducts extends CatalogTaxonomy {
     await this.repo.transaction((tx) => tx.deleteDraftProduct(id));
     await this.detachAll(
       [
-        ...strings(row.media_ids).map((assetId) => ({ assetId, kind: 'product_image' })),
+        ...stringList(row.media_ids).map((assetId) => ({ assetId, kind: 'product_image' })),
         ...(row.video_media_id ? [{ assetId: row.video_media_id, kind: 'product_video' }] : []),
-        ...variants.flatMap((v) => strings(v.media_ids)).map((assetId) => ({ assetId, kind: 'variant_image' })),
+        ...variants.flatMap((v) => stringList(v.media_ids)).map((assetId) => ({ assetId, kind: 'variant_image' })),
       ],
       id,
     );
@@ -444,7 +445,7 @@ export class CatalogProducts extends CatalogTaxonomy {
   }
 
   private async freeBrandSlug(tx: CatalogRepository, name: string) {
-    const root = slugify(name);
+    const root = slugify(name, { fallback: 'item' });
     for (let i = 1; ; i++) {
       const slug = i === 1 ? root : `${root}-${i}`;
       if (!(await tx.brandSlugTaken(slug))) return slug;
@@ -596,7 +597,7 @@ export class CatalogProducts extends CatalogTaxonomy {
     const ruleList = standard ? imageRulesOfRow(standard.rules) : [];
     const blocking = imageRulesOf(ruleList, 'blocking');
     const warning = imageRulesOf(ruleList, 'warning');
-    const images = strings(p.media_ids);
+    const images = stringList(p.media_ids);
     const minCount = Math.max(standard?.min_count ?? 1, blocking?.minCount ?? 1);
     const details: string[] = [];
     const evidence: ProductCheckEvidence[] = [];
@@ -657,7 +658,7 @@ export class CatalogProducts extends CatalogTaxonomy {
   }
 
   private claimCheck(p: ProductRow): CheckResult {
-    const hits = findClaims({ title: p.title, keyFeatures: strings(p.key_features), description: p.description });
+    const hits = findClaims({ title: p.title, keyFeatures: stringList(p.key_features), description: p.description });
     if (!hits.length) return { kind: 'prohibited_claim', result: 'pass', message: 'No prohibited claims found', details: [], evidence: [] };
     const medical = hits.some((h) => h.kind === 'medical');
     const label: Record<string, string> = { title: 'title', keyFeatures: 'key features', description: 'description' };
@@ -745,7 +746,7 @@ export function currentListPrice(v: VariantRow | undefined): common.Money | null
 
 /** The images still to re-crop: the product's flagged images that it (or a variant) still uses */
 function keptRecrops(existing: ProductRow | null, used: string[]): string[] {
-  return strings(existing?.recrop_media_ids).filter((id) => used.includes(id));
+  return stringList(existing?.recrop_media_ids).filter((id) => used.includes(id));
 }
 
 /** Staff list price: whole minor units above zero in the market currency; null clears it */

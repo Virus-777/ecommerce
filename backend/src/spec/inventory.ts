@@ -2725,24 +2725,6 @@ export const spec = defineModuleSpec({
       "min": 1,
       "unit": "hours",
       "sellerVisible": false
-    },
-    "costingMethod": {
-      "default": "weighted_average",
-      "desc": "Company stock valuation",
-      "type": "enum",
-      "choices": [
-        "weighted_average",
-        "fifo"
-      ],
-      "approval": "business_owner",
-      "sellerVisible": false
-    },
-    "allowSellerNegativeAvailable": {
-      "default": false,
-      "desc": "Never sell beyond available quantity (plan ch. 9)",
-      "type": "bool",
-      "sellerVisible": false,
-      "editable": false
     }
   },
   errorCodes: {

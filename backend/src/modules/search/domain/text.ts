@@ -23,9 +23,6 @@ export function attrKey(name: string): string {
   return normalizeQuery(name).replace(/['-]/g, '').replace(/\s+/g, '_');
 }
 
-/** Attribute values compared case-insensitively */
-export const attrValue = (v: string) => v.trim().toLowerCase();
-
 /* ------------------------------------------------------------------ synonyms */
 
 export interface SynonymSet {
@@ -124,8 +121,6 @@ export function normalizeGtin(code: string | null | undefined): string | null {
 export const queryGtin = (q: string | null | undefined) => (q && /^[\d\s-]{8,18}$/.test(q.trim()) ? normalizeGtin(q.trim()) : null);
 
 /* ------------------------------------------------------------------ misc */
-
-export const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
 /** '3 colors' style plural of an option name */
 export function plural(n: number, noun: string): string {

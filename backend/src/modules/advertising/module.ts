@@ -58,6 +58,7 @@ export default defineModule({
     ctx.jobs.handle("advertising.accrue-charges", () => service.accrueCharges());
     ctx.jobs.handle("advertising.post-charges", () => service.postCharges());
     ctx.jobs.handle("advertising.expire-frequency-state", () => service.expireFrequencyState());
+    ctx.jobs.handle("advertising.prune-events", () => service.pruneEvents());
     ctx.jobs.handle("advertising.ending-soon-notice", () => service.endingSoonNotice());
   },
 });

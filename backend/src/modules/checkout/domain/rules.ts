@@ -2,6 +2,7 @@
  * Pure checkout rules: what the jsonb columns hold, sales tax, labels, steps, change choices.
  * No I/O here.
  */
+import { money as checkedMoney } from '../../../kernel/lib/money.js';
 import { format as formatMoney } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
 import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
@@ -126,7 +127,8 @@ export interface StoredChange {
 
 /* ================================================================ money */
 
-export const m = (amount: number, currency: string): common.Money => ({ amount, currency });
+/** Money in integer minor units (the kernel refuses anything else) */
+export const m = (amount: number, currency: string): common.Money => checkedMoney(amount, currency);
 export const fmt = (amount: number, currency: string) => formatMoney(m(amount, currency));
 
 /* ================================================================ labels */

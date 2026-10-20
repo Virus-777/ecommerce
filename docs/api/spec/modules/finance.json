@@ -805,7 +805,6 @@
     { "key": "creditSecondReviewerThreshold", "type": "money", "default": { "amount": 50000, "currency": "USD" }, "desc": "Seller credits from other modules (creditSeller) above this wait for a Finance reviewer ($500 example). The only finance threshold setting: a module caller has no access limit of its own; staff actions use access limits", "min": 0, "approval": "business_owner", "sellerVisible": false },
     { "key": "negativeBalanceOwedAfterDays", "type": "duration", "default": 30, "desc": "Uncovered negative balance becomes an amount owed", "unit": "days", "min": 1, "approval": "second_reviewer", "sellerVisible": true },
     { "key": "destinationChangePauseHours", "type": "duration", "default": 72, "desc": "Minimum wait before paying a newly verified destination", "unit": "hours", "min": 0, "approval": "business_owner", "sellerVisible": true },
-    { "key": "statementPeriod", "type": "enum", "default": "weekly", "desc": "Statement period, aligned with the payout schedule", "choices": ["weekly", "monthly"], "approval": "second_reviewer", "sellerVisible": true },
     { "key": "depositConfirmAttempts", "type": "int", "default": 3, "desc": "Tries to enter the two test-deposit amounts before new deposits are sent", "min": 1, "max": 10, "approval": "second_reviewer", "sellerVisible": false }
   ],
   "integrations": [

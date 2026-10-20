@@ -6,6 +6,7 @@
  *   needs second   permitted_with_second_review, or the amount is above the role's second-review threshold;
  *                  for the requester, also every action declared secondReviewer = always
  */
+import { format as moneyFormat } from '../../../kernel/lib/money.js';
 import type { LimitValue } from '../../../spec/access.js';
 import type { Money } from '../../../spec/common.js';
 
@@ -118,7 +119,7 @@ export function bestFor<T extends { value: LimitValue }>(kind: LimitKind, mode: 
 /* ---------------------------------------------------------------- display */
 
 export function formatMoney(m: Money): string {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: m.currency }).format(m.amount / 100);
+  return moneyFormat(m);
 }
 
 const formatNumber = (kind: LimitKind, n: number) => (kind === 'percent' ? `±${n}%` : `${n} units`);

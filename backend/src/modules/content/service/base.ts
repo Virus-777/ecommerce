@@ -3,6 +3,7 @@
  * media usages, settings and small validation helpers. The use cases build on it
  * (base → tiles → pages → homepage → help → policies → service).
  */
+import { isTimeZone } from '../../../kernel/lib/dates.js';
 import type { Principal } from '../../../kernel/auth/index.js';
 import { SYSTEM_ACTOR } from '../../../kernel/auth/index.js';
 import { AppError, isAppError } from '../../../kernel/errors/index.js';
@@ -12,7 +13,7 @@ import type * as audit from '../../../spec/audit.js';
 import type * as common from '../../../spec/common.js';
 import type { LinkRef, OwnerRef, Schedule, Version } from '../../../spec/content.js';
 import type { UsageInput } from '../../../spec/media.js';
-import { isSafeUrl, isValidTimeZone, scheduleLabel } from '../domain/rules.js';
+import { isSafeUrl, scheduleLabel } from '../domain/rules.js';
 import type { VersionRow } from '../ports.js';
 import type { ContentRepository } from '../repository.js';
 
@@ -131,7 +132,7 @@ export class ContentBase {
 
   protected async marketTimeZone(): Promise<string> {
     const tz = await this.ctx.settings.get('marketTimeZone');
-    return isValidTimeZone(tz) ? tz : 'America/Los_Angeles';
+    return isTimeZone(tz) ? tz : 'America/Los_Angeles';
   }
 
   protected async reviewRequired(): Promise<SettingsShape> {
@@ -142,7 +143,7 @@ export class ContentBase {
 
   protected async timeZoneOr(tz: string | null | undefined, path = 'timeZone'): Promise<string> {
     if (tz == null || tz === '') return this.marketTimeZone();
-    if (!isValidTimeZone(tz)) throw invalid(path, 'Use an IANA time zone, e.g. America/Los_Angeles');
+    if (!isTimeZone(tz)) throw invalid(path, 'Use an IANA time zone, e.g. America/Los_Angeles');
     return tz;
   }
 

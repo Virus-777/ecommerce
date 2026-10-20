@@ -284,7 +284,7 @@ export class Refunds {
     await this.core.audit(
       {
         action: 'returns.refund.issue',
-        actionLabel: `Proposed refund ${rr.ref} of ${(total / 100).toFixed(2)} ${currency} on ${order.ref}`,
+        actionLabel: `Proposed refund ${rr.ref} of ${format(money(total, currency))} on ${order.ref}`,
         category: 'financial',
         target: { type: 'refund_request', id: rr.id, ref: rr.ref, label: `Refund ${rr.ref}`, screen: 'admin/order' },
         relatedTargets: [{ type: 'order', id: order.id, ref: order.ref }],
@@ -483,7 +483,7 @@ export class Refunds {
       action: APPROVE_ACTION,
       target: { type: 'refund_request', id: rr.id, ref: rr.ref, label: `Refund ${rr.ref}`, sellerId: rr.seller_id, screen: REFUND_SCREEN },
       amount: money(rr.total, rr.currency),
-      summary: `Refund ${rr.ref} of ${(rr.total / 100).toFixed(2)} ${rr.currency}`,
+      summary: `Refund ${rr.ref} of ${format(money(rr.total, rr.currency))}`,
       details: { orderId: rr.order_id, orderRef: rr.order_ref, returnId: rr.return_id, caseId: rr.case_id, orderItemIds: rr.order_item_ids, fundedBy: rr.funded_by, source: rr.source },
       reason: note ?? rr.reason ?? 'Refund approval',
       // case decisions come in-process with only the staff member: the request is filed under their account
@@ -581,7 +581,7 @@ export class Refunds {
     await this.core.audit(
       {
         action: 'returns.refund.approve',
-        actionLabel: `Approved refund ${rr.ref} of ${(rr.total / 100).toFixed(2)} ${rr.currency}`,
+        actionLabel: `Approved refund ${rr.ref} of ${format(money(rr.total, rr.currency))}`,
         category: 'financial',
         target: { type: 'refund_request', id: rr.id, ref: rr.ref, label: `Refund ${rr.ref}`, screen: REFUND_SCREEN },
         before: { status: rr.status },
@@ -644,7 +644,7 @@ export class Refunds {
       const updated = await tx.update('refund_requests', id, { status, payment_refund_id: paymentRefundId, updated_at: now, sent_at: credited ? now : null });
       await tx.addRefundEvents(id, [this.ev(credited ? 'Store credit issued' : 'Handed to payments', null, SYSTEM, now)]);
       if (updated.return_id) {
-        await this.core.timeline(tx, updated.return_id, [{ kind: credited ? 'refund_sent' : 'refund_processing', label: credited ? 'Store credit issued' : 'Refund processing', detail: credited ? `${(updated.total / 100).toFixed(2)} ${updated.currency} added to your store credit` : 'Your refund is on its way to your payment provider.', visibility: 'customer' }]);
+        await this.core.timeline(tx, updated.return_id, [{ kind: credited ? 'refund_sent' : 'refund_processing', label: credited ? 'Store credit issued' : 'Refund processing', detail: credited ? `${format(money(updated.total, updated.currency))} added to your store credit` : 'Your refund is on its way to your payment provider.', visibility: 'customer' }]);
         if (credited) await this.completeLinked(tx, updated, batch);
       }
       return updated;

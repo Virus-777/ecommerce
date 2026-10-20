@@ -2,6 +2,8 @@
  * Pure promotion rules (no I/O): money labels, funding split, scope matching, eligibility, earnings,
  * validation of campaign and discount input. Money is integer minor units throughout.
  */
+import { format as moneyFormat } from '../../../kernel/lib/money.js';
+import { money as checkedMoney } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
 import type { DiscountRule, EarningsImpact, Eligibility, Funding, Limits, ParticipationSettings, DealsPlacement, Scope, StackingRules, TargetRef } from '../../../spec/promotions.js';
 
@@ -13,8 +15,6 @@ export const COUPON_KINDS: readonly Kind[] = ['percent_coupon', 'fixed_coupon', 
 export const SHIPPING_KINDS: readonly Kind[] = ['free_shipping'];
 /** Kinds that need the phase-3 feature (launch phase 3 or later) */
 export const PHASE3_KINDS: readonly Kind[] = ['bundle', 'quantity_deal'];
-export const SELLER_KINDS: readonly Kind[] = ['markdown', 'percent_coupon', 'fixed_coupon', 'min_spend', 'free_shipping'];
-
 /** A campaign decoded from its row and targets: what the rules work on */
 export interface CampaignModel {
   id: string;
@@ -59,7 +59,8 @@ export interface OfferAttrs {
 
 /* ------------------------------------------------------------------ money and labels */
 
-export const m = (amount: number, currency = 'USD'): common.Money => ({ amount, currency });
+/** Money in integer minor units (the kernel refuses anything else) */
+export const m = (amount: number, currency = 'USD'): common.Money => checkedMoney(amount, currency);
 
 /** $10 for whole amounts, $10.50 otherwise */
 export function moneyLabel(amount: number, currency = 'USD'): string {
@@ -68,7 +69,7 @@ export function moneyLabel(amount: number, currency = 'USD'): string {
 }
 
 /** $100.00 */
-export const moneyFull = (amount: number, currency = 'USD') => new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount / 100);
+export const moneyFull = (amount: number, currency = 'USD') => moneyFormat({ amount, currency });
 
 /** 2000 → 20%, 1250 → 12.5% */
 export const bpsLabel = (bps: number) => `${Number((bps / 100).toFixed(2))}%`;

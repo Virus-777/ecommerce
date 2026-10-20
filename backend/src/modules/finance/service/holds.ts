@@ -2,13 +2,14 @@
  * Holds (manual and rule-based: chargeback, dispute, new seller, restriction), adjustments with
  * second-reviewer approval, amounts owed and write-offs, and the consumers that place or settle them.
  */
+import { isIsoDate } from '../../../kernel/lib/dates.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type { Adjustment, AdjustmentInput, AmountOwed, Hold, HoldInput, Reference } from '../../../spec/finance.js';
-import { addDays, DAY, detId, encodeActor, fmt, isDate, SYSTEM } from '../domain/rules.js';
+import { addDays, DAY, detId, encodeActor, fmt, SYSTEM } from '../domain/rules.js';
 import { adjustmentMachine, amountOwedMachine, holdMachine } from '../domain/state-machines.js';
 import { toAdjustment, toHold, toOwed } from '../mappers.js';
 import type { AdjustmentRec, HoldRec } from '../ports.js';
@@ -72,7 +73,7 @@ export class HoldsPart extends Part {
     const issues: { path: string; message: string }[] = [];
     if (!isUuid(input.sellerId)) issues.push({ path: 'sellerId', message: 'A seller id' });
     if (!Number.isSafeInteger(input.amount.amount) || input.amount.amount <= 0) issues.push({ path: 'amount', message: 'A positive amount' });
-    if (!isDate(input.reviewDate) || (!input.system && input.reviewDate < this.core.today())) issues.push({ path: 'reviewDate', message: 'A review date from today' });
+    if (!isIsoDate(input.reviewDate) || (!input.system && input.reviewDate < this.core.today())) issues.push({ path: 'reviewDate', message: 'A review date from today' });
     if (!input.reason?.trim()) issues.push({ path: 'reason', message: 'Give the reason the seller will see' });
     if (issues.length) throw invalid(issues, 'The hold is not valid');
     const id = input.id ?? newId();
@@ -208,7 +209,7 @@ export class HoldsPart extends Part {
 
   async extend(id: string, body: { reviewDate: string; reason: string }, by: By): Promise<Hold> {
     if (!isUuid(id)) throw notFound('Hold');
-    if (!isDate(body.reviewDate) || body.reviewDate < this.core.today()) throw invalid([{ path: 'reviewDate', message: 'A review date from today' }]);
+    if (!isIsoDate(body.reviewDate) || body.reviewDate < this.core.today()) throw invalid([{ path: 'reviewDate', message: 'A review date from today' }]);
     if (!body.reason?.trim()) throw invalid([{ path: 'reason', message: 'Give a reason' }]);
     const before = await this.repo.transaction(async (tx) => {
       const h = await tx.get('holds', id, { forUpdate: true });

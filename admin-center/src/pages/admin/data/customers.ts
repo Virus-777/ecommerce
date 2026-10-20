@@ -1,7 +1,7 @@
 // Types and labels for the admin "Customers" screen (design: pages/admin/admin-customers.html and
 // admin-customers--customer-detail.html), mapped from GET /api/admin/customers/customers, /customers/{id},
 // /guest-buyers and POST /customers/{id}/actions. useDebounced is shared with the cases queue search.
-import { useEffect, useState } from 'react';
+export { useDebounced } from '@marketly/web-shared/lib/hooks';
 import type { components } from '@marketly/web-shared/api';
 import type { Tone } from '@marketly/web-shared/ui';
 
@@ -9,7 +9,6 @@ type S = components['schemas'];
 export type CustomerRow = S['customers.AdminCustomerRow'];
 export type CustomerDetail = S['customers.AdminCustomerDetail'];
 export type GuestBuyer = S['customers.GuestBuyerRow'];
-export type DataRequest = S['customers.DataRequest'];
 export type AccountActionInput = S['customers.AccountActionInput'];
 export type AccountStatus = CustomerRow['accountStatus'];
 export type Verification = CustomerRow['verification'];
@@ -56,12 +55,3 @@ export const DATA_REQUEST_LABEL: Record<string, string> = {
   completed: 'Completed',
 };
 
-/** A value that settles after the user stops typing (search boxes). */
-export function useDebounced<T>(value: T, ms: number): T {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setV(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return v;
-}

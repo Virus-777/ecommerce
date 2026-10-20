@@ -2,6 +2,7 @@
  * Seller Center and Admin Center reads: offer summaries, lists with their filters and tab counts,
  * offer details, the offer-form preview, Official Store rows, exports and content-gap copies.
  */
+import { format as formatMoney } from '../../../kernel/lib/money.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
 import { pageOf, toPageRequest, type PageRequest } from '../../../kernel/lib/pagination.js';
@@ -298,7 +299,7 @@ export class ViewsPart extends Part {
     if (input.returnTerms?.kind === 'extended' && (input.returnTerms.windowDays ?? 0) < b.windowDays) warnings.push(`Returns must allow at least ${b.windowDays} days for this category.`);
     if (input.condition !== 'new' && !input.conditionNotes?.trim()) warnings.push('Describe the condition: used and refurbished offers need condition notes.');
     if (!res.purchasable) warnings.push('The product is still in catalog review: the offer is saved as a draft and can publish when the product is approved.');
-    if (context.lowestNewPrice && input.condition === 'new' && input.price.amount > context.lowestNewPrice.amount * 1.2) warnings.push(`Your price is more than 20% above the lowest New offer (${(context.lowestNewPrice.amount / 100).toFixed(2)}).`);
+    if (context.lowestNewPrice && input.condition === 'new' && input.price.amount > context.lowestNewPrice.amount * 1.2) warnings.push(`Your price is more than 20% above the lowest New offer (${formatMoney(context.lowestNewPrice)}).`);
     if (!delivery.shipsToLocation) warnings.push('This shipping profile does not deliver to the market default location.');
     const snap = (await this.core.sellerSnapshots([sellerId])).get(sellerId);
     if (snap && !snap.launchReady) warnings.push('Your launch review has not passed yet: published offers wait in draft until it does.');

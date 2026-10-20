@@ -4,14 +4,8 @@
  * the sellers public API (getStorefrontCard, getSellers, getStorefrontBySlug) as the sellers resolvers do.
  * Pure functions on spec types: no service, no database.
  */
+import { gqlEnum, lazy } from '../../../kernel/graphql/index.js';
 import type { SellerSnapshot, SellerSummary, Storefront, VerificationLabel } from '../../../spec/sellers.js';
-
-const upper = (s: string | null | undefined) => (s ? s.toUpperCase().replace(/-/g, '_') : s);
-
-const lazy = <T,>(f: () => Promise<T>) => {
-  let p: Promise<T> | undefined;
-  return () => (p ??= f());
-};
 
 const NOT_CERTIFIED = 'Product authenticity is not certified';
 
@@ -34,9 +28,9 @@ export function sellerPublicProfileOut(src: PublicProfileSource) {
     banner: sf?.banner ?? null,
     tagline: src.tagline !== undefined ? src.tagline : (sf?.tagline ?? null),
     introduction: src.introduction !== undefined ? src.introduction : (sf?.introduction ?? null),
-    verification: { ...v, state: upper(v.state) },
+    verification: { ...v, state: gqlEnum(v.state) },
     onTimeDispatchPct: (sf?.highlights as { onTimeDispatchPct?: number | null } | undefined)?.onTimeDispatchPct ?? null,
-    approvedClaims: ((sf?.approvedClaims ?? []) as { kind: string; text: string }[]).map((c) => ({ kind: upper(c.kind), text: c.text })),
+    approvedClaims: ((sf?.approvedClaims ?? []) as { kind: string; text: string }[]).map((c) => ({ kind: gqlEnum(c.kind), text: c.text })),
     contact: (sf?.contact as { canMessage: boolean; productQuestions: boolean; replyTarget: string; phone?: string | null } | undefined) ?? { canMessage: true, productQuestions: true, replyTarget: 'within_24h', phone: null },
     warranty: src.warranty !== undefined ? src.warranty : (sf?.warranty ?? null),
     collections: sf?.collections ?? [],

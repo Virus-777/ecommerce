@@ -164,7 +164,12 @@ export function FileDrop({ title = 'Drag photos here or browse', hint = 'JPG or 
       <Icon name="image-plus" className="ic-lg" />
       <span className="small strong u-c-text">{title}</span>
       <span className="xs">{hint}</span>
-      <input ref={(el) => { input = el; }} type="file" hidden accept={accept} multiple={multiple} onChange={(e) => onFiles?.(Array.from(e.target.files ?? []))} />
+      <input ref={(el) => { input = el; }} type="file" hidden accept={accept} multiple={multiple} onChange={(e) => {
+          onFiles?.(Array.from(e.target.files ?? []));
+          // so picking the same file again (after removing it) fires change
+          e.target.value = '';
+        }}
+      />
       <Button variant="secondary" size="sm" onClick={() => input?.click()}>
         Browse files
       </Button>

@@ -1,5 +1,5 @@
+import { download as downloadFile, waitForExport as waitForJob } from '@marketly/web-shared/lib/exports';
 import type { components } from '@marketly/web-shared/api';
-import { ApiError } from '@marketly/web-shared/api';
 import { money, type MoneyValue } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
 import type { IconName } from '@marketly/web-shared/ui';
@@ -67,9 +67,15 @@ const PT = 'America/Los_Angeles';
 /** A calendar date from the API (YYYY-MM-DD), read without time-zone shifts. */
 const day = (d: string) => new Date(`${d.slice(0, 10)}T12:00:00Z`);
 
-/** "Fri, Oct 16, 2026" (date-only fields). */
-export const fmtDay = (d?: string | null, o: { weekday?: boolean; year?: boolean } = { weekday: true, year: true }) =>
-  d ? day(d).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', ...(o.weekday ? { weekday: 'short' } : {}), ...(o.year ? { year: 'numeric' } : {}) }) : '';
+/**
+ * "Fri, Oct 16, 2026": a date-only field (YYYY-MM-DD) as written, a timestamp as its market (Pacific) date — cutting
+ * a timestamp to its first 10 characters would give the UTC date, a day late in the evening.
+ */
+export const fmtDay = (d?: string | null, o: { weekday?: boolean; year?: boolean } = { weekday: true, year: true }) => {
+  if (!d) return '';
+  const timestamp = d.length > 10;
+  return (timestamp ? new Date(d) : day(d)).toLocaleDateString('en-US', { timeZone: timestamp ? PT : 'UTC', month: 'short', day: 'numeric', ...(o.weekday ? { weekday: 'short' } : {}), ...(o.year ? { year: 'numeric' } : {}) });
+};
 
 /** "Oct 8, 9:14 AM" (timestamps, market time). */
 export const fmtTime = (iso?: string | null, o: { year?: boolean; weekday?: boolean } = {}) =>
@@ -104,31 +110,12 @@ export const isoDaysAgo = (n: number) => {
   return d.toLocaleDateString('en-CA', { timeZone: PT });
 };
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Waits for an async export (reports.ExportJob) to finish and returns the ready job with its download link.
  * Exports run in the reports module's job (every minute), so this can take a minute or two.
  */
-export async function waitForExport(get: () => Promise<ExportJob>, first: ExportJob, timeoutMs = 5 * 60_000): Promise<ExportJob> {
-  let job = first;
-  const until = Date.now() + timeoutMs;
-  while (job.state === 'queued' || job.state === 'running') {
-    if (Date.now() > until) throw new ApiError(504, 'EXPORT_TIMEOUT', `Export ${job.ref} is still being prepared. Try again in a few minutes.`);
-    await sleep(3000);
-    job = await get();
-  }
-  if (job.state !== 'ready' || !job.downloadUrl) throw new ApiError(422, 'EXPORT_FAILED', job.error || `Export ${job.ref} couldn’t be prepared.`);
-  return job;
-}
+export const waitForExport = (get: () => Promise<ExportJob>, first: ExportJob, timeoutMs = 5 * 60_000): Promise<ExportJob> => waitForJob(first, () => get(), { timeoutMs, everyMs: 3000 });
 
 /** Starts the browser download of a signed link. */
-export function download(url: string) {
-  const a = document.createElement('a');
-  a.href = url;
-  a.rel = 'noopener';
-  a.download = '';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-}
+export const download = (url: string) => downloadFile(url);

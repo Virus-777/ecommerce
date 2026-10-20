@@ -6,7 +6,8 @@ import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type { Principal } from '../../../spec/identity.js';
 import type { FileLink, PutawayTask } from '../../../spec/warehouse.js';
-import { renderPdf, renderZpl } from '../domain/pdf.js';
+import { renderPdf } from '../../../kernel/lib/pdf.js';
+import { renderZpl } from '../domain/zpl.js';
 import { actorText, QUARANTINE, STORAGE_KINDS } from '../domain/rules.js';
 import { putAwayTaskMachine } from '../domain/state-machines.js';
 import type { Where } from '../../../kernel/mongo/index.js';
@@ -130,6 +131,6 @@ export class Putaway {
     const ref = tasks[0]!.receipt_ref;
     if (q.format === 'zpl') return this.core.fileLink({ fileName: `putaway-${ref}.zpl`, contentType: 'text/plain', bytes: renderZpl(labels), principal, reason: 'Put-away labels' });
     const pages = labels.map((l) => [{ text: l.lines[0]!, bold: true, size: 18 }, { text: l.lines[1]!, size: 10 }, { text: l.lines[2]!, bold: true, size: 14, gap: 6 }, { text: l.lines[3]!, size: 10 }, { text: `||| ${l.barcode} |||`, size: 16, gap: 10 }]);
-    return this.core.fileLink({ fileName: `putaway-${ref}.pdf`, contentType: 'application/pdf', bytes: renderPdf(pages, 'label'), principal, reason: 'Put-away labels' });
+    return this.core.fileLink({ fileName: `putaway-${ref}.pdf`, contentType: 'application/pdf', bytes: renderPdf(pages, { page: 'label' }), principal, reason: 'Put-away labels' });
   }
 }

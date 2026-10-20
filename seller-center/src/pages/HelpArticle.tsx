@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { useDebounced } from '@marketly/web-shared/lib/hooks';
+import { Fragment, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { errorMessage, useApi } from '@marketly/web-shared/api';
@@ -22,16 +23,6 @@ import './HelpArticle.css';
 type Feedback = '' | 'yes' | 'sent';
 
 const REASONS = ['Didn’t answer my question', 'Hard to follow', 'Out of date', 'Something else'];
-
-/** The search text after the user stops typing. */
-function useDebounced<T>(value: T, ms = 250): T {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setV(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return v;
-}
 
 /* ---------------- Search ---------------- */
 

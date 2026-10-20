@@ -1,7 +1,5 @@
-import { isAppError } from '../../../kernel/errors/index.js';
-import type { GraphQLContext, ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { createBatchLoader, gqlEnum, type GraphQLContext, type ModuleResolvers, nullOnNotFound, pageInput, pairs } from '../../../kernel/graphql/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
-import { format } from '../../../kernel/lib/money.js';
 import { toPageRequest } from '../../../kernel/lib/pagination.js';
 import type * as catalog from '../../../spec/catalog.js';
 import type * as common from '../../../spec/common.js';
@@ -13,10 +11,6 @@ import type { ItemDetail, Lookups } from '../views.js';
 
 /* ---------------------------------------------------------------- REST shapes → GraphQL shapes (enums in capitals, Money.formatted) */
 
-const up = <T extends string | null | undefined>(s: T) => (s ? s.toUpperCase().replace(/-/g, '_') : s);
-const money = (m: common.Money | null | undefined) => (m ? { ...m, formatted: format(m) } : null);
-const pairs = (m: Record<string, string> | null | undefined) => Object.entries(m ?? {}).map(([name, value]) => ({ name, value }));
-const pageInput = (p: common.PageInput | null | undefined): common.PageInput => ({ ...(p?.cursor ? { cursor: p.cursor } : {}), ...(p?.page ? { page: p.page } : {}), ...(p?.limit ? { limit: p.limit } : {}) });
 
 const CONDITION_LABEL: Record<string, string> = { new: 'New', used_like_new: 'Used – Like new', used_good: 'Used – Good', used_acceptable: 'Used – Acceptable', refurbished: 'Refurbished' };
 
@@ -27,7 +21,7 @@ const variantOut = (v: catalog.Variant) => ({ ...v, options: pairs(v.options) })
 /** An offers Offer as the Offer type (offers' own fields; quote, deal and stock resolve by id in their modules) */
 const offerOut = (o: offers.Offer, product: () => Promise<catalog.Product | null>) => ({
   ...o,
-  ownerType: up(o.ownerType),
+  ownerType: gqlEnum(o.ownerType),
   official: o.ownerType === 'official',
   product: async () => {
     const p = await product();
@@ -37,49 +31,20 @@ const offerOut = (o: offers.Offer, product: () => Promise<catalog.Product | null
     const v = (await product())?.variants.find((x) => x.id === o.variantId);
     return variantOut(v ?? { id: o.variantId, options: {}, gtin: null, images: [] });
   },
-  condition: up(o.condition),
+  condition: gqlEnum(o.condition),
   conditionLabel: CONDITION_LABEL[o.condition] ?? o.condition,
-  price: money(o.price),
-  compareAt: o.compareAt ? { ...o.compareAt, amount: money(o.compareAt.amount), basis: up(o.compareAt.basis) } : null,
-  returnTerms: { ...o.returnTerms, kind: up(o.returnTerms.kind) },
-  warranty: { ...o.warranty, kind: up(o.warranty.kind), handledBy: up(o.warranty.handledBy ?? null) },
-  status: up(o.status),
+  price: o.price ?? null,
+  compareAt: o.compareAt ? { ...o.compareAt, amount: o.compareAt.amount ?? null, basis: gqlEnum(o.compareAt.basis) } : null,
+  returnTerms: { ...o.returnTerms, kind: gqlEnum(o.returnTerms.kind) },
+  warranty: { ...o.warranty, kind: gqlEnum(o.warranty.kind), handledBy: gqlEnum(o.warranty.handledBy ?? null) },
+  status: gqlEnum(o.status),
 });
 
 const listOut = (l: WishlistList) => l;
 
 /* ---------------------------------------------------------------- batching per request (one call per key and tick) */
 
-type Batch<V> = { ids: Set<string>; promise: Promise<Map<string, V>> };
-const batches = new WeakMap<object, Map<string, Batch<unknown>>>();
-
-function load<V>(ctx: GraphQLContext, key: string, id: string, fetch: (ids: string[]) => Promise<Map<string, V>>): Promise<V | undefined> {
-  let perCtx = batches.get(ctx);
-  if (!perCtx) batches.set(ctx, (perCtx = new Map()));
-  let batch = perCtx.get(key) as Batch<V> | undefined;
-  if (!batch) {
-    const ids = new Set<string>();
-    const promise = new Promise<Map<string, V>>((resolve, reject) => {
-      setImmediate(() => {
-        perCtx!.delete(key);
-        fetch([...ids]).then(resolve, reject);
-      });
-    });
-    batch = { ids, promise };
-    perCtx.set(key, batch as Batch<unknown>);
-  }
-  batch.ids.add(id);
-  return batch.promise.then((m) => m.get(id));
-}
-
-const nullOnNotFound = async <T>(p: Promise<T>): Promise<T | null> => {
-  try {
-    return await p;
-  } catch (err) {
-    if (isAppError(err) && (err.status === 404 || err.code === 'VALIDATION_FAILED')) return null;
-    throw err;
-  }
-};
+const load = createBatchLoader();
 
 /**
  * Resolvers for the GraphQL fields this module owns (`@source(module: "wishlist", …)` in graphql/schema.ts).
@@ -136,8 +101,8 @@ export const resolvers = (service: WishlistService): ModuleResolvers => {
       const o = await lk(ctx).offer(d.savedOfferId);
       return o && o.status !== 'removed' && o.status !== 'draft' ? offerOut(o, () => lk(ctx).product(o.productId)) : null;
     },
-    priceWhenSaved: money(d.item.priceWhenSaved),
-    priceHint: { ...d.item.priceHint, kind: up(d.item.priceHint.kind), low: money(d.item.priceHint.low), high: money(d.item.priceHint.high) },
+    priceWhenSaved: d.item.priceWhenSaved ?? null,
+    priceHint: { ...d.item.priceHint, kind: gqlEnum(d.item.priceHint.kind), low: d.item.priceHint.low ?? null, high: d.item.priceHint.high ?? null },
     alerts: d.item.alerts,
     canMoveToCart: d.item.canMoveToCart,
     note: d.item.note ?? null,
@@ -159,11 +124,11 @@ export const resolvers = (service: WishlistService): ModuleResolvers => {
     },
     // the seller's public card, built with the mapper sellers shares (null without a seller or with sellers off)
     seller: async () => (a.sellerId ? sellerCard(ctx, a.sellerId) : null),
-    kind: up(a.kind),
-    state: up(a.state),
-    targetPrice: money(a.targetPrice),
-    referencePrice: money(a.referencePrice),
-    triggeredPrice: money(a.triggeredPrice),
+    kind: gqlEnum(a.kind),
+    state: gqlEnum(a.state),
+    targetPrice: a.targetPrice ?? null,
+    referencePrice: a.referencePrice ?? null,
+    triggeredPrice: a.triggeredPrice ?? null,
   });
 
   return {

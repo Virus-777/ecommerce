@@ -2,13 +2,15 @@
  * Help Center: categories (topics), articles with drafts, review, schedule and versions,
  * helpfulness feedback, search, suggestions for support and the store reads.
  */
+import { stringList } from '../../../kernel/lib/text.js';
+import { slugify } from '../../../kernel/lib/text.js';
 import type { Principal } from '../../../kernel/auth/index.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { pageOf, type PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type { ContactChannel, HelpArticle, HelpArticleAdmin, HelpArticleInput, HelpArticleSummary, HelpCategory, HelpHome, LinkRef, Version } from '../../../spec/content.js';
-import { contactChannelsFrom, contentTables, isValidSlug, plainText, readMinutes, sanitizeHtml, slugify } from '../domain/rules.js';
+import { contactChannelsFrom, contentTables, isValidSlug, plainText, readMinutes, sanitizeHtml } from '../domain/rules.js';
 import { contentPublicationMachine } from '../domain/state-machines.js';
 import type { ArticleRow, CategoryRow, VersionRow } from '../ports.js';
 import type { ContentRepository } from '../repository.js';
@@ -41,8 +43,6 @@ export const SELLER_FIRST_NOTE = 'For items from marketplace sellers, the seller
 const HELPFUL_WINDOW_DAYS = 30;
 /** Articles Seller Center shows */
 const SELLER_AUDIENCES = ['seller', 'both'];
-
-const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 
 export class ContentHelp extends ContentHomepage {
   /* ---------------------------------------------------------------- categories */
@@ -635,7 +635,7 @@ export class ContentHelp extends ContentHomepage {
     const n = Math.min(Math.max(Number(limit) || 3, 1), 20);
     if (!t) return [];
     const published = await this.repo.listArticles({ statuses: ['published'] });
-    let hits = published.filter((a) => strings(a.topics).includes(t));
+    let hits = published.filter((a) => stringList(a.topics).includes(t));
     if (hits.length < n) {
       const cat = await this.repo.categoryBySlug(t);
       if (cat) hits.push(...published.filter((a) => a.category_id === cat.id && !hits.includes(a)));
@@ -650,7 +650,7 @@ export class ContentHelp extends ContentHomepage {
   }
 
   async countHelpArticlesForPolicy(policyKey: string): Promise<{ count: number; articleIds: string[] }> {
-    const ids = (await this.repo.listArticles({ statuses: ['published'] })).filter((a) => strings(a.policy_keys).includes(policyKey)).map((a) => a.id);
+    const ids = (await this.repo.listArticles({ statuses: ['published'] })).filter((a) => stringList(a.policy_keys).includes(policyKey)).map((a) => a.id);
     return { count: ids.length, articleIds: ids };
   }
 

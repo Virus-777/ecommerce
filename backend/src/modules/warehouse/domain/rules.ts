@@ -5,8 +5,6 @@ import type { BoxType, Dimensions, Weight } from '../../../spec/warehouse.js';
 export const BIN_KINDS = ['pick', 'bulk', 'returns', 'quarantine', 'packing', 'dock'] as const;
 /** Bins stock items are stored in (assignments, put-away of sellable units) */
 export const STORAGE_KINDS: readonly string[] = ['pick', 'bulk'];
-/** Fulfillment statuses still worked on in the warehouse */
-export const ACTIVE_STATUSES = ['awaiting_pick', 'picking', 'picked', 'packing', 'on_hold'] as const;
 /** Not packed yet (at risk and late counts) */
 export const UNPACKED_STATUSES: readonly string[] = ['awaiting_pick', 'picking', 'picked', 'packing', 'on_hold'];
 /** A wave is complete when each of its orders is in one of these */
@@ -93,11 +91,6 @@ export function itemMatches(code: string, item: { sku: string; stockItemId: stri
   if (c === normalizeCode(item.sku)) return true;
   if (c === item.stockItemId.toUpperCase()) return true;
   return (item.extraCodes ?? []).some((x) => x && normalizeCode(x) === c);
-}
-
-export function binMatches(code: string, bin: { code: string; barcode: string }): boolean {
-  const c = normalizeCode(code);
-  return Boolean(c) && (c === normalizeCode(bin.code) || c === normalizeCode(bin.barcode));
 }
 
 export const looksLikeReturnRef = (code: string) => /^RT-/i.test(code.trim());
@@ -199,4 +192,15 @@ export function upcoming(times: string[], at: (time: string) => Date, now: Date)
     .map(at)
     .filter((d) => d.getTime() > now.getTime())
     .sort((a, b) => a.getTime() - b.getTime());
+}
+
+/**
+ * Inside market business hours by the settings calendar (auto-wave runs only then). No calendar, or one that never
+ * opens because no hours are set, counts as open: the job then runs every time, as it did before hours existed.
+ */
+export function inBusinessHours(cal: { isOpen(at: string): boolean; nextOpen(after: string): string } | undefined, now: Date): boolean {
+  if (!cal) return true;
+  const at = now.toISOString();
+  // a calendar that never opens answers nextOpen with the time asked about
+  return cal.isOpen(at) || cal.nextOpen(at) === at;
 }

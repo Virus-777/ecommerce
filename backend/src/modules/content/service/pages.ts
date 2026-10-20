@@ -2,12 +2,14 @@
  * Campaign pages, curated collections, the About page and landing pages: drafts and versions,
  * review, schedule, publish, unpublish, correction or removal, and the store reads.
  */
+import { slugify } from '../../../kernel/lib/text.js';
+import { isTimeZone } from '../../../kernel/lib/dates.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { pageOf, toPageRequest, type PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type { AboutFacts, BannerBlock, CampaignPageCard, Check, CollectionCard, LinkedPromotion, PageAdmin, PageBlock, PageDraftInput, PageSummary, ProductSource, ProductTile, RemovalInfo, StorePage, Version } from '../../../spec/content.js';
-import { isValidSlug, isValidTimeZone, sanitizeHtml, slugify } from '../domain/rules.js';
+import { isValidSlug, sanitizeHtml } from '../domain/rules.js';
 import { contentPublicationMachine } from '../domain/state-machines.js';
 import type { PageRow, VersionRow } from '../ports.js';
 import { dateOrNull, invalid, unique, iso, notFound, requireText, SYSTEM, type By, type DraftReview } from './base.js';
@@ -61,7 +63,7 @@ export class ContentPages extends ContentTiles {
     if (other && other.id !== opts.pageId) throw this.ctx.error('SLUG_TAKEN', `Another page uses /${slug}`);
     if (input.period) {
       if (new Date(input.period.from) >= new Date(input.period.to)) throw invalid('period.to', 'The period must end after it starts');
-      if (!isValidTimeZone(input.period.timeZone)) throw invalid('period.timeZone', 'Use an IANA time zone, e.g. America/Los_Angeles');
+      if (!isTimeZone(input.period.timeZone)) throw invalid('period.timeZone', 'Use an IANA time zone, e.g. America/Los_Angeles');
     }
     const max = await this.ctx.settings.get('maxSectionProducts');
     const ids = new Set<string>();

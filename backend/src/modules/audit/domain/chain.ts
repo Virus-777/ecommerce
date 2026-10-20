@@ -121,8 +121,6 @@ export const sameBytes = (a: Uint8Array | null | undefined, b: Uint8Array | null
   !!a && !!b && a.length === b.length && Buffer.compare(Buffer.from(a), Buffer.from(b)) === 0;
 
 export const toHex = (b: Uint8Array): string => Buffer.from(b).toString('hex');
-export const fromHex = (s: string): Uint8Array => new Uint8Array(Buffer.from(s, 'hex'));
-
 /** Derivation label of the checkpoint key: secretFor(config, CHECKPOINT_PURPOSE) */
 export const CHECKPOINT_PURPOSE = 'audit.checkpoint';
 /** Stored with each checkpoint so a rotated key can be told apart */
@@ -138,12 +136,6 @@ export function checkpointMacOk(key: string, c: { seq: number; hash: Uint8Array;
   const want = Buffer.from(checkpointMac(key, c.seq, c.hash), 'hex');
   const got = /^[0-9a-f]+$/i.test(c.mac) ? Buffer.from(c.mac, 'hex') : Buffer.alloc(0);
   return got.length === want.length && timingSafeEqual(got, want);
-}
-
-/** A purge checkpoint: the last removed entry, so the first kept entry's prev_hash still verifies. */
-export interface Checkpoint {
-  seq: number;
-  hash: string;
 }
 
 export type LinkProblem = 'prev_hash' | 'hash';

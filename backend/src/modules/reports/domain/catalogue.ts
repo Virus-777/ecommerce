@@ -678,8 +678,6 @@ export const REPORTS: ReportSeed[] = [
   },
 ];
 
-export const reportSeed = (key: string) => REPORTS.find((r) => r.key === key);
-
 /* ---------------------------------------------------------------- read models */
 
 export interface ReadModelDef {

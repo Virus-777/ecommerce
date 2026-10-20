@@ -1,6 +1,8 @@
 // API access for the product detail page and its sub-pages (offers, reviews, questions):
 // catalog product, purchase box, rating summary, category trail, add to cart, Buy now.
 // Product routes carry the id (/p/:slug/:id); the slug is cosmetic (BACKEND-REQUESTS G1).
+import { productHref as productLink } from '@/api/search';
+import { date } from '@marketly/web-shared/lib/dates';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
@@ -10,7 +12,6 @@ import { href } from '@marketly/web-shared/routes';
 import { announce } from '@marketly/web-shared/ui';
 
 export type CatalogProduct = components['schemas']['catalog.Product'];
-export type CatalogVariant = components['schemas']['catalog.Variant'];
 export type Category = components['schemas']['catalog.Category'];
 export type PurchaseBox = components['schemas']['offers.PurchaseBox'];
 export type OfferView = components['schemas']['offers.OfferView'];
@@ -18,7 +19,6 @@ export type SellerCue = components['schemas']['offers.SellerCue'];
 export type RatingSummary = components['schemas']['reviews.RatingSummary'];
 export type SimilarProduct = components['schemas']['search.ProductCard'];
 export type MediaRef = components['schemas']['MediaRef'];
-export type AddItemResult = components['schemas']['cart.AddItemResult'];
 export type CartSource = 'product_page' | 'offers_list';
 
 /** Seller id of first-party offers (docs/api/README.md, Constants). */
@@ -30,7 +30,7 @@ export function useProductParams() {
   return { slug, id };
 }
 
-export const productHref = (slug: string, id: string, view?: string, query?: Record<string, string>) => href('store/product', view, { slug, id }, query);
+export const productHref = (slug: string, id: string, view?: string, query?: Record<string, string>) => productLink({ id, slug }, view, query);
 
 /** Sign-in link that comes back to `next` (the current page by default). */
 export function useSignInHref() {
@@ -167,7 +167,7 @@ export const orderWithin = (minutes?: number | null) => {
 
 const TZ = 'America/Los_Angeles';
 /** "Oct 2, 2026" in the market time zone. */
-export const fmtDate = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: TZ }) : '');
+export const fmtDate = (iso?: string | null) => (iso ? date(iso) : '');
 /** "Oct 19, 11:59 PM PT". */
 export const fmtDateTime = (iso?: string | null) =>
   iso ? `${new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: TZ })} PT` : '';

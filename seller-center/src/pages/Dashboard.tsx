@@ -3,7 +3,7 @@ import { Link } from 'react-router';
 import { call, useApi, type components } from '@marketly/web-shared/api';
 import { SellerLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
-import { formatMoney, type MoneyValue, isoInText } from '@marketly/web-shared/lib/format';
+import { formatMoney, type MoneyValue, isoInText, meterFill } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
 import { Badge, Button, Card, Deadline, Icon, Meter, StatusLegend, TableWrap, type Tone } from '@marketly/web-shared/ui';
 import { useSellerSession } from '@/app/session';
@@ -84,12 +84,7 @@ const PERF_STATUS: Record<Metric['status'], { badge: string; tone: 'success' | '
 };
 
 /** Meter fill: share of a "at least" target reached, or how much of an "at most" allowance is used. */
-function meterPct(m: Metric): number {
-  const { comparator, threshold, unit } = m.target;
-  if (comparator === 'gte') return Math.max(0, Math.min(100, unit === 'percent' ? m.value : threshold ? (m.value / threshold) * 100 : 100));
-  if (!threshold) return m.value > 0 ? 100 : 0;
-  return Math.max(0, Math.min(100, Math.round((m.value / threshold) * 100)));
-}
+const meterPct = (m: Metric): number => meterFill(m.value, m.target);
 
 
 /** Work-queue tile; the shared QueueTile only announces "(urgent)", the design also marks amber tiles "(at risk)". */

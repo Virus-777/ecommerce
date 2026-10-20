@@ -8,7 +8,6 @@ import { useApi } from './provider';
 // feature flags, maintenance notice). One cached response per app, shared by every screen under the query key
 // APP_CONFIG_KEY (screens that call the endpoint themselves should use the same key).
 
-export type AppConfig = components['schemas']['settings.AppConfig'];
 export type PublicMarket = components['schemas']['settings.PublicMarket'];
 /** Where prices and delivery dates are estimated before a visitor gives an address ("Deliver to …"). */
 export type DeliveryLocation = components['schemas']['settings.DeliveryLocation'];

@@ -5,7 +5,7 @@
  */
 import { isUuid } from '../../../kernel/lib/ids.js';
 import { money } from '../../../kernel/lib/money.js';
-import type { PageRequest } from '../../../kernel/lib/pagination.js';
+import { toPageRequest, type PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type { AdminOrderDetail, AdminOrderRow, DelayedItemAlert, ItemPaidAmount, OrderDetail, OrderSummary, SellerOrderCounts, SellerOrderDetail, SellerOrderRow } from '../../../spec/orders.js';
 import { DAY, dayStart, endOfMarketDay, isMarketlyService, rangeStart } from '../domain/rules.js';
@@ -27,11 +27,6 @@ const listOf = (v: unknown, keep: (s: string) => string | null): string[] | unde
   const raw = Array.isArray(v) ? v : String(v).split(',');
   // given but nothing usable: matches nothing (an export of the selected rows never widens to everything)
   return [...new Set(raw.map((x) => keep(String(x).trim())).filter((x): x is string => !!x))].slice(0, 500);
-};
-
-const toPageRequest = (p: common.PageInput | undefined): PageRequest => {
-  const limit = Math.min(Math.max(p?.limit ?? 24, 1), 100);
-  return p?.page ? { mode: 'page', page: p.page, limit } : { mode: 'cursor', cursor: p?.cursor ?? null, limit };
 };
 
 /** Timeline entries each area may see */

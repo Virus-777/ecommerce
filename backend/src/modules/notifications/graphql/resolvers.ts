@@ -1,22 +1,21 @@
-import type { GraphQLContext, ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { gqlEnum, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
 import { toPageRequest } from '../../../kernel/lib/pagination.js';
 import type { PageInput } from '../../../spec/common.js';
 import type { Notice } from '../../../spec/notifications.js';
 import type { Reader } from '../app/inbox.js';
 import type { NotificationsService } from '../service.js';
 
-const up = (s: string | null | undefined) => (s ? s.toUpperCase() : s);
 const low = <T extends string>(s: string | null | undefined) => (s ? (s.toLowerCase() as T) : undefined);
 
 /** REST Notice → GraphQL Notification (enum values in upper case, `read` flag) */
 export function gqlNotice(n: Notice) {
   return {
     ...n,
-    category: up(n.category),
-    tone: up(n.tone),
+    category: gqlEnum(n.category),
+    tone: gqlEnum(n.tone),
     read: Boolean(n.readAt),
-    deadline: n.deadline ? { dueAt: n.deadline.dueAt, state: up(n.deadline.state) } : null,
-    routedTo: n.routedTo ? { ...n.routedTo, reason: up(n.routedTo.reason), recipients: n.routedTo.recipients.map((r) => ({ ...r, as: up(r.as) })) } : null,
+    deadline: n.deadline ? { dueAt: n.deadline.dueAt, state: gqlEnum(n.deadline.state) } : null,
+    routedTo: n.routedTo ? { ...n.routedTo, reason: gqlEnum(n.routedTo.reason), recipients: n.routedTo.recipients.map((r) => ({ ...r, as: gqlEnum(r.as) })) } : null,
   };
 }
 

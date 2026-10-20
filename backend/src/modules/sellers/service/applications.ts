@@ -3,6 +3,8 @@
  * verification checks (provider + webhook), Trust and Risk referral, information requests, the review
  * decision, appeals on rejection, and invitations to apply during the invite-only launch.
  */
+import { stringList } from '../../../kernel/lib/text.js';
+import { slugify } from '../../../kernel/lib/text.js';
 import { createHash, createHmac } from 'node:crypto';
 import type { Principal } from '../../../kernel/auth/index.js';
 import { AppError } from '../../../kernel/errors/index.js';
@@ -37,19 +39,15 @@ import type {
 } from '../../../spec/sellers.js';
 import { PROGRAM } from '../domain/catalogue.js';
 import {
-  addBusinessDays,
   addDays,
   completedSteps,
-  DATA_STEPS,
   deadline,
   holderMatches,
-  isoDate,
   missingFields,
   nextStep,
   percentComplete,
   reapplyFrom,
   riskCategoriesIn,
-  slugify,
   taxIdDigits,
   validTaxId,
   type ApplicationSections,
@@ -188,7 +186,7 @@ export class ApplicationsPart extends Part {
   async documents(a: ApplicationRec): Promise<ApplicationDocument[]> {
     const rows = await this.repo.find('application_documents', { application_id: a.id }, { orderBy: [['uploaded_at', 'asc']] });
     const refs = await this.core.mediaRefs(rows.map((d) => d.media_id));
-    return rows.map((d) => map.document(d, refs, this.core.fallbackUrl));
+    return rows.map((d) => map.document(d, refs));
   }
 
   private async latestRequest(appId: string): Promise<InfoRequestRec | undefined> {
@@ -199,7 +197,7 @@ export class ApplicationsPart extends Part {
     const now = this.now();
     const sec = this.sections(a);
     const missing = missingFields(sec);
-    const done = map.strings(a.completed_steps);
+    const done = stringList(a.completed_steps);
     const accepted = await this.repo.find('agreement_acceptances', { application_id: a.id }, { orderBy: [['accepted_at', 'asc']] });
     const seller = a.seller_id ? await this.repo.get('sellers', a.seller_id) : undefined;
     const request = await this.latestRequest(a.id);
@@ -265,7 +263,7 @@ export class ApplicationsPart extends Part {
     return this.codeFor(invitationId);
   }
 
-  async startApplication(accountId: string, body: ApplicationAccountInput, by: By): Promise<SellerApplication> {
+  async startApplication(accountId: string, body: ApplicationAccountInput, _by: By): Promise<SellerApplication> {
     const issues: { path: string; message: string }[] = [];
     if (!body.contactName.trim()) issues.push({ path: 'contactName', message: 'Enter your name' });
     if (!body.storeName.trim()) issues.push({ path: 'storeName', message: 'Enter a store name' });
@@ -343,7 +341,7 @@ export class ApplicationsPart extends Part {
     return { owners, issues };
   }
 
-  async updateApplication(accountId: string, id: string, body: UpdateBody, by: By): Promise<SellerApplication> {
+  async updateApplication(accountId: string, id: string, body: UpdateBody, _by: By): Promise<SellerApplication> {
     const a = await this.own(accountId, id);
     if (!EDITABLE.includes(a.state)) throw this.illegal(a, 'update');
     const given: string[] = [];
@@ -412,7 +410,7 @@ export class ApplicationsPart extends Part {
     return this.view(after);
   }
 
-  async addApplicationDocument(accountId: string, id: string, body: { mediaId: string; kind: ApplicationDocument['kind']; ownerId?: string | null; infoRequestItemId?: string | null }, by: By): Promise<ApplicationDocument> {
+  async addApplicationDocument(accountId: string, id: string, body: { mediaId: string; kind: ApplicationDocument['kind']; ownerId?: string | null; infoRequestItemId?: string | null }, _by: By): Promise<ApplicationDocument> {
     const a = await this.own(accountId, id);
     if (!EDITABLE.includes(a.state)) throw this.illegal(a, 'addDocument', 'Documents can be added to a draft or for an open information request');
     const sec = this.sections(a);
@@ -463,10 +461,10 @@ export class ApplicationsPart extends Part {
       return d;
     });
     const refs = await this.core.mediaRefs([doc.media_id]);
-    return map.document(doc, refs, this.core.fallbackUrl);
+    return map.document(doc, refs);
   }
 
-  async removeApplicationDocument(accountId: string, id: string, documentId: string, by: By) {
+  async removeApplicationDocument(accountId: string, id: string, documentId: string, _by: By) {
     const a = await this.own(accountId, id);
     const d = isUuid(documentId) ? await this.repo.get('application_documents', documentId) : undefined;
     if (!d || d.application_id !== a.id) throw notFound('Document');
@@ -489,7 +487,7 @@ export class ApplicationsPart extends Part {
   }
 
   private async uniqueSlug(name: string, repo: SellersRepository) {
-    const base = slugify(name);
+    const base = slugify(name, { max: 60, fallback: 'store' });
     if (!(await repo.slugTaken(base))) return base;
     for (let i = 2; i < 50; i++) if (!(await repo.slugTaken(`${base}-${i}`))) return `${base}-${i}`;
     return `${base}-${newId().slice(-6)}`;
@@ -524,7 +522,7 @@ export class ApplicationsPart extends Part {
     const acc = sec.account!;
     const v = sec.verification!;
     const risky = riskCategoriesIn(`${b.plannedProducts ?? ''} ${b.shippingPlan ?? ''}`, (await this.core.setting('riskReviewCategories')) as readonly string[]);
-    const target = addBusinessDays(now, await this.core.setting('decisionTargetBusinessDays'));
+    const target = this.core.addBusinessDays(now, await this.core.setting('decisionTargetBusinessDays'));
     const sellerRef = await this.ctx.refs.next('SL', { daily: false });
     // duplicate checks: keyed hashes only (never the tax id), against every other application and seller
     const taxIdHash = a.tax_id_hash ?? this.taxHashOf(v);
@@ -608,7 +606,7 @@ export class ApplicationsPart extends Part {
         reviewed_by: null,
         reviewed_at: null,
       });
-      await this.core.timeline(tx, seller.id, { kind: 'applied', title: 'Application submitted', detail: `Decision target ${isoDate(target)}`, actor: by.actor, ref: locked.ref });
+      await this.core.timeline(tx, seller.id, { kind: 'applied', title: 'Application submitted', detail: `Decision target ${this.core.today(target)}`, actor: by.actor, ref: locked.ref });
       return { after, seller };
     });
     this.core.publish(
@@ -748,7 +746,7 @@ export class ApplicationsPart extends Part {
   /** An overturned rejection reopens the application under review */
   async reopenOnAppeal(applicationId: string, by: By) {
     const now = this.now();
-    const target = addBusinessDays(now, await this.core.setting('decisionTargetBusinessDays'));
+    const target = this.core.addBusinessDays(now, await this.core.setting('decisionTargetBusinessDays'));
     await this.repo.transaction(async (tx) => {
       const a = await this.byId(applicationId, tx, true);
       if (a.state !== 'rejected') return;
@@ -1015,6 +1013,7 @@ export class ApplicationsPart extends Part {
     const c = await this.checkOf(a.id, checkId);
     await this.repo.update('verification_checks', c.id, { result: 'pending', summary: 'Running the check again', source: 'automated', provider: null, provider_ref: null, accepted_note: null, checked_by: null, checked_at: null });
     await this.runChecks({ applicationId: a.id, checkId: c.id });
+    await this.core.audit({ action: 'sellers.check.rerun', actionLabel: 'Ran a verification check again', category: 'other', target: this.appTarget(a), before: { kind: c.kind, result: c.result }, after: { kind: c.kind, result: 'pending' } }, by);
     return map.check((await this.repo.get('verification_checks', c.id))!);
   }
 
@@ -1051,7 +1050,9 @@ export class ApplicationsPart extends Part {
     return map.riskReview(row);
   }
 
-  async requestApplicationInformation(id: string, body: { items: unknown[]; message: string; dueAt: string; reminder: 'three_days_before' | 'none' }, by: By) {
+  async requestApplicationInformation(id: string, body: { items: unknown[]; message: string; dueAt?: string | null; reminder: 'three_days_before' | 'none' }, by: By) {
+    // the deadline staff set, else the default reply window (setting infoRequestDefaultDays)
+    const dueAt = body.dueAt ? new Date(body.dueAt) : addDays(this.now(), await this.core.setting('infoRequestDefaultDays'));
     const raw = (body.items ?? []) as { title?: string; detail?: string; neededFor?: string; documentKind?: string | null }[];
     const kinds = ['account', 'business', 'verification', 'payout', 'return_address', 'agreement', 'category'];
     const issues: { path: string; message: string }[] = [];
@@ -1061,7 +1062,7 @@ export class ApplicationsPart extends Part {
       if (!i?.neededFor || !kinds.includes(i.neededFor)) issues.push({ path: `items.${n}.neededFor`, message: `One of ${kinds.join(', ')}` });
     });
     if (!body.message?.trim()) issues.push({ path: 'message', message: 'Write the message the applicant reads' });
-    if (new Date(body.dueAt).getTime() <= this.now().getTime()) issues.push({ path: 'dueAt', message: 'The deadline must be in the future' });
+    if (!(dueAt.getTime() > this.now().getTime())) issues.push({ path: 'dueAt', message: 'The deadline must be in the future' });
     if (issues.length) throw invalid(issues);
     const items: InfoRequestItem[] = raw.map((i) => ({ id: newId(), title: i.title!.trim(), detail: i.detail?.trim() ?? '', neededFor: i.neededFor as InfoRequestItem['neededFor'], documentKind: i.documentKind ?? null, status: 'open', response: null }));
     const now = this.now();
@@ -1074,7 +1075,7 @@ export class ApplicationsPart extends Part {
         application_id: a.id,
         items: items as never,
         message: body.message.trim(),
-        due_at: new Date(body.dueAt),
+        due_at: dueAt,
         reminder: body.reminder,
         reminded_at: null,
         draft_saved_at: null,
@@ -1093,8 +1094,8 @@ export class ApplicationsPart extends Part {
       }
       return row;
     });
-    this.core.publish('sellers.application.information_requested', { applicationId: after.id, sellerId: after.seller_id!, dueAt: new Date(body.dueAt).toISOString(), itemCount: items.length }, by);
-    await this.core.audit({ action: 'sellers.application.request_information', actionLabel: 'Asked an applicant for information', category: 'other', target: this.appTarget(after), reason: body.message, after: { items: items.map((i) => i.title), dueAt: body.dueAt } }, by);
+    this.core.publish('sellers.application.information_requested', { applicationId: after.id, sellerId: after.seller_id!, dueAt: dueAt.toISOString(), itemCount: items.length }, by);
+    await this.core.audit({ action: 'sellers.application.request_information', actionLabel: 'Asked an applicant for information', category: 'other', target: this.appTarget(after), reason: body.message, after: { items: items.map((i) => i.title), dueAt: dueAt.toISOString() } }, by);
     return this.adminView(after);
   }
 
@@ -1118,13 +1119,13 @@ export class ApplicationsPart extends Part {
       const strict = this.latestChecks(await tx.find('verification_checks', { application_id: a.id })).every((c) => !['identity', 'business_registration', 'payout_account', 'return_address'].includes(c.kind) || c.result === 'passed');
       let granted = false;
       if (!labelBlocking.length && strict) {
-        seller = await this.parts.accounts.grantLabel(tx, seller, by, labelDays);
+        seller = await this.parts.accounts.grantLabel(tx, seller, labelDays);
         granted = true;
       }
       const sec = this.sections(a);
       const owner = await this.parts.members.createOwner(tx, seller, { accountId: a.applicant_account_id, name: sec.account?.contactName ?? seller.legal_name, email: sec.account?.workEmail ?? '' });
       await this.parts.storefront.createProfile(tx, seller);
-      for (const d of await tx.find('application_documents', { application_id: a.id, kind: 'owner_id' })) await tx.update('application_documents', d.id, { delete_after: isoDate(addDays(now, retention)) });
+      for (const d of await tx.find('application_documents', { application_id: a.id, kind: 'owner_id' })) await tx.update('application_documents', d.id, { delete_after: this.core.today(addDays(now, retention)) });
       const app = await tx.update('applications', a.id, { state, decision: decision as never, reviewer_id: a.reviewer_id ?? by.actor.id ?? null });
       let payout: Awaited<ReturnType<typeof this.parts.accounts.submitDestination>> | undefined;
       const details = sec.payout?.current;
@@ -1182,7 +1183,7 @@ export class ApplicationsPart extends Part {
     const now = this.now();
     const retention = await this.core.setting('documentRetentionDays');
     const window = await this.core.setting('appealWindowDays');
-    const canReapplyFrom = reapplyFrom(body.reapply, now);
+    const canReapplyFrom = reapplyFrom(body.reapply, now, this.core.tz);
     const decision = {
       outcome: 'rejected',
       reasonCode: body.reasonCode,
@@ -1199,7 +1200,7 @@ export class ApplicationsPart extends Part {
       const a = await this.byId(id, tx, true);
       const state = this.core.step(sellerApplicationMachine, a.state, 'reject');
       const row = await tx.update('applications', a.id, { state, decision: decision as never, can_reapply_from: canReapplyFrom, reviewer_id: a.reviewer_id ?? by.actor.id ?? null });
-      for (const d of await tx.find('application_documents', { application_id: a.id })) await tx.update('application_documents', d.id, { delete_after: isoDate(addDays(now, retention)) });
+      for (const d of await tx.find('application_documents', { application_id: a.id })) await tx.update('application_documents', d.id, { delete_after: this.core.today(addDays(now, retention)) });
       if (a.seller_id) {
         const s = await this.core.seller(a.seller_id, { repo: tx, forUpdate: true });
         await tx.update('sellers', s.id, { status: this.core.step(sellerAccountStatusMachine, s.status, 'reject'), status_since: now, closed_reason: 'application_rejected', updated_at: now });
@@ -1352,7 +1353,7 @@ export class ApplicationsPart extends Part {
       await this.repo.update('information_requests', r.id, { reminded_at: now });
       const a = await this.repo.get('applications', r.application_id);
       if (!a?.seller_id) continue;
-      await this.core.timeline(this.repo, a.seller_id, { kind: 'information_reminder', title: `Reminder: send the requested information by ${isoDate(r.due_at)}`, ref: a.ref });
+      await this.core.timeline(this.repo, a.seller_id, { kind: 'information_reminder', title: `Reminder: send the requested information by ${this.core.today(r.due_at)}`, ref: a.ref });
       const openItems = ((r.items ?? []) as unknown as { status?: string }[]).filter((i) => !i.status || i.status === 'open' || i.status === 'rejected').length;
       this.core.publish('sellers.application.information_reminder', { applicationId: a.id, ref: a.ref, sellerId: a.seller_id, applicantAccountId: a.applicant_account_id, dueAt: r.due_at.toISOString(), openItems });
     }

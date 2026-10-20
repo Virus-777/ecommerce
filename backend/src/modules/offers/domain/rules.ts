@@ -2,6 +2,8 @@
  * Pure offer rules (no I/O): condition labels and groups, dispatch / return / warranty wording,
  * price-change maths, was-price checks, restriction scope, eligibility reasons and the featured-offer ranking.
  */
+import { format as moneyFormat } from '../../../kernel/lib/money.js';
+import { csvLine } from '../../../kernel/lib/csv.js';
 import type * as common from '../../../spec/common.js';
 import type { FeaturedRuleParameters, IneligibilityReason, ReturnTerms, WarrantyInput, WarrantyTerms } from '../../../spec/offers.js';
 
@@ -30,11 +32,6 @@ export function conditionGroup(c: string): ConditionGroup {
 
 /** Used and refurbished offers must describe their condition */
 export const needsConditionNotes = (c: string) => c !== 'new';
-
-/** Statuses customers can buy from (out of stock shows but cannot be bought) */
-export const SELLING: readonly OfferStatus[] = ['active'];
-/** Statuses that are listed on the store (all-offers page) */
-export const LISTED: readonly OfferStatus[] = ['active', 'out_of_stock', 'ineligible'];
 
 /* ------------------------------------------------------------------ wording */
 
@@ -80,11 +77,7 @@ export function changePct(from: number, to: number): number {
 export const discountPct = (was: number, now: number) => (was > now && was > 0 ? Math.round(((was - now) / was) * 100) : null);
 
 export function formatMoney(m: common.Money): string {
-  try {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: m.currency }).format(m.amount / 100);
-  } catch {
-    return `${(m.amount / 100).toFixed(2)} ${m.currency}`;
-  }
+  return moneyFormat(m);
 }
 
 /** Price history row in force at some point of a window */
@@ -362,12 +355,8 @@ export function parseCsv(text: string): string[][] {
   return rows.filter((r) => r.some((f) => f.trim() !== ''));
 }
 
-const csvCell = (v: unknown) => {
-  const s = v === null || v === undefined ? '' : String(v);
-  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-};
-
-export const toCsv = (rows: readonly (readonly unknown[])[]) => rows.map((r) => r.map(csvCell).join(',')).join('\n') + '\n';
+/** The bulk-update correction report: seller-supplied text (SKUs, notes) is guarded against formula injection (kernel csvCell) */
+export const toCsv = (rows: readonly (readonly unknown[])[]) => rows.map((r) => csvLine(r)).join('\n') + '\n';
 
 /** "24.00", "$24", "24" → 2400; null when not a number */
 export function parsePrice(raw: string): number | null {

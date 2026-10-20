@@ -8,7 +8,7 @@ import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, Badge, Button, Dialog, EmptyState, Field, Img, OptionCard, PageHeader, Select, StatusBadge, TableWrap, Tabs, Textarea, type Tone } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
-import { date, dateTime, LoadError, SkeletonLines } from '@/app/parts';
+import { date, dateTime, LoadError, SkeletonLines, actorLabel } from '@/app/parts';
 import {
   AUTHOR_BADGE, isQa, isReported, isResponse, KIND_LABEL, LEGIT, NOUN, OUTCOME_LABEL, reasonLabel, reasonTone, rowActions, rowEdge,
   type AppealRow, type ContentType, type Edge, type ModerationDetail, type ModerationItem, type ModerationReason, type ReasonCode, type RowAction,
@@ -743,7 +743,7 @@ export default function Reviews() {
                     // The recorded decision (outcome, reason, moderator); older items fall back to visibility and reports.
                     const dec = d.decision;
                     const removed = dec ? dec.outcome === 'remove' || dec.outcome === 'reject_response' : d.visibility === 'hidden';
-                    const who = dec ? (dec.by.name ?? (dec.by.kind === 'system' ? 'Trust and Risk enforcement' : 'Marketly staff')) : null;
+                    const who = dec ? actorLabel(dec.by) : null;
                     return (
                       <tr key={d.id}>
                         <td>

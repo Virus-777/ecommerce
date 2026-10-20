@@ -46,6 +46,8 @@ describe('money', () => {
   it('is integer minor units', () => {
     expect(() => money(1.5)).toThrow(AppError);
     expect(format(money(18900))).toBe('$189.00');
+    // a code Intl refuses reads as plain text instead of failing the request
+    expect(format({ amount: 18900, currency: 'not-a-code' })).toBe('189.00 not-a-code');
     expect(multiply(money(999), 0.125)).toEqual(money(125));
   });
 
@@ -119,7 +121,7 @@ describe('job schedules from the spec', () => {
     ['nightly 03:30 market time', { kind: 'daily', time: '03:30' }],
     ['monthly, 1st 03:00 market time', { kind: 'monthly', time: '03:00' }],
     ['on boot', { kind: 'boot' }],
-    ['every 30 min during business hours (when enabled)', { kind: 'interval', ms: 1_800_000, window: 'business-hours' }],
+    ['every 30 min during business hours (when enabled)', { kind: 'interval', ms: 1_800_000 }],
   ])('%s', (text, expected) => {
     expect(parseSchedule(text)).toEqual(expected);
   });
@@ -142,5 +144,21 @@ describe('small helpers', () => {
     expect(orThrow(0, 'zero is a value')).toBe(0);
     expect(() => orThrow(undefined, 'access: role r1')).toThrow('access: role r1 not found');
     expect(() => orThrow(null, 'thing')).toThrow('thing not found');
+  });
+});
+
+describe('csvCell', () => {
+  it('guards text a spreadsheet would run as a formula, keeps negative numbers, quotes when needed', async () => {
+    const { csvCell, csvLine } = await import('./csv.js');
+    expect(csvCell('=HYPERLINK("http://x","click")')).toBe(`"'=HYPERLINK(""http://x"",""click"")"`);
+    expect(csvCell('+1')).toBe(`"'+1"`);
+    expect(csvCell('@SUM(A1)')).toBe(`"'@SUM(A1)"`);
+    expect(csvCell('-cmd')).toBe(`"'-cmd"`);
+    expect(csvCell('-12.50')).toBe('-12.50');
+    expect(csvCell('SKU-1')).toBe('SKU-1');
+    expect(csvCell('a,b')).toBe('"a,b"');
+    expect(csvCell(null)).toBe('');
+    expect(csvCell('x', { quote: true })).toBe('"x"');
+    expect(csvLine(['=1', 'ok', 2])).toBe(`"'=1",ok,2`);
   });
 });

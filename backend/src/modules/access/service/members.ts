@@ -6,12 +6,9 @@ import { SYSTEM_ACTOR } from '../../../kernel/auth/index.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { pageOf, type PageRequest } from '../../../kernel/lib/pagination.js';
-import type * as audit from '../../../spec/audit.js';
 import type * as common from '../../../spec/common.js';
-import type * as identity from '../../../spec/identity.js';
 import type {
   MyAccess,
-  Role,
   RoleAssignment,
   RoleRef,
   StaffInvitationInput,
@@ -146,7 +143,7 @@ export class Members {
     return (await this.core.staffRefs([staffId], dir, accounts)).get(staffId) ?? null;
   }
 
-  async listMembers(caller: Caller, query: { q?: string; roleId?: string; status?: StaffMember['status']; away?: boolean }, page: PageRequest): Promise<common.Page<StaffMember>> {
+  async listMembers(_caller: Caller, query: { q?: string; roleId?: string; status?: StaffMember['status']; away?: boolean }, page: PageRequest): Promise<common.Page<StaffMember>> {
     await this.core.ready();
     const dir = await loadDirectory(this.core.repo, this.core.now());
     const ids = await this.core.repo.memberAccountIds();
@@ -165,7 +162,7 @@ export class Members {
     return pageOf(members, page);
   }
 
-  async getMember(caller: Caller, accountId: string): Promise<StaffMemberDetail> {
+  async getMember(_caller: Caller, accountId: string): Promise<StaffMemberDetail> {
     await this.core.ready();
     const dir = await loadDirectory(this.core.repo, this.core.now());
     const [assignments, accounts] = await Promise.all([this.core.repo.listAssignments({ accountId }), this.core.requireAccounts([accountId])]);

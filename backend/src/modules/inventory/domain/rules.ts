@@ -38,8 +38,6 @@ export const addQty = (a: StockQuantities, b: StockQuantities): StockQuantities 
   returned: a.returned + b.returned,
 });
 
-export const isGroup = (g: string): g is Group => (GROUPS as readonly string[]).includes(g);
-
 /** Units a group holds (outside is unlimited) */
 export const unitsIn = (q: StockQuantities, g: GroupOrOutside): number => (g === 'outside' ? Number.POSITIVE_INFINITY : q[FIELD[g]]);
 
@@ -84,9 +82,6 @@ export function weightedAverage(current: number | null, currentUnits: number, ad
 }
 
 /* ---------------------------------------------------------------- reasons */
-
-export const SELLER_REASONS = ['received_stock', 'count_correction', 'damaged_or_defective', 'lost_or_missing', 'returned_item_restocked', 'moved_to_another_channel', 'other'] as const;
-export const STAFF_REASONS = ['quality_hold', 'damaged_in_warehouse', 'count_correction', 'found_stock', 'theft_or_loss', 'write_off', 'repair', 'supplier_return', 'other'] as const;
 
 const REASON_LABELS: Record<string, string> = {
   // seller adjustments

@@ -29,7 +29,6 @@ import type {
 import {
   ACTIVE_STATUSES,
   actorFrom,
-  addBusinessDays,
   addDays,
   customerStatusLabel,
   deadline,
@@ -156,7 +155,7 @@ export class Views {
   inspectBy(agg: Agg): Date | null {
     const received = this.core.receivedAt(agg);
     if (!received || !is(['received', 'awaiting_remedy', 'completed'], agg.ret.status)) return null;
-    return addBusinessDays(received, agg.ret.terms_snapshot.meta.targets.inspectionBusinessDays, this.core.tz);
+    return this.core.addBusinessDays(received, agg.ret.terms_snapshot.meta.targets.inspectionBusinessDays);
   }
 
   refundBy(agg: Agg): Date | null {
@@ -165,7 +164,7 @@ export class Views {
     const decided = agg.ret.decision?.decidedAt ? new Date(agg.ret.decision.decidedAt) : null;
     const from = inspected ?? decided;
     if (!from) return null;
-    return addBusinessDays(from, agg.ret.terms_snapshot.meta.targets.refundBusinessDays, this.core.tz);
+    return this.core.addBusinessDays(from, agg.ret.terms_snapshot.meta.targets.refundBusinessDays);
   }
 
   deadlines(agg: Agg): ReturnCase['deadlines'] {
@@ -315,7 +314,7 @@ export class Views {
       approvedAt,
       sentAt: rr.sent_at?.toISOString() ?? null,
       failedReason: rr.failed_reason,
-      expectedBy: approvedAt && status !== 'sent' ? addBusinessDays(new Date(approvedAt), agg.ret.terms_snapshot.meta.targets.refundBusinessDays + 3, this.core.tz).toISOString() : null,
+      expectedBy: approvedAt && status !== 'sent' ? this.core.addBusinessDays(new Date(approvedAt), agg.ret.terms_snapshot.meta.targets.refundBusinessDays + 3).toISOString() : null,
       bankReference: null,
       explanation: refundExplanation(status),
     };
@@ -622,7 +621,6 @@ export class Views {
   /* ---------------------------------------------------------------- refund requests */
 
   async refundRequest(rr: RefundRec, area: 'seller' | 'admin' = 'admin', agg?: Agg): Promise<RefundRequest> {
-    const x = rr.deductions;
     const approval = rr.approval_request_id ? ((await this.core.soft('access', 'approval info', (a) => a.approvalInfo(rr.approval_request_id!))) ?? { required: true, reason: 'Above the approver limit', approvalRequestId: rr.approval_request_id, approvers: ['Finance'] }) : null;
     let impact: EarningsImpact | null = null;
     if (rr.owner_type === 'seller' && agg) impact = await this.earningsImpact(agg, rr);

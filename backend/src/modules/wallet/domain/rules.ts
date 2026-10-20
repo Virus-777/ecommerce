@@ -2,6 +2,8 @@
  * Pure wallet rules: lot allocation, expiry dates, ledger labels, gift card codes, actor encoding.
  * No I/O here; the service feeds rows in and writes what comes out.
  */
+import { money as checkedMoney } from '../../../kernel/lib/money.js';
+import { addMonths } from '../../../kernel/lib/dates.js';
 import { createHash, createHmac, randomInt } from 'node:crypto';
 import { format } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
@@ -11,7 +13,8 @@ import type { LotAllocation } from '../ports.js';
 export type EntryKind = LedgerEntry['kind'];
 export type LotSource = CreditLot['source'];
 
-export const m = (amount: number, currency: string): common.Money => ({ amount, currency });
+/** Money in integer minor units (the kernel refuses anything else) */
+export const m = (amount: number, currency: string): common.Money => checkedMoney(amount, currency);
 
 /** Entries that only move credit between available and held (shown to staff; the customer sees the balance) */
 export const RESERVATION_KINDS: readonly EntryKind[] = ['hold', 'release'];
@@ -37,17 +40,6 @@ export function allocate(lots: readonly { id: string; remaining: number }[], amo
 }
 
 export const allocated = (a: readonly LotAllocation[] | null | undefined) => (a ?? []).reduce((s, x) => s + x.amount, 0);
-
-/** Calendar months later (the 31st becomes the last day of a shorter month) */
-export function addMonths(at: Date, months: number): Date {
-  const d = new Date(at.getTime());
-  const day = d.getUTCDate();
-  d.setUTCDate(1);
-  d.setUTCMonth(d.getUTCMonth() + months);
-  const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
-  d.setUTCDate(Math.min(day, last));
-  return d;
-}
 
 /** Goodwill and price-adjustment credit: the grant's own days, else creditExpiryMonths (0 or less: no expiry) */
 export function goodwillExpiry(now: Date, expiresInDays: number | null | undefined, months: number): Date | null {

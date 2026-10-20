@@ -64,9 +64,7 @@ export class Batch {
 }
 
 export const invalid = (issues: { path: string; message: string }[], message = issues[0]?.message ?? 'Some details need fixing') => new AppError('VALIDATION_FAILED', message, { issues });
-export const invalidField = (path: string, message: string) => invalid([{ path, message }], message);
 export const notFound = (what: string) => new AppError('NOT_FOUND', `${what} not found`);
-export const illegal = (machine: string, from: string, event: string, message: string) => new AppError('ILLEGAL_TRANSITION', message, { machine, from, event });
 export const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
 export const num = (v: string | number | null | undefined) => (v === null || v === undefined ? 0 : Number(v));
 
@@ -191,7 +189,7 @@ export class Core {
   }
 
   flush(batch: Batch, by: { actor?: common.Actor; requestId?: string } = {}) {
-    for (const e of batch.events) this.publish(e.name, e.payload as never, by);
+    for (const e of batch.events.splice(0)) this.publish(e.name, e.payload as never, by);
   }
 
   /** An optional module's answer; off, not built or failing → undefined (the caller degrades) */

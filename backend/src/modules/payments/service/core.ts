@@ -5,6 +5,7 @@
  */
 import type { Principal } from '../../../kernel/auth/index.js';
 import { AppError, isAppError } from '../../../kernel/errors/index.js';
+import { illegalTransition } from '../../../kernel/errors/index.js';
 import type { EventMap } from '../../../kernel/events/index.js';
 import { dateInZone } from '../../../kernel/lib/clock.js';
 import { newId } from '../../../kernel/lib/ids.js';
@@ -77,7 +78,7 @@ export class Batch {
 
 export const invalid = (issues: { path: string; message: string }[], message = 'Some details need fixing') => new AppError('VALIDATION_FAILED', message, { issues });
 export const notFound = (what = 'Payment') => new AppError('NOT_FOUND', `${what} not found`);
-export const illegal = (message: string, details: Record<string, unknown> = {}) => new AppError('ILLEGAL_TRANSITION', message, details);
+export const illegal = illegalTransition;
 
 /** What payments needs from an order (orders.getOrder), flattened */
 export interface OrderInfo {
@@ -219,7 +220,7 @@ export class Core {
 
   /** Publishes what a transaction collected (after the commit) */
   flush(batch: Batch, by: { actor?: common.Actor; requestId?: string } = {}) {
-    for (const e of batch.events) this.publish(e.name, e.payload as never, by);
+    for (const e of batch.events.splice(0)) this.publish(e.name, e.payload as never, by);
   }
 
   async audit(entry: Omit<audit.RecordInput, 'actor' | 'module' | 'requestId'>, by: By) {

@@ -4,7 +4,7 @@
  */
 import { isNotImplemented } from '../../kernel/errors/index.js';
 import { dateInZone } from '../../kernel/lib/clock.js';
-import { money, sum, type Money } from '../../kernel/lib/money.js';
+import { money, sum } from '../../kernel/lib/money.js';
 import type { ModuleContext } from '../../kernel/module-system/index.js';
 import type * as common from '../../spec/common.js';
 import type {
@@ -449,4 +449,3 @@ export const timelineEvent = (e: PoEventRow): common.TimelineEvent => ({
   actor: { kind: e.actorKind as common.Actor['kind'], id: e.actorId, name: null },
 });
 
-export const asMoney = (amount: number, currency: string): Money => money(amount, currency);

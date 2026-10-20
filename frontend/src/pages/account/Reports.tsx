@@ -1,3 +1,4 @@
+import { LoadError as SharedLoadError } from '@marketly/web-shared/ui';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router';
@@ -67,14 +68,7 @@ const APPEAL_ERRORS: Record<string, string> = {
 const LIMIT = 20;
 
 function ListError({ error, retry, what }: { error: unknown; retry: () => void; what: string }) {
-  return (
-    <Alert tone="danger" title={`We couldn't load ${what}`}>
-      {errorMessage(error)}{' '}
-      <Button variant="ghost" size="sm" onClick={retry}>
-        Try again
-      </Button>
-    </Alert>
-  );
+  return <SharedLoadError error={error} onRetry={retry} title={`We couldn’t load ${what}`} />;
 }
 
 const cardSkeleton = (

@@ -10,8 +10,6 @@ import { useIsPhone } from '@marketly/web-shared/lib/hooks';
 
 export type NewsCard = components['schemas']['content.NewsCard'];
 export type NewsPost = components['schemas']['content.NewsPost'];
-export type NewsCategory = components['schemas']['content.NewsCategory'];
-
 /** Cards per website page and per phone batch (a 3-column grid fills evenly). */
 export const NEWS_PER_PAGE = 12;
 

@@ -22,6 +22,7 @@
  * Subjects typed in pass 3 (product, dispute, conversation, return_parcel) were 'other' before: closes
  * match both, so items opened before the upgrade still close.
  */
+import { format as formatMoney } from '../../../kernel/lib/money.js';
 import type { EventName, EventPayload } from '../../../kernel/events/index.js';
 import type { Money } from '../../../spec/common.js';
 import type { spec, WorkSubject } from '../../../spec/workqueues.js';
@@ -464,7 +465,7 @@ export const INTAKE: IntakeTable = {
           {
             queueKey: 'finance.payment_checks',
             title: `Reconciliation mismatch: ${human(p.check)}`,
-            summary: `Difference of ${(p.difference.amount / 100).toFixed(2)} ${p.difference.currency}`,
+            summary: `Difference of ${formatMoney(p.difference)}`,
             subject: { type: 'reconciliation_check', id: p.itemId, label: human(p.check) },
             amount: { amount: Math.abs(p.difference.amount), currency: p.difference.currency },
             priority: Math.abs(p.difference.amount) > 100_000 ? 'high' : 'normal',
@@ -635,7 +636,7 @@ export const INTAKE: IntakeTable = {
         queues: ['sellers.launch_reviews'],
         title: 'Launch readiness review',
         dedupe: 'launch_review:{sellerId}',
-        deadline: 'now + queue default (business hours)',
+        deadline: 'event.reviewBy (launchReviewBusinessDays), else now + queue default (business hours)',
         priority: 'normal',
         build: (p) => [
           {
@@ -643,6 +644,7 @@ export const INTAKE: IntakeTable = {
             title: 'Launch readiness review',
             subject: { type: 'seller', id: p.sellerId },
             sellerId: p.sellerId,
+            dueAt: p.reviewBy ?? null,
             dedupeKey: `launch_review:${p.sellerId}`,
             links: [L('Open seller', 'admin/seller', p.sellerId)],
           },
@@ -744,7 +746,7 @@ export const INTAKE: IntakeTable = {
         queues: ['sellers.launch_reviews'],
         title: 'Store change to review ({kind})',
         dedupe: 'change_request:{changeRequestId}',
-        deadline: 'now + queue default (business hours)',
+        deadline: 'event.reviewBy (store names and public claims), else now + queue default (business hours)',
         priority: 'normal',
         build: (p) => [
           {
@@ -753,6 +755,7 @@ export const INTAKE: IntakeTable = {
             subject: { type: 'change_request', id: p.changeRequestId, label: human(p.kind) },
             related: list(S('seller', p.sellerId)),
             sellerId: p.sellerId,
+            dueAt: p.reviewBy ?? null,
             dedupeKey: `change_request:${p.changeRequestId}`,
             links: [L('Open seller', 'admin/seller', p.sellerId)],
           },

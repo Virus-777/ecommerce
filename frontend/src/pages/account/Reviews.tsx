@@ -1,3 +1,5 @@
+import { LoadError as SharedLoadError } from '@marketly/web-shared/ui';
+import { humanize } from '@marketly/web-shared/lib/format';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
@@ -55,7 +57,7 @@ const TRUST_STATUS: Record<string, { label: string; tone?: Tone }> = {
   action_taken: { label: 'Action taken', tone: 'success' },
   no_violation: { label: 'No violation' },
 };
-const sentence = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, ' ') : s);
+const sentence = (s: string) => humanize(s);
 
 function reviewRow(r: ReviewReport): ReportRow {
   const t = TARGET[r.targetType] ?? { label: r.targetType.replace(/_/g, ' '), icon: 'flag' as IconName };
@@ -97,14 +99,7 @@ function trustRow(r: TrustReport): ReportRow {
 }
 
 function ListError({ error, retry, what }: { error: unknown; retry: () => void; what: string }) {
-  return (
-    <Alert tone="danger" title={`We couldn't load ${what}`}>
-      {errorMessage(error)}{' '}
-      <Button variant="ghost" size="sm" onClick={retry}>
-        Try again
-      </Button>
-    </Alert>
-  );
+  return <SharedLoadError error={error} onRetry={retry} title={`We couldn’t load ${what}`} />;
 }
 
 const cardSkeleton = (

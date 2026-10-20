@@ -4,7 +4,7 @@
  * statuses and flags recomputed after every change. The use cases live in the part classes.
  */
 import type { Principal } from '../../../kernel/auth/index.js';
-import { AppError, isAppError } from '../../../kernel/errors/index.js';
+import { AppError, isAppError, isNotImplemented } from '../../../kernel/errors/index.js';
 import type { EventMap } from '../../../kernel/events/index.js';
 import { dateInZone } from '../../../kernel/lib/clock.js';
 import { newId } from '../../../kernel/lib/ids.js';
@@ -161,11 +161,16 @@ export class Core {
 
   /** Publishes what a transaction collected (after the commit) */
   flush(batch: Batch) {
-    for (const e of batch.events) this.publish(e.name, e.payload as never, batch.by);
+    for (const e of batch.events.splice(0)) this.publish(e.name, e.payload as never, batch.by);
   }
 
   async audit(entry: Omit<audit.RecordInput, 'actor' | 'module' | 'requestId'>, by: By) {
-    await this.ctx.tryUse('audit')?.record({ ...entry, actor: by.actor, module: this.ctx.name, requestId: by.requestId ?? null });
+    try {
+      await this.ctx.tryUse('audit')?.record({ ...entry, actor: by.actor, module: this.ctx.name, requestId: by.requestId ?? null });
+    } catch (err) {
+      // the change is committed; a missing audit entry is logged, never turned into a failed request
+      this.ctx.log[isNotImplemented(err) ? 'debug' : 'error']({ err, action: entry.action }, 'audit entry not recorded');
+    }
   }
 
   /** An optional module's answer; off, not built or failing → undefined (the caller degrades) */

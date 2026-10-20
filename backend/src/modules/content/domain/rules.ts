@@ -13,7 +13,6 @@ const DROP_WITH_CONTENT = new Set(['script', 'style', 'iframe', 'object', 'embed
 
 const escapeText = (s: string) => s.replace(/&(?!#?[a-zA-Z0-9]{1,10};)/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const escapeAttr = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-export const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 /** Decodes the entities a browser would decode in an attribute, so `jav&#x61;script:` is seen for what it is */
 function decodeEntities(s: string): string {
@@ -154,18 +153,6 @@ export function readMinutes(html: string | null | undefined): number {
 
 /* ------------------------------------------------------------------ slugs */
 
-export function slugify(text: string): string {
-  return text
-    .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/&/g, ' and ')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 80)
-    .replace(/-+$/g, '');
-}
-
 export const isValidSlug = (s: string) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(s) && s.length <= 120;
 
 /* ------------------------------------------------------------------ schedules */
@@ -187,15 +174,6 @@ export function scheduleLabel(from: Date | null, to: Date | null, timeZone: stri
   return opts.followsCampaign ? 'Follows campaign' : 'Always on';
 }
 
-export function isValidTimeZone(tz: string | null | undefined): boolean {
-  if (!tz) return false;
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz });
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 /** Inside [from, to) at a moment */
 export const inWindow = (at: Date, from: Date | string | null | undefined, to: Date | string | null | undefined) =>
@@ -354,4 +332,5 @@ export function contactChannelsFrom(offered: readonly SupportChannel[], contactU
     const action = c.action ? { label: c.action.label, url: c.action.url, kind: c.action.kind === 'external' ? ('external' as const) : ('help' as const) } : { label: 'Write to us', url: contactUrl, kind: 'help' as const };
     return [{ kind, label: c.label, hours: c.hours, detail: c.detail ?? c.expectedResponse, action }];
   });
-}
+}import { escapeHtml } from '../../../kernel/lib/text.js';
+

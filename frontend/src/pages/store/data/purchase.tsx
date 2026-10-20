@@ -1,11 +1,11 @@
 // Blocks the purchase-flow screens share (cart, checkout, review changes, payment result, confirmation),
 // rendered from the cart/checkout API types: packages per seller, compact lines, checkout steps.
+import { productHref as productLink } from '@/api/search';
 import { Fragment, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { cx } from '@marketly/web-shared/lib/cx';
-import { formatMoney } from '@marketly/web-shared/lib/format';
+import { formatMoney, initials, tileTint, CONDITION_LABEL, type Condition } from '@marketly/web-shared/lib/format';
 import { useScrollRegion } from '@marketly/web-shared/lib/hooks';
-import { href } from '@marketly/web-shared/routes';
 import type { components } from '@marketly/web-shared/api';
 import { Badge, Icon, Img, LogoTile, SellerBadge, Stars } from '@marketly/web-shared/ui';
 
@@ -16,38 +16,20 @@ export type SearchCard = S['search.ProductCard'];
 
 export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-const CONDITION: Record<string, string> = {
-  new: 'New',
-  used_like_new: 'Used – like new',
-  used_good: 'Used – good',
-  used_acceptable: 'Used – acceptable',
-  refurbished: 'Refurbished',
-};
-/** Cart conditions are enum values; checkout and confirmation already send the label. */
-export const conditionLabel = (c: string) => CONDITION[c] ?? c;
+/** Cart conditions are enum values; checkout and confirmation already send the label (the same words). */
+export const conditionLabel = (c: string) => CONDITION_LABEL[c as Condition] ?? c;
 
-const TINTS = ['1', '2', '3', '4', '5', '6'];
-/** A stable tile tint for a seller name (the API sends no brand colour). */
-export const tintFor = (name: string) => TINTS[[...name].reduce((s, ch) => s + ch.charCodeAt(0), 0) % TINTS.length];
-const initialsOf = (name: string) =>
-  name
-    .replace(/^Marketly /, '')
-    .split(/\s+/)
-    .map((w) => w[0])
-    .slice(0, 2)
-    .join('')
-    .toUpperCase();
+/** A stable tile tint for a seller name (the API sends no brand colour): the same on every screen */
+export const tintFor = (name: string) => tileTint(name);
+const initialsOf = (name: string) => initials(name);
 
 /** Product photo in an image tile (.imgph), with a neutral icon when the line has no image. */
 export function ItemImg({ image, className }: { image?: MediaRef | null; className?: string }) {
   return <Img icon="package" src={image?.url} alt={image?.alt ?? ''} className={className} />;
 }
 
-/** Store link for a seller label (Official Store or the seller's storefront). */
-export const sellerHref = (s: SellerLabel) => (s.official ? href('store/official') : href('store/seller', '', { slug: s.slug }));
-
 /** Product page link (the slug is cosmetic; routes carry the id). */
-export const productHref = (productId: string, slug?: string | null) => href('store/product', '', { slug: slug || 'item', id: productId });
+export const productHref = (productId: string, slug?: string | null) => productLink({ id: productId, slug });
 
 /** Package header (.buy-pkg-head): seller tile, name + badge, "Package i of N · Ships from", arrival and shipping. */
 export function PkgHead({ seller, label, shipsFrom, arrives, shipNote }: { seller: SellerLabel; label: string; shipsFrom: string; arrives?: string | null; shipNote?: ReactNode }) {

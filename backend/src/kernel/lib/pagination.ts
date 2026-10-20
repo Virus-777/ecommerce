@@ -32,6 +32,18 @@ export function decodeCursor(cursor: string): unknown[] {
   throw new AppError('VALIDATION_FAILED', 'Invalid cursor', { issues: [{ path: 'cursor', message: 'not a cursor from this list' }] });
 }
 
+/**
+ * Where a page starts in an offset-paged list: (page - 1) × limit, or the offset a cursor of that list carries. A cursor
+ * from another list is refused (VALIDATION_FAILED), never read as the first page.
+ */
+export function offsetOf(req: PageRequest): number {
+  if (req.mode === 'page') return (req.page - 1) * req.limit;
+  if (!req.cursor) return 0;
+  const n = decodeCursor(req.cursor)[0];
+  if (typeof n === 'number' && Number.isInteger(n) && n >= 0) return n;
+  throw new AppError('VALIDATION_FAILED', 'Invalid cursor', { issues: [{ path: 'cursor', message: 'not a cursor from this list' }] });
+}
+
 /** Builds a page from an in-memory list (small bounded lists, read models, tests). */
 export function pageOf<T>(all: readonly T[], req: PageRequest): Page<T> {
   if (req.mode === 'page') {

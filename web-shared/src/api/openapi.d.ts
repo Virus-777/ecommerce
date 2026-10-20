@@ -43238,7 +43238,8 @@ export interface components {
             id: string;
             /** @enum {string} */
             kind: "owner_id" | "business_registration" | "tax_form" | "bank_letter" | "proof_of_address" | "category_certificate" | "authorization_letter" | "other";
-            file: components["schemas"]["MediaRef"];
+            /** @description Null when the file is no longer available (deleted, or media could not answer) */
+            file: components["schemas"]["MediaRef"] | null;
             fileName: string;
             sizeBytes: number;
             /** Format: date-time */

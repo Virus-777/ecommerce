@@ -4,11 +4,7 @@
 // - a report closes with Resolve (an outcome; blocked while a recommendation is still with an owner team, unless the
 //   outcome is "referred") or Dismiss (no action), and reopens with a reason (…/reports/{id}/resolve|dismiss|reopen);
 // - Trust appeals get a reviewer and a decision (…/appeals/{id}/assign|decide).
-import type { components } from '@marketly/web-shared/api';
 import type { Recommendation, TrustAppeal, TrustReportDetail } from './trust';
-
-type S = components['schemas'];
-export type RecAction = S['trust.Recommendation']['action'];
 
 /** Resolve outcomes (trust.resolveReport). */
 export type ResolveOutcome = 'action_taken' | 'no_violation' | 'insufficient_evidence' | 'referred';
@@ -24,10 +20,8 @@ export const outcomeLabel = (o: string) => RESOLVE_OUTCOMES.find((x) => x.value 
 /** Recommendations still with an owner team: resolving is refused (RECOMMENDATIONS_OPEN) unless the outcome is referred. */
 export const openWithOwners = (d: Pick<TrustReportDetail, 'recommendations'>) => d.recommendations.filter((r) => r.state === 'sent_to_owner');
 
-const ACTIVE = new Set(['open', 'under_review', 'escalated']);
 /** Status machine: resolve from under_review / escalated; dismiss from any active status; reopen from resolved / dismissed. */
 export const canResolveStatus = (status: string) => status === 'under_review' || status === 'escalated';
-export const canDismissStatus = (status: string) => ACTIVE.has(status);
 export const canReopenStatus = (status: string) => status === 'resolved' || status === 'dismissed';
 
 /**

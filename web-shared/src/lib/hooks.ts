@@ -112,3 +112,51 @@ export function useElementWidth<T extends HTMLElement>(): [RefObject<T | null>, 
   }, []);
   return [ref, width];
 }
+
+/** `value` once it has stopped changing for `ms` (search boxes: one request after typing, not one per key). */
+export function useDebounced<T>(value: T, ms = 300): T {
+  const [v, setV] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setV(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return v;
+}
+
+/**
+ * Calls onVisible when the element comes within 200px of the viewport (the next page of a phone list loads before
+ * the reader reaches the end). Does nothing where the browser has no IntersectionObserver.
+ */
+export function useInView<T extends HTMLElement>(onVisible: () => void, enabled: boolean): RefObject<T | null> {
+  const ref = useRef<T | null>(null);
+  const cb = useRef(onVisible);
+  cb.current = onVisible;
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || !enabled || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && cb.current(), { rootMargin: '200px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [enabled]);
+  return ref;
+}
+
+let capturedToken: { path: string; token: string } | null = null;
+
+/**
+ * Reads `#token=…` (emailed links: password reset, invitations) once and removes it from the address bar
+ * (history.replaceState), so the token never stays in the URL, history or a shared screenshot; '' when there is
+ * none. It is kept in memory for this page, so React's development double render or a remount still has it after
+ * the fragment is gone.
+ */
+export function useHashToken(): string {
+  const [token] = useState(() => {
+    const t = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('token');
+    if (t) capturedToken = { path: window.location.pathname, token: t };
+    return capturedToken?.path === window.location.pathname ? capturedToken.token : '';
+  });
+  useEffect(() => {
+    if (window.location.hash) history.replaceState(history.state, '', window.location.pathname + window.location.search);
+  }, []);
+  return token;
+}

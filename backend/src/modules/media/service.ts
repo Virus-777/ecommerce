@@ -1,3 +1,4 @@
+import { actorOfPrincipal } from '../../kernel/auth/index.js';
 import { isIP } from 'node:net';
 import { createHash } from 'node:crypto';
 import type { Readable } from 'node:stream';
@@ -40,7 +41,6 @@ import {
   productTargets,
   recropMessage,
   resolveSpec,
-  sameSpec,
   toSetting,
   widthTargets,
   type ProcessingSpec,
@@ -1587,7 +1587,12 @@ export class MediaService implements MediaPublicApi {
   }
 
   protected async audit(entry: Omit<audit.RecordInput, 'actor' | 'module' | 'requestId'>, by: By) {
-    await this.ctx.tryUse('audit')?.record({ ...entry, actor: by.actor, module: this.ctx.name, requestId: by.requestId });
+    try {
+      await this.ctx.tryUse('audit')?.record({ ...entry, actor: by.actor, module: this.ctx.name, requestId: by.requestId });
+    } catch (err) {
+      // the change is committed; a missing audit entry is logged, never turned into a failed request
+      this.ctx.log[isNotImplemented(err) ? 'debug' : 'error']({ err, action: entry.action }, 'audit entry not recorded');
+    }
   }
 
   private target(row: AssetRow): audit.AuditTarget {
@@ -1695,10 +1700,6 @@ function categoryOf(row: AssetRow): audit.RecordInput['category'] {
 
 const snapshot = (r: AssetRow) => ({ status: r.status, purpose: r.purpose, owner: { kind: r.owner_kind, id: r.owner_id }, removedReason: r.removed_reason, showPlaceholder: r.show_placeholder });
 
-function actorOfPrincipal(p: identity.Principal): common.Actor {
-  if (p.kind === 'visitor') return { kind: 'visitor', id: p.guestSessionId ?? p.sessionId ?? null };
-  return { kind: p.kind, id: p.accountId ?? null };
-}
 
 function formatOfRow(row: AssetRow): string {
   return fileTypeOf(row.content_type, row.file_name) ?? row.content_type.split('/')[1] ?? 'unknown';

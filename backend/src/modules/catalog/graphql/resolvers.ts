@@ -1,30 +1,10 @@
-import { isAppError } from '../../../kernel/errors/index.js';
-import { gqlActor, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
-import { format } from '../../../kernel/lib/money.js';
+import { gqlActor, gqlEnum, type GraphQLContext, type ModuleResolvers, nullOnNotFound, pageInput, pairs } from '../../../kernel/graphql/index.js';
 import { toPageRequest } from '../../../kernel/lib/pagination.js';
-import type { Money, PageInput } from '../../../spec/common.js';
+import type { PageInput } from '../../../spec/common.js';
 import type { Attribute, Category, Product, ProductAdmin, ProductCheck } from '../../../spec/catalog.js';
 import type { CatalogService } from '../service.js';
 
-/** GraphQL enums are the upper-case names of the REST values (changes_requested ↔ CHANGES_REQUESTED). */
-const up = (s: string | null | undefined) => (s ? s.toUpperCase() : null);
 const actorOut = gqlActor;
-const pairs = (m: Record<string, string> | null | undefined) => Object.entries(m ?? {}).map(([name, value]) => ({ name, value }));
-const money = (m: Money | null | undefined) => (m ? { ...m, formatted: format(m) } : null);
-const nullOnNotFound = async <T>(p: Promise<T>): Promise<T | null> => {
-  try {
-    return await p;
-  } catch (err) {
-    if (isAppError(err) && err.code === 'NOT_FOUND') return null;
-    throw err;
-  }
-};
-
-const pagingIn = (p: PageInput | null | undefined): PageInput => ({
-  ...(p?.cursor ? { cursor: p.cursor } : {}),
-  ...(p?.page ? { page: p.page } : {}),
-  ...(p?.limit ? { limit: p.limit } : {}),
-});
 
 /**
  * A read done once per GraphQL request (the context object) and shared by every field that asks for it: a field
@@ -43,7 +23,7 @@ function perRequest<K, V>(read: (key: K) => Promise<V>) {
 }
 
 export function graphqlMappers(service: CatalogService) {
-  const attributeOut = (a: Attribute) => ({ ...a, kind: up(a.kind) });
+  const attributeOut = (a: Attribute) => ({ ...a, kind: gqlEnum(a.kind) });
   const categoryAttributes = perRequest((id: string) => service.categoryAttributes(id));
   // every category of the full tree by id
   const categoryNodes = perRequest(async (_: null) => {
@@ -82,13 +62,13 @@ export function graphqlMappers(service: CatalogService) {
     ...p,
     category: (_args: unknown, ctx?: GraphQLContext) => categoryById(p.categoryId, ctx),
     specs: pairs(p.specs),
-    variants: p.variants.map((v) => ({ ...v, options: pairs(v.options), listPrice: money(v.listPrice) })),
+    variants: p.variants.map((v) => ({ ...v, options: pairs(v.options), listPrice: v.listPrice ?? null })),
   });
 
   const checkOut = (c: ProductCheck) => ({
     ...c,
-    kind: up(c.kind),
-    result: up(c.result),
+    kind: gqlEnum(c.kind),
+    result: gqlEnum(c.result),
     evidence: c.evidence.map((e) => ({
       ...e,
       matchedProduct: () => productById(e.matchedProductId),
@@ -103,28 +83,28 @@ export function graphqlMappers(service: CatalogService) {
     const own = opts.area === 'admin' || opts.owns;
     return {
       ...productOut(a.product),
-      reviewState: up(opts.owns || opts.area === 'admin' ? a.reviewState : 'approved'),
-      publication: up(a.publication),
+      reviewState: gqlEnum(opts.owns || opts.area === 'admin' ? a.reviewState : 'approved'),
+      publication: gqlEnum(a.publication),
       missing: own ? a.missing : null,
       reviewLog: own ? a.reviewLog.map((l) => ({ ...l, fields: pairs(l.fields), actor: actorOut(l.actor) })) : null,
       submission:
         own && a.submission
           ? {
               ...a.submission,
-              kind: up(a.submission.kind),
-              state: up(a.submission.state),
+              kind: gqlEnum(a.submission.kind),
+              state: gqlEnum(a.submission.state),
               submittedBy: actorOut(a.submission.submittedBy),
               lastSavedBy: actorOut(a.submission.lastSavedBy),
               assignee: actorOut(a.submission.assignee),
-              reviewDeadline: a.submission.reviewDeadline ? { dueAt: a.submission.reviewDeadline.dueAt, state: up(a.submission.reviewDeadline.state) } : null,
+              reviewDeadline: a.submission.reviewDeadline ? { dueAt: a.submission.reviewDeadline.dueAt, state: gqlEnum(a.submission.reviewDeadline.state) } : null,
             }
           : null,
       submittedByMe: opts.owns,
       noGtin: own ? a.product.noGtin : null,
       requestedBrandName: own ? (a.requestedBrand?.name ?? null) : null,
       imagesToRecrop: own ? (a.imagesToRecrop ?? []) : null,
-      reviewDraft: a.reviewDraft ? { ...a.reviewDraft, decision: up(a.reviewDraft.decision), fields: pairs(a.reviewDraft.fields), savedBy: actorOut(a.reviewDraft.savedBy) } : null,
-      owner: { type: up(a.owner), sellerId: a.ownerSellerId ?? null },
+      reviewDraft: a.reviewDraft ? { ...a.reviewDraft, decision: gqlEnum(a.reviewDraft.decision), fields: pairs(a.reviewDraft.fields), savedBy: actorOut(a.reviewDraft.savedBy) } : null,
+      owner: { type: gqlEnum(a.owner), sellerId: a.ownerSellerId ?? null },
       // one batched read (a duplicate check lists 20 candidates at most)
       duplicateCandidates: async () => (await service.getProducts(a.duplicateCandidates.map((d) => d.id))).map((r) => productOut(r.product)),
       checks: a.checks.map(checkOut),
@@ -179,7 +159,7 @@ export const resolvers = (service: CatalogService): ModuleResolvers => {
         return r ? m.adminOut(r.product, { owns: r.ownsSubmission, area: 'seller' }) : null;
       },
       productReviewQueue: async (_root, args: { kind?: string | null; categoryId?: string | null; paging?: PageInput | null }, ctx: GraphQLContext) => {
-        const page = await service.reviewQueue({ kind: args.kind?.toLowerCase() ?? undefined, categoryId: args.categoryId ?? undefined }, toPageRequest(pagingIn(args.paging)), staffViewer(ctx));
+        const page = await service.reviewQueue({ kind: args.kind?.toLowerCase() ?? undefined, categoryId: args.categoryId ?? undefined }, toPageRequest(pageInput(args.paging)), staffViewer(ctx));
         return { ...page, items: page.items.map((a) => m.adminOut(a, { owns: false, area: 'admin' })) };
       },
       productAdmin: async (_root, args: { id: string }, ctx: GraphQLContext) => {

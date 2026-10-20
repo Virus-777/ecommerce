@@ -731,7 +731,7 @@ export class Intents {
       if (hold) await this.core.soft('wallet', 'releaseHold', (w) => w.releaseHold(hold));
       return after;
     }
-    if (i.status === 'pending_check' || i.status === 'authorizing' || i.status === 'created') throw illegal('The payment result is not known yet. It is checked with the bank before it can be released.', { status: i.status });
+    if (i.status === 'pending_check' || i.status === 'authorizing' || i.status === 'created') throw illegal('The payment result is not known yet. It is checked with the bank before it can be released.', { from: i.status });
     if (i.status === 'captured') paymentIntentMachine.next('captured', 'void'); // ILLEGAL_TRANSITION: refund instead
     if (i.status === 'partially_captured') {
       if (o.strict) paymentIntentMachine.next('partially_captured', 'void');
@@ -1138,7 +1138,7 @@ export class Intents {
     if (!body.reason?.trim()) throw invalid([{ path: 'reason', message: 'Give a reason' }]);
     const before = await this.get(intentId);
     if (!before.orphan && before.order_id) throw illegal('This payment already belongs to an order');
-    if (!is(ACCEPTED, before.status) && before.status !== 'pending_check') throw illegal('Only money that was authorized or captured can be resolved', { status: before.status });
+    if (!is(ACCEPTED, before.status) && before.status !== 'pending_check') throw illegal('Only money that was authorized or captured can be resolved', { from: before.status });
     if (body.action === 'link_to_order') {
       // no money moves: no limit
       if (!body.orderId) throw invalid([{ path: 'orderId', message: 'Choose the order this checkout created' }]);

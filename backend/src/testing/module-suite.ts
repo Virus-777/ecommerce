@@ -9,7 +9,7 @@
  */
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { routeUrlOf, urlOf } from '../kernel/http/register.js';
+import { urlOf } from '../kernel/http/register.js';
 import { allSpecs, specOf } from '../kernel/module-system/loader.js';
 import type { Area, AuthKind, EndpointDef } from '../kernel/spec/define.js';
 import type { Audience } from '../kernel/auth/tokens.js';

@@ -2,13 +2,12 @@
  * Pure media rules (no I/O): which caller may upload what, type and size limits, visibility,
  * ownership, which usages fit which files, evidence retention and when a file may be deleted.
  */
-import type { MediaOwner, UploadRequest, UsageInput } from '../../../spec/media.js';
+import type { UploadRequest, UsageInput } from '../../../spec/media.js';
 
 export type Purpose = UploadRequest['purpose'];
 export type GeneratedPurpose = 'export' | 'statement' | 'report' | 'correction_report' | 'data_export' | 'label' | 'gift_card_codes';
 export type UsageKind = UsageInput['kind'];
 export type AssetKind = 'image' | 'video' | 'document' | 'spreadsheet';
-export type OwnerKind = MediaOwner['kind'];
 export type FileType = 'jpeg' | 'png' | 'webp' | 'heic' | 'gif' | 'mp4' | 'mov' | 'pdf' | 'csv' | 'xlsx';
 
 export const GENERATED_PURPOSES: readonly GeneratedPurpose[] = ['export', 'statement', 'report', 'correction_report', 'data_export', 'label', 'gift_card_codes'];

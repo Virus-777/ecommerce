@@ -1,3 +1,5 @@
+import { humanize } from '@marketly/web-shared/lib/format';
+
 // Date formatting for the help, policy and seller-application screens: API dates are ISO UTC and are shown
 // in the market time zone (America/Los_Angeles, docs: API-INTEGRATION-BRIEF §4.5).
 
@@ -28,4 +30,4 @@ export const timePT = (iso?: string | null) => (iso ? `${fmt(iso, { hour: 'numer
 export const daysUntil = (iso?: string | null) => (iso ? Math.ceil((new Date(iso).getTime() - Date.now()) / 86_400_000) : 0);
 
 /** "snake_case_value" → "Snake case value" (fallback labels for enums the API sends without a label). */
-export const humanize = (s: string) => s.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+export { humanize };

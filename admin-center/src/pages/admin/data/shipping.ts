@@ -4,7 +4,6 @@ import type { components } from '@marketly/web-shared/api';
 
 type S = components['schemas'];
 export type Carrier = S['shipping.Carrier'];
-export type ShippingMethod = S['shipping.ShippingMethod'];
 export type Zone = S['shipping.Zone'];
 export type ShippingProfile = S['shipping.ShippingProfile'];
 export type ServiceNotice = S['shipping.ServiceNotice'];

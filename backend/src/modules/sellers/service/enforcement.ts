@@ -2,6 +2,7 @@
  * Enforcement: restrictions, suspensions, reinstatement, warnings, appeals, canSell, approvals for
  * enforcement actions (access) and trust enforcements.
  */
+import { stringList } from '../../../kernel/lib/text.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import type { EventEnvelope, EventPayload } from '../../../kernel/events/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
@@ -10,11 +11,9 @@ import type * as common from '../../../spec/common.js';
 import type { Appeal, AppealInput, AppealRoute, Restriction, RestrictionInput, RestrictionScope, SellerWarning, SuspensionImpact, SuspensionInput } from '../../../spec/sellers.js';
 import {
   type Activity,
-  addBusinessDays,
   addDays,
   affectedSummary,
   DEFAULT_STILL_WORKS,
-  isoDate,
   normalizeScope,
   restrictionBlocks,
 } from '../domain/rules.js';
@@ -65,7 +64,7 @@ export class EnforcementPart extends Part {
     const appeals = await this.repo.find('appeals', { subject: 'restriction', subject_id: rows.map((r) => r.id) }, { orderBy: [['submitted_at', 'desc']] });
     const sellers = new Map((await this.repo.getMany('sellers', [...new Set(rows.map((r) => r.seller_id))])).map((s) => [s.id, s]));
     const evidence = rows.flatMap((r) => ((r.resolution_evidence ?? []) as { mediaId?: string }[]).map((e) => e.mediaId));
-    const refs = await this.core.mediaRefs([...evidence, ...appeals.flatMap((a) => map.strings(a.evidence_media_ids))]);
+    const refs = await this.core.mediaRefs([...evidence, ...appeals.flatMap((a) => stringList(a.evidence_media_ids))]);
     const appealViews = await this.appealViews(appeals, { refs, sellers, restrictions: rows });
     // staff see a change waiting for a second reviewer, and its approval in place of the restriction's own
     const changes = o.staff ? await this.core.pendingChangesFor('restriction_change', rows.map((r) => r.id)) : new Map<string, PendingChangeRec>();
@@ -103,7 +102,7 @@ export class EnforcementPart extends Part {
   /** A suspension shown in the restriction list (sellers appeal both from there) */
   private async suspensionView(s: SuspensionRec, seller: SellerRec, o: { staff?: boolean } = {}): Promise<Restriction> {
     const appeals = await this.repo.find('appeals', { subject: 'suspension', subject_id: s.id }, { orderBy: [['submitted_at', 'desc']] });
-    const refs = await this.core.mediaRefs(appeals.flatMap((a) => map.strings(a.evidence_media_ids)));
+    const refs = await this.core.mediaRefs(appeals.flatMap((a) => stringList(a.evidence_media_ids)));
     const approval = o.staff ? await this.approvalInfo(s.approval_request_id) : null;
     return {
       id: s.id,
@@ -266,7 +265,7 @@ export class EnforcementPart extends Part {
         restrictionId: r.id,
         reasonCode: r.reason_code,
         reason: r.reason,
-        affectedActivities: map.strings(r.affected_activities) as Activity[],
+        affectedActivities: stringList(r.affected_activities) as Activity[],
         scope,
         categoryIds: scope.categoryIds ?? [],
         appealRoute: route.howTo,
@@ -367,7 +366,7 @@ export class EnforcementPart extends Part {
   ): Promise<RestrictionRec> {
     const before = await this.restrictionOf(id);
     if (before.state !== 'active') return before;
-    const activities = patch.affectedActivities ?? (map.strings(before.affected_activities) as Activity[]);
+    const activities = patch.affectedActivities ?? (stringList(before.affected_activities) as Activity[]);
     const scope = patch.scope ?? normalizeScope(before.scope as RestrictionScope);
     const after = await this.repo.update('restrictions', id, {
       ...(patch.reason ? { reason: patch.reason } : {}),
@@ -488,7 +487,7 @@ export class EnforcementPart extends Part {
     const sellers = ctx.sellers ?? new Map();
     const missingSellers = rows.map((a) => a.seller_id).filter((id) => !sellers.has(id));
     for (const s of await this.repo.getMany('sellers', missingSellers)) sellers.set(s.id, s);
-    const refs = ctx.refs ?? (await this.core.mediaRefs(rows.flatMap((a) => map.strings(a.evidence_media_ids))));
+    const refs = ctx.refs ?? (await this.core.mediaRefs(rows.flatMap((a) => stringList(a.evidence_media_ids))));
     const restrictionRefs = new Map((ctx.restrictions ?? []).map((r) => [r.id, r.ref]));
     const needR = rows.filter((a) => a.subject === 'restriction' && !restrictionRefs.has(a.subject_id)).map((a) => a.subject_id);
     for (const r of await this.repo.getMany('restrictions', needR)) restrictionRefs.set(r.id, r.ref);
@@ -542,7 +541,7 @@ export class EnforcementPart extends Part {
     const evidence = [...new Set(input.evidenceIds ?? [])];
     const id = newId();
     if (evidence.length) await this.attachEvidence(evidence, input.owner, id, `Appeal ${input.subject}`);
-    const decideBy = addBusinessDays(now, await this.core.setting('appealDecisionBusinessDays'));
+    const decideBy = this.core.addBusinessDays(now, await this.core.setting('appealDecisionBusinessDays'));
     let row: AppealRec;
     try {
       row = await this.repo.insert('appeals', {
@@ -739,7 +738,7 @@ export class EnforcementPart extends Part {
     const offers = await this.core.optional('offers', 'offers', unavailable, async (o) => (await o.listOffersAdmin({ sellerId, status: ['active'] }, { page: 1, limit: 1 })).total ?? 0);
     const orders = await this.core.optional('orders', 'orders', unavailable, async (o) => (await o.countOrdersForSellers([sellerId]))[sellerId]);
     const returns = await this.core.optional('returns', 'returns', unavailable, (r) => r.sellerQueueCounts(sellerId));
-    const range = { from: isoDate(addDays(this.now(), -365)), to: this.core.today() };
+    const range = { from: this.core.today(addDays(this.now(), -365)), to: this.core.today() };
     const cases = await this.core.optional('support', 'cases', unavailable, (s) => s.sellerCaseStats(sellerId, range));
     const balances = await this.core.optional('finance', 'balances', unavailable, (f) => f.getSellerBalances(sellerId));
     const openOrders = orders?.open ?? 0;
@@ -1005,7 +1004,7 @@ export class EnforcementPart extends Part {
       return { allowed: false, reason: 'The launch readiness review has not passed yet' };
     }
     for (const r of await this.activeRestrictions(sellerId)) {
-      if (restrictionBlocks({ affectedActivities: map.strings(r.affected_activities), scope: normalizeScope(r.scope as RestrictionScope) }, check)) {
+      if (restrictionBlocks({ affectedActivities: stringList(r.affected_activities), scope: normalizeScope(r.scope as RestrictionScope) }, check)) {
         return { allowed: false, restrictionId: r.id, reason: r.title, appealRoute: (r.appeal_route as unknown as StoredRoute).howTo };
       }
     }
@@ -1092,7 +1091,7 @@ export class EnforcementPart extends Part {
           stillWorks: p.stillWorks ?? null,
           toResolve: p.toResolve ?? 'Contact your Seller Manager or appeal with documents that answer the findings.',
           appealDays: p.appealDays ?? null,
-          reviewDate: typeof p.reviewDate === 'string' && p.reviewDate >= this.core.today() ? p.reviewDate : isoDate(addDays(this.now(), 30)),
+          reviewDate: typeof p.reviewDate === 'string' && p.reviewDate >= this.core.today() ? p.reviewDate : this.core.today(addDays(this.now(), 30)),
           endsAt: p.endsAt ?? null,
           trustReportId: e.reportId,
           trustEnforcementId: e.enforcementId,
@@ -1113,7 +1112,7 @@ export class EnforcementPart extends Part {
           {
             reasonCode: p.reasonCode ?? 'policy_violation',
             reason: p.reason ?? e.reason,
-            reviewDate: typeof p.reviewDate === 'string' ? p.reviewDate : isoDate(addDays(this.now(), 30)),
+            reviewDate: typeof p.reviewDate === 'string' ? p.reviewDate : this.core.today(addDays(this.now(), 30)),
             openOrders: p.openOrders ?? 'seller_keeps_fulfilling',
             secondReviewerId: p.secondReviewerId ?? NIL,
             trustReportId: e.reportId,

@@ -2,6 +2,7 @@
  * Read models: the case as the customer, the seller or staff sees it (CaseView), the dispute review
  * (AdminCaseDetail), list rows and summaries. Order, return, staff and file facts are composed at read time.
  */
+import { format as formatMoney } from '../../../kernel/lib/money.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
 import type * as common from '../../../spec/common.js';
 import type { OrderDetail } from '../../../spec/orders.js';
@@ -292,7 +293,7 @@ export class Views {
     if (!group || !item) return null;
     const terms = order.policyVersions.find((p) => p.policyKey === 'purchase_terms');
     const discount = item.discounts.reduce((s, d) => s + d.amount.amount, 0);
-    const fmt = (m: common.Money) => `$${(m.amount / 100).toFixed(2)}`;
+    const fmt = (m: common.Money) => formatMoney(m);
     return {
       snapshotAt: order.acceptedAt ?? order.placedAt,
       termsVersion: terms?.version ?? `offer terms v${item.offer.termsVersion}`,
@@ -392,7 +393,7 @@ export class Views {
       shipmentEvidence,
       evidence: agg.evidence.map((e) => this.evidence(e, ctx, 'admin')),
       deadlines: this.deadlines(agg),
-      holds: (holds ?? []).filter((h) => h.status === 'active').map((h) => `${h.sellerName} hold $${(h.amount.amount / 100).toFixed(2)} · review ${dateLabel(h.reviewDate, this.core.tz)}`),
+      holds: (holds ?? []).filter((h) => h.status === 'active').map((h) => `${h.sellerName} hold ${formatMoney(h.amount)} · review ${dateLabel(h.reviewDate, this.core.tz)}`),
       decisionDraft: draft,
       pendingApproval,
       history: agg.events.map((e) => ({ at: e.at.toISOString(), label: e.label, detail: [e.detail, e.reason].filter(Boolean).join(' · ') || null, actor: e.actor_kind === 'system' ? null : this.actor({ kind: e.actor_kind as common.Actor['kind'], id: e.actor_id }, ctx, 'admin') })),

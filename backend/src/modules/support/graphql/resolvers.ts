@@ -1,6 +1,5 @@
-import { gqlActor, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { gqlActor, gqlDeadline, gqlEnum, type GraphQLContext, type ModuleResolvers, pageInput } from '../../../kernel/graphql/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
-import { format as formatMoney } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
 import type { AdminCaseDetail, CaseView, DecisionInput } from '../../../spec/support.js';
 import { isOpen } from '../domain/rules.js';
@@ -13,17 +12,13 @@ import type { SupportService } from '../service.js';
  * their own orders and their own requests, staff everything. REST shapes are mapped to GraphQL shapes.
  */
 
-const upper = (s: string | null | undefined) => (s ? s.toUpperCase().replace(/-/g, '_') : null);
-const money = (m: common.Money | null | undefined) => (m ? { ...m, formatted: formatMoney(m) } : null);
 const actor = gqlActor;
 const timeline = (list: readonly common.TimelineEvent[]) => list.map((t) => ({ at: t.at, label: t.label, detail: t.detail ?? null, actor: actor(t.actor) }));
-const deadline = (d: common.Deadline | null | undefined) => (d ? { dueAt: d.dueAt, state: upper(d.state) } : null);
 const options = (o: Record<string, string> | null | undefined) => Object.entries(o ?? {}).map(([name, value]) => ({ name, value }));
-const pageInput = (p: common.PageInput | null | undefined): common.PageInput => ({ ...(p?.cursor ? { cursor: p.cursor } : {}), ...(p?.page ? { page: p.page } : {}), ...(p?.limit ? { limit: p.limit } : {}) });
 const emptyPage = { items: [], nextCursor: null, page: null, totalPages: null, total: 0 };
 
 const draftRemedies = (d: DecisionInput) =>
-  (d.remedies ?? []).map((r) => ({ kind: upper(r.kind), amount: money(r.amount), chargedTo: upper(r.chargedTo), orderItemIds: r.orderItemIds ?? [], dueAt: r.dueAt ?? null, note: r.note ?? null }));
+  (d.remedies ?? []).map((r) => ({ kind: gqlEnum(r.kind), amount: r.amount ?? null, chargedTo: gqlEnum(r.chargedTo), orderItemIds: r.orderItemIds ?? [], dueAt: r.dueAt ?? null, note: r.note ?? null }));
 
 /** The GraphQL Case from the REST view; the admin detail adds the dispute review fields */
 export function gqlCase(v: CaseView, extra: { updatedAt: string; area: 'store' | 'seller' | 'admin'; marketplaceInvolved: boolean; expectedReply: string; reopened: boolean; detail?: AdminCaseDetail | null; evidence?: AdminCaseDetail['evidence'] }) {
@@ -31,50 +26,50 @@ export function gqlCase(v: CaseView, extra: { updatedAt: string; area: 'store' |
   return {
     id: v.id,
     ref: v.ref,
-    kind: upper(v.kind),
+    kind: gqlEnum(v.kind),
     subject: v.subject,
     category: { ...v.category, team: v.category.team },
-    priority: upper(v.priority),
-    status: upper(v.status),
+    priority: gqlEnum(v.priority),
+    status: gqlEnum(v.status),
     statusLabel: v.statusLabel,
     openedAt: v.openedAt,
     updatedAt: extra.updatedAt,
     open: isOpen(v.status),
-    handledBy: { kind: upper(v.handledBy.kind), name: v.handledBy.name, staff: actor(v.handledBy.staff), team: v.handledBy.team ?? null, supportFollowing: v.handledBy.supportFollowing },
-    nextAction: { label: v.nextAction.label, whoMustAct: upper(v.nextAction.whoMustAct), due: deadline(v.nextAction.due), youNeedToAct: v.nextAction.youNeedToAct, note: v.nextAction.note ?? null },
-    expectedResponse: deadline(v.expectedResponse),
+    handledBy: { kind: gqlEnum(v.handledBy.kind), name: v.handledBy.name, staff: actor(v.handledBy.staff), team: v.handledBy.team ?? null, supportFollowing: v.handledBy.supportFollowing },
+    nextAction: { label: v.nextAction.label, whoMustAct: gqlEnum(v.nextAction.whoMustAct), due: gqlDeadline(v.nextAction.due), youNeedToAct: v.nextAction.youNeedToAct, note: v.nextAction.note ?? null },
+    expectedResponse: gqlDeadline(v.expectedResponse),
     expectedReply: extra.expectedReply,
     orderId: v.order?.id ?? null,
     orderRef: v.order?.ref || null,
-    items: v.items.map((i) => ({ ...i, options: options(i.options), price: money(i.price), imageUrl: i.imageUrl ?? null, ownerType: upper(i.ownerType), sellerId: i.sellerId ?? null, packageLabel: i.packageLabel ?? null, estimate: i.estimate ?? null })),
+    items: v.items.map((i) => ({ ...i, options: options(i.options), price: i.price ?? null, imageUrl: i.imageUrl ?? null, ownerType: gqlEnum(i.ownerType), sellerId: i.sellerId ?? null, packageLabel: i.packageLabel ?? null, estimate: i.estimate ?? null })),
     returnId: v.returnId ?? null,
     returnRef: v.returnRef ?? null,
-    messages: v.messages.map((m) => ({ ...m, author: actor(m.author), role: upper(m.role), audience: upper(m.audience) })),
+    messages: v.messages.map((m) => ({ ...m, author: actor(m.author), role: gqlEnum(m.role), audience: gqlEnum(m.audience) })),
     attachments: v.attachments,
-    offers: v.offers.map((o) => ({ ...o, from: upper(o.from), kind: upper(o.kind), amount: money(o.amount), shipBy: o.shipBy ?? null, note: o.note ?? null, status: upper(o.status), respondBy: o.respondBy ?? null })),
-    decision: v.decision ? { outcome: upper(v.decision.outcome), reason: v.decision.reason, decidedBy: actor(v.decision.decidedBy), decidedAt: v.decision.decidedAt, publishedAt: v.decision.publishedAt ?? null, appealDeadline: v.decision.appealDeadline ?? null, appealRoute: v.decision.appealRoute, final: v.decision.final } : null,
-    remedies: v.remedies.map((r) => ({ ...r, kind: upper(r.kind), amount: money(r.amount), chargedTo: upper(r.chargedTo), status: upper(r.status), currentStep: r.currentStep ?? null, dueAt: r.dueAt ?? null, destination: r.destination ?? null, note: r.note ?? null, refundRequestId: r.refundRequestId ?? null, replacementId: r.replacementId ?? null })),
-    appeal: v.appeal ? { ...v.appeal, by: actor(v.appeal.by), status: upper(v.appeal.status), reviewer: actor(v.appeal.reviewer), decidedAt: v.appeal.decidedAt ?? null, outcome: v.appeal.outcome ?? null } : null,
+    offers: v.offers.map((o) => ({ ...o, from: gqlEnum(o.from), kind: gqlEnum(o.kind), amount: o.amount ?? null, shipBy: o.shipBy ?? null, note: o.note ?? null, status: gqlEnum(o.status), respondBy: o.respondBy ?? null })),
+    decision: v.decision ? { outcome: gqlEnum(v.decision.outcome), reason: v.decision.reason, decidedBy: actor(v.decision.decidedBy), decidedAt: v.decision.decidedAt, publishedAt: v.decision.publishedAt ?? null, appealDeadline: v.decision.appealDeadline ?? null, appealRoute: v.decision.appealRoute, final: v.decision.final } : null,
+    remedies: v.remedies.map((r) => ({ ...r, kind: gqlEnum(r.kind), amount: r.amount ?? null, chargedTo: gqlEnum(r.chargedTo), status: gqlEnum(r.status), currentStep: r.currentStep ?? null, dueAt: r.dueAt ?? null, destination: r.destination ?? null, note: r.note ?? null, refundRequestId: r.refundRequestId ?? null, replacementId: r.replacementId ?? null })),
+    appeal: v.appeal ? { ...v.appeal, by: actor(v.appeal.by), status: gqlEnum(v.appeal.status), reviewer: actor(v.appeal.reviewer), decidedAt: v.appeal.decidedAt ?? null, outcome: v.appeal.outcome ?? null } : null,
     reopenUntil: v.reopenUntil ?? null,
     reopenRules: v.reopenRules,
     timeline: timeline(v.timeline),
     can: v.can,
     marketplaceInvolved: extra.marketplaceInvolved,
-    evidence: (extra.evidence ?? d?.evidence ?? []).map((e) => ({ ...e, party: upper(e.party), kind: upper(e.kind), note: e.note ?? null, addedBy: actor(e.addedBy) })),
+    evidence: (extra.evidence ?? d?.evidence ?? []).map((e) => ({ ...e, party: gqlEnum(e.party), kind: gqlEnum(e.kind), note: e.note ?? null, addedBy: actor(e.addedBy) })),
     customer: d?.customer ? { ...d.customer, id: d.customer.id ?? null, location: d.customer.location ?? null, email: d.customer.email ?? null, asksFor: d.customer.asksFor ?? null } : null,
-    seller: d?.seller ? { ...d.seller, ownerType: upper(d.seller.ownerType), id: d.seller.id ?? null, location: d.seller.location ?? null, onTimeDispatchPct: d.seller.onTimeDispatchPct ?? null, offers: d.seller.offers ?? null } : null,
+    seller: d?.seller ? { ...d.seller, ownerType: gqlEnum(d.seller.ownerType), id: d.seller.id ?? null, location: d.seller.location ?? null, onTimeDispatchPct: d.seller.onTimeDispatchPct ?? null, offers: d.seller.offers ?? null } : null,
     owner: actor(d?.owner),
     team: d?.team ?? null,
     financeReviewer: actor(d?.financeReviewer),
-    purchaseTerms: d?.purchaseTerms ? { ...d.purchaseTerms, pricePaid: money(d.purchaseTerms.pricePaid), listPrice: money(d.purchaseTerms.listPrice), discountNote: d.purchaseTerms.discountNote ?? null, promisedDelivery: d.purchaseTerms.promisedDelivery ?? null, dispatchBy: d.purchaseTerms.dispatchBy ?? null } : null,
+    purchaseTerms: d?.purchaseTerms ? { ...d.purchaseTerms, pricePaid: d.purchaseTerms.pricePaid ?? null, listPrice: d.purchaseTerms.listPrice ?? null, discountNote: d.purchaseTerms.discountNote ?? null, promisedDelivery: d.purchaseTerms.promisedDelivery ?? null, dispatchBy: d.purchaseTerms.dispatchBy ?? null } : null,
     shipmentEvidence: timeline(d?.shipmentEvidence ?? []),
-    deadlines: (d?.deadlines ?? []).map((x) => ({ label: x.label, deadline: deadline(x.deadline), party: upper(x.party) })),
+    deadlines: (d?.deadlines ?? []).map((x) => ({ label: x.label, deadline: gqlDeadline(x.deadline), party: gqlEnum(x.party) })),
     history: timeline(d?.history ?? []),
     reopened: extra.reopened,
     pendingApproval: d?.pendingApproval ? { required: d.pendingApproval.required, reason: d.pendingApproval.reason ?? null, approvalRequestId: d.pendingApproval.approvalRequestId ?? null, approvers: d.pendingApproval.approvers } : null,
     decisionDraft: d?.decisionDraft
       ? {
-          outcome: upper(d.decisionDraft.draft.outcome),
+          outcome: gqlEnum(d.decisionDraft.draft.outcome),
           reason: d.decisionDraft.draft.reason ?? null,
           remedies: draftRemedies(d.decisionDraft.draft),
           appealDeadline: d.decisionDraft.draft.appealDeadline ?? null,

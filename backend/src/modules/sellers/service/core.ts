@@ -7,6 +7,7 @@ import { createHash, createHmac } from 'node:crypto';
 import type { Principal } from '../../../kernel/auth/index.js';
 import { AppError, isNotImplemented } from '../../../kernel/errors/index.js';
 import type { EventMap } from '../../../kernel/events/index.js';
+import { BusinessDays } from '../../../kernel/lib/business-days.js';
 import { dateInZone } from '../../../kernel/lib/clock.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import { secretFor } from '../../../kernel/lib/secrets.js';
@@ -80,6 +81,18 @@ export class Core {
   now = () => this.ctx.clock.now();
   /** Market date YYYY-MM-DD */
   today = (at: Date = this.now()) => dateInZone(at, this.ctx.config.market.timeZone);
+  get tz() {
+    return this.ctx.config.market.timeZone;
+  }
+
+  /** Business days for review and decision targets: the market's calendar (business hours, closures) */
+  readonly businessDays = new BusinessDays({
+    load: async () => this.ctx.tryUse('settings')?.businessCalendar(),
+    timeZone: () => this.tz,
+    now: () => this.now(),
+    onError: (err) => this.ctx.log.warn({ err }, 'sellers: business calendar unavailable, counting weekdays'),
+  });
+  addBusinessDays = (from: Date, days: number) => this.businessDays.add(from, days);
   setting = <K extends Parameters<ModuleContext<'sellers'>['settings']['get']>[0]>(key: K) => this.ctx.settings.get(key);
 
   publish<N extends OwnEvent>(name: N, payload: EventMap[N], by: { actor?: common.Actor; requestId?: string } = {}) {
@@ -87,7 +100,12 @@ export class Core {
   }
 
   async audit(entry: Omit<audit.RecordInput, 'actor' | 'module' | 'requestId'>, by: By) {
-    await this.ctx.tryUse('audit')?.record({ ...entry, actor: by.actor, module: this.ctx.name, requestId: by.requestId ?? null });
+    try {
+      await this.ctx.tryUse('audit')?.record({ ...entry, actor: by.actor, module: this.ctx.name, requestId: by.requestId ?? null });
+    } catch (err) {
+      // the change is committed; a missing audit entry is logged, never turned into a failed request
+      this.ctx.log[isNotImplemented(err) ? 'debug' : 'error']({ err, action: entry.action }, 'audit entry not recorded');
+    }
   }
 
   /** One row of the seller timeline (seller-visible unless staff-only) */
@@ -130,9 +148,7 @@ export class Core {
     }
   }
 
-  fallbackUrl = (id: string) => `${this.ctx.config.publicUrls.store.replace(/\/$/, '')}/media/unavailable/${id}`;
-
-  /** MediaRefs for files, looked up in one call; unknown files get a placeholder */
+  /** MediaRefs for files, looked up in one call; files media does not know (or media down) are null */
   async mediaRefs(ids: readonly (string | null | undefined)[]): Promise<Refs> {
     const wanted = [...new Set(ids.filter((i): i is string => isUuid(i)))];
     const map = new Map<string, common.MediaRef>();
@@ -143,7 +159,7 @@ export class Core {
         if (!isNotImplemented(err)) this.ctx.log.warn({ err }, 'sellers: media refs failed');
       }
     }
-    return (id) => (id ? (map.get(id) ?? (isUuid(id) ? { id, url: this.fallbackUrl(id) } : null)) : null);
+    return (id) => (id ? (map.get(id) ?? null) : null);
   }
 
   /** Staff display name (access), or null */

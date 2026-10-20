@@ -566,9 +566,7 @@
     { "key": "holdMinutes", "type": "duration", "default": 15, "desc": "Checkout hold lifetime", "unit": "minutes", "min": 1, "max": 60, "sellerVisible": false },
     { "key": "pendingPaymentHoldMinutes", "type": "duration", "default": 60, "desc": "Maximum hold extension while a payment result is being checked", "unit": "minutes", "min": 1, "sellerVisible": false },
     { "key": "defaultLowStockThreshold", "type": "int", "default": 3, "desc": "Low-stock threshold of stock items without their own (seller items and company SKUs)", "min": 0, "sellerVisible": true },
-    { "key": "lowStockAlertCooldownHours", "type": "duration", "default": 24, "desc": "Minimum time between inventory.stock.low events for one item", "unit": "hours", "min": 1, "sellerVisible": false },
-    { "key": "costingMethod", "type": "enum", "default": "weighted_average", "desc": "Company stock valuation", "choices": ["weighted_average", "fifo"], "approval": "business_owner", "sellerVisible": false },
-    { "key": "allowSellerNegativeAvailable", "type": "bool", "default": false, "desc": "Never sell beyond available quantity (plan ch. 9)", "editable": false, "sellerVisible": false }
+    { "key": "lowStockAlertCooldownHours", "type": "duration", "default": 24, "desc": "Minimum time between inventory.stock.low events for one item", "unit": "hours", "min": 1, "sellerVisible": false }
   ],
   "errorCodes": {
     "INSUFFICIENT_STOCK": { "status": 409, "meaning": "Not enough Available units. details.lines[{ stockItemId, requested, available }]" },

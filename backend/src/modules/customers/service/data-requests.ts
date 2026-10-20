@@ -15,7 +15,7 @@ import type { ClosureBlocker, ClosureEligibility, DataRequest } from '../../../s
 import type * as identity from '../../../spec/identity.js';
 import { blocker, displayName, isPendingRefund, RETAINED_RECORDS, type AccountStatus } from '../domain/rules.js';
 import { customerAccountStatusMachine, dataRequestMachine } from '../domain/state-machines.js';
-import { zip } from '../domain/zip.js';
+import { zip } from '../../../kernel/lib/zip.js';
 import * as map from '../mappers.js';
 import type { ActionRow, ConsentRow, CustomerRow, DataRequestRow } from '../ports.js';
 import {

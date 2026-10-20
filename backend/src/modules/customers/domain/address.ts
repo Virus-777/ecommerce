@@ -3,6 +3,7 @@
  * (all 50 US states at launch) and PO box detection. A provider, when configured, adds a normalised
  * suggestion; without one these rules are all that run (spec integrations).
  */
+import { isPoBoxLine } from '../../../kernel/lib/address.js';
 import type * as common from '../../../spec/common.js';
 import type { AddressIssue, AddressValidation } from '../../../spec/customers.js';
 
@@ -16,7 +17,6 @@ export const SERVICE_STATES = new Set([
 const OTHER_US_CODES = new Set(['PR', 'GU', 'VI', 'AS', 'MP', 'UM', 'AA', 'AE', 'AP']);
 
 const ZIP = /^\d{5}(-\d{4})?$/;
-const PO_BOX = /\b(p\s*\.?\s*o\s*\.?\s*box|post\s+office\s+box|pob\s+\d|box\s+\d+\s*$)/i;
 const PHONE = /^\+?[0-9 ().-]{7,20}$/;
 
 export const MAX_FIELD = 200;
@@ -37,7 +37,7 @@ export function cleanAddress(a: common.Address): common.Address {
   };
 }
 
-export const isPoBox = (a: common.Address) => PO_BOX.test(a.line1) || PO_BOX.test(a.line2 ?? '');
+export const isPoBox = (a: common.Address) => isPoBoxLine(a.line1) || isPoBoxLine(a.line2);
 
 /** Format rules, service region and PO boxes. `issues` with missing / invalid_format make the address invalid. */
 export function checkAddress(input: common.Address): AddressValidation {

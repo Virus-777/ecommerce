@@ -6,8 +6,6 @@ import { keepPreviousData, useInfiniteQuery, useMutation, useQuery } from '@tans
 import { call, useApi, type components } from '@marketly/web-shared/api';
 
 export type ApiReview = components['schemas']['reviews.ProductReview'];
-export type ReviewMedia = components['schemas']['MediaRef'];
-
 /** A review photo with the review it belongs to (photo strip and viewer). */
 export interface ReviewPhoto {
   id: string;

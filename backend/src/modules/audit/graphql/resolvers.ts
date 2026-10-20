@@ -1,10 +1,8 @@
-import { gqlActor, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { gqlActor, gqlEnum, type GraphQLContext, type ModuleResolvers, pageInput } from '../../../kernel/graphql/index.js';
 import type { Page, PageInput, TimelineEvent } from '../../../spec/common.js';
 import type { AuditEntry, AuditFilters } from '../../../spec/audit.js';
 import type { AuditService } from '../service.js';
 
-/** GraphQL enums are the upper-case names of the REST values (FINANCIAL ↔ financial). */
-const up = (s: string) => s.toUpperCase();
 const down = <T extends string>(s: string | null | undefined) => (s ? (s.toLowerCase() as T) : undefined);
 
 const actorOut = gqlActor;
@@ -14,8 +12,8 @@ export function toGraphQL(e: AuditEntry) {
   return {
     ...e,
     actor: actorOut(e.actor),
-    category: up(e.category),
-    approval: { ...e.approval, state: up(e.approval.state), steps: e.approval.steps.map(stepOut) },
+    category: gqlEnum(e.category),
+    approval: { ...e.approval, state: gqlEnum(e.approval.state), steps: e.approval.steps.map(stepOut) },
   };
 }
 
@@ -31,12 +29,6 @@ const filtersIn = (f: FilterInput | null | undefined): AuditFilters => {
   const { category, approvalState, ...rest } = f;
   return { ...rest, category: down(category), approvalState: down(approvalState) };
 };
-
-const pagingIn = (p: PageInput | null | undefined): PageInput => ({
-  ...(p?.cursor ? { cursor: p.cursor } : {}),
-  ...(p?.page ? { page: p.page } : {}),
-  ...(p?.limit ? { limit: p.limit } : {}),
-});
 
 interface TrailArgs {
   category?: string | null;
@@ -60,7 +52,7 @@ function trailLoader(service: AuditService) {
     async (root: { id?: string }, args: TrailArgs, ctx: GraphQLContext) => {
       const id = root?.id;
       if (!id) return { items: [], nextCursor: null };
-      const opts = { includeRelated: args.includeRelated ?? true, category: down(args.category), page: pagingIn(args.paging) };
+      const opts = { includeRelated: args.includeRelated ?? true, category: down(args.category), page: pageInput(args.paging) };
       const key = `${targetType}|${JSON.stringify(opts)}`;
       let batches = perRequest.get(ctx);
       if (!batches) perRequest.set(ctx, (batches = new Map()));
@@ -98,7 +90,7 @@ export const resolvers = (service: AuditService): ModuleResolvers => {
   const trail = trailLoader(service);
   return {
     Query: {
-      auditEntries: async (_root, args: { filter?: FilterInput | null; paging?: PageInput | null }) => pageOut(await service.searchEntries(filtersIn(args.filter), pagingIn(args.paging))),
+      auditEntries: async (_root, args: { filter?: FilterInput | null; paging?: PageInput | null }) => pageOut(await service.searchEntries(filtersIn(args.filter), pageInput(args.paging))),
       auditEntry: async (_root, args: { id: string }) => {
         const e = await service.getEntry(args.id);
         return e ? toGraphQL(e) : null;

@@ -10,7 +10,6 @@ export type CaseStatus = 'open' | 'waiting_on_seller' | 'waiting_on_customer' | 
 export type Priority = 'low' | 'medium' | 'high' | 'urgent';
 export type Team = CaseCategory['team'];
 export type HandlerKind = 'seller' | 'official_store' | 'marketplace_support';
-export type Party = 'customer' | 'seller' | 'marketplace' | 'none';
 export type RemedyKind = Remedy['kind'];
 export type RemedyStatus = Remedy['status'];
 export type Area = 'store' | 'seller' | 'admin';
@@ -21,11 +20,7 @@ export const CLOSED_STATUSES: readonly CaseStatus[] = ['resolved', 'closed'];
 export const OPEN_STATUSES: readonly CaseStatus[] = ['open', 'waiting_on_seller', 'waiting_on_customer', 'escalated', 'decision_made', 'appealed', 'reopened'];
 /** A remedy in one of these states is a promise not yet kept (REMEDY_PENDING) */
 export const UNRESOLVED_REMEDY: readonly RemedyStatus[] = ['pending_approval', 'approved', 'in_progress'];
-export const MONEY_KINDS: readonly RemedyKind[] = ['refund', 'partial_refund', 'goodwill_credit'];
-
 export const isOpen = (status: string) => !(CLOSED_STATUSES as readonly string[]).includes(status);
-export const priorityRank = (p: string) => Math.max(0, PRIORITIES.indexOf(p as Priority));
-
 /** Display name of the Official Store (shared constant) */
 export { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 export const SUPPORT_NAME = 'Marketly support';

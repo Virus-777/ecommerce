@@ -9,7 +9,7 @@ export type DeadlineState = 'on_time' | 'due_soon' | 'overdue';
 
 export function deadlineState(dueAt: Date, now: Date, dueSoonMinutes: number): DeadlineState {
   const left = dueAt.getTime() - now.getTime();
-  if (left <= 0) return 'overdue';
+  if (left < 0) return 'overdue';
   if (left <= dueSoonMinutes * 60_000) return 'due_soon';
   return 'on_time';
 }
@@ -200,9 +200,6 @@ export function addDays(date: string, days: number): string {
   const [y, m, d] = date.split('-').map(Number) as [number, number, number];
   return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
 }
-
-/** A date as YYYY-MM-DD, from a date column (text) or a Date */
-export const dateText = (v: unknown): string => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10));
 
 export const isHhMm = (s: unknown): s is string => typeof s === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(s);
 

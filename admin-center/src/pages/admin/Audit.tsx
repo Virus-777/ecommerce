@@ -1,3 +1,4 @@
+import { dayKey, fromZonedInput } from '@marketly/web-shared/lib/dates';
 import { useEffect, useState, type ReactNode, useCallback } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
@@ -42,10 +43,7 @@ const Change = ({ e }: { e: Entry }) =>
 function rangeFrom(range: string): string | undefined {
   const now = Date.now();
   if (range === 'Today') {
-    const day = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-    const probe = new Date(`${day}T12:00:00Z`).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', timeZoneName: 'shortOffset' });
-    const off = Number(/GMT([+-]\d+)/.exec(probe)?.[1] ?? -8);
-    return new Date(`${day}T00:00:00${off < 0 ? '-' : '+'}${String(Math.abs(off)).padStart(2, '0')}:00`).toISOString();
+    return fromZonedInput(`${dayKey(new Date())}T00:00`) ?? undefined;
   }
   if (range === 'Last 7 days') return new Date(now - 7 * 86_400_000).toISOString();
   if (range === 'Last 30 days') return new Date(now - 30 * 86_400_000).toISOString();

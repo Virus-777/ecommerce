@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { SellerLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
-import { formatMoney, money } from '@marketly/web-shared/lib/format';
+import { formatMoney, money, parseCents } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, Badge, Button, Card, Checkbox, Dialog, Field, Icon, KeyValue, OptionCard, PageHeader, Select, Switch, TableWrap, TextInput, Timeline, announce, type TimelineEvent } from '@marketly/web-shared/ui';
 import { useSellerSession } from '@/app/session';
@@ -59,7 +59,7 @@ const freeError = (v: string) => (!v.trim() || (isAmount(v) && Number(v) > 0) ? 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const sentence = (l: string[]) => l.join(', ').replace(/^./, (c) => c.toUpperCase());
 const lbs = (g: number) => `${Math.round((g / 453.592) * 10) / 10} lb`;
-const toCents = (v: string) => Math.round(Number(v) * 100);
+const toCents = (v: string) => parseCents(v) ?? NaN;
 
 function fromServer(st: ShippingSettings, profileId: string): Draft {
   const p = st.profiles.find((x) => x.id === profileId) ?? st.profiles[0];

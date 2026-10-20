@@ -2,6 +2,7 @@
  * Reads: contact options, the order problem form, lists for each area, queue KPIs, assignees, the public
  * API reads other modules and GraphQL use, and report exports.
  */
+import { isIsoDate } from '../../../kernel/lib/dates.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import { dateInZone, zonedTimeToUtc } from '../../../kernel/lib/clock.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
@@ -374,8 +375,7 @@ export class Reads {
 
   /** Cases opened per market day, seller and category, with first-reply figures (reports: Complaint patterns, Response time) */
   async caseStatsByDay(range: common.DateRange, sellerId?: string): Promise<DailyCaseStats[]> {
-    const day = /^\d{4}-\d{2}-\d{2}$/;
-    if (!day.test(range?.from ?? '') || !day.test(range?.to ?? '') || range.from > range.to) {
+    if (!isIsoDate(range?.from) || !isIsoDate(range?.to) || range.from > range.to) {
       throw new AppError('VALIDATION_FAILED', 'A date range: from on or before to', { issues: [{ path: 'range', message: 'Dates are YYYY-MM-DD, from on or before to' }] });
     }
     const tz = this.core.tz;

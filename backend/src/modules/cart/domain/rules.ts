@@ -3,7 +3,7 @@
  * notices already stored, line state, quantity limits, package keys and customer-facing sentences.
  */
 import type { Json } from '../../../kernel/lib/json.js';
-import { format as formatMoney, money, type Money } from '../../../kernel/lib/money.js';
+import { format as formatMoney, money } from '../../../kernel/lib/money.js';
 import type { CartItem, CartNotice, CartPackage } from '../../../spec/cart.js';
 import type * as offers from '../../../spec/offers.js';
 import type { NoticeRow } from '../ports.js';
@@ -263,14 +263,6 @@ export function offerBlock(status: string, reasonCode?: string | null): NoticeKi
   return 'offer_ended';
 }
 
-/** Reason sent with OFFER_UNAVAILABLE */
-export const unavailableReason: Record<string, string> = {
-  out_of_stock: 'out_of_stock',
-  offer_ended: 'offer_ended',
-  seller_unavailable: 'seller_unavailable',
-  product_unavailable: 'product_unavailable',
-};
-
 export const unavailableMessage: Record<string, string> = {
   out_of_stock: 'This offer is out of stock.',
   offer_ended: 'This offer is no longer available.',
@@ -300,8 +292,6 @@ export function storedCoupons(j: Json): StoredCoupon[] {
 export const normalizeCode = (code: string) => code.trim().toUpperCase();
 
 export const addDays = (d: Date, days: number) => new Date(d.getTime() + days * 86_400_000);
-
-export const sumMoney = (items: Money[], currency: string): Money => money(items.reduce((a, m) => a + m.amount, 0), currency);
 
 /** Rows grouped by a key, groups in the order of their first row (Map.groupBy, which the ES2023 lib lacks) */
 export function groupBy<T>(rows: readonly T[], key: (row: T) => string): Map<string, T[]> {

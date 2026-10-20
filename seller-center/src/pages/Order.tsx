@@ -51,7 +51,7 @@ type View = 'shipped';
 
 // The carriers the setup lists (Other and OnTrac included). Tracking is optional for 'other'.
 const NO_CARRIER: SetupCarrierG = { code: '', name: 'No carrier', services: [] };
-const GROUP_TONE: Record<string, Tone> = { new: 'brand', preparing: 'info', delayed: 'warning', partly_shipped: 'warning', shipped: 'info', partly_delivered: 'warning', delivered: 'success', partly_cancelled: '', cancelled: '' };
+const GROUP_TONE: Record<string, Tone> = { new: 'brand', preparing: 'info', delayed: 'warning', partly_shipped: 'info', shipped: 'info', partly_delivered: 'warning', delivered: 'success', partly_cancelled: '', cancelled: '' };
 const OPEN_EXCEPTION = new Set(['open', 'in_progress', 'escalated']);
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
 const itemName = (i: { title: string; variantLabel?: string | null }) => `${i.title}${i.variantLabel ? `, ${i.variantLabel}` : ''}`;

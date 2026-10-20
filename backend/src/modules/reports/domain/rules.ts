@@ -29,16 +29,6 @@ export function addDays(day: string, n: number): string {
 /** Days from `from` to `to`, both included */
 export const daysBetween = (from: string, to: string) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS) + 1;
 
-export const isDay = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(`${s}T00:00:00Z`));
-
-export function isTimeZone(tz: string): boolean {
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz });
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 /** The days a preset covers, ending today (market time) */
 export function presetRange(preset: Exclude<Preset, 'custom'>, today: string): DayRange {

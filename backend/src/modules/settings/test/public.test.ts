@@ -204,6 +204,9 @@ describe('overview and sections', () => {
     expect(keys).toEqual(expect.arrayContaining(['returns_baseline', 'fees', 'support', 'catalog']));
     const market = o.sections.find((s: any) => s.key === 'market');
     expect(market.values.find((v: any) => v.key === 'market.currency')).toMatchObject({ valueText: 'USD', hint: 'Read-only' });
+    // the time zone too: the server configuration's, the one every module reads
+    expect(market.values.find((v: any) => v.key === 'market.timeZone')).toMatchObject({ valueText: h.app.kernel.config.market.timeZone, hint: 'Read-only' });
+    expect(o.market.timeZone).toBe(h.app.kernel.config.market.timeZone);
     const returns = o.sections.find((s: any) => s.key === 'returns_baseline');
     expect(returns).toMatchObject({ ownedHere: false, link: { path: '/api/admin/returns/policies' } });
     const support = o.sections.find((s: any) => s.key === 'support');

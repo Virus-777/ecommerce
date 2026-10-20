@@ -10,13 +10,10 @@ export type PlacementRec = Db['placements'];
 export type RulesRec = Db['global_rules'];
 export type CampaignRec = Db['campaigns'];
 export type ItemRec = Db['campaign_items'];
-export type CampaignCreativeRec = Db['campaign_creatives'];
 export type StepRec = Db['approval_steps'];
 export type CreativeRec = Db['creatives'];
-export type ReviewRec = Db['creative_reviews'];
 export type LogRec = Db['campaign_log'];
 export type EventRec = Db['ad_events'];
-export type AttributionRec = Db['attributions'];
 export type StatRec = Db['daily_stats'];
 export type ChargeRec = Db['ad_charges'];
 

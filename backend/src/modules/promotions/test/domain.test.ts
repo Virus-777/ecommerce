@@ -124,7 +124,7 @@ describe('cart evaluation', () => {
     expect(out.applied[0]!.amount.amount).toBe(total);
     const parts = out.lines.map((l) => l.allocations.reduce((a, x) => a + x.amount.amount, 0));
     expect(parts.reduce((a, b) => a + b, 0)).toBe(total);
-    out.lines.forEach((l, i) => expect(parts[i]!).toBeLessThanOrEqual(lines[i]!.unitPrice.amount * lines[i]!.quantity));
+    out.lines.forEach((_, i) => expect(parts[i]!).toBeLessThanOrEqual(lines[i]!.unitPrice.amount * lines[i]!.quantity));
     expect(out.totals.total.amount).toBe(total);
     expect(out.totals.platform.amount).toBe(total);
   });

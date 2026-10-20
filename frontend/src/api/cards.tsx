@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { LoadError as SharedLoadError, LogoTile } from '@marketly/web-shared/ui';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { dollars } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Button, Icon, Img, LazyLoad, Pager, ProductCard, announce, type CardProduct, type IconName } from '@marketly/web-shared/ui';
+import { Icon, Img, LazyLoad, Pager, ProductCard, announce, type CardProduct, type IconName } from '@marketly/web-shared/ui';
 import { useSession } from '@/app/session';
 import { useAdTracking } from './ad-events';
 import type { MediaRef } from './catalog';
@@ -13,7 +14,6 @@ import { productHref, type Listing, type StoreCard } from './search';
 // Store browse building blocks rendered from API data with the design's markup: the product card
 // (.pcard), image tiles with real photos, skeletons, the load-error alert and the listing pager.
 
-const FILL: CSSProperties = { width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' };
 
 /** Image tile (.imgph): the API photo when there is one, else the design's tinted icon placeholder. */
 export function Pic({ image, icon = 'package', tint = '1', className, alt }: { image?: MediaRef | null; icon?: IconName; tint?: string; className?: string; alt?: string }) {
@@ -22,11 +22,7 @@ export function Pic({ image, icon = 'package', tint = '1', className, alt }: { i
 
 /** Logo tile (.logo-tile) with the logo image, or initials. */
 export function LogoPic({ logo, initials, tint, size, className }: { logo?: MediaRef | null; initials: string; tint: string; size?: 'xs' | 'sm' | 'md'; className?: string }) {
-  return (
-    <span className={cx('logo-tile', size, `tint-${tint}`, className)} aria-hidden="true">
-      {logo ? <img src={logo.url} alt="" style={FILL} /> : initials}
-    </span>
-  );
+  return <LogoTile initials={initials} tint={tint} size={size} className={className} src={logo?.url} />;
 }
 
 /** Storefront link for a card's seller: the Official Store page, a seller store when its slug is known. */
@@ -175,14 +171,7 @@ export function SkLines({ n = 2, className }: { n?: number; className?: string }
 
 /** A failed read: the server's message and a Try again button (API.md rule 4). */
 export function LoadError({ error, onRetry, title = 'We couldn’t load this' }: { error: unknown; onRetry: () => void; title?: ReactNode }) {
-  return (
-    <Alert tone="danger" title={title}>
-      {errorMessage(error)}{' '}
-      <Button variant="secondary" size="sm" icon="refresh-cw" onClick={onRetry}>
-        Try again
-      </Button>
-    </Alert>
-  );
+  return <SharedLoadError error={error} onRetry={onRetry} title={title} />;
 }
 
 /** Phone lazy-load row: loads the next cursor page when it scrolls into view (design .lazy-load). */

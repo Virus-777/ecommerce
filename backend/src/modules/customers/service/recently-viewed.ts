@@ -7,7 +7,6 @@ import type { EventPayload } from '../../../kernel/events/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import type * as catalog from '../../../spec/catalog.js';
 import type { RecentlyViewedItem } from '../../../spec/customers.js';
-import type * as identity from '../../../spec/identity.js';
 import * as map from '../mappers.js';
 import type { CustomerRow, ViewOwner, ViewRow } from '../ports.js';
 import { type Core, DAY, GUEST_SESSION_DAYS, notFound } from './core.js';

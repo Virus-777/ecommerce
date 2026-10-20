@@ -31,6 +31,8 @@ export default defineModule({
     ctx.afterBoot(() => service.reads.registerDatasets());
     // the Returns baseline section of the Admin Center settings page (G76)
     ctx.afterBoot(() => service.registerSettingsSection());
+    // the business calendar for deadlines, read once now (then refreshed every few minutes)
+    ctx.afterBoot(() => void service.core.businessDays.refresh());
 
     // Events this module reacts to (spec events.consumes)
     ctx.events.on("orders.item.delivered", (e) => service.onItemDeliveredFromOrders(e.payload));

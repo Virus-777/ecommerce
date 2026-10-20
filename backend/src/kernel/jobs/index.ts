@@ -10,7 +10,8 @@
  *
  * Both understand the spec's schedule phrases ("every 10 min", "hourly", "daily 02:00 market time",
  * "nightly 03:00 PT", "on boot"). Any other phrase fails boot: a job the scheduler can't time would
- * silently never run (FORMAT.md lists the phrases).
+ * silently never run (FORMAT.md lists the phrases). Words after the timing ("every 30 min during business
+ * hours") are for the reader; a job limited to some hours checks them in its handler.
  */
 import type { FastifyBaseLogger } from 'fastify';
 import { isNotImplemented } from '../errors/index.js';
@@ -18,7 +19,7 @@ import { dateInZone, systemClock, zonedTimeToUtc, type Clock } from '../lib/cloc
 import type { MongoStore } from '../mongo/index.js';
 
 export type Schedule =
-  | { kind: 'interval'; ms: number; window?: 'business-hours' }
+  | { kind: 'interval'; ms: number }
   | { kind: 'daily'; time: string }
   | { kind: 'weekly'; time: string }
   | { kind: 'monthly'; time: string }
@@ -31,7 +32,7 @@ export function parseSchedule(text: string): Schedule {
     const n = Number(every[1] ?? 1);
     const unit = every[2]!;
     const ms = unit.startsWith('s') ? n * 1000 : unit.startsWith('m') ? n * 60_000 : n * 3_600_000;
-    return { kind: 'interval', ms, ...(s.includes('business hours') ? { window: 'business-hours' as const } : {}) };
+    return { kind: 'interval', ms };
   }
   if (s === 'hourly') return { kind: 'interval', ms: 3_600_000 };
   if (s === 'on boot') return { kind: 'boot' };

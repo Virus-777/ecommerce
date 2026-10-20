@@ -42,8 +42,6 @@ export async function findContent(repo: ReviewsRepository, id: string, types: re
   return undefined;
 }
 
-export const statusOf = (c: Content) => c.row.status;
-
 /** Who wrote it: customer id, seller id or staff account id */
 export function authorOf(c: Content): { kind: 'customer' | 'seller' | 'staff'; id: string } {
   switch (c.type) {

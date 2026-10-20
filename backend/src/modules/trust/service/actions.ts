@@ -15,7 +15,8 @@ import { ACTIONS, amountOf, humanize, isAction, isTeam, normalizeParams, OWNER_T
 import type { EnforcementRec, RecommendationRec, TargetRec } from '../ports.js';
 import type { TrustRepository } from '../repository.js';
 import { actorText, illegal, invalid, invalidField, notFound, type By, type Core } from './core.js';
-import { offsetOf, pageFrom } from './reports.js';
+import { offsetOf } from '../../../kernel/lib/pagination.js';
+import { pageFrom } from './reports.js';
 import type { Views } from './views.js';
 
 const text = (s: unknown) => (typeof s === 'string' ? s.trim() : '');
@@ -76,7 +77,7 @@ export class Actions {
       if (def.targets.length && (body.targets ?? []).some((t) => !def.targets.includes(t.type))) issues.push({ path: 'targets', message: `${humanize(body.action)} applies to ${def.targets.join(' or ')} records` });
       if (body.action === 'other' && (body.targets ?? []).some((t) => t.type === 'offer')) issues.push({ path: 'targets', message: 'Use suspend_offer for offers (offers acts on every enforcement that names an offer)' });
       if (body.params !== undefined && body.params !== null && (typeof body.params !== 'object' || Array.isArray(body.params))) issues.push({ path: 'params', message: 'An object' });
-      const n = normalizeParams(body.action, body.params, { now: this.core.now(), rationale: text(body.rationale), appealWindowDays: await this.core.setting('appealWindowDays', 14) });
+      const n = normalizeParams(body.action, body.params, { now: this.core.now(), timeZone: this.core.ctx.config.market.timeZone, rationale: text(body.rationale), appealWindowDays: await this.core.setting('appealWindowDays', 14) });
       issues.push(...n.issues);
       params = (body.params && typeof body.params === 'object' ? body.params : {}) as Record<string, unknown>;
     }
@@ -207,7 +208,7 @@ export class Actions {
     const now = this.core.now();
     const windowDays = await this.core.setting('appealWindowDays', 14);
     const merged = { ...(rec.params ?? {}), ...(body.params && typeof body.params === 'object' && !Array.isArray(body.params) ? (body.params as Record<string, unknown>) : {}) };
-    const n = normalizeParams(action, merged, { now, rationale: body.reason.trim(), appealWindowDays: windowDays });
+    const n = normalizeParams(action, merged, { now, timeZone: this.core.ctx.config.market.timeZone, rationale: body.reason.trim(), appealWindowDays: windowDays });
     if (n.issues.length) throw invalid(n.issues);
     const params = n.params;
     if (action === 'suspend_seller' && params.secondReviewerId && params.secondReviewerId === by.actor.id) throw invalidField('params.secondReviewerId', 'The second reviewer must be someone else');

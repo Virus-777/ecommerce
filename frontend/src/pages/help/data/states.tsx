@@ -1,24 +1,12 @@
-import { errorMessage } from '@marketly/web-shared/api';
-import { Alert, Button, type IconName } from '@marketly/web-shared/ui';
+import { iconFor as sharedIconFor } from '@marketly/web-shared/ui';
+import { LoadError as SharedLoadError } from '@marketly/web-shared/ui';
+import { type IconName } from '@marketly/web-shared/ui';
 
 // Loading and error states shared by the help, policy and seller-entry screens (web-shared/docs/API.md, rule 4).
 
 /** A failed read: the server's message and a Try again button. */
 export function LoadError({ error, retry, title = 'We couldn’t load this' }: { error: unknown; retry?: () => void; title?: string }) {
-  return (
-    <Alert tone="danger" title={title}>
-      <span className="stack gap-2">
-        <span>{errorMessage(error)}</span>
-        {retry && (
-          <span>
-            <Button variant="secondary" size="sm" icon="refresh-cw" onClick={retry}>
-              Try again
-            </Button>
-          </span>
-        )}
-      </span>
-    </Alert>
-  );
+  return <SharedLoadError error={error} onRetry={retry} title={title} />;
 }
 
 /** Skeleton lines (e.g. a paragraph or a list while loading). */
@@ -56,12 +44,7 @@ export const Loading = ({ label = 'Loading' }: { label?: string }) => (
   </span>
 );
 
-// Icons the API may name (help topics, seller categories). Icon names must exist in the generated icon set,
-// so API names are checked against the ones the design uses and fall back otherwise.
-const KNOWN_ICONS = new Set<string>([
-  'shopping-bag', 'truck', 'credit-card', 'circle-x', 'undo-2', 'banknote', 'user-round', 'store', 'circle-help', 'file-text', 'package', 'headphones', 'monitor',
-  'cooking-pot', 'shirt', 'tent', 'sparkles', 'puzzle', 'paw-print', 'shield-check', 'badge-check', 'mail', 'phone', 'message-circle', 'life-buoy', 'gavel', 'scale',
-]);
+// Category slugs map to the design's icons; any other name the icon set has is used as it is (web-shared iconFor).
 const CATEGORY_ICONS: Record<string, IconName> = {
   electronics: 'headphones', computers: 'monitor', 'home-and-kitchen': 'cooking-pot', home: 'cooking-pot', fashion: 'shirt', 'sports-and-outdoors': 'tent', sports: 'tent',
   beauty: 'sparkles', 'toys-and-games': 'puzzle', toys: 'puzzle', 'pet-supplies': 'paw-print', pets: 'paw-print',
@@ -70,6 +53,5 @@ const CATEGORY_ICONS: Record<string, IconName> = {
 /** An API icon name if the icon set has it, else the fallback. Category slugs map to the design's icons. */
 export function iconFor(name: string | null | undefined, fallback: IconName = 'circle-help'): IconName {
   if (!name) return fallback;
-  if (CATEGORY_ICONS[name]) return CATEGORY_ICONS[name];
-  return KNOWN_ICONS.has(name) ? (name as IconName) : fallback;
+  return CATEGORY_ICONS[name] ?? sharedIconFor(name, fallback);
 }

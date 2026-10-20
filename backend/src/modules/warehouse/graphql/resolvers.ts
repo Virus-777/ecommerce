@@ -1,13 +1,10 @@
-import { gqlActor, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
-import type * as common from '../../../spec/common.js';
+import { createBatchLoader, gqlActor, gqlDeadline, gqlEnum, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
 import type { Fulfillment } from '../../../spec/warehouse.js';
 import type { WarehouseService } from '../service.js';
 
 /* ---------------------------------------------------------------- REST shapes → GraphQL shapes (enums in capitals) */
 
-const upper = (s: string | null | undefined) => (s ? s.toUpperCase() : null);
 const actor = gqlActor;
-const deadline = (d: common.Deadline) => ({ dueAt: d.dueAt, state: upper(d.state) });
 
 interface Lookups {
   waveRefs: Map<string, string>;
@@ -18,9 +15,9 @@ function task(f: Fulfillment, l: Lookups) {
   return {
     id: f.id,
     orderRef: f.orderRef,
-    status: upper(f.status),
+    status: gqlEnum(f.status),
     shipBy: f.shipBy,
-    deadline: deadline(f.deadline),
+    deadline: gqlDeadline(f.deadline),
     deliveryChoice: f.deliveryChoice,
     waveRef: f.waveId ? (l.waveRefs.get(f.waveId) ?? null) : null,
     lines: f.lines.map((x) => ({
@@ -33,7 +30,7 @@ function task(f: Fulfillment, l: Lookups) {
       binCode: x.binCode ?? null,
       picked: x.picked,
       short: x.short,
-      state: upper(x.state),
+      state: gqlEnum(x.state),
       pickedBy: actor(x.pickedBy),
       pickedAt: x.pickedAt ?? null,
     })),
@@ -41,7 +38,7 @@ function task(f: Fulfillment, l: Lookups) {
       id: p.id,
       index: p.index,
       of: p.of,
-      status: upper(p.status),
+      status: gqlEnum(p.status),
       itemCount: p.items.reduce((n, i) => n + i.quantity, 0),
       allScanned: p.allScanned,
       boxName: p.boxTypeId ? (l.boxNames.get(p.boxTypeId) ?? null) : null,
@@ -63,27 +60,7 @@ function task(f: Fulfillment, l: Lookups) {
 
 /* ---------------------------------------------------------------- batching per request (one call per field and tick) */
 
-type Batch<V> = { ids: Set<string>; promise: Promise<Map<string, V>> };
-const batches = new WeakMap<object, Map<string, Batch<unknown>>>();
-
-function load<V>(ctx: GraphQLContext, key: string, id: string, fetch: (ids: string[]) => Promise<Map<string, V>>): Promise<V | undefined> {
-  let perCtx = batches.get(ctx);
-  if (!perCtx) batches.set(ctx, (perCtx = new Map()));
-  let batch = perCtx.get(key) as Batch<V> | undefined;
-  if (!batch) {
-    const ids = new Set<string>();
-    const promise = new Promise<Map<string, V>>((resolve, reject) => {
-      setImmediate(() => {
-        perCtx!.delete(key);
-        fetch([...ids]).then(resolve, reject);
-      });
-    });
-    batch = { ids, promise };
-    perCtx.set(key, batch as Batch<unknown>);
-  }
-  batch.ids.add(id);
-  return batch.promise.then((m) => m.get(id));
-}
+const load = createBatchLoader();
 
 /**
  * Resolvers for the GraphQL fields this module owns (`@source(module: "warehouse", …)` in graphql/schema.ts).

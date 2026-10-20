@@ -1,3 +1,4 @@
+import { useDebounced } from '@marketly/web-shared/lib/hooks';
 import { useEffect, useState } from 'react';
 import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
@@ -24,16 +25,6 @@ const RANGES: Array<{ value: OrderRange; label: string }> = [
   { value: 'ALL', label: 'All time' },
 ];
 const DEFAULT_RANGE: OrderRange = 'LAST_3_MONTHS';
-
-/** The search box value, settled for 300 ms before it becomes a query. */
-function useDebounced<T>(value: T, ms = 300) {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setV(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return v;
-}
 
 export default function Orders() {
   const { api, gql } = useApi();

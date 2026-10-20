@@ -1,21 +1,15 @@
 // Small building blocks shared by the account order and return screens: loading skeletons, the
 // load-error alert, the not-found card, the API seller line and the phone "load more" trigger.
-import { useEffect, useRef, type ReactNode } from 'react';
+export { useInView } from '@marketly/web-shared/lib/hooks';
+import { LoadError as SharedLoadError } from '@marketly/web-shared/ui';
+import { type ReactNode } from 'react';
 import { Link } from 'react-router';
-import { errorMessage } from '@marketly/web-shared/api';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Button, EmptyState, SellerBadge } from '@marketly/web-shared/ui';
+import { Button, EmptyState, SellerBadge } from '@marketly/web-shared/ui';
 
 /** A failed read: the error and a Try again button (API.md rule 4). */
 export function LoadError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
-  return (
-    <Alert tone="danger" title="We couldn't load this">
-      {errorMessage(error)}{' '}
-      <Button variant="secondary" size="sm" onClick={onRetry}>
-        Try again
-      </Button>
-    </Alert>
-  );
+  return <SharedLoadError error={error} onRetry={onRetry} />;
 }
 
 /** Skeleton rows for a list card while it loads. */
@@ -81,17 +75,3 @@ export function SellerLineApi({ seller }: { seller: { name: string; slug?: strin
   );
 }
 
-/** Calls `onVisible` when the returned element scrolls into view (phone lists load the next page). */
-export function useInView<T extends HTMLElement>(onVisible: () => void, enabled: boolean) {
-  const ref = useRef<T | null>(null);
-  const cb = useRef(onVisible);
-  cb.current = onVisible;
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || !enabled || typeof IntersectionObserver === 'undefined') return;
-    const io = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && cb.current(), { rootMargin: '200px' });
-    io.observe(el);
-    return () => io.disconnect();
-  }, [enabled]);
-  return ref;
-}

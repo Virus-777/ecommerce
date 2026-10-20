@@ -540,7 +540,8 @@ export const ReturnAddressInput: z.ZodType<ReturnAddressInput> = z.object({
 export interface ApplicationDocument {
   id: string;
   kind: "owner_id" | "business_registration" | "tax_form" | "bank_letter" | "proof_of_address" | "category_certificate" | "authorization_letter" | "other";
-  file: common.MediaRef;
+  /** Null when the file is no longer available (deleted, or media could not answer) */
+  file?: common.MediaRef | null;
   fileName: string;
   sizeBytes: number;
   uploadedAt: string;
@@ -554,7 +555,7 @@ export const ApplicationDocument: z.ZodType<ApplicationDocument> = z.object({
   id: z.uuid(),
   kind: z.enum(["owner_id", "business_registration", "tax_form", "bank_letter", "proof_of_address", "category_certificate", "authorization_letter", "other"]),
   get file() {
-    return common.MediaRef;
+    return common.MediaRef.nullish();
   },
   fileName: z.string(),
   sizeBytes: z.number().int(),
@@ -2976,12 +2977,15 @@ export interface SellersChangeRequestSubmittedEvent {
   changeRequestId: string;
   sellerId: string;
   kind: string;
+  /** Review target for store name changes and public claims (claimReviewBusinessDays); null: the queue default */
+  reviewBy?: string | null;
 }
 
 export const SellersChangeRequestSubmittedEvent: z.ZodType<SellersChangeRequestSubmittedEvent> = z.object({
   changeRequestId: z.uuid(),
   sellerId: z.uuid(),
   kind: z.string(),
+  reviewBy: z.iso.datetime({ offset: true }).describe("Review target for store name changes and public claims (claimReviewBusinessDays); null: the queue default").nullish(),
 });
 
 /** sellers.change_request.decided: Staff approve or reject a change request */
@@ -3072,10 +3076,13 @@ export const SellersMemberReactivatedEvent: z.ZodType<SellersMemberReactivatedEv
 /** sellers.launch_review.requested: A seller asks for the launch readiness review */
 export interface SellersLaunchReviewRequestedEvent {
   sellerId: string;
+  /** Review target (launchReviewBusinessDays) */
+  reviewBy?: string | null;
 }
 
 export const SellersLaunchReviewRequestedEvent: z.ZodType<SellersLaunchReviewRequestedEvent> = z.object({
   sellerId: z.uuid(),
+  reviewBy: z.iso.datetime({ offset: true }).describe("Review target (launchReviewBusinessDays)").nullish(),
 });
 
 /** sellers.launch_review.decided: The launch review passes or needs changes (offers activates eligible offers on pass) */
@@ -5100,7 +5107,7 @@ export const endpoints = defineEndpoints({
     body: () => z.object({
       items: z.array(z.unknown()).describe("{ title, detail, neededFor, documentKind? }"),
       message: z.string(),
-      dueAt: z.iso.datetime({ offset: true }),
+      dueAt: z.iso.datetime({ offset: true }).describe("Reply deadline; default now + infoRequestDefaultDays").nullish(),
       reminder: z.enum(["three_days_before", "none"]),
     }),
     response: () => ApplicationAdmin,

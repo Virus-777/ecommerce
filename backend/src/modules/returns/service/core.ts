@@ -3,8 +3,10 @@
  * aggregate, timelines and the baseline in force. The use cases live in the part classes.
  */
 import type { Principal } from '../../../kernel/auth/index.js';
-import { AppError, isAppError } from '../../../kernel/errors/index.js';
+import { AppError, isAppError, isNotImplemented } from '../../../kernel/errors/index.js';
+import { illegalTransition } from '../../../kernel/errors/index.js';
 import type { EventMap } from '../../../kernel/events/index.js';
+import { BusinessDays } from '../../../kernel/lib/business-days.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type { ModuleContext, PublicApiMap } from '../../../kernel/module-system/index.js';
 import type * as audit from '../../../spec/audit.js';
@@ -76,7 +78,7 @@ export const invalid = (issues: { path: string; message: string }[], message = '
 export const invalidField = (path: string, message: string) => invalid([{ path, message }], message);
 export const notFound = (what = 'Return') => new AppError('NOT_FOUND', `${what} not found`);
 export const unavailable = (what: string) => new AppError('SERVICE_UNAVAILABLE', `${what} is unavailable right now`, undefined, 503);
-export const illegal = (message: string, details?: Record<string, unknown>) => new AppError('ILLEGAL_TRANSITION', message, details);
+export const illegal = illegalTransition;
 
 /** Who is looking: the store shopper (customer or guest session), a seller, or staff */
 export type Visibility = { area: 'admin' } | { area: 'seller'; sellerId: string } | { area: 'store'; customerId?: string | null; guestSessionId?: string | null };
@@ -102,6 +104,15 @@ export class Core {
   get tz() {
     return this.ctx.config.market.timeZone;
   }
+
+  /** Business days for response, inspection and refund deadlines: the market's calendar (business hours, closures) */
+  readonly businessDays = new BusinessDays({
+    load: async () => this.ctx.tryUse('settings')?.businessCalendar(),
+    timeZone: () => this.tz,
+    now: () => this.now(),
+    onError: (err) => this.ctx.log.warn({ err }, 'returns: business calendar unavailable, counting weekdays'),
+  });
+  addBusinessDays = (from: Date, days: number) => this.businessDays.add(from, days);
   get currency() {
     return this.ctx.config.market.currency || 'USD';
   }
@@ -113,11 +124,16 @@ export class Core {
 
   /** Publishes what a transaction collected (after the commit) */
   flush(batch: Batch) {
-    for (const e of batch.events) this.publish(e.name, e.payload as never, batch.by);
+    for (const e of batch.events.splice(0)) this.publish(e.name, e.payload as never, batch.by);
   }
 
   async audit(entry: Omit<audit.RecordInput, 'actor' | 'module' | 'requestId' | 'category'> & { category?: audit.RecordInput['category'] }, by: By) {
-    await this.ctx.tryUse('audit')?.record({ category: 'returns', ...entry, actor: by.actor, module: this.ctx.name, requestId: by.requestId ?? null });
+    try {
+      await this.ctx.tryUse('audit')?.record({ category: 'returns', ...entry, actor: by.actor, module: this.ctx.name, requestId: by.requestId ?? null });
+    } catch (err) {
+      // the change is committed; a missing audit entry is logged, never turned into a failed request
+      this.ctx.log[isNotImplemented(err) ? 'debug' : 'error']({ err, action: entry.action }, 'audit entry not recorded');
+    }
   }
 
   /** An optional module's answer; off, not built or failing → undefined (the caller degrades) */

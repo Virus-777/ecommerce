@@ -2,6 +2,8 @@
  * Pure rules of the sellers module (no I/O): application completeness, payout details, dates and
  * deadlines, restriction scope matching, labels. Everything here is deterministic and unit-testable.
  */
+import { isPoBoxLine } from '../../../kernel/lib/address.js';
+import { dateInZone } from '../../../kernel/lib/clock.js';
 import type * as common from '../../../spec/common.js';
 import type {
   ApplicationAccountInput,
@@ -162,21 +164,7 @@ export function holderMatches(holder: string, legalName: string | undefined, own
 export const taxIdDigits = (s: string) => s.replace(/[^0-9]/g, '');
 export const validTaxId = (type: 'ein' | 'ssn', s: string) => taxIdDigits(s).length === 9 && (type === 'ein' || !/^(000|666|9)/.test(taxIdDigits(s)));
 
-export const isPoBox = (a: common.Address | null | undefined) => Boolean(a && /\bp\.?\s*o\.?\s*box\b|\bpost office box\b/i.test(`${a.line1} ${a.line2 ?? ''}`));
-
-export const addressKey = (a: common.Address | null | undefined) => (a ? `${a.line1}|${a.postalCode}`.toLowerCase().replace(/\s+/g, ' ').trim() : '');
-
-export function slugify(name: string): string {
-  const s = name
-    .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/&/g, ' and ')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 60);
-  return s || 'store';
-}
+export const isPoBox = (a: common.Address | null | undefined) => Boolean(a && (isPoBoxLine(a.line1) || isPoBoxLine(a.line2)));
 
 export const sameStoreName = (a: string, b: string) => a.trim().toLowerCase().replace(/\s+/g, ' ') === b.trim().toLowerCase().replace(/\s+/g, ' ');
 
@@ -190,20 +178,8 @@ export function riskCategoriesIn(text: string | null | undefined, categories: re
 
 /* ------------------------------------------------------------------ dates */
 
-export const isoDate = (d: Date) => d.toISOString().slice(0, 10);
+// market days and business days: Core.today(at) and Core.addBusinessDays (the market's calendar), never the UTC day
 export const addDays = (d: Date, days: number) => new Date(d.getTime() + days * DAY);
-
-/** Adds business days (Monday–Friday) */
-export function addBusinessDays(from: Date, days: number): Date {
-  let d = new Date(from.getTime());
-  let left = Math.max(0, Math.round(days));
-  while (left > 0) {
-    d = new Date(d.getTime() + DAY);
-    const wd = d.getUTCDay();
-    if (wd !== 0 && wd !== 6) left--;
-  }
-  return d;
-}
 
 /** Deadline state: overdue once past, due soon within a day */
 export function deadline(dueAt: Date | string, now: Date): common.Deadline {
@@ -212,9 +188,10 @@ export function deadline(dueAt: Date | string, now: Date): common.Deadline {
   return { dueAt: due.toISOString(), state: left < 0 ? 'overdue' : left <= DAY ? 'due_soon' : 'on_time' };
 }
 
-export function reapplyFrom(rule: 'immediately' | 'after_30_days' | 'after_90_days' | 'not_eligible', now: Date): string | null {
+/** The market day from which a rejected applicant may apply again; null when never */
+export function reapplyFrom(rule: 'immediately' | 'after_30_days' | 'after_90_days' | 'not_eligible', now: Date, timeZone: string): string | null {
   if (rule === 'not_eligible') return null;
-  return isoDate(addDays(now, rule === 'after_30_days' ? 30 : rule === 'after_90_days' ? 90 : 0));
+  return dateInZone(addDays(now, rule === 'after_30_days' ? 30 : rule === 'after_90_days' ? 90 : 0), timeZone);
 }
 
 /* ------------------------------------------------------------------ restrictions */
@@ -292,4 +269,3 @@ export function restrictionBlocks(
 
 export const pct = (num: number, den: number) => (den > 0 ? Math.round((num / den) * 1000) / 10 : 0);
 
-export const actorLabel = (a: common.Actor | null | undefined) => a?.name ?? (a?.kind === 'system' ? 'Marketly' : a?.kind === 'staff' ? 'Marketly staff' : 'Seller');

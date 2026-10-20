@@ -199,6 +199,9 @@ export class AdvertisingService implements AdvertisingPublicApi {
   expireFrequencyState() {
     return this.ops.expireFrequencyState();
   }
+  pruneEvents() {
+    return this.ops.pruneEvents();
+  }
 
   endingSoonNotice() {
     return this.ops.endingSoonNotice();

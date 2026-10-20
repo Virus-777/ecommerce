@@ -13,7 +13,7 @@ import { LoadError, SkeletonLines, date, dateTime, deadlineLabel, deadlineTone }
 import { exportNote, useDatasetExport } from './data/dataset-export';
 import { RefundApprovals, useRefundRequests } from './data/refund-approvals';
 import {
-  PERIODS, feeRulePairs, pct, periodRange, reconEdge, refundEdge, refundWhy,
+  PERIODS, feeRulePairs, bpsNumber, periodRange, reconEdge, refundEdge, refundWhy,
   type Dispute, type Edge, type FeeRules, type FinanceOverview, type Money, type Period, type ReconItem, type Refund,
 } from './data/finance';
 
@@ -655,18 +655,18 @@ export default function Finance() {
                         {rules.categoryRates.map((c) => (
                           <tr key={c.categoryId}>
                             <td>{c.categoryName}</td>
-                            <td className="r col-pin">{pct(c.rateBps)}%</td>
+                            <td className="r col-pin">{bpsNumber(c.rateBps)}%</td>
                           </tr>
                         ))}
                         <tr>
                           <td>{rules.categoryRates.length ? 'Every other category' : 'All categories'}</td>
-                          <td className="r col-pin">{pct(rules.defaultRateBps)}%</td>
+                          <td className="r col-pin">{bpsNumber(rules.defaultRateBps)}%</td>
                         </tr>
                       </tbody>
                     </table>
                   </TableWrap>
                   <div className="panel small">
-                    <b>Illustration:</b> a $100.00 item sale with a {pct(rules.defaultRateBps)}% fee creates {formatMoney({ amount: rules.defaultRateBps, currency: 'USD' })} of fee income and{' '}
+                    <b>Illustration:</b> a $100.00 item sale with a {bpsNumber(rules.defaultRateBps)}% fee creates {formatMoney({ amount: rules.defaultRateBps, currency: 'USD' })} of fee income and{' '}
                     {formatMoney({ amount: 10000 - rules.defaultRateBps, currency: 'USD' })} of seller earnings before other adjustments.
                   </div>
                   {fees.data!.upcoming.length > 0 && (

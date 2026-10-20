@@ -1,6 +1,5 @@
-import { gqlActor, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { gqlActor, gqlDeadline, gqlEnum, type GraphQLContext, lazy, type ModuleResolvers } from '../../../kernel/graphql/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
-import { format as formatMoney } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
 import type { Decline, Dispute, MethodSnapshot, PaymentDetail, Refund, RefundView, SavedPaymentMethod } from '../../../spec/payments.js';
 import { CUSTOMER_STATE_LABEL, STATUS_LABEL } from '../domain/rules.js';
@@ -8,54 +7,47 @@ import type { PaymentsService } from '../service.js';
 
 /* ---------------------------------------------------------------- REST shapes → GraphQL shapes (enums in capitals, Money.formatted) */
 
-const upper = (s: string | null | undefined) => (s ? s.toUpperCase() : (s ?? null));
-const money = (m: common.Money | null | undefined) => (m ? { ...m, formatted: formatMoney(m) } : null);
 const actor = gqlActor;
 const timeline = (list: readonly common.TimelineEvent[]) => list.map((t) => ({ ...t, detail: t.detail ?? null, actor: actor(t.actor) }));
-const deadline = (d: common.Deadline | null | undefined) => (d ? { dueAt: d.dueAt, state: upper(d.state) } : null);
-const lazy = <T>(f: () => Promise<T>) => {
-  let p: Promise<T> | undefined;
-  return () => (p ??= f());
-};
 
-const decline = (d: Decline | null | undefined) => (d ? { ...d, category: upper(d.category) } : null);
-const snapshot = (m: MethodSnapshot) => ({ kind: upper(m.kind), brand: m.brand ?? null, last4: m.last4 ?? null, wallet: upper(m.wallet ?? null), label: m.label });
-const savedMethod = (m: SavedPaymentMethod) => ({ ...m, kind: upper(m.kind) });
+const decline = (d: Decline | null | undefined) => (d ? { ...d, category: gqlEnum(d.category) } : null);
+const snapshot = (m: MethodSnapshot) => ({ kind: gqlEnum(m.kind), brand: m.brand ?? null, last4: m.last4 ?? null, wallet: gqlEnum(m.wallet ?? null), label: m.label });
+const savedMethod = (m: SavedPaymentMethod) => ({ ...m, kind: gqlEnum(m.kind) });
 
 function payment(service: PaymentsService, p: PaymentDetail) {
   const inFlight = p.refunds.filter((r) => r.status === 'requested' || r.status === 'processing' || r.status === 'failed').reduce((s, r) => s + r.amount.amount, 0);
   const attempts = lazy(() => service.attemptsOf(p.id));
   return {
     id: p.id,
-    state: upper(p.customerState),
+    state: gqlEnum(p.customerState),
     stateLabel: CUSTOMER_STATE_LABEL[p.customerState],
     methodLabel: p.method.label,
     method: snapshot(p.method),
-    amount: money(p.amount),
-    capturedAmount: money(p.capturedAmount),
-    refundedAmount: money(p.refundedAmount),
-    refundsInFlight: money({ amount: inFlight, currency: p.amount.currency }),
+    amount: p.amount ?? null,
+    capturedAmount: p.capturedAmount ?? null,
+    refundedAmount: p.refundedAmount ?? null,
+    refundsInFlight: { amount: inFlight, currency: p.amount.currency },
     chargedAt: p.capturedAt ?? p.authorizedAt ?? null,
     ref: p.ref,
-    status: upper(p.status),
+    status: gqlEnum(p.status),
     provider: p.provider,
     providerRef: p.providerRef ?? null,
-    authorizedAmount: money(p.authorizedAmount),
+    authorizedAmount: p.authorizedAmount ?? null,
     authorizedAt: p.authorizedAt ?? null,
     capturedAt: p.capturedAt ?? null,
     authorizationExpiresAt: p.authorizationExpiresAt ?? null,
     lastCheckedAt: p.lastCheckedAt ?? null,
     decline: async () => decline(p.decline ?? [...(await attempts())].reverse().find((a) => a.decline)?.decline ?? null),
-    allocations: p.allocations.map((a) => ({ groupId: a.groupId, sellerId: a.sellerId ?? null, amount: money(a.amount) })),
-    captures: p.captures.map((c) => ({ ...c, groupId: c.groupId ?? null, providerRef: c.providerRef ?? null, amount: money(c.amount), status: upper(c.status) })),
+    allocations: p.allocations.map((a) => ({ groupId: a.groupId, sellerId: a.sellerId ?? null, amount: a.amount ?? null })),
+    captures: p.captures.map((c) => ({ ...c, groupId: c.groupId ?? null, providerRef: c.providerRef ?? null, amount: c.amount ?? null, status: gqlEnum(c.status) })),
     attempts: async () =>
       (await attempts()).map((a) => ({
         id: a.id,
         ref: a.ref,
         attemptNo: a.attempt_no,
-        amount: money({ amount: a.amount, currency: a.currency }),
+        amount: { amount: a.amount, currency: a.currency },
         methodLabel: a.method.label,
-        status: upper(a.status),
+        status: gqlEnum(a.status),
         statusLabel: STATUS_LABEL[a.status as keyof typeof STATUS_LABEL] ?? a.status,
         decline: decline(a.decline),
         createdAt: a.created_at.toISOString(),
@@ -70,20 +62,20 @@ function refund(r: Refund, v: RefundView) {
     ref: r.ref,
     orderId: r.orderId,
     orderRef: r.orderRef,
-    origin: upper(r.origin),
+    origin: gqlEnum(r.origin),
     originRef: r.originRef ?? null,
-    items: r.items.map((i) => ({ orderItemId: i.orderItemId, title: i.title, groupId: i.groupId, amount: money(i.amount) })),
-    amount: money(r.amount),
-    destination: upper(r.destination),
+    items: r.items.map((i) => ({ orderItemId: i.orderItemId, title: i.title, groupId: i.groupId, amount: i.amount ?? null })),
+    amount: r.amount ?? null,
+    destination: gqlEnum(r.destination),
     destinationLabel: r.destinationLabel,
-    status: upper(r.status),
+    status: gqlEnum(r.status),
     statusLabel: r.statusLabel,
     steps: v.steps,
     currentStep: v.currentStep,
     sentAt: r.sentAt ?? null,
     arrivalNote: r.arrivalNote,
     explanation: v.explanation,
-    failure: v.failure ? { reason: v.failure.reason, action: upper(v.failure.action) } : null,
+    failure: v.failure ? { reason: v.failure.reason, action: gqlEnum(v.failure.action) } : null,
     createdAt: r.createdAt,
     attempts: r.attempts,
     maxAttempts: r.maxAttempts,
@@ -102,16 +94,16 @@ function dispute(d: Dispute) {
   return {
     id: d.id,
     ref: d.ref,
-    kind: upper(d.kind),
+    kind: gqlEnum(d.kind),
     provider: d.provider,
     providerCaseId: d.providerCaseId,
     groupId: d.groupId ?? null,
     sellerName: d.sellerName ?? null,
     reasonCode: d.reasonCode,
     reason: d.reason,
-    amount: money(d.amount),
-    evidenceDue: deadline(d.evidenceDue),
-    status: upper(d.status),
+    amount: d.amount ?? null,
+    evidenceDue: gqlDeadline(d.evidenceDue),
+    status: gqlEnum(d.status),
     statusLabel: d.statusLabel,
     sellerBalanceEffect: d.sellerBalanceEffect,
     evidenceText: d.evidence.text ?? null,
@@ -142,11 +134,11 @@ export const resolvers = (service: PaymentsService): ModuleResolvers => ({
       const s = await service.remainingRefundable(root.id).catch(() => null);
       if (!s) return null;
       return {
-        captured: money(s.captured),
-        refunded: money(s.refunded),
-        inFlight: money(s.inFlight),
-        remaining: money(s.remaining),
-        items: s.items.map((i) => ({ ...i, paid: money(i.paid), refunded: money(i.refunded), inFlight: money(i.inFlight), remaining: money(i.remaining), blockedReason: i.blockedReason ?? null })),
+        captured: s.captured ?? null,
+        refunded: s.refunded ?? null,
+        inFlight: s.inFlight ?? null,
+        remaining: s.remaining ?? null,
+        items: s.items.map((i) => ({ ...i, paid: i.paid ?? null, refunded: i.refunded ?? null, inFlight: i.inFlight ?? null, remaining: i.remaining ?? null, blockedReason: i.blockedReason ?? null })),
       };
     },
     paymentDisputes: async (root: { id: string }) => (isUuid(root.id) ? (await service.listDisputesForOrder(root.id)).map(dispute) : []),

@@ -1,11 +1,12 @@
 /** Categories, attributes, image standards and brands (staff taxonomy work, store and seller brand lists). */
+import { slugify } from '../../../kernel/lib/text.js';
 import { SYSTEM_ACTOR } from '../../../kernel/auth/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { pageOf, type PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type { Attribute, AttributeAdmin, AttributeInput, Brand, BrandAdmin, Category, ImageRule } from '../../../spec/catalog.js';
 import { brandStatusMachine } from '../domain/state-machines.js';
-import { attributeFilled, imageRulesOf, normalize, slugify } from '../domain/rules.js';
+import { attributeFilled, imageRulesOf, normalize } from '../domain/rules.js';
 import { stringMap, toAttribute } from '../mappers.js';
 import type { AttributeRow, BrandRow, CategoryRow, ProductRow } from '../ports.js';
 import { invalid, notFound, requireReason, type By, type Taxonomy } from './base.js';
@@ -56,7 +57,7 @@ export class CatalogTaxonomy extends CatalogViews {
   }
 
   private async uniqueSlug(base: string, taken: (slug: string) => Promise<boolean>) {
-    const root = slugify(base);
+    const root = slugify(base, { fallback: 'item' });
     for (let i = 1; ; i++) {
       const slug = i === 1 ? root : `${root}-${i}`;
       if (!(await taken(slug))) return slug;

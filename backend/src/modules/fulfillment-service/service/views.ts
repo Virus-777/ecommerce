@@ -5,7 +5,7 @@
  */
 import type * as common from '../../../spec/common.js';
 import type { Enrollment, FeeCharge, FeeSchedule, FulfillmentRequest, InboundLine, InboundShipment, OwnedStock, RemovalOrder, ServiceReceipt, ServiceReturn, SkuEnrollment, StockDifference } from '../../../spec/fulfillment-service.js';
-import { renderPdf, type PdfLine } from '../domain/pdf.js';
+import { renderPdf, type PdfLine } from '../../../kernel/lib/pdf.js';
 import { actorOf, ageBuckets, CHARGE_LABEL, cubicFeet, EXAMPLE_SCHEDULE, groupBy, onHandBlocks, physicalUnits, plural, qty, rateFor, round4 } from '../domain/rules.js';
 import type { Balances, ChargeRec, EnrollmentRec, InboundLineRec, InboundRec, LedgerRec, ReceiptRec, RemovalRec, RequestRec, ScheduleRec, ServiceReturnRec, SkuRec, StockDifferenceRec } from '../ports.js';
 import { iso, num, Part } from './core.js';
@@ -285,7 +285,7 @@ export class Views extends Part {
       ]);
     }
     try {
-      const bytes = renderPdf(pages);
+      const bytes = renderPdf(pages, { page: 'label' });
       const asset = await media.storeGeneratedFile({ owner: { kind: 'seller', id: r.seller_id }, fileName: `${r.ref}-labels.pdf`, contentType: 'application/pdf', body: new Blob([Buffer.from(bytes)]).stream(), ttlHours: 1, purpose: 'label' });
       return await media.refs([asset.id]);
     } catch (err) {

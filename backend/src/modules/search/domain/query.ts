@@ -2,6 +2,7 @@
  * The query string is the state of a results screen (spec notes): REST parameters ⇄ SearchQuery,
  * applied-filter chips with their removal query strings, and filter validation that needs no I/O.
  */
+import { isIsoDate } from '../../../kernel/lib/dates.js';
 import { CONDITION_GROUPS, SORT_KEYS, type ConditionGroup, type SearchFilters, type SearchQuery, type SortKey } from './types.js';
 import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import { attrKey, formatMoney } from './text.js';
@@ -105,7 +106,7 @@ export function validateFilters(f: SearchFilters, sort: SortKey | undefined) {
   if (f.priceMax != null && f.priceMax < 0) throw new FilterError('priceMax', 'Maximum price cannot be negative');
   if (f.priceMin != null && f.priceMax != null && f.priceMin > f.priceMax) throw new FilterError('priceMin', 'Minimum price is above the maximum');
   if (f.listedWithinDays != null && f.listedWithinDays < 1) throw new FilterError('listedWithinDays', 'listedWithinDays is at least 1');
-  if (f.arrivesBy != null && !/^\d{4}-\d{2}-\d{2}$/.test(f.arrivesBy)) throw new FilterError('arrivesBy', 'arrivesBy is a date');
+  if (f.arrivesBy != null && !isIsoDate(f.arrivesBy)) throw new FilterError('arrivesBy', 'arrivesBy is a date');
   for (const c of f.conditions ?? []) if (!CONDITION_GROUPS.includes(c)) throw new FilterError('condition', `Unknown condition '${c}'`);
   if (sort && !SORT_KEYS.includes(sort)) throw new FilterError('sort', `Unknown sort '${sort}'`);
 }

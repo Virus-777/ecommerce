@@ -1,13 +1,11 @@
 import { SYSTEM_ACTOR } from '../../kernel/auth/index.js';
 import { AppError } from '../../kernel/errors/index.js';
 import type { EventPayload } from '../../kernel/events/index.js';
-import type * as audit from '../../spec/audit.js';
 import type * as common from '../../spec/common.js';
 import type * as identity from '../../spec/identity.js';
 import type {
   AccessPublicApi,
   ApprovalRequest,
-  ApprovalTarget,
   AuthorityCheck,
   AmountInput,
   MyActionLimit,
@@ -29,7 +27,6 @@ import {
   BATCH,
   groupBy,
   iso,
-  by,
 } from './service/core.js';
 import { Roles } from './service/roles.js';
 import { Members } from './service/members.js';

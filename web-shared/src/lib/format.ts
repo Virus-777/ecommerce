@@ -10,8 +10,18 @@ export const percentOff = (price: number, was?: number | null) =>
   was && was > price ? Math.round((1 - price / was) * 100) : 0;
 
 /** "Jordan Lee" -> "JL" */
+/** Two-letter initials for a logo tile: "Casa Verde Home" → "CV", "Pixel & Port" → "PP"; "?" for no name */
 export const initials = (name: string) =>
-  String(name).split(' ').map((w) => w[0]).slice(0, 2).join('');
+  String(name ?? '')
+    .replace(/&/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w[0]!.toUpperCase())
+    .slice(0, 2)
+    .join('') || '?';
+
+/** A stable tile tint ("1"–"6") for a name, so a store or brand keeps its colour on every screen of every app */
+export const tileTint = (name: string) => String((Array.from(String(name ?? '')).reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7) % 6) + 1);
 
 /** A money value as the API sends it: an integer amount in minor units (cents) plus the currency. */
 export interface MoneyValue {
@@ -36,3 +46,60 @@ export const isoInText = (text?: string | null): string =>
     const d = new Date(m);
     return Number.isNaN(d.getTime()) ? m : `${PT_INSTANT.format(d)} PT`;
   });
+
+/**
+ * Money typed in a field → integer cents: "$1,234.50", "12.5" and "12" are read; more than two decimals, a minus sign
+ * or anything else is not money (null). Every money field in the three apps reads input this way.
+ */
+export function parseCents(text: string | null | undefined): number | null {
+  const t = (text ?? '').replace(/[$,\s]/g, '');
+  if (!/^\d+(\.\d{1,2})?$/.test(t) && !/^\.\d{1,2}$/.test(t)) return null;
+  return Math.round(Number(t) * 100);
+}
+
+/**
+ * A URL slug, the same rule the backend saves (kernel slugify): accents dropped, "&" read as "and", anything else not
+ * a letter or digit becomes one hyphen, at most 80 characters. Text with no letters or digits gives `fallback`.
+ */
+export function slugify(text: string, fallback = ''): string {
+  const slug = text
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80)
+    .replace(/-+$/g, '');
+  return slug || fallback;
+}
+
+/** An API key as words: "PARTLY_DELIVERED" and "partly_delivered" → "Partly delivered"; "order.manager" → "Order manager" */
+export function humanize(key?: string | null): string {
+  const t = (key ?? '').replace(/[_.-]+/g, ' ').trim().toLowerCase();
+  return t ? t[0]!.toUpperCase() + t.slice(1) : '';
+}
+
+/** Offer conditions as the API names them (offers' CONDITION_LABEL): the cart, checkout and Seller Center read the same */
+export type Condition = 'new' | 'used_like_new' | 'used_good' | 'used_acceptable' | 'refurbished';
+export const CONDITION_LABEL: Record<Condition, string> = {
+  new: 'New',
+  used_like_new: 'Used – Like new',
+  used_good: 'Used – Good',
+  used_acceptable: 'Used – Acceptable',
+  refurbished: 'Refurbished',
+};
+
+/**
+ * How full a performance meter is (0–100), the same on every screen: for an "at least" percent target the value
+ * itself, for another "at least" target the share of it reached; for an "at most" target how much of the allowance
+ * is used. Without a target, the value as a percent.
+ */
+export function meterFill(value: number, target?: { comparator?: string | null; threshold?: number | null; unit?: string | null } | null): number {
+  const clamp = (n: number) => Math.max(0, Math.min(100, Math.round(n)));
+  if (!target) return clamp(value);
+  const { comparator, threshold, unit } = target;
+  if (comparator === 'gte') return clamp(unit === 'percent' ? value : threshold ? (value / threshold) * 100 : 100);
+  if (!threshold) return value > 0 ? 100 : 0;
+  return clamp((value / threshold) * 100);
+}

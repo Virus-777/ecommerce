@@ -1,23 +1,19 @@
 // API helpers shared by the admin seller screens (Sellers list, Seller 360, Seller application review).
 // Data: GET /api/admin/sellers/sellers (+ /stats, /{id}), /applications (+ /{id}), the AdminSeller screen query.
-import { useEffect, useRef, useState } from 'react';
+export { useDebounced, useInView } from '@marketly/web-shared/lib/hooks';
 import type { components } from '@marketly/web-shared/api';
 import type { Tint } from '@marketly/web-shared/data/fixtures';
-import { formatMoney, type MoneyValue } from '@marketly/web-shared/lib/format';
+import { formatMoney, type MoneyValue, initials, tileTint } from '@marketly/web-shared/lib/format';
 
 type S = components['schemas'];
 export type SellerRow = S['sellers.SellerRow'];
-export type SellerStats = S['sellers.SellerStats'];
 export type SellerDetail = S['sellers.SellerAdminDetail'];
 export type Restriction = S['sellers.Restriction'];
 export type Appeal = S['sellers.Appeal'];
-export type SuspensionImpact = S['sellers.SuspensionImpact'];
 export type ApplicationAdmin = S['sellers.ApplicationAdmin'];
 export type ApplicationRow = S['sellers.ApplicationRow'];
 export type Actor = S['Actor'];
 export type TimelineEvent = S['TimelineEvent'];
-
-export type DeadlineTone = 'ok' | 'warning' | 'danger';
 
 /** API seller status -> the design's label. */
 export const SELLER_STATUS: Record<string, string> = {
@@ -38,15 +34,8 @@ export const cap = (s: string) => {
 export const statusLabel = (s?: string | null) => (s ? (SELLER_STATUS[s.toLowerCase()] ?? cap(s)) : '');
 
 /** Store name -> logo tile initials and a stable tint (the API sends a logo image; the design shows tiles). */
-export const initialsOf = (name: string) =>
-  name
-    .replace(/[^A-Za-z0-9 ]/g, ' ')
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((w) => w.charAt(0).toUpperCase())
-    .slice(0, 2)
-    .join('') || '?';
-export const tintOf = (id: string): Tint => String((id.split('').reduce((n, c) => (n * 31 + c.charCodeAt(0)) >>> 0, 7) % 6) + 1) as Tint;
+export const initialsOf = (name: string) => initials(name);
+export const tintOf = (name: string): Tint => tileTint(name) as Tint;
 
 export const signedMoney = (m?: MoneyValue | null) => (!m ? '—' : m.amount < 0 ? `−${formatMoney({ ...m, amount: -m.amount })}` : formatMoney(m));
 
@@ -115,33 +104,6 @@ export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 export const CLOSED_GROUP = new Set(['DELIVERED', 'CANCELLED', 'COMPLETED', 'REFUNDED', 'RETURNED', 'CLOSED', 'SHIPPED', 'IN_TRANSIT']);
 /** Return statuses that are finished. */
 export const CLOSED_RETURN = new Set(['REJECTED', 'REFUNDED', 'CLOSED', 'CANCELLED', 'WITHDRAWN', 'COMPLETED', 'EXPIRED']);
-
-/** Input value that follows `value` after `ms` without changes. */
-export function useDebounced<T>(value: T, ms = 300): T {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setV(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return v;
-}
-
-/** Calls `onVisible` when the returned element scrolls into view (phone "load more"). */
-export function useInView<T extends HTMLElement>(onVisible: () => void, enabled: boolean) {
-  const ref = useRef<T | null>(null);
-  const cb = useRef(onVisible);
-  cb.current = onVisible;
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || !enabled || typeof IntersectionObserver === 'undefined') return;
-    const io = new IntersectionObserver((es) => {
-      if (es.some((e) => e.isIntersecting)) cb.current();
-    });
-    io.observe(el);
-    return () => io.disconnect();
-  }, [enabled]);
-  return ref;
-}
 
 /** Today + n days as YYYY-MM-DD in Pacific time (date inputs). */
 export const isoDay = (daysFromToday: number) => new Date(Date.now() + daysFromToday * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });

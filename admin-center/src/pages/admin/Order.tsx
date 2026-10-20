@@ -4,7 +4,7 @@ import { Link, useParams } from 'react-router';
 import { call, errorMessage, newIdempotencyKey, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
-import { formatMoney, initials, isoInText } from '@marketly/web-shared/lib/format';
+import { formatMoney, initials, isoInText, tileTint } from '@marketly/web-shared/lib/format';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import {
@@ -40,7 +40,6 @@ interface RefundForm {
 }
 
 const EMPTY_FORM: RefundForm = { selected: {}, amounts: {}, reason: '', funding: '', note: '', notify: true };
-const tintOf = (name: string) => String(((name.charCodeAt(0) || 0) % 6) + 1);
 const money = (m?: Amt | null) => m?.formatted ?? formatMoney(m ?? { amount: 0, currency: 'USD' });
 
 /** Timeline with the design's "At risk:" note on warning events (shared Timeline lacks it). */
@@ -65,7 +64,7 @@ function History({ events }: { events: TimelineEvent[] }) {
 function SellerCell({ s }: { s: SellerLabel }) {
   return (
     <span className="row nowrap gap-2">
-      <LogoTile initials={initials(s.name)} tint={tintOf(s.name)} size="sm" />
+      <LogoTile initials={initials(s.name)} tint={tileTint(s.name)} size="sm" />
       <span className="stack gap-0">
         <span className="small strong nowrap">{s.name}</span>
         <span className="xs muted nowrap">{s.official ? 'Official Store' : 'Marketplace seller'}</span>
@@ -393,7 +392,7 @@ export default function Order() {
                 titleAs={gi === 0 ? 'h2' : 'h3'}
                 title={
                   <span className="row gap-2">
-                    <LogoTile initials={initials(s.name)} tint={tintOf(s.name)} size="sm" />
+                    <LogoTile initials={initials(s.name)} tint={tileTint(s.name)} size="sm" />
                     <span>{!s.official && s.slug && can('sellers.accounts.view') ? <Link to={href('admin/seller', '', { slug: s.slug })}>{s.name}</Link> : s.name}</span>
                     {s.official ? (
                       <Badge tone="brand" icon="badge-check">

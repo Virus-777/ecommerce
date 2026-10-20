@@ -1,5 +1,6 @@
 // Cart and checkout API helpers for the purchase-flow screens: types, queries, the URL params each
 // checkout page carries, Idempotency-Key handling and the development payment tokens (gap G9).
+import { useAppConfig } from '@marketly/web-shared/api';
 import { useQuery } from '@tanstack/react-query';
 import { useRef } from 'react';
 import { call, newIdempotencyKey, toApiError, useApi, type components } from '@marketly/web-shared/api';
@@ -9,18 +10,13 @@ type S = components['schemas'];
 export type CartView = S['cart.CartView'];
 export type CartItem = S['cart.CartItem'];
 export type CartNotice = S['cart.CartNotice'];
-export type CartPackage = S['cart.CartPackage'];
-export type CouponPreview = S['cart.CouponPreview'];
 export type CheckoutView = S['checkout.CheckoutView'];
-export type CheckoutPackage = S['checkout.CheckoutPackage'];
 export type CheckoutLine = S['checkout.CheckoutLine'];
 export type CouponResult = S['checkout.CouponResult'];
-export type QuoteTotals = S['checkout.QuoteTotals'];
 export type PlaceOrderResult = S['checkout.PlaceOrderResult'];
 export type ChangeSet = S['checkout.ChangeSet'];
 export type Change = S['checkout.Change'];
 export type ChangeDecision = S['checkout.ChangeDecision'];
-export type ConfirmationView = S['checkout.ConfirmationView'];
 export type PaymentStatusView = S['payments.PaymentStatusView'];
 export type MethodSelection = S['payments.MethodSelection'];
 export type SavedPaymentMethod = S['payments.SavedPaymentMethod'];
@@ -89,15 +85,8 @@ export function usePaymentIntent(id: string | null | undefined) {
   });
 }
 
-/** Support phone and hours, guest checkout switch (GET /api/public/settings/app-config). */
-export function useAppConfig() {
-  const { api } = useApi();
-  return useQuery({
-    queryKey: ['settings', 'app-config'],
-    queryFn: () => call(api.GET('/api/public/settings/app-config')),
-    staleTime: 5 * 60_000,
-  });
-}
+/** Support phone and hours, guest checkout switch (GET /api/public/settings/app-config): the shared query and cache key. */
+export { useAppConfig };
 
 /* ---------------- Idempotency ---------------- */
 

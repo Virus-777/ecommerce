@@ -3,7 +3,6 @@
  * item eligibility, refund breakdowns and policy comparisons. No I/O.
  */
 import { allocate, format, money } from '../../../kernel/lib/money.js';
-import { zoneOffsetMs } from '../../../kernel/lib/clock.js';
 import type * as common from '../../../spec/common.js';
 import type { RefundDeduction, ShippingResponsibility, TrackStep } from '../../../spec/returns.js';
 
@@ -51,7 +50,6 @@ export const is = <T extends string>(list: readonly T[], v: string | null | unde
 
 /* ---------------------------------------------------------------- reasons and shipping responsibility */
 
-export type CustomerReason = 'defective' | 'damaged' | 'wrong_item' | 'not_as_described' | 'missing_parts' | 'changed_mind' | 'better_price' | 'no_longer_needed' | 'wrong_size' | 'other';
 export type ReasonGroup = ShippingResponsibility['reasonGroup'];
 
 const REASON_GROUP: Record<string, ReasonGroup> = {
@@ -112,22 +110,7 @@ export function responsibilityFor(list: ShippingResponsibility[], group: ReasonG
 
 /* ---------------------------------------------------------------- time */
 
-/** Weekday in a time zone (0 = Sunday) */
-function weekdayIn(at: Date, tz: string): number {
-  return new Date(at.getTime() + zoneOffsetMs(at, tz)).getUTCDay();
-}
-
-/** n business days (Mon–Fri, market time) after `from`, same time of day */
-export function addBusinessDays(from: Date, n: number, tz: string): Date {
-  let t = new Date(from.getTime());
-  let left = Math.max(0, Math.round(n));
-  while (left > 0) {
-    t = new Date(t.getTime() + DAY);
-    const wd = weekdayIn(t, tz);
-    if (wd !== 0 && wd !== 6) left -= 1;
-  }
-  return t;
-}
+/* business days: Core.addBusinessDays (the market's calendar, kernel/lib/business-days.ts) */
 
 export const addDays = (from: Date, n: number) => new Date(from.getTime() + n * DAY);
 

@@ -1,3 +1,5 @@
+import { parseCents } from '@marketly/web-shared/lib/format';
+import { fromZonedInput } from '@marketly/web-shared/lib/dates';
 import type { components } from '@marketly/web-shared/api';
 import type { IconName } from '@marketly/web-shared/ui';
 
@@ -54,10 +56,8 @@ export const GAP_STATUS: Record<CoverageGap['severity'], string> = { critical: '
 export const moneyField = (amount?: number | null) => (amount == null ? '' : (amount / 100).toLocaleString('en-US', { maximumFractionDigits: 2 }));
 /** "$" field text → minor units (null when empty, NaN when not a number). */
 export const parseMoneyField = (s: string): number | null => {
-  const t = s.replace(/[,$\s]/g, '');
-  if (!t) return null;
-  const n = Number(t);
-  return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : NaN;
+  if (!s.replace(/[,$\s]/g, '')) return null;
+  return parseCents(s) ?? NaN;
 };
 export const numberField = (n?: number | null) => (n == null ? '' : String(n));
 export const parseNumberField = (s: string): number | null => {
@@ -126,10 +126,5 @@ export const todayKey = () => new Date().toLocaleDateString('en-CA', { timeZone:
 /** An effective date (YYYY-MM-DD) as the instant the API takes: a minute from now for today, else the start of that Pacific day. */
 export function effectiveInstant(day: string): string {
   if (day <= todayKey()) return new Date(Date.now() + 60_000).toISOString();
-  const probe = new Date(`${day}T12:00:00Z`);
-  const tz = probe.toLocaleString('en-US', { timeZone: 'America/Los_Angeles', timeZoneName: 'shortOffset' });
-  const m = /GMT([+-]\d+)/.exec(tz);
-  const off = m ? Number(m[1]) : -8;
-  const sign = off < 0 ? '-' : '+';
-  return new Date(`${day}T00:00:00${sign}${String(Math.abs(off)).padStart(2, '0')}:00`).toISOString();
+  return fromZonedInput(`${day}T00:00`) ?? new Date(Date.now() + 60_000).toISOString();
 }

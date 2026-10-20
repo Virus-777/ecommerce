@@ -57,8 +57,6 @@ export const CHARGE_TYPE: Record<FeeRate['type'], string> = {
   disposal_per_unit: 'disposal',
   label_per_unit: 'labelling',
 };
-export const REIMBURSEMENT = 'reimbursement';
-
 export const CHARGE_LABEL: Record<string, string> = {
   receiving: 'Receiving',
   storage: 'Monthly storage',

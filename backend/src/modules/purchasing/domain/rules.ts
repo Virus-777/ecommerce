@@ -17,8 +17,6 @@ export type ClaimKind = 'shortage' | 'damage' | 'wrong_item' | 'other';
 export const OPEN_PO_STATUSES: readonly PoStatus[] = ['draft', 'sent', 'partly_received'];
 /** Sent to the supplier and not finished: their open quantities are Incoming. */
 export const INCOMING_PO_STATUSES: readonly PoStatus[] = ['sent', 'partly_received'];
-/** Deliveries still to arrive. */
-export const PENDING_DELIVERY_STATUSES: readonly DeliveryStatus[] = ['expected', 'delayed'];
 /** Submitted receiving records (counted). */
 export const SUBMITTED_RECEIPT_STATUSES: readonly ReceiptStatus[] = ['awaiting_confirmation', 'confirmed'];
 /** Claims still being followed up. */
@@ -59,8 +57,6 @@ export interface LineQty {
 
 /** Units still to come: ordered − received − closed short, never below zero. */
 export const openQty = (l: LineQty) => Math.max(l.qtyOrdered - l.qtyReceived - l.qtyClosed, 0);
-
-export const lineTotal = (unitCostAmount: number, qty: number, currency: string): Money => money(unitCostAmount * qty, currency);
 
 /** Freight split over lines pro rata by line value (largest remainder, no cent lost). */
 export function freightShares(freight: Money, lines: { unitCostAmount: number; qtyOrdered: number }[]): Money[] {

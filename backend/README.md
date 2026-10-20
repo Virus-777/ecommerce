@@ -64,7 +64,6 @@ providers/           provider adapters behind ports, with a deterministic dev ad
 http/<area>.ts       one handler per spec endpoint of that area
 graphql/             schema.ts (generated fragment) + resolvers.ts
 domain/              state machines and pure rules
-permissions.ts       the module's permission keys
 README.md            GENERATED: the module's API reference
 <module>.test.ts     the module booted with its dependencies, held to its spec (contract suite)
 test/                behaviour tests; helpers.ts boots the module for them

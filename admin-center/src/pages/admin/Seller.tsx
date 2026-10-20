@@ -6,7 +6,7 @@ import AdminSellerQuery from '@marketly/web-shared/api/graphql/admin/AdminSeller
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { useView } from '@marketly/web-shared/lib/hooks';
-import { formatMoney } from '@marketly/web-shared/lib/format';
+import { formatMoney, meterFill } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, Badge, Button, Card, Deadline, Dialog, EmptyState, Field, Icon, KeyValue, LogoTile, Meter, OptionCard, PageHeader, Select, StatusBadge, SummaryRow, TableWrap, Tabs, Textarea, TextInput, announce } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
@@ -87,13 +87,8 @@ function validate(d: SuspendDraft) {
 }
 
 
-/** Meter fill for a metric: percent "at least" targets show the value; others show value against twice the limit. */
-function meterPct(value: number, target?: { comparator?: string; threshold?: number; unit?: string }) {
-  if (!target) return Math.min(100, value);
-  if (target.comparator === 'gte' && target.unit === 'percent') return Math.min(100, Math.max(0, value));
-  if (!target.threshold) return value > 0 ? Math.min(100, value * 20) : 0;
-  return Math.min(100, Math.round((value / (target.threshold * 2)) * 100));
-}
+/** Meter fill for a metric (the same formula as the Seller Center) */
+const meterPct = (value: number, target?: { comparator?: string; threshold?: number; unit?: string }) => meterFill(value, target);
 const metricTone = (s: string): Tone => (s === 'meets' ? 'success' : s === 'watch' ? 'warning' : 'danger');
 
 /** Timeline with the design's "At risk:" note on amber events. */
@@ -399,7 +394,7 @@ export default function Seller() {
         crumbs={[{ label: 'Sellers', to: href('admin/sellers') }, { label: a.storeName }]}
         title={
           <span className="row gap-3">
-            <LogoTile initials={initialsOf(a.storeName)} tint={tintOf(a.id)} />
+            <LogoTile initials={initialsOf(a.storeName)} tint={tintOf(a.storeName)} />
             <span>{a.storeName}</span>
           </span>
         }

@@ -1,3 +1,4 @@
+import { parseCents } from '@marketly/web-shared/lib/format';
 import { Fragment, useEffect, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router';
 import { Checkbox, Icon, Radio, Select, Stars5 } from '@marketly/web-shared/ui';
@@ -70,10 +71,7 @@ const writeAttrs = (a: Record<string, string[]>) =>
 /** Facet key → REST parameter. */
 const PARAM: Record<string, string> = { category: 'category', brand: 'brand', seller: 'seller', condition: 'condition', delivery: 'delivery', rating: 'rating', availability: 'availability' };
 
-const toCents = (s: string) => {
-  const n = parseFloat(s.replace(/[$,\s]/g, ''));
-  return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : null;
-};
+const toCents = (s: string) => parseCents(s);
 const toDollars = (c: string | null) => (c ? String(Number(c) / 100) : '');
 
 /** Price filter: min/max fields and the server's price presets with result counts (setting search.pricePresets). */

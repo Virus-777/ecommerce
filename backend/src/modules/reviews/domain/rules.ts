@@ -139,8 +139,6 @@ export function shortName(full: string | null | undefined): string {
 }
 
 export const ANONYMOUS_REVIEWER = 'Marketly customer';
-export const ANONYMOUS_ASKER = 'a shopper';
-
 export const REVIEW_STATUS_LABEL: Record<string, string> = {
   draft: 'Draft',
   pending: 'Checking',
@@ -190,8 +188,6 @@ export const MODERATION_REASONS: ModerationReason[] = [
 ];
 
 export const reasonLabel = (code: string | null | undefined) => MODERATION_REASONS.find((r) => r.code === code)?.label ?? (code ? (REPORT_REASON_LABEL[code] ?? code) : '');
-export const removesContent = (code: string) => MODERATION_REASONS.find((r) => r.code === code)?.removes ?? false;
-
 /** Plain explanations of decisions for authors (reporters are never named) */
 export const AUTHOR_TEXT: Record<string, string> = {
   legitimate_experience: 'It describes your own experience, so it stays.',

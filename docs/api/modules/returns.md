@@ -1529,7 +1529,6 @@ Checked through the access module (limits per role, second reviewer).
 | autoApproveOfficialWithinWindow | `true` | bool, approval: second reviewer | Official Store returns inside the window are approved automatically |
 | autoApproveServiceWithinWindow | `true` | bool, approval: second reviewer, seller-visible | Fulfilled by Marketly returns inside the seller's return window are approved automatically by Marketly (decision D7) |
 | maxPhotosPerReturn | `6` | int, 1–20 | Photos or short videos per return request |
-| maxMediaMb | `10` | int, MB, 1–… | Upload size per file |
 | inspectionChecksByCategory | `{}` | json | Category id → functional and hygiene checks added to the inspection checklist (e.g. Headphones: powers on and pairs, ear cushions clean) |
 | refundRefPrefix | `"RF-"` | string, read-only | Human reference prefix for refund requests |
 

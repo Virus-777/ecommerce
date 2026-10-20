@@ -9,7 +9,6 @@ import type {
   SavedAddress,
 } from '../../spec/customers.js';
 import type * as identity from '../../spec/identity.js';
-import type * as reports from '../../spec/reports.js';
 import { Core, type CustomersServiceDeps } from './service/core.js';
 import { Profiles } from './service/profiles.js';
 import { Addresses } from './service/addresses.js';

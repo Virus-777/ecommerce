@@ -2,7 +2,7 @@
 import { isUuid } from '../../../kernel/lib/ids.js';
 import type * as common from '../../../spec/common.js';
 import type { Fulfillment, ScanResult, WarehouseSummary } from '../../../spec/warehouse.js';
-import { addDays, itemMatches, looksLikeReturnRef, NIL_UUID, normalizeCode, SYSTEM, UNPACKED_STATUSES } from '../domain/rules.js';
+import { addDays, inBusinessHours, itemMatches, looksLikeReturnRef, NIL_UUID, normalizeCode, SYSTEM, UNPACKED_STATUSES } from '../domain/rules.js';
 import type { Where } from '../../../kernel/mongo/index.js';
 import type { FulfillmentRec } from '../ports.js';
 import type { Bins } from './bins.js';
@@ -212,10 +212,11 @@ export class Summary {
     return flagged;
   }
 
-  /** Job (when enabled): a wave per location from orders awaiting pick due by the next carrier pickup */
+  /** Job (when enabled, during business hours): a wave per location from orders awaiting pick due by the next carrier pickup */
   async autoWave(): Promise<number> {
     const cfg = await this.core.cfg();
     if (!cfg.autoWaveEnabled) return 0;
+    if (!inBusinessHours(await this.core.soft('settings', 'business hours', (s) => s.businessCalendar()), this.core.now())) return 0;
     const next = this.core.pickups(cfg).next;
     if (!next) return 0;
     const waiting = await this.repo.find('fulfillments', { status: 'awaiting_pick', wave_id: null, ship_by: { op: '<=', value: next } });

@@ -2,7 +2,7 @@
  * Secrets identity keeps: password hashes (scrypt), opaque tokens stored as hashes, 6-digit codes,
  * TOTP (RFC 6238), recovery codes and encrypted 2-step secrets. node:crypto only.
  */
-import { createCipheriv, createDecipheriv, createHash, createHmac, hkdfSync, randomBytes, randomInt, scrypt, timingSafeEqual, type KeyObject } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, createHmac, hkdfSync, randomBytes, randomInt, scrypt, timingSafeEqual } from 'node:crypto';
 
 /* ------------------------------------------------------------------ passwords (scrypt, per-password salt) */
 

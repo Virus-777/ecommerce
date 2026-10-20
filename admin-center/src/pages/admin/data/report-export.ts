@@ -2,20 +2,14 @@
 // (or failed) and its signed link is opened. Used by the report library and the report detail.
 // useDatasetExport does the same for a registered dataset (the screens' Export buttons, G72), and
 // useExportJob for any create/poll pair (audit exports poll GET audit/exports/{id}).
+import { download as downloadFile } from '@marketly/web-shared/lib/exports';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { call, useApi } from '@marketly/web-shared/api';
 import { localLink, type ExportJob, type ReportQuery } from './reports';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export function download(url: string, name?: string | null) {
-  const a = document.createElement('a');
-  a.href = url;
-  if (name) a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-}
+export const download = (url: string, name?: string | null) => downloadFile(url, name);
 
 export function useReportExport() {
   const { api } = useApi();

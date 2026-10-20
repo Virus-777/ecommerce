@@ -1,6 +1,7 @@
+import { isIsoDate } from '../../kernel/lib/dates.js';
 import { createHash } from 'node:crypto';
 import { SYSTEM_ACTOR } from '../../kernel/auth/index.js';
-import { AppError } from '../../kernel/errors/index.js';
+import { AppError, isNotImplemented } from '../../kernel/errors/index.js';
 import type { EventPayload } from '../../kernel/events/index.js';
 import { newId, isUuid } from '../../kernel/lib/ids.js';
 import { dateInZone } from '../../kernel/lib/clock.js';
@@ -204,8 +205,20 @@ export class SettingsService implements SettingsPublicApi {
     await this.#reload().catch((err) => this.ctx.log.error({ err }, 'settings: reload after write failed'));
   }
 
+  /**
+   * The market's time zone and currency come from the server configuration (MARKET_TIME_ZONE, MARKET_CURRENCY), the
+   * one source every module reads; the settings show them read-only (owner decision 2026-10-20)
+   */
+  #fromConfig(key: string): { value: unknown } | undefined {
+    if (key === 'market.timeZone') return { value: this.ctx.config.market.timeZone };
+    if (key === 'market.currency') return { value: this.ctx.config.market.currency };
+    return undefined;
+  }
+
   /** Value of a key at a time from stored versions and scheduled changes; undefined when none exists (the default applies). */
   async #resolve(key: string, at?: string | Date): Promise<{ value: unknown } | undefined> {
+    const fixed = this.#fromConfig(key);
+    if (fixed) return fixed;
     const now = this.now();
     const t = at ? new Date(at) : now;
     if (Number.isNaN(t.getTime())) throw new AppError('VALIDATION_FAILED', 'Invalid time', { issues: [{ path: 'at', message: 'not a date-time' }] });
@@ -218,6 +231,8 @@ export class SettingsService implements SettingsPublicApi {
 
   /** The stored version in force at t, or the latest scheduled change effective by then (the snapshot's view of #resolve) */
   #resolveIn(snap: Snapshot, key: string, t: Date): { value: unknown } | undefined {
+    const fixed = this.#fromConfig(key);
+    if (fixed) return fixed;
     const current = snap.values.get(key);
     let pick: { value: unknown; from: number } | undefined = current && current.effectiveFrom <= t ? { value: current.value, from: current.effectiveFrom.getTime() } : undefined;
     for (const s of snap.scheduled.get(key) ?? []) {
@@ -346,7 +361,7 @@ export class SettingsService implements SettingsPublicApi {
     return {
       isOpen: (at) => cal.isOpen(date(at, 'at')),
       isBusinessDay: (day) => {
-        if (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new AppError('VALIDATION_FAILED', 'Invalid day', { issues: [{ path: 'day', message: 'not a date (YYYY-MM-DD)' }] });
+        if (!isIsoDate(day)) throw new AppError('VALIDATION_FAILED', 'Invalid day', { issues: [{ path: 'day', message: 'not a date (YYYY-MM-DD)' }] });
         return cal.isBusinessDay(day);
       },
       addBusinessMinutes: (from, minutes) => (cal.addBusinessMinutes(date(from, 'from'), minutes) ?? date(from, 'from')).toISOString(),
@@ -1012,9 +1027,6 @@ export class SettingsService implements SettingsPublicApi {
     if (itemDefs.some((d) => d.public)) {
       items.push({ module: 'settings', kind: 'customers', count: null, message: `The website and the Android app show the new value from ${when}`, severity: 'info', owner: null, screen: null });
     }
-    if (itemDefs.some((d) => d.key === 'market.timeZone' || d.key === 'market.currency')) {
-      items.push({ module: 'settings', kind: 'other', count: null, message: 'Deadlines, reports and campaign schedules follow the market settings: this change needs a migration plan', severity: 'warning', owner: 'Business Owner', screen: null });
-    }
     const rule = strictest(itemDefs.map((d) => d.approval));
     return { computedAt: now.toISOString(), items, blocking: [...new Set(blocking)], needsApproval: rule !== 'none', approvalRule: rule, approvers: APPROVER_LABELS[rule] };
   }
@@ -1472,7 +1484,12 @@ export class SettingsService implements SettingsPublicApi {
   }
 
   async #audit(entry: Omit<audit.RecordInput, 'actor' | 'module' | 'requestId' | 'category'> & { category?: audit.RecordInput['category'] }, by: By): Promise<void> {
-    await this.ctx.tryUse('audit')?.record({ category: 'settings', ...entry, actor: by.actor, module: this.ctx.name, requestId: by.requestId ?? null });
+    try {
+      await this.ctx.tryUse('audit')?.record({ category: 'settings', ...entry, actor: by.actor, module: this.ctx.name, requestId: by.requestId ?? null });
+    } catch (err) {
+      // the change is committed; a missing audit entry is logged, never turned into a failed request
+      this.ctx.log[isNotImplemented(err) ? 'debug' : 'error']({ err, action: entry.action }, 'audit entry not recorded');
+    }
   }
 }
 

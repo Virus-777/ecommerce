@@ -27,7 +27,7 @@ export const STATUS_TONE: Record<string, Tone> = {
   // Payment
   Accepted: 'success', Pending: 'warning', Failed: 'danger', Refunded: '', 'Partly refunded': '', Checking: 'warning', Authorized: 'info', Captured: 'success',
   // Order & item
-  New: 'brand', Confirmed: 'info', Preparing: 'info', Delayed: 'warning', Shipped: 'info', 'In transit': 'info', 'Out for delivery': 'info',
+  New: 'brand', Confirmed: 'info', Preparing: 'info', Delayed: 'warning', 'Partly shipped': 'info', Shipped: 'info', 'In transit': 'info', 'Out for delivery': 'info',
   Delivered: 'success', 'Partly delivered': 'warning', Cancelled: '', 'Partly cancelled': '', Completed: 'success', Overdue: 'danger', 'Delivery failed': 'danger', Lost: 'danger',
   'Cancellation requested': 'warning', Received: 'info', Inspected: 'info', Triggered: 'success',
   // Returns & refunds

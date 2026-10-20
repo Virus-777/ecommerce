@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppError } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import type * as common from '../../../spec/common.js';
-import { unzip } from '../domain/zip.js';
+import { unzip } from '../../../kernel/lib/zip.js';
 import { ADMIN, boot, STORE, type Kit } from './helpers.js';
 
 const PHOTO = newId();

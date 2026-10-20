@@ -120,7 +120,7 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | POST | `/api/admin/sellers/applications/{id}/checks/{checkId}/rerun` | Run an automated check again (e.g. after a new document) | staff<br>`sellers.applications.review` | `VerificationCheck` |
 | POST | `/api/admin/sellers/applications/{id}/checks/{checkId}/result` | Record a manual check result or accept a 'needs attention' result with a note _(audited)_ | staff<br>`sellers.applications.review` | `{ result: enum(passed|needs_attention|failed), note: text, acceptForApproval: bool? }` → `VerificationCheck` |
 | POST | `/api/admin/sellers/applications/{id}/trust-review` | Refer the application to Trust and Risk _(audited)_ | staff<br>`sellers.applications.review` | `{ question: text }` → `RiskReview` |
-| POST | `/api/admin/sellers/applications/{id}/request-information` | Ask the applicant for specific items with a deadline _(audited)_ | staff<br>`sellers.applications.review` | `{ items: json[], message: text, dueAt: datetime, reminder: enum(three_days_before|none) }` → `ApplicationAdmin` |
+| POST | `/api/admin/sellers/applications/{id}/request-information` | Ask the applicant for specific items with a deadline _(audited)_ | staff<br>`sellers.applications.review` | `{ items: json[], message: text, dueAt: datetime?, reminder: enum(three_days_before|none) }` → `ApplicationAdmin` |
 | POST | `/api/admin/sellers/applications/{id}/approve` | Approve the application _(audited)_ | staff<br>`sellers.applications.decide` | `{ note: text?, conditions: RestrictionInput[]?, recommendedHoldDays: int? }` → `ApplicationAdmin` |
 | POST | `/api/admin/sellers/applications/{id}/reject` | Reject with an explanation the applicant will read _(audited)_ | staff<br>`sellers.applications.decide` | `{ reasonCode: enum(unverified_identity_or_business|outside_assortment|risk_review_failed|duplicate_account|incomplete|other), explanation: text, ruleRef: string?, reapply: enum(immediately|after_30_days|after_90_days|not_eligible) }` → `ApplicationAdmin` |
 | POST | `/api/admin/sellers/applications/{id}/notes` | Add a staff-only note to an application | staff<br>`sellers.applications.review` | `{ body: text }` → `SellerNote` |
@@ -409,7 +409,7 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 |---|---|
 | id | `uuid` |
 | kind | `enum(owner_id|business_registration|tax_form|bank_letter|proof_of_address|category_certificate|authorization_letter|other)` |
-| file | `MediaRef` |
+| file | `MediaRef?` Null when the file is no longer available (deleted, or media could not answer) |
 | fileName | `string` |
 | sizeBytes | `int` |
 | uploadedAt | `datetime` |
@@ -2133,14 +2133,14 @@ Indexes: `(email)`, `(state, expires_at)`
 | `sellers.appeal.decided` | An appeal is decided | `{ appealId: uuid, sellerId: uuid, outcome: enum(upheld|overturned|partly_overturned), subject: string, subjectId: uuid, trustReportId: uuid? }` | notifications, trust, workqueues |
 | `sellers.payout_account.changed` | The owner adds or changes the payout destination (finance starts verification and review) | `{ sellerId: uuid, changeId: uuid, providerDestinationId: string, label: string, accountHolderName: string, accountType: string, previousLabel: string?, isInitial: bool, requestedBy: Actor }` | finance, notifications |
 | `sellers.storefront.updated` | Storefront content, collections or approved claims change | `{ sellerId: uuid, fields: string[] }` | - |
-| `sellers.change_request.submitted` | A store name, claim or business change waits for review | `{ changeRequestId: uuid, sellerId: uuid, kind: string }` | workqueues |
+| `sellers.change_request.submitted` | A store name, claim or business change waits for review | `{ changeRequestId: uuid, sellerId: uuid, kind: string, reviewBy: datetime? }` | workqueues |
 | `sellers.change_request.decided` | Staff approve or reject a change request | `{ changeRequestId: uuid, sellerId: uuid, kind: string, approved: bool, brandRequest: json? }` | catalog, notifications, workqueues |
 | `sellers.member.invited` | The owner invites staff | `{ sellerId: uuid, memberId: uuid, email: email }` | notifications |
 | `sellers.member.joined` | An invited member accepts | `{ sellerId: uuid, memberId: uuid, accountId: uuid }` | notifications |
 | `sellers.member.permissions_changed` | A member's role or permissions change | `{ sellerId: uuid, memberId: uuid, permissions: string[] }` | - |
 | `sellers.member.removed` | A member is suspended or removed | `{ sellerId: uuid, memberId: uuid, accountId: uuid? }` | notifications |
 | `sellers.member.reactivated` | The owner lifts a member's suspension | `{ sellerId: uuid, memberId: uuid, accountId: uuid?, permissions: string[] }` | - |
-| `sellers.launch_review.requested` | A seller asks for the launch readiness review | `{ sellerId: uuid }` | workqueues |
+| `sellers.launch_review.requested` | A seller asks for the launch readiness review | `{ sellerId: uuid, reviewBy: datetime? }` | workqueues |
 | `sellers.launch_review.decided` | The launch review passes or needs changes (offers activates eligible offers on pass) | `{ sellerId: uuid, outcome: enum(passed|changes_needed), decidedAt: datetime }` | notifications, offers, workqueues |
 | `sellers.agreement.accepted` | An agreement version is accepted | `{ sellerId: uuid?, applicationId: uuid?, key: string, versionLabel: string }` | - |
 | `sellers.verification.changed` | The Verified seller label is granted, lapses or is revoked | `{ sellerId: uuid, state: string }` | notifications |

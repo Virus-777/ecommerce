@@ -1,78 +1,68 @@
-import type { GraphQLContext, ModuleResolvers } from '../../../kernel/graphql/index.js';
-import { format as formatMoney } from '../../../kernel/lib/money.js';
+import { gqlEnum, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
 import type * as cart from '../../../spec/cart.js';
-import type * as common from '../../../spec/common.js';
 import type * as payments from '../../../spec/payments.js';
 import type * as shipping from '../../../spec/shipping.js';
 import type { ChangeSet, CheckoutLine, CheckoutView, ConfirmationView, CouponResult, QuoteTotals } from '../../../spec/checkout.js';
 import type { CheckoutService } from '../service.js';
 
-/**
- * Resolvers for the GraphQL fields this module owns (`@source(module: "checkout", …)` in graphql/schema.ts).
- *   Query.checkoutSession → service.getSessionView (the viewer's own session; null otherwise)
- *   CheckoutSession.confirmation → service.getConfirmation (null until the payment is accepted)
- * The CheckoutSession object is built here: GraphQL enums are upper case and Money carries `formatted`.
- */
-const upper = <T extends string | null | undefined>(s: T) => (s ? s.toUpperCase() : s);
-const money = (x: common.Money | null | undefined) => (x ? { ...x, formatted: formatMoney(x) } : null);
 const seller = (s: cart.SellerLabel) => ({ id: s.id ?? null, name: s.name, slug: s.slug, official: s.official, verified: s.verified, logo: s.logo ?? null });
 
 const line = (l: CheckoutLine) => ({
   ...l,
-  status: upper(l.status),
-  unitPrice: money(l.unitPrice),
-  lineTotal: money(l.lineTotal),
-  discounts: l.discounts.map((d) => ({ ...d, amount: money(d.amount), fundedBy: upper(d.fundedBy) })),
+  status: gqlEnum(l.status),
+  unitPrice: l.unitPrice ?? null,
+  lineTotal: l.lineTotal ?? null,
+  discounts: l.discounts.map((d) => ({ ...d, amount: d.amount ?? null, fundedBy: gqlEnum(d.fundedBy) })),
 });
 
 const option = (o: shipping.DeliveryOption | null | undefined) =>
-  o ? { ...o, price: money(o.price), fundedBy: upper(o.fundedBy), arrivalFrom: o.arrival.from, arrivalTo: o.arrival.to, notices: o.notices ?? [] } : null;
+  o ? { ...o, price: o.price ?? null, fundedBy: gqlEnum(o.fundedBy), arrivalFrom: o.arrival.from, arrivalTo: o.arrival.to, notices: o.notices ?? [] } : null;
 
 const coupon = (c: CouponResult) => ({
   ...c,
-  status: upper(c.status),
-  fundedBy: upper(c.fundedBy ?? null),
-  amount: money(c.amount),
-  coverage: c.coverage.map((x) => ({ ...x, amount: money(x.amount) })),
+  status: gqlEnum(c.status),
+  fundedBy: gqlEnum(c.fundedBy ?? null),
+  amount: c.amount ?? null,
+  coverage: c.coverage.map((x) => ({ ...x, amount: x.amount ?? null })),
 });
 
 const totals = (t: QuoteTotals) => ({
   ...t,
-  items: money(t.items),
-  discounts: t.discounts.map((d) => ({ ...d, amount: money(d.amount), fundedBy: upper(d.fundedBy) })),
-  discountTotal: money(t.discountTotal),
-  shippingByPackage: t.shippingByPackage.map((s) => ({ ...s, amount: money(s.amount) })),
-  shippingTotal: money(t.shippingTotal),
-  tax: t.tax.map((x) => ({ ...x, amount: money(x.amount) })),
-  taxTotal: money(t.taxTotal),
-  creditApplied: money(t.creditApplied),
-  total: money(t.total),
+  items: t.items ?? null,
+  discounts: t.discounts.map((d) => ({ ...d, amount: d.amount ?? null, fundedBy: gqlEnum(d.fundedBy) })),
+  discountTotal: t.discountTotal ?? null,
+  shippingByPackage: t.shippingByPackage.map((s) => ({ ...s, amount: s.amount ?? null })),
+  shippingTotal: t.shippingTotal ?? null,
+  tax: t.tax.map((x) => ({ ...x, amount: x.amount ?? null })),
+  taxTotal: t.taxTotal ?? null,
+  creditApplied: t.creditApplied ?? null,
+  total: t.total ?? null,
 });
 
 const paymentOptions = (o: payments.PaymentOptions) => ({
   ...o,
-  savedMethods: o.savedMethods.map((s) => ({ ...s, kind: upper(s.kind) })),
+  savedMethods: o.savedMethods.map((s) => ({ ...s, kind: gqlEnum(s.kind) })),
   walletKinds: o.walletKinds.map((k) => k.toUpperCase()),
 });
 
 const paymentStatus = (p: payments.PaymentStatusView | null | undefined) =>
-  p ? { ...p, state: upper(p.state), amount: money(p.amount), decline: p.decline ? { ...p.decline, category: upper(p.decline.category) } : null } : null;
+  p ? { ...p, state: gqlEnum(p.state), amount: p.amount ?? null, decline: p.decline ? { ...p.decline, category: gqlEnum(p.decline.category) } : null } : null;
 
 export const gqlChangeSet = (c: ChangeSet) => ({
   ...c,
-  status: upper(c.status),
-  previousTotal: money(c.previousTotal),
-  newTotal: money(c.newTotal),
-  deltas: c.deltas.map((d) => ({ ...d, amount: money(d.amount) })),
+  status: gqlEnum(c.status),
+  previousTotal: c.previousTotal ?? null,
+  newTotal: c.newTotal ?? null,
+  deltas: c.deltas.map((d) => ({ ...d, amount: d.amount ?? null })),
   changes: c.changes.map((x) => ({
     ...x,
-    kind: upper(x.kind),
-    previousAmount: money(x.previousAmount),
-    currentAmount: money(x.currentAmount),
-    effectOnTotal: money(x.effectOnTotal),
+    kind: gqlEnum(x.kind),
+    previousAmount: x.previousAmount ?? null,
+    currentAmount: x.currentAmount ?? null,
+    effectOnTotal: x.effectOnTotal ?? null,
     choices: x.choices.map((k) => k.toUpperCase()),
-    defaultChoice: upper(x.defaultChoice),
-    alternatives: x.alternatives.map((a) => ({ ...a, seller: seller(a.seller), price: money(a.price), shipping: money(a.shipping) })),
+    defaultChoice: gqlEnum(x.defaultChoice),
+    alternatives: x.alternatives.map((a) => ({ ...a, seller: seller(a.seller), price: a.price ?? null, shipping: a.shipping ?? null })),
   })),
 });
 
@@ -80,33 +70,33 @@ export const gqlConfirmation = (c: ConfirmationView | null) =>
   c
     ? {
         ...c,
-        charged: money(c.charged),
+        charged: c.charged ?? null,
         totals: totals(c.totals),
-        packages: c.packages.map((p) => ({ ...p, seller: seller(p.seller), items: p.items.map((i) => ({ ...i, price: money(i.price) })) })),
+        packages: c.packages.map((p) => ({ ...p, seller: seller(p.seller), items: p.items.map((i) => ({ ...i, price: i.price ?? null })) })),
       }
     : null;
 
 type Owner = { customerId?: string; guestSessionId?: string };
 
-export const gqlSession = (v: CheckoutView, extras: { hidePricesOnSlip: boolean; openChangeSet: () => Promise<ChangeSet | null> }) => ({
+const gqlSession = (v: CheckoutView, extras: { hidePricesOnSlip: boolean; openChangeSet: () => Promise<ChangeSet | null> }) => ({
   ...v,
-  status: upper(v.status),
-  source: upper(v.source),
-  steps: v.steps.map((s) => ({ ...s, key: upper(s.key), status: upper(s.status) })),
-  account: v.account ? { ...v.account, kind: upper(v.account.kind) } : null,
-  address: v.address ? { ...v.address, lines: v.address.lines.map((l) => ({ ...l, reason: upper(l.reason ?? null) })) } : null,
+  status: gqlEnum(v.status),
+  source: gqlEnum(v.source),
+  steps: v.steps.map((s) => ({ ...s, key: gqlEnum(s.key), status: gqlEnum(s.status) })),
+  account: v.account ? { ...v.account, kind: gqlEnum(v.account.kind) } : null,
+  address: v.address ? { ...v.address, lines: v.address.lines.map((l) => ({ ...l, reason: gqlEnum(l.reason ?? null) })) } : null,
   packages: v.packages.map((p) => {
     const options = p.options.map(option);
-    return { ...p, seller: seller(p.seller), lines: p.lines.map(line), options, selectedOption: options.find((o) => o?.id === p.selectedOptionId) ?? null, totals: { items: money(p.totals.items), discounts: money(p.totals.discounts), shipping: money(p.totals.shipping), tax: money(p.totals.tax), total: money(p.totals.total) } };
+    return { ...p, seller: seller(p.seller), lines: p.lines.map(line), options, selectedOption: options.find((o) => o?.id === p.selectedOptionId) ?? null, totals: { items: p.totals.items ?? null, discounts: p.totals.discounts ?? null, shipping: p.totals.shipping ?? null, tax: p.totals.tax ?? null, total: p.totals.total ?? null } };
   }),
   excludedLines: v.excludedLines.map(line),
   coupons: v.coupons.map(coupon),
-  credit: v.credit ? { ...v.credit, available: money(v.credit.available), applied: money(v.credit.applied) } : null,
-  payment: { selected: v.payment.selected ? { ...v.payment.selected, kind: upper(v.payment.selected.kind) } : null, chargeNote: v.payment.chargeNote },
+  credit: v.credit ? { ...v.credit, available: v.credit.available ?? null, applied: v.credit.applied ?? null } : null,
+  payment: { selected: v.payment.selected ? { ...v.payment.selected, kind: gqlEnum(v.payment.selected.kind) } : null, chargeNote: v.payment.chargeNote },
   paymentOptions: paymentOptions(v.payment.options),
   lastPayment: paymentStatus(v.lastPayment),
   totals: totals(v.totals),
-  legal: { ...v.legal, policyVersions: v.legal.policyVersions.map((p) => ({ ...p, policyKey: upper(p.policyKey) })) },
+  legal: { ...v.legal, policyVersions: v.legal.policyVersions.map((p) => ({ ...p, policyKey: gqlEnum(p.policyKey) })) },
   hidePricesOnSlip: extras.hidePricesOnSlip,
   openChangeSet: async () => {
     const c = await extras.openChangeSet();

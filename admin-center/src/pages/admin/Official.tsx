@@ -1,3 +1,4 @@
+import { fromZonedInput, zonedInput } from '@marketly/web-shared/lib/dates';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
@@ -44,11 +45,8 @@ const k = (cents: number) => `$${(cents / 100_000).toFixed(1)}k`;
 const pct = (v: number) => `${v.toFixed(1)}%`;
 const marginOf = (price: number, cost: number) => ((price - cost) / price) * 100;
 const signed = (v: number) => `${v < 0 ? '−' : '+'}${Math.abs(v).toFixed(1)}%`;
-/** Local "YYYY-MM-DDTHH:mm" for datetime-local inputs. */
-const localNow = () => {
-  const d = new Date(Date.now() - new Date().getTimezoneOffset() * 60_000);
-  return d.toISOString().slice(0, 16);
-};
+/** Now as a datetime-local value in Pacific Time (like every Admin Center date field). */
+const localNow = () => zonedInput(new Date().toISOString());
 
 interface Draft {
   newPrice: string;
@@ -200,8 +198,8 @@ export default function Official() {
           body: {
             price: { amount: cents, currency },
             compareAt: draft.was === 'list' && offer!.offer.compareAt ? { amount: offer!.offer.compareAt, basis: 'list_price' } : null,
-            startsAt: draft.start ? new Date(draft.start).toISOString() : null,
-            endsAt: draft.end ? new Date(draft.end).toISOString() : null,
+            startsAt: draft.start ? fromZonedInput(draft.start) : null,
+            endsAt: draft.end ? fromZonedInput(draft.end) : null,
             reason: draft.reason.trim(),
           },
         }),

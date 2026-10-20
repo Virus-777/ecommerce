@@ -4,7 +4,7 @@ import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { ApiError, call, errorMessage, newIdempotencyKey, useApi, useUploads } from '@marketly/web-shared/api';
 import { useSession } from '@/app/session';
 import { StoreLayout } from '@/layouts';
-import { formatMoney, money } from '@marketly/web-shared/lib/format';
+import { formatMoney, money, initials, tileTint } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, Breadcrumbs, Button, EmptyState, Field, FileDrop, Icon, Img, LogoTile, OptionCard, SellerBadge, StatusBadge, Textarea, type IconName } from '@marketly/web-shared/ui';
 import { dateLong, dayDate } from './data/format';
@@ -410,7 +410,7 @@ export default function OrderProblem() {
           <div className="card-body">
             {handler ? (
               <div className="row gap-3 nowrap">
-                <LogoTile initials={handler.sellerName.split(/\s+/).map((w) => w[0]).slice(0, 2).join('')} tint="1" />
+                <LogoTile initials={handlerOfficial ? 'M' : initials(handler.sellerName)} tint={handlerOfficial ? 'brand' : tileTint(handler.sellerName)} />
                 <div className="stack gap-0">
                   <span className="small strong">{handlerOfficial ? 'Marketly support handles it' : `${handler.sellerName} handles it first`}</span>
                   <span className="xs muted">

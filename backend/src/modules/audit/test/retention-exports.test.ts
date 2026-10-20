@@ -49,10 +49,13 @@ const staff = auth(staffToken);
 const call = (method: 'GET' | 'PUT' | 'POST', url: string, payload?: unknown, headers = staff) => app.inject({ method, url: `/api/admin/audit${url}`, headers, ...(payload ? { payload } : {}) });
 const changed: { retainYears: number; previousYears: number }[] = [];
 const history = async (action: string) => (await call('GET', `/entries?action=${action}`)).json().items;
+/** registerDataset calls made while the app booted (before beforeEach clears the mocks) */
+let bootRegistrations: unknown[][] = [];
 
 beforeAll(async () => {
   app = await buildTestApp({ only: ['audit', 'access', 'reports'], apiStubs: { access, reports } as never });
   app.kernel.events.subscribe('test', 'audit.retention.changed', (e) => void changed.push(e.payload as never));
+  bootRegistrations = [...reports.registerDataset.mock.calls];
 });
 afterAll(async () => {
   await app?.close();
@@ -159,11 +162,11 @@ describe('retention', () => {
 });
 
 describe('exports', () => {
-  it('records the reason, registers the dataset and creates the job through reports (202)', async () => {
+  it('registers the dataset at boot, records the reason and creates the job through reports (202)', async () => {
+    expect(bootRegistrations).toContainEqual([expect.objectContaining({ key: 'audit.admin.entries', owner: 'audit', permission: 'audit.entries.export', audience: 'staff' })]);
     const res = await call('POST', '/exports', { filters: { category: 'settings' }, format: 'jsonl', reason: 'Quarterly control review' });
     expect(res.statusCode, res.body).toBe(202);
     expect(res.json()).toMatchObject({ dataset: 'audit.admin.entries', format: 'jsonl', state: 'queued' });
-    expect(reports.registerDataset).toHaveBeenCalledWith(expect.objectContaining({ key: 'audit.admin.entries', owner: 'audit', permission: 'audit.entries.export', audience: 'staff' }));
     expect(reports.requestExport).toHaveBeenCalledWith(
       expect.objectContaining({ dataset: 'audit.admin.entries', format: 'jsonl', filters: { category: 'settings' }, principal: expect.objectContaining({ kind: 'staff', accountId: morgan.accountId }) }),
     );

@@ -17,7 +17,6 @@ import type {
   LimitInput,
   LimitValue,
   MyActionLimit,
-  Role,
 } from '../../../spec/access.js';
 import { loadDirectory, type Directory } from '../directory.js';
 import {
@@ -41,7 +40,6 @@ import {
   FINAL,
   iso,
   uniq,
-  by,
   roleRef,
   moneyOf,
   num,

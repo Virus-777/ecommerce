@@ -210,9 +210,6 @@ export function sellerScreen(kind: string): string {
   }
 }
 
-/** Default deadline of a manual task's queue when the queue is unknown (never used for real queues) */
-export const DEFAULT_DEADLINE_MINUTES = 24 * 60;
-
 export const PRIORITIES: readonly Priority[] = ['low', 'normal', 'high', 'urgent'];
 export const priorityRank = (p: string) => Math.max(0, PRIORITIES.indexOf(p as Priority));
 export const bump = (p: Priority): Priority => PRIORITIES[Math.min(PRIORITIES.length - 1, priorityRank(p) + 1)]!;

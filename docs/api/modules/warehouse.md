@@ -3,7 +3,7 @@
 Physical work for Official Store stock: bins, put-away of received goods, pick waves and pick lists by order with bin locations and scanning, packing stations (item checklist, box and weight, carrier label through shipping, packing slip), shortage and damage reports, and receipt of return parcels handed over to returns inspection.
 
 - **Group:** Catalog and stock · **Launch phase:** 1 · **Plan chapters:** 9, 12, 13
-- **Depends on:** [inventory](inventory.md), [orders](orders.md) · **Optional:** [shipping](shipping.md), [returns](returns.md), [purchasing](purchasing.md), [media](media.md), [audit](audit.md), [finance](finance.md), [fulfillment-service](fulfillment-service.md), [workqueues](workqueues.md)
+- **Depends on:** [inventory](inventory.md), [orders](orders.md) · **Optional:** [shipping](shipping.md), [returns](returns.md), [purchasing](purchasing.md), [media](media.md), [audit](audit.md), [finance](finance.md), [fulfillment-service](fulfillment-service.md), [workqueues](workqueues.md), [settings](settings.md)
 - **Required by:** [fulfillment-service](fulfillment-service.md)
 
 ## Owns
@@ -739,7 +739,7 @@ Indexes: `(status, expected_by)`, `(return_id)`, `(tracking_number)`
 | Job | Schedule | Does |
 |---|---|---|
 | `warehouse.flag-at-risk` | every 15 min | Publish warehouse.fulfillment.at_risk for fulfillments not packed within atRiskMinutes of ship-by (work queue for the Warehouse and Shipping Managers) |
-| `warehouse.auto-wave` | every 30 min during business hours (when enabled) | Create waves from fulfillments awaiting pick ahead of each carrier pickup time |
+| `warehouse.auto-wave` | every 30 min during business hours (when enabled) | Create waves from fulfillments awaiting pick ahead of each carrier pickup time. Business hours are the market's (settings); with none set, or settings off, it runs every time |
 | `warehouse.overdue-return-parcels` | daily 08:00 market time | List expected return parcels past their expected date for returns follow-up |
 
 ## Settings

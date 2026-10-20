@@ -1,4 +1,5 @@
 /** Seller members, invitations, role templates and the seller permission catalogue; member access for the kernel guard. */
+import { stringList } from '../../../kernel/lib/text.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
@@ -38,7 +39,7 @@ export class MembersPart extends Part {
     if (!isUuid(sellerId) || !isUuid(accountId)) return null;
     const m = await this.repo.activeMember(sellerId, accountId);
     if (!m) return null;
-    return { memberId: m.id, role: m.role, permissions: m.is_owner ? this.allSellerKeys() : map.strings(m.permissions), isOwner: m.is_owner };
+    return { memberId: m.id, role: m.role, permissions: m.is_owner ? this.allSellerKeys() : stringList(m.permissions), isOwner: m.is_owner };
   }
 
   /** Public API: active members with an identity account (notifications fans out to them, owner first) */
@@ -155,7 +156,7 @@ export class MembersPart extends Part {
     if (m.is_owner) throw new AppError('OWNER_ONLY', "The owner's permissions can't be changed");
     if (!OPEN.includes(m.status)) throw new AppError('ILLEGAL_TRANSITION', 'This member is no longer on the account', { from: m.status, event: 'update' });
     const role = body.role ?? (m.role as InviteMemberInput['role']);
-    const permissions = this.permissionsFor(role, body.permissions ?? (body.role ? null : map.strings(m.permissions)));
+    const permissions = this.permissionsFor(role, body.permissions ?? (body.role ? null : stringList(m.permissions)));
     const row = await this.repo.update('members', m.id, { role, permissions: permissions as never });
     this.core.publish('sellers.member.permissions_changed', { sellerId, memberId: m.id, permissions }, by);
     if (row.status === 'active' && row.account_id) {
@@ -195,7 +196,7 @@ export class MembersPart extends Part {
     const status = this.core.step(sellerMemberMachine, m.status, 'reactivate');
     const row = await this.repo.update('members', m.id, { status });
     await this.grant(seller, row);
-    const permissions = map.strings(row.permissions);
+    const permissions = stringList(row.permissions);
     this.core.publish('sellers.member.reactivated', { sellerId, memberId: m.id, accountId: m.account_id, permissions }, by);
     await this.core.audit(
       { action: 'sellers.member.reactivate', actionLabel: 'Reactivated a staff member', category: 'access', target: this.target(seller, row), reason: reason?.trim() || null, before: { status: m.status }, after: { status: row.status, permissions }, visibleToSeller: true },
@@ -346,7 +347,7 @@ export class MembersPart extends Part {
         const members = await tx.find('members', { role: g.template, status: OPEN, is_owner: false });
         const out: { sellerId: string; memberId: string; permissions: string[] }[] = [];
         for (const m of members) {
-          const permissions = map.strings(m.permissions);
+          const permissions = stringList(m.permissions);
           if (permissions.includes(g.permission)) continue;
           permissions.push(g.permission);
           await tx.update('members', m.id, { permissions: permissions as never });

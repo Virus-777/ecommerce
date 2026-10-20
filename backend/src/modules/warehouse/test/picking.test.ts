@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { callers } from '../../../testing/app.js';
+import { inBusinessHours } from '../domain/rules.js';
 import { harness, type Harness } from './helpers.js';
 
 let h: Harness;
@@ -276,5 +277,17 @@ describe('jobs', () => {
     const waves = (await h.call('GET', '/waves')).body.items.length;
     await h.app.kernel.jobs.runNow('warehouse.auto-wave');
     expect((await h.call('GET', '/waves')).body.items.length).toBe(waves);
+  });
+});
+
+describe('auto-wave business hours', () => {
+  const NOW = new Date('2026-11-20T18:00:00.000Z');
+  const calendar = (open: boolean, never = false) => ({ isOpen: () => open, nextOpen: (after: string) => (never || open ? after : '2026-11-21T16:00:00.000Z') });
+
+  it('runs while the market is open, waits while closed, and always runs without a calendar or hours', () => {
+    expect(inBusinessHours(calendar(true), NOW)).toBe(true);
+    expect(inBusinessHours(calendar(false), NOW)).toBe(false);
+    expect(inBusinessHours(undefined, NOW)).toBe(true);
+    expect(inBusinessHours(calendar(false, true), NOW)).toBe(true);
   });
 });

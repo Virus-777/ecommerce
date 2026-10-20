@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { orThrow } from '../../kernel/lib/or-throw.js';
-import { decodeCursor, encodeCursor, type PageRequest } from '../../kernel/lib/pagination.js';
+import { encodeCursor, offsetOf, type PageRequest } from '../../kernel/lib/pagination.js';
 import { contains, whereFilter, type Filter, type ModuleStore, type Table, type Where } from '../../kernel/mongo/index.js';
 import type * as common from '../../spec/common.js';
 import type {
@@ -468,7 +468,7 @@ export class ReviewsRepository {
       const totalPages = Math.max(1, Math.ceil(total / req.limit));
       return { items: rowsOf(r?.items ?? []), nextCursor: req.page < totalPages ? encodeCursor([req.page * req.limit]) : null, page: req.page, totalPages, total };
     }
-    const start = req.cursor ? Number(decodeCursor(req.cursor)[0]) || 0 : 0;
+    const start = req.cursor ? offsetOf(req) : 0;
     const rows = await this.#questions.aggregate<Record<string, unknown>>([...stages, sort, { $skip: start }, { $limit: req.limit + 1 }, QUESTION_CLEANUP]);
     const items = rows.slice(0, req.limit);
     return { items: rowsOf(items), nextCursor: rows.length > req.limit ? encodeCursor([start + req.limit]) : null };

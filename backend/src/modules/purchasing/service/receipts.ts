@@ -69,7 +69,7 @@ export class Receipts {
     return (await this.core.views.receipts([r]))[0]!;
   }
 
-  async updateReceipt(id: string, body: { lines: ReceiptLineInput[]; note?: string | null }, by: Caller): Promise<Receipt> {
+  async updateReceipt(id: string, body: { lines: ReceiptLineInput[]; note?: string | null }, _by: Caller): Promise<Receipt> {
     const receipt = await this.core.repo.getReceipt(id);
     if (!receipt) throw notFound('Receiving record');
     if (receipt.status !== 'in_progress') throw illegal(receipt.status, 'count', 'Counts can change only while receiving is in progress.');

@@ -1,20 +1,16 @@
 import { GraphQLError } from 'graphql';
-import { gqlActor, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
-import { format as formatMoney } from '../../../kernel/lib/money.js';
-import type { Money } from '../../../spec/common.js';
+import { gqlActor, gqlEnum, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
 import type { Movement, StockItem } from '../../../spec/inventory.js';
 import type { InventoryService } from '../service.js';
 
 /* ---------------------------------------------------------------- REST shapes → GraphQL shapes (enums in capitals, Money.formatted) */
 
-const up = (s: string) => s.toUpperCase();
-const money = (m: Money | null | undefined) => (m ? { ...m, formatted: formatMoney(m) } : null);
 const actorOut = gqlActor;
 
 const movementOut = (m: Movement) => ({
   id: m.id,
-  fromGroup: up(m.fromGroup),
-  toGroup: up(m.toGroup),
+  fromGroup: gqlEnum(m.fromGroup),
+  toGroup: gqlEnum(m.toGroup),
   quantity: m.quantity,
   reasonCode: m.reasonCode,
   reasonLabel: m.reasonLabel,
@@ -78,10 +74,10 @@ export const resolvers = (service: InventoryService): ModuleResolvers => {
   /** StockItem with its lazily resolved fields */
   const stockItemOut = (s: StockItem) => ({
     ...s,
-    ownerType: up(s.ownerType),
-    state: up(s.state),
-    unitCost: money(s.unitCost),
-    valueAtCost: money(s.valueAtCost),
+    ownerType: gqlEnum(s.ownerType),
+    state: gqlEnum(s.state),
+    unitCost: s.unitCost ?? null,
+    valueAtCost: s.valueAtCost ?? null,
     lastChange: (_args: unknown, ctx: GraphQLContext) => lastChange(ctx, s.id).then((v) => v ?? null),
     recentMovements: async (args: { limit?: number | null }, ctx: GraphQLContext) => {
       const limit = Math.min(Math.max(args?.limit ?? 10, 1), 50);
@@ -109,7 +105,7 @@ export const resolvers = (service: InventoryService): ModuleResolvers => {
         let stockItemId = root.stockItemId ?? null;
         if (!stockItemId) stockItemId = (await stockForOffers(ctx, root.id, ''))?.id ?? '';
         const a = await availability(ctx, JSON.stringify({ offerId: root.id, stockItemId, ...(root.purchaseLimit != null ? { purchaseLimit: root.purchaseLimit } : {}) }));
-        return a ? { ...a, state: up(a.state) } : { state: 'OUT_OF_STOCK', quantity: null, maxPerOrder: 0, purchaseLimit: root.purchaseLimit ?? null, label: 'Out of stock', expectedRestockDate: null };
+        return a ? { ...a, state: gqlEnum(a.state) } : { state: 'OUT_OF_STOCK', quantity: null, maxPerOrder: 0, purchaseLimit: root.purchaseLimit ?? null, label: 'Out of stock', expectedRestockDate: null };
       },
       stock: async (root: { id: string }, _args, ctx) => {
         await assertStockReader(ctx);
@@ -127,7 +123,7 @@ export const resolvers = (service: InventoryService): ModuleResolvers => {
       myStockSummary: async (_root, _args, ctx) => service.getSellerStockSummary(ctx.principal?.sellerId ?? '00000000-0000-0000-0000-000000000000'),
       stockSummary: async (_root, args: { locationId?: string | null }) => {
         const s = await service.getStockSummary(args.locationId ?? undefined);
-        return { ...s, groups: s.groups.map((g) => ({ ...g, group: up(g.group), valueAtCost: money(g.valueAtCost) })) };
+        return { ...s, groups: s.groups.map((g) => ({ ...g, group: gqlEnum(g.group), valueAtCost: g.valueAtCost ?? null })) };
       },
     },
   };

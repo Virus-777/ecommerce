@@ -4,7 +4,7 @@ import { Link, useParams } from 'react-router';
 import { ApiError, call, errorMessage, newIdempotencyKey, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
-import { formatMoney, initials, isoInText } from '@marketly/web-shared/lib/format';
+import { formatMoney, initials, isoInText, tileTint } from '@marketly/web-shared/lib/format';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import {
@@ -636,7 +636,7 @@ export default function Case() {
               {seller ? (
                 <>
                   <div className="row gap-3">
-                    <LogoTile initials={initials(seller.name)} tint="1" />
+                    <LogoTile initials={initials(seller.name)} tint={tileTint(seller.name)} />
                     <span className="ab-cell">
                       <span className="strong">{seller.id && seller.ownerType === 'seller' ? <Link to={href('admin/seller', '', { slug: seller.id })}>{seller.name}</Link> : seller.name}</span>
                       <span className="xs muted">{[seller.location, seller.verified ? 'Verified seller' : null].filter(Boolean).join(' · ')}</span>

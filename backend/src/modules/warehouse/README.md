@@ -5,7 +5,7 @@
 Physical work for Official Store stock: bins, put-away of received goods, pick waves and pick lists by order with bin locations and scanning, packing stations (item checklist, box and weight, carrier label through shipping, packing slip), shortage and damage reports, and receipt of return parcels handed over to returns inspection.
 
 - **Group:** Catalog and stock · **Launch phase:** 1 · **Plan chapters:** 9, 12, 13
-- **Depends on:** [inventory](../inventory/README.md), [orders](../orders/README.md) · **Optional:** [shipping](../shipping/README.md), [returns](../returns/README.md), [purchasing](../purchasing/README.md), [media](../media/README.md), [audit](../audit/README.md), [finance](../finance/README.md), [fulfillment-service](../fulfillment-service/README.md), [workqueues](../workqueues/README.md)
+- **Depends on:** [inventory](../inventory/README.md), [orders](../orders/README.md) · **Optional:** [shipping](../shipping/README.md), [returns](../returns/README.md), [purchasing](../purchasing/README.md), [media](../media/README.md), [audit](../audit/README.md), [finance](../finance/README.md), [fulfillment-service](../fulfillment-service/README.md), [workqueues](../workqueues/README.md), [settings](../settings/README.md)
 - **Required by:** [fulfillment-service](../fulfillment-service/README.md)
 
 ## Owns
@@ -741,7 +741,7 @@ Indexes: `(status, expected_by)`, `(return_id)`, `(tracking_number)`
 | Job | Schedule | Does |
 |---|---|---|
 | `warehouse.flag-at-risk` | every 15 min | Publish warehouse.fulfillment.at_risk for fulfillments not packed within atRiskMinutes of ship-by (work queue for the Warehouse and Shipping Managers) |
-| `warehouse.auto-wave` | every 30 min during business hours (when enabled) | Create waves from fulfillments awaiting pick ahead of each carrier pickup time |
+| `warehouse.auto-wave` | every 30 min during business hours (when enabled) | Create waves from fulfillments awaiting pick ahead of each carrier pickup time. Business hours are the market's (settings); with none set, or settings off, it runs every time |
 | `warehouse.overdue-return-parcels` | daily 08:00 market time | List expected return parcels past their expected date for returns follow-up |
 
 ## Settings

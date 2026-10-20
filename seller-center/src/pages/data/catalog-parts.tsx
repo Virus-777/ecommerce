@@ -1,10 +1,14 @@
 // Shared pieces of the Seller Center catalog, offer and inventory screens (Products, CatalogMatch,
 // ProductNew, Offer, Inventory, BulkUpdate): load/skeleton states, labels for API enums, money input
 // helpers, dates, CSV and export downloads, the seller-visible settings.
-import { useEffect, useRef, useState } from 'react';
+export { useDebounced, useInView } from '@marketly/web-shared/lib/hooks';
+import { LoadError as SellerLoadError } from '@/pages/data/home';
+import { waitForExport as waitForJob } from '@marketly/web-shared/lib/exports';
+import { parseCents, CONDITION_LABEL, type Condition } from '@marketly/web-shared/lib/format';
+import { shortDate } from '@marketly/web-shared/lib/dates';
 import { useQuery } from '@tanstack/react-query';
-import { ApiError, call, errorMessage, useApi, type components } from '@marketly/web-shared/api';
-import { Alert, Button, type IconName } from '@marketly/web-shared/ui';
+import { call, useApi, type components } from '@marketly/web-shared/api';
+import { type IconName } from '@marketly/web-shared/ui';
 
 export type Money = components['schemas']['Money'];
 export type ExportJob = components['schemas']['reports.ExportJob'];
@@ -32,14 +36,7 @@ export function useSellerSettings() {
 
 /** A failed read: the error and a Try again button (API.md rule 4). */
 export function LoadError({ error, onRetry, title = 'We couldn’t load this' }: { error: unknown; onRetry: () => void; title?: string }) {
-  return (
-    <Alert tone="danger" title={title}>
-      {errorMessage(error)}{' '}
-      <Button variant="secondary" size="sm" onClick={onRetry}>
-        Try again
-      </Button>
-    </Alert>
-  );
+  return <SellerLoadError error={error} onRetry={onRetry} title={title} />;
 }
 
 /** Skeleton rows for a list card while it loads. */
@@ -72,42 +69,11 @@ export function FormSkeleton({ cards = 3 }: { cards?: number }) {
   );
 }
 
-/** The value, settled for `ms` before it changes (search boxes). */
-export function useDebounced<T>(value: T, ms = 300) {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setV(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return v;
-}
-
-/** Calls `onVisible` when the returned element scrolls into view (phone lists load the next page). */
-export function useInView<T extends HTMLElement>(onVisible: () => void, enabled: boolean) {
-  const ref = useRef<T | null>(null);
-  const cb = useRef(onVisible);
-  cb.current = onVisible;
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || !enabled || typeof IntersectionObserver === 'undefined') return;
-    const io = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && cb.current(), { rootMargin: '200px' });
-    io.observe(el);
-    return () => io.disconnect();
-  }, [enabled]);
-  return ref;
-}
-
 /* ---------------- labels for API enums ---------------- */
 
-export type Condition = 'new' | 'used_like_new' | 'used_good' | 'used_acceptable' | 'refurbished';
+export type { Condition };
 export const CONDITIONS: Condition[] = ['new', 'used_like_new', 'used_good', 'used_acceptable', 'refurbished'];
-export const CONDITION_LABEL: Record<Condition, string> = {
-  new: 'New',
-  used_like_new: 'Used – Like new',
-  used_good: 'Used – Good',
-  used_acceptable: 'Used – Acceptable',
-  refurbished: 'Refurbished',
-};
+export { CONDITION_LABEL };
 export const conditionLabel = (c?: string | null) => CONDITION_LABEL[(c ?? '').toLowerCase() as Condition] ?? c ?? '';
 
 export type Review = 'Approved' | 'Draft' | 'Submitted' | 'Changes requested' | 'Rejected';
@@ -155,10 +121,8 @@ export function iconFor(...words: Array<string | null | undefined>): IconName {
 
 /** "189", "189.00", "$1,189.5" → minor units; null when not a positive amount. */
 export function toMinor(s: string): number | null {
-  const t = s.replace(/[$,\s]/g, '');
-  if (!/^\d+(\.\d{1,2})?$/.test(t)) return null;
-  const n = Math.round(Number(t) * 100);
-  return n > 0 ? n : null;
+  const n = parseCents(s);
+  return n && n > 0 ? n : null;
 }
 /** 18900 → "189.00" (input value). */
 export const inputAmount = (m?: Money | null) => (m ? (m.amount / 100).toFixed(2) : '');
@@ -170,22 +134,12 @@ const TZ = { timeZone: 'America/Los_Angeles' } as const;
 export const fmtWhen = (iso?: string | null) =>
   iso ? new Date(iso).toLocaleString('en-US', { ...TZ, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
 /** "Oct 6" */
-export const fmtDay = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString('en-US', { ...TZ, month: 'short', day: 'numeric' }) : '');
+export const fmtDay = (iso?: string | null) => (iso ? shortDate(iso) : '');
 /** "Oct 6, 2026, 2:18 PM PT" */
 export const fmtFull = (iso?: string | null) =>
   iso ? `${new Date(iso).toLocaleString('en-US', { ...TZ, month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })} PT` : '';
 
 /* ---------------- files ---------------- */
-
-export function downloadCsv(name: string, rows: string[][]) {
-  const csv = rows.map((r) => r.map((c) => (/[",\n]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c)).join(',')).join('\n');
-  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  a.click();
-  URL.revokeObjectURL(url);
-}
 
 /** Opens a signed download link (export files, templates, correction reports). */
 export function openDownload(url: string, fileName?: string | null) {
@@ -196,18 +150,7 @@ export function openDownload(url: string, fileName?: string | null) {
   a.click();
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 
 /** Polls an export job (reports) until it is ready, then returns it; throws when it fails or takes too long. */
-export async function waitForExport(first: ExportJob, poll: (id: string) => Promise<ExportJob>, timeoutMs = 60_000): Promise<ExportJob> {
-  let job = first;
-  const until = Date.now() + timeoutMs;
-  while (job.state === 'queued' || job.state === 'running') {
-    if (Date.now() > until) throw new ApiError(504, 'EXPORT_TIMEOUT', 'The export is taking longer than usual. Try again in a moment.');
-    await sleep(1200);
-    job = await poll(job.id);
-  }
-  if (job.state !== 'ready' || !job.downloadUrl) throw new ApiError(422, 'EXPORT_FAILED', job.error || 'The export failed. Try again.');
-  return job;
-}
+export const waitForExport = (first: ExportJob, poll: (id: string) => Promise<ExportJob>, timeoutMs = 60_000): Promise<ExportJob> => waitForJob(first, poll, { timeoutMs, everyMs: 1200 });

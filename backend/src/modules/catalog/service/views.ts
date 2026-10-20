@@ -1,8 +1,9 @@
 /** Read models: category tree, brands, products, admin products and what blocks a submission. */
+import { stringList } from '../../../kernel/lib/text.js';
 import type * as common from '../../../spec/common.js';
 import type { Attribute, Brand, BrandAdmin, Category, ImageRule, Product, ProductAdmin, ProductSummary, RequestedBrand, Variant } from '../../../spec/catalog.js';
 import { completeness, imageRulesOf, type Completeness } from '../domain/rules.js';
-import { evidenceOf, groupBy, imageRulesOfRow, iso, LOG_ACTIONS, stringMap, strings, toAttribute, toBrand, toBrandAdmin, toCheck, toLogEntry, toReviewDraft, toSubmission } from '../mappers.js';
+import { evidenceOf, groupBy, imageRulesOfRow, iso, LOG_ACTIONS, stringMap, toAttribute, toBrand, toBrandAdmin, toCheck, toLogEntry, toReviewDraft, toSubmission } from '../mappers.js';
 import type { AttributeRow, BrandRow, CategoryRow, ImageStandardRow, ProductRow, SubmissionRow, VariantRow } from '../ports.js';
 import { CatalogBase, type Taxonomy, type Viewer } from './base.js';
 
@@ -101,8 +102,8 @@ export class CatalogViews extends CatalogBase {
     ]);
     // one media read for product, variant and brand images
     const refsRead = this.refsMap([
-      ...rows.flatMap((r) => [...strings(r.media_ids), r.video_media_id]),
-      ...variants.flatMap((v) => strings(v.media_ids)),
+      ...rows.flatMap((r) => [...stringList(r.media_ids), r.video_media_id]),
+      ...variants.flatMap((v) => stringList(v.media_ids)),
       ...brandRows.flatMap((b) => [b.logo_media_id, b.banner_media_id]),
     ]);
     const [refs, brands] = await Promise.all([refsRead, this.brandViews(brandRows, refsRead)]);
@@ -114,7 +115,7 @@ export class CatalogViews extends CatalogBase {
             id: v.id,
             options: stringMap(v.options),
             gtin: v.gtin,
-            images: pick(strings(v.media_ids)),
+            images: pick(stringList(v.media_ids)),
             weightGrams: v.weight_grams ?? null,
             lengthCm: v.length_cm ?? null,
             widthCm: v.width_cm ?? null,
@@ -130,10 +131,10 @@ export class CatalogViews extends CatalogBase {
           categoryId: r.category_id,
           categoryPath: tax.path(r.category_id).map((c) => c.name),
           description: r.description,
-          keyFeatures: strings(r.key_features),
+          keyFeatures: stringList(r.key_features),
           specs: stringMap(r.specs),
-          includedItems: strings(r.included_items),
-          images: pick(strings(r.media_ids)),
+          includedItems: stringList(r.included_items),
+          images: pick(stringList(r.media_ids)),
           video: (r.video_media_id && refs.get(r.video_media_id)) || null,
           modelNumber: r.model_number,
           manufacturerPartNumber: r.mpn,
@@ -183,9 +184,9 @@ export class CatalogViews extends CatalogBase {
             requestedBrand: r.requested_brand,
             categoryId: r.category_id,
             description: r.description,
-            keyFeatures: strings(r.key_features),
+            keyFeatures: stringList(r.key_features),
             specs: stringMap(r.specs),
-            imageCount: strings(r.media_ids).length,
+            imageCount: stringList(r.media_ids).length,
             modelNumber: r.model_number,
             mpn: r.mpn,
             noGtin: r.no_gtin,
@@ -270,7 +271,7 @@ export class CatalogViews extends CatalogBase {
         bestPrice: (l?.best_price as common.Money | null) ?? null,
         offerNote: l?.offer_note ?? null,
         reviewDraft: draft && viewer.kind === 'staff' ? toReviewDraft(draft, { kind: 'staff', id: draft.staff_id }) : null,
-        imagesToRecrop: strings(r.recrop_media_ids),
+        imagesToRecrop: stringList(r.recrop_media_ids),
       };
     });
   }

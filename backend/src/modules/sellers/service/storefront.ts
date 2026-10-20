@@ -2,6 +2,7 @@
  * Storefront: the store profile editor, public claims and brand requests, change requests (store name,
  * tagline, claims, legal name, ownership, address) with their staff review, featured collections and the public storefront.
  */
+import { stringList } from '../../../kernel/lib/text.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
@@ -52,6 +53,11 @@ export class StorefrontPart extends Part {
     await tx.upsertProfile({ ...(await this.profileOf(s.id, tx)), location: locationOf(s.business_address as unknown as common.Address) });
   }
 
+  /** Review target for a store name change or a public claim (setting claimReviewBusinessDays): the work item's deadline */
+  private async claimReviewBy(): Promise<string> {
+    return this.core.addBusinessDays(this.now(), await this.core.setting('claimReviewBusinessDays')).toISOString();
+  }
+
   private contactOf(p: ProfileRec): ContactOptions {
     return { ...DEFAULT_CONTACT, ...((p.contact_options ?? {}) as Partial<ContactOptions>) };
   }
@@ -61,7 +67,7 @@ export class StorefrontPart extends Part {
     const collections = await this.repo.find('featured_collections', { seller_id: s.id }, { orderBy: [['position', 'asc']] });
     const claims = (await this.repo.find('public_claims', { seller_id: s.id }, { orderBy: [['submitted_at', 'desc']] })).map((c) => this.liveClaim(c));
     const pending = await this.repo.find('change_requests', { seller_id: s.id, state: 'pending' }, { orderBy: [['submitted_at', 'desc']] });
-    const refs = await this.core.mediaRefs([p.logo_media_id, p.banner_media_id, ...collections.map((c) => c.image_media_id), ...claims.flatMap((c) => map.strings(c.evidence_media_ids)), ...pending.flatMap((c) => map.strings(c.evidence_media_ids))]);
+    const refs = await this.core.mediaRefs([p.logo_media_id, p.banner_media_id, ...collections.map((c) => c.image_media_id), ...claims.flatMap((c) => stringList(c.evidence_media_ids)), ...pending.flatMap((c) => stringList(c.evidence_media_ids))]);
     const returns = await this.core.optional('returns', 'returns', null, async (r) => (await r.sellerReturnTermsFor([s.id]))[s.id]);
     return {
       sellerId: s.id,
@@ -97,7 +103,7 @@ export class StorefrontPart extends Part {
     return ids.map((id): ProfileCategory => {
       const r = restrictions.find((x) => {
         const scope = normalizeScope(x.scope as never);
-        const acts = map.strings(x.affected_activities);
+        const acts = stringList(x.affected_activities);
         return acts.some((a) => ['new_offers', 'new_listings', 'sales'].includes(a)) && (isWholeAccount(scope) || scope.categoryIds?.includes(id));
       });
       return { categoryId: id, name: names.get(id) ?? 'Category', state: r || s.status === 'suspended' ? 'paused' : 'active', ...(r ? { reason: r.title } : s.status === 'suspended' ? { reason: 'Account suspended' } : {}) };
@@ -178,7 +184,7 @@ export class StorefrontPart extends Part {
       await this.repo.upsertProfile(next);
       this.core.publish('sellers.storefront.updated', { sellerId: s.id, fields }, by);
     }
-    if (nameRequest) this.core.publish('sellers.change_request.submitted', { changeRequestId: nameRequest.id, sellerId: s.id, kind: 'store_name' }, by);
+    if (nameRequest) this.core.publish('sellers.change_request.submitted', { changeRequestId: nameRequest.id, sellerId: s.id, kind: 'store_name', reviewBy: await this.claimReviewBy() }, by);
     if (taglineRequest) this.core.publish('sellers.change_request.submitted', { changeRequestId: taglineRequest.id, sellerId: s.id, kind: 'tagline' }, by);
     return this.storeProfile(s);
   }
@@ -206,7 +212,7 @@ export class StorefrontPart extends Part {
   private async view(rows: ChangeRequestRec[]): Promise<ChangeRequest[]> {
     if (!rows.length) return [];
     const sellers = new Map((await this.repo.getMany('sellers', rows.map((r) => r.seller_id))).map((s) => [s.id, s]));
-    const refs = await this.core.mediaRefs(rows.flatMap((r) => map.strings(r.evidence_media_ids)));
+    const refs = await this.core.mediaRefs(rows.flatMap((r) => stringList(r.evidence_media_ids)));
     return rows.map((r) => map.changeRequest(r, { storeName: sellers.get(r.seller_id)?.store_name ?? '', refs }));
   }
 
@@ -381,7 +387,7 @@ export class StorefrontPart extends Part {
     });
     await this.parts.enforcement.attachEvidence(evidence, { kind: 'seller', id: s.id }, claim.id, `Public claim: ${claim.text}`);
     const cr = await this.newChangeRequest(s, 'public_claim', null, { claimId: claim.id, kind: claim.kind, text: claim.text, brandId: claim.brand_id }, evidence, by);
-    this.core.publish('sellers.change_request.submitted', { changeRequestId: cr.id, sellerId: s.id, kind: 'public_claim' }, by);
+    this.core.publish('sellers.change_request.submitted', { changeRequestId: cr.id, sellerId: s.id, kind: 'public_claim', reviewBy: await this.claimReviewBy() }, by);
     return map.claim(claim, await this.core.mediaRefs(evidence));
   }
 
@@ -410,7 +416,7 @@ export class StorefrontPart extends Part {
       if ((cr.proposed as { claimId?: string })?.claimId === c.id) await this.repo.update('change_requests', cr.id, { state: this.core.step(changeRequestMachine, cr.state, 'withdraw') });
     }
     if (wasLive) this.core.publish('sellers.storefront.updated', { sellerId, fields: ['claims'] }, by);
-    return map.claim(after, await this.core.mediaRefs(map.strings(after.evidence_media_ids)));
+    return map.claim(after, await this.core.mediaRefs(stringList(after.evidence_media_ids)));
   }
 
   async revokePublicClaim(id: string, body: { reason: string; recordViolation: boolean }, by: By): Promise<PublicClaim> {
@@ -440,7 +446,7 @@ export class StorefrontPart extends Part {
       },
       by,
     );
-    return map.claim(after, await this.core.mediaRefs(map.strings(after.evidence_media_ids)));
+    return map.claim(after, await this.core.mediaRefs(stringList(after.evidence_media_ids)));
   }
 
   /** Approved claims past their expiry become expired (daily) */
@@ -586,11 +592,11 @@ export class StorefrontPart extends Part {
   private async visibleCollections(s: SellerRec, unavailable: string[] | null) {
     if (s.status === 'suspended') return [];
     const rows = await this.repo.find('featured_collections', { seller_id: s.id, visible: true }, { orderBy: [['position', 'asc']] });
-    const all = [...new Set(rows.flatMap((r) => map.strings(r.offer_ids)))];
+    const all = [...new Set(rows.flatMap((r) => stringList(r.offer_ids)))];
     const active = all.length ? await this.core.optional('offers', 'collections', unavailable, async (o) => new Set((await o.listActiveOffersByIds(all)).map((x) => x.id))) : new Set<string>();
     const refs = await this.core.mediaRefs(rows.map((r) => r.image_media_id));
     return rows.map((r) => {
-      const offerIds = map.strings(r.offer_ids).filter((id) => !active || active.has(id));
+      const offerIds = stringList(r.offer_ids).filter((id) => !active || active.has(id));
       return { ...map.collection(r, refs), offerIds, offerCount: offerIds.length, itemCount: offerIds.length };
     });
   }

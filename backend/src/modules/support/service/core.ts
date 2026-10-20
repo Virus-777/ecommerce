@@ -4,6 +4,7 @@
  */
 import type { Principal } from '../../../kernel/auth/index.js';
 import { AppError, isAppError } from '../../../kernel/errors/index.js';
+import { illegalTransition } from '../../../kernel/errors/index.js';
 import type { EventMap } from '../../../kernel/events/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type { ModuleContext, PublicApiMap } from '../../../kernel/module-system/index.js';
@@ -79,7 +80,7 @@ export const DAY = 86_400_000;
 export const invalid = (issues: { path: string; message: string }[], message = issues[0]?.message ?? 'Check the details and try again') => new AppError('VALIDATION_FAILED', message, { issues });
 export const invalidField = (path: string, message: string) => invalid([{ path, message }], message);
 export const notFound = (what = 'Case') => new AppError('NOT_FOUND', `${what} not found`);
-export const illegal = (message: string, details?: Record<string, unknown>) => new AppError('ILLEGAL_TRANSITION', message, details);
+export const illegal = illegalTransition;
 
 /** Actors kept in text columns (opened_by, added_by, created_by) */
 export const actorText = (a: common.Actor) => JSON.stringify({ kind: a.kind, id: a.id ?? null, ...(a.name ? { name: a.name } : {}) });
@@ -120,7 +121,7 @@ export class Core {
   }
 
   flush(batch: Batch) {
-    for (const e of batch.events) this.publish(e.name, e.payload as never, batch.by);
+    for (const e of batch.events.splice(0)) this.publish(e.name, e.payload as never, batch.by);
   }
 
   async audit(entry: Omit<audit.RecordInput, 'actor' | 'module' | 'requestId' | 'category'> & { category?: audit.RecordInput['category'] }, by: By) {
@@ -473,8 +474,6 @@ export class Core {
     if (!unique.length) return out;
     const refs = await this.soft('media', 'file links', (m) => m.refs(unique, 'medium'));
     for (const r of refs ?? []) out.set(r.id, r);
-    const base = (this.ctx.config.publicUrls?.store ?? 'https://store.marketly.test').replace(/\/$/, '');
-    for (const id of unique) if (!out.has(id)) out.set(id, { id, url: `${base}/media/${id}` });
     return out;
   }
 }

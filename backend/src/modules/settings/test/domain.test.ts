@@ -25,7 +25,7 @@ describe('catalogue', () => {
   it('uses what a module declares for a setting over inference', () => {
     expect(def('returns.changeOfMindReturnFee')).toMatchObject({ valueType: 'money', min: 0, approval: 'business_owner', sellerVisible: true, minLeadDays: 14 });
     expect(def('finance.payoutSchedule')).toMatchObject({ valueType: 'string', approval: 'business_owner', sellerVisible: true, minLeadDays: 30, editable: true });
-    expect(def('finance.statementPeriod')).toMatchObject({ valueType: 'enum', enumValues: ['weekly', 'monthly'], approval: 'second_reviewer' });
+    expect(def('payments.captureMode')).toMatchObject({ valueType: 'enum', enumValues: ['on_acceptance', 'per_group_on_dispatch'], approval: 'business_owner' });
     expect(def('support.maxAttachments')).toMatchObject({ valueType: 'int', min: 0, max: 20 });
     expect(def('support.appealWindowDays')).toMatchObject({ valueType: 'duration', unit: 'days', min: 1, approval: 'business_owner' });
     expect(def('messaging.maxAttachmentMb')).toMatchObject({ unit: 'MB', min: 1 });
@@ -59,6 +59,9 @@ describe('values', () => {
     expect(validateValue(def('apps.maintenance'), { active: true, kind: 'maintenance', message: null })).toHaveLength(1);
     expect(validateValue(def('market.locale'), 'en-US')).toEqual([]);
     expect(validateValue(def('notifications.retryBackoffMinutes'), { a: 1 })).toHaveLength(1);
+    // a value outside an enum's choices
+    expect(validateValue(def('payments.captureMode'), 'daily')).toEqual([{ path: 'value', message: expect.stringContaining('on_acceptance, per_group_on_dispatch') }]);
+    expect(validateValue(def('payments.captureMode'), 'per_group_on_dispatch')).toEqual([]);
   });
 
   it('writes values for people', () => {

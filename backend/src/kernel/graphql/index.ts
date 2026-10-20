@@ -46,6 +46,7 @@ import { costLimitRule } from './cost.js';
 
 export type { GraphQLArea, Fragment };
 export { ACTOR_KIND, actorKind, gqlActor } from './shapes.js';
+export { createBatchLoader, gqlDeadline, gqlEnum, lazy, nullOnNotFound, pageInput, pairs } from './helpers.js';
 
 export interface GraphQLContext {
   area: GraphQLArea;

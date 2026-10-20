@@ -6,7 +6,7 @@
  * (kernel/mongo/schema.ts); repositories reach them through ctx.mongo.table(name).
  */
 import { Schema } from 'mongoose';
-import { collectionOptions, integer, positive } from '../../kernel/mongo/schemas.js';
+import { collectionOptions, integer } from '../../kernel/mongo/schemas.js';
 
 /** One review per customer per product (latest delivered purchase); Verified Purchase when linked to a delivered order item */
 const product_reviews = new Schema(

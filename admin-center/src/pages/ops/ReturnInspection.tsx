@@ -14,7 +14,7 @@ import { ExportButton, ExportNotice } from '@/pages/admin/data/export-button';
 import { useDatasetExport } from '@/pages/admin/data/report-export';
 import { isStepUpCancel, reauthField, useStepUp } from '@/pages/admin/data/step-up';
 import { CheckInDialog, ParcelsCard } from './data/parcels';
-import { CONDITIONS, OUTCOMES, outcomeDisabled, stockMovement, type Grade, type Outcome } from './data/returns';
+import { CONDITIONS, gradeLabel, OUTCOMES, outcomeDisabled, stockMovement, type Grade, type Outcome } from './data/returns';
 import { BeforeAfter, EDGE_RISK, EDGE_URGENT, EmptyRow, OpsLegend, SkeletonRows } from './data/shared';
 
 // Design: pages/ops/ops-return-inspection.html (queue) · view "inspecting-<return ref>" (design: inspecting-rt-261005-0212)
@@ -426,7 +426,7 @@ function Bench({ returnId }: { returnId: string }) {
         await call(
           api.POST('/api/admin/returns/requests/{id}/inspection', {
             params: { path: { id: returnId } },
-            body: { ...i, conditionOutcome: i.missingParts.length ? 'missing_parts' : 'as_described', regradeCondition: outcome === 'different_condition' ? (grade === 'good' ? 'Used – Good' : 'Used – Like new') : undefined } as never,
+            body: { ...i, conditionOutcome: i.missingParts.length ? 'missing_parts' : 'as_described', regradeCondition: outcome === 'different_condition' ? gradeLabel(grade) : undefined } as never,
           }),
         );
       }

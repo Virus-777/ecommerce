@@ -118602,8 +118602,12 @@
                     "type": "string"
                   },
                   "dueAt": {
-                    "type": "string",
-                    "format": "date-time"
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date-time",
+                    "description": "Reply deadline; default now + infoRequestDefaultDays"
                   },
                   "reminder": {
                     "type": "string",
@@ -118616,7 +118620,6 @@
                 "required": [
                   "items",
                   "message",
-                  "dueAt",
                   "reminder"
                 ]
               }
@@ -205981,7 +205984,15 @@
             ]
           },
           "file": {
-            "$ref": "#/components/schemas/MediaRef"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MediaRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null when the file is no longer available (deleted, or media could not answer)"
           },
           "fileName": {
             "type": "string"
@@ -206019,7 +206030,6 @@
         "required": [
           "id",
           "kind",
-          "file",
           "fileName",
           "sizeBytes",
           "uploadedAt",

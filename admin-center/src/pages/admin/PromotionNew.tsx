@@ -1,10 +1,11 @@
+import { fromZonedInput, zonedInput } from '@marketly/web-shared/lib/dates';
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
 import { ApiError, call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
-import { formatMoney, num } from '@marketly/web-shared/lib/format';
+import { formatMoney, num, parseCents } from '@marketly/web-shared/lib/format';
 import { useScrollRegion, useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, Badge, Button, Card, Checkbox, EmptyState, Field, Icon, Img, PageHeader, Price, Radio, Select, StatusBadge, Textarea, TextInput, announce, type IconName } from '@marketly/web-shared/ui';
@@ -131,7 +132,7 @@ const EMPTY: Form = {
 
 const toNum = (s: string) => Number(s.replace(/[$,\s]/g, ''));
 const isInt = (s: string) => /^\d[\d,]*$/.test(s.trim()) && toNum(s) > 0;
-const cents = (s: string) => Math.round(toNum(s) * 100);
+const cents = (s: string) => parseCents(s) ?? NaN;
 const usd = (amount: number) => ({ amount, currency: 'USD' });
 
 type Errors = Partial<Record<'name' | 'code' | 'start' | 'end' | 'cats' | 'value' | 'minSpend' | 'max' | 'budget' | 'cap' | 'perCustomer' | 'perOrder', string>>;
@@ -163,22 +164,10 @@ function validate(f: Form): Errors {
   return e;
 }
 
-/** Offset of a time zone from UTC at an instant, in minutes. */
-function tzOffset(tz: string, at: Date): number {
-  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(at).map((x) => [x.type, x.value]));
-  const asUtc = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour), Number(p.minute), Number(p.second));
-  return (asUtc - at.getTime()) / 60000;
-}
 /** "2026-10-16T00:00" in tz → ISO instant. */
-function wallToIso(wall: string, tz: string): string {
-  const guess = new Date(`${wall}:00Z`);
-  return new Date(guess.getTime() - tzOffset(tz, guess) * 60000).toISOString();
-}
+const wallToIso = (wall: string, tz: string): string => fromZonedInput(wall, tz) ?? '';
 /** ISO instant → "2026-10-16T00:00" wall time in tz. */
-function isoToWall(iso: string, tz: string): string {
-  const d = new Date(iso);
-  return new Date(d.getTime() + tzOffset(tz, d) * 60000).toISOString().slice(0, 16);
-}
+const isoToWall = (iso: string, tz: string): string => zonedInput(iso, tz);
 
 function period(f: Form, withYear: boolean) {
   const tz = TIME_ZONES.find((t) => t.value === f.tz)?.short ?? f.tz;
@@ -336,18 +325,22 @@ interface CategoryNode {
   children?: CategoryNode[];
 }
 
+/** Categories a promotion can target: second-level ones as "Parent › Child", or a top level without children */
+function promotableCategories(data: unknown): Cat[] {
+  const out: Cat[] = [];
+  for (const top of data as CategoryNode[]) for (const c of top.children?.length ? top.children : [top]) out.push({ id: c.id, name: c === top ? top.name : `${top.name} › ${c.name}`, offers: c.offerCount });
+  return out;
+}
+
 export default function PromotionNew() {
   const [params] = useSearchParams();
   const id = params.get('id') ?? '';
   const { api } = useApi();
+  // the cache keeps the tree as the API sends it (other pages share this key); the list is derived in select
   const cats = useQuery({
     queryKey: ['catalog', 'categories', 'admin'],
-    queryFn: async () => {
-      const tree = (await call(api.GET('/api/admin/catalog/categories'))) as unknown as CategoryNode[];
-      const out: Cat[] = [];
-      for (const top of tree) for (const c of top.children?.length ? top.children : [top]) out.push({ id: c.id, name: c === top ? top.name : `${top.name} › ${c.name}`, offers: c.offerCount });
-      return out;
-    },
+    queryFn: () => call(api.GET('/api/admin/catalog/categories')),
+    select: promotableCategories,
   });
   const campaign = useQuery({ queryKey: ['promotions', 'campaign', id], enabled: !!id, queryFn: () => call(api.GET('/api/admin/promotions/campaigns/{id}', { params: { path: { id } } })) });
 

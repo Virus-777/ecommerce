@@ -3,6 +3,7 @@
  * (market days); instants are Dates. Pure: the service gathers business days, closures and notice
  * effects into a DayRules object first.
  */
+import { durationText } from '../../../kernel/lib/dates.js';
 import { dateInZone, zonedTimeToUtc } from '../../../kernel/lib/clock.js';
 import type * as common from '../../../spec/common.js';
 
@@ -14,7 +15,6 @@ export const HOUR_MS = 3_600_000;
 
 export const weekdayOf = (date: string): Weekday => WEEKDAYS[new Date(`${date}T12:00:00Z`).getUTCDay()]!;
 export const addDays = (date: string, n: number): string => new Date(new Date(`${date}T12:00:00Z`).getTime() + n * DAY_MS).toISOString().slice(0, 10);
-export const isDate = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
 export const isTime = (s: unknown): s is string => typeof s === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(s);
 
 /** HH:mm of an instant in a time zone */
@@ -121,15 +121,6 @@ export function instantLabel(at: Date, timeZone: string): string {
   return `${dayLabel(dateInZone(at, timeZone))}, ${clockLabel(timeInZone(at, timeZone))}`;
 }
 
-export function durationLabel(ms: number): string {
-  const abs = Math.abs(ms);
-  const h = Math.floor(abs / HOUR_MS);
-  const m = Math.floor((abs % HOUR_MS) / 60_000);
-  if (h >= 48) return `${Math.floor(h / 24)} d`;
-  if (h >= 1) return m ? `${h} h ${m} min` : `${h} h`;
-  return `${Math.max(1, m)} min`;
-}
-
 const DAY_NAMES: Record<string, string> = { mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun' };
 const ORDER = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 
@@ -153,7 +144,7 @@ export function deadlineState(dueAt: Date, now: Date, dueSoonMs = 4 * HOUR_MS): 
 
 export function deadlineLabel(dueAt: Date, now: Date, timeZone: string): string {
   const left = dueAt.getTime() - now.getTime();
-  if (left < 0) return `Overdue by ${durationLabel(left)}`;
-  if (left <= 24 * HOUR_MS) return `Due in ${durationLabel(left)}`;
+  if (left < 0) return `Overdue by ${durationText(left)}`;
+  if (left <= 24 * HOUR_MS) return `Due in ${durationText(left)}`;
   return `Due ${instantLabel(dueAt, timeZone)}`;
 }

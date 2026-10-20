@@ -1,23 +1,22 @@
 // Seller orders and shipping (design: pages/seller/seller-orders*.html, seller-order*.html, seller-shipping.html).
 // API types, the SellerOrderDetail screen query, Pacific-time formatting and the small helpers the Orders,
 // Order and Shipping screens share. Data: docs/api/modules/orders.md (seller fulfilment), shipping.md, messaging.md.
-import { useEffect, useRef, useState } from 'react';
+export { useDebounced, useInView } from '@marketly/web-shared/lib/hooks';
+import { download as downloadFile, waitForExport as waitForJob } from '@marketly/web-shared/lib/exports';
+import { fromZonedInput } from '@marketly/web-shared/lib/dates';
+import { useEffect, useState } from 'react';
 import type { components } from '@marketly/web-shared/api';
 import { href } from '@marketly/web-shared/routes';
 import SELLER_ORDER_DETAIL_TEXT from '@marketly/web-shared/api/graphql/seller/SellerOrderDetail.graphql?raw';
 
 type S = components['schemas'];
 export type OrderRow = S['orders.SellerOrderRow'];
-export type OrderCounts = S['orders.SellerOrderCounts'];
 export type OrderDetailRest = S['orders.SellerOrderDetail'];
 export type CancellationRequest = S['orders.CancellationRequest'];
 export type ExportJob = S['reports.ExportJob'];
-export type DocumentLink = S['orders.DocumentLink'];
 export type LabelQuote = S['shipping.LabelQuote'];
 export type LabelResult = S['shipping.LabelResult'];
-export type Shipment = S['shipping.Shipment'];
 export type ShippingSettings = S['shipping.SellerShippingSettings'];
-export type ShippingProfile = S['shipping.ShippingProfile'];
 export type ProfileMethod = S['shipping.ProfileMethod'];
 export type PlatformMethod = S['shipping.ShippingMethod'];
 export type Carrier = S['shipping.Carrier'];
@@ -63,16 +62,9 @@ export function addDays(key: string, n: number): string {
 }
 
 /** Minutes PT is behind UTC at an instant (420 in summer, 480 in winter). */
-function ptOffset(at: Date): number {
-  const name = at.toLocaleString('en-US', { timeZone: TZ, timeZoneName: 'shortOffset' }).split(' ').pop() ?? 'GMT-8';
-  const m = /GMT([+-])(\d+)(?::(\d+))?/.exec(name);
-  return m ? (m[1] === '-' ? 1 : -1) * (Number(m[2]) * 60 + Number(m[3] ?? 0)) : 480;
-}
-
 /** The instant of a PT wall-clock time on a market day, as ISO. */
 export function ptInstant(key: string, hh = 0, mm = 0): string {
-  const guess = new Date(`${key}T${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00Z`);
-  return new Date(guess.getTime() + ptOffset(guess) * 60_000).toISOString();
+  return fromZonedInput(`${key}T${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`, TZ) ?? '';
 }
 
 /** "today, Oct 8, 5:00 PM PT" / "tomorrow, Oct 9, …" / "Wed, Oct 14, 5:00 PM PT" */
@@ -97,31 +89,6 @@ export function useNow(ms = 30_000): number {
     return () => clearInterval(t);
   }, [ms]);
   return now;
-}
-
-/** The value, settled for `ms` before it changes (search boxes). */
-export function useDebounced<T>(value: T, ms = 300): T {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setV(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return v;
-}
-
-/** Calls `onVisible` when the element scrolls into view (phone "load more"). */
-export function useInView<T extends HTMLElement>(onVisible: () => void, active: boolean) {
-  const ref = useRef<T>(null);
-  const cb = useRef(onVisible);
-  cb.current = onVisible;
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || !active) return;
-    const io = new IntersectionObserver(([e]) => e.isIntersecting && cb.current());
-    io.observe(el);
-    return () => io.disconnect();
-  }, [active]);
-  return ref;
 }
 
 /* ------------------------------------------------------------------ orders */
@@ -204,27 +171,11 @@ export function trackingProblem(carrier: TrackingCarrier | undefined, raw: strin
 /* ------------------------------------------------------------------ files */
 
 /** Opens a signed download link (packing slips, labels, exports: the API serves them as attachments). */
-export function openDownload(url: string, fileName?: string | null) {
-  const a = document.createElement('a');
-  a.href = url;
-  a.rel = 'noopener';
-  if (fileName) a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-}
+export const openDownload = (url: string, fileName?: string | null) => downloadFile(url, fileName);
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Polls an export job until its file is ready (exports run as background jobs; up to ~3 minutes). */
-export async function waitForExport(read: () => Promise<ExportJob>, first: ExportJob): Promise<ExportJob> {
-  let job = first;
-  for (let i = 0; i < 60 && (job.state === 'queued' || job.state === 'running'); i++) {
-    await sleep(3000);
-    job = await read();
-  }
-  return job;
-}
+export const waitForExport = (read: () => Promise<ExportJob>, first: ExportJob): Promise<ExportJob> => waitForJob(first, () => read(), { timeoutMs: 3 * 60_000, everyMs: 3000 });
 
 /* ------------------------------------------------------------------ SellerOrderDetail screen query */
 

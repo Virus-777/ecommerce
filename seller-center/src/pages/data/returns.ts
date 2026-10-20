@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+export { useDebounced, useInView } from '@marketly/web-shared/lib/hooks';
+import { date, shortDate } from '@marketly/web-shared/lib/dates';
 import { useQuery } from '@tanstack/react-query';
 import { ApiError, useApi, type components } from '@marketly/web-shared/api';
 import SELLER_RETURN_DETAIL from '@marketly/web-shared/api/graphql/seller/SellerReturnDetail.graphql?raw';
-import { formatMoney, type MoneyValue } from '@marketly/web-shared/lib/format';
+import { formatMoney, type MoneyValue, parseCents, humanize } from '@marketly/web-shared/lib/format';
 
 
 // Seller returns and cases: list (GET /api/seller/returns/requests, …/counts, …/terms, …/exports) and the return
@@ -11,7 +12,6 @@ import { formatMoney, type MoneyValue } from '@marketly/web-shared/lib/format';
 
 export type SellerReturnRow = components['schemas']['returns.SellerReturnRow'];
 export type SellerReturnCounts = components['schemas']['returns.SellerReturnCounts'];
-export type SellerReturnTerms = components['schemas']['returns.SellerReturnTerms'];
 type Deadline = components['schemas']['Deadline'];
 
 /** List tab as the URL view ('' = Return requests) and the API's `tab`. */
@@ -44,14 +44,12 @@ export const RETURN_PERIODS: Array<{ value: 'last_30_days' | 'last_90_days' | 't
 
 const TZ = 'America/Los_Angeles';
 const fmt = (o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('en-US', { timeZone: TZ, ...o });
-const DATE = fmt({ month: 'short', day: 'numeric' });
 const DATE_TIME = fmt({ month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 const LONG = fmt({ weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 const FULL = fmt({ month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
-const DAY_YEAR = fmt({ month: 'short', day: 'numeric', year: 'numeric' });
 
 /** "Oct 4" */
-export const fmtDate = (iso?: string | null) => (iso ? DATE.format(new Date(iso)) : '');
+export const fmtDate = (iso?: string | null) => (iso ? shortDate(iso) : '');
 /** "Oct 4, 7:02 PM" */
 export const fmtDateTime = (iso?: string | null) => (iso ? DATE_TIME.format(new Date(iso)) : '');
 /** "Fri, Oct 9, 4:00 PM PT" */
@@ -59,7 +57,7 @@ export const fmtDue = (iso?: string | null) => (iso ? `${LONG.format(new Date(is
 /** "Oct 5, 2026, 4:12 PM PT" */
 export const fmtFull = (iso?: string | null) => (iso ? `${FULL.format(new Date(iso))} PT` : '');
 /** "Sep 26, 2026" */
-export const fmtDay = (iso?: string | null) => (iso ? DAY_YEAR.format(new Date(iso)) : '');
+export const fmtDay = (iso?: string | null) => (iso ? date(iso) : '');
 
 /** "1 day 6 h left" / "Overdue 6 h" */
 export function timeLeft(iso: string, now = Date.now()): string {
@@ -77,40 +75,19 @@ export const deadlineTone = (d?: { state: string } | null): 'ok' | 'warning' | '
   return s === 'overdue' ? 'danger' : s === 'due_soon' ? 'warning' : 'ok';
 };
 /** Row edge: red when overdue, amber when due soon. */
-export const rowEdge = (d?: Deadline | null): 'flagged' | 'warn' | undefined => (d?.state === 'overdue' ? 'flagged' : d?.state === 'due_soon' ? 'warn' : undefined);
+export const rowEdge = (d?: Deadline | null): 'flagged' | 'warn' | undefined => {
+  const s = d?.state.toLowerCase();
+  return s === 'overdue' ? 'flagged' : s === 'due_soon' ? 'warn' : undefined;
+};
 
 export const money = (m?: MoneyValue | null) => formatMoney(m);
 /** "−$27.90" (the amount shown as a deduction) */
 export const negMoney = (m?: MoneyValue | null) => (m ? `−${formatMoney({ ...m, amount: Math.abs(m.amount) })}` : '');
 /** "12.50" → 1250; NaN when it isn't a money amount */
-export const toMinor = (s: string): number => (/^\d+(\.\d{1,2})?$/.test(s.trim()) ? Math.round(Number(s.trim()) * 100) : NaN);
-export const human = (s?: string | null) => (s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase().replace(/_/g, ' ') : '');
+export const toMinor = (s: string): number => parseCents(s) ?? NaN;
+export const human = (s?: string | null) => humanize(s);
 
 /* ------------------------------------------------------------------ hooks */
-
-export function useDebounced<T>(value: T, ms = 300): T {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setV(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return v;
-}
-
-/** Calls onVisible when the element scrolls into view (phone lazy loading). */
-export function useInView<T extends HTMLElement>(onVisible: () => void, enabled: boolean) {
-  const ref = useRef<T | null>(null);
-  const cb = useRef(onVisible);
-  cb.current = onVisible;
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || !enabled || typeof IntersectionObserver === 'undefined') return;
-    const io = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && cb.current(), { rootMargin: '200px' });
-    io.observe(el);
-    return () => io.disconnect();
-  }, [enabled]);
-  return ref;
-}
 
 /* ------------------------------------------------------------------ return case (GraphQL SellerReturnDetail) */
 

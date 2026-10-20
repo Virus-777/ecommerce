@@ -3,13 +3,14 @@
  * (datasets orders.admin.orders and orders.seller.orders, rows from exportRows with contact masking),
  * receipts, invoices, credit notes and packing slips rendered from the frozen order.
  */
+import { maskText } from '../../../kernel/auth/masking.js';
 import { AppError, isNotImplemented } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import type * as identity from '../../../spec/identity.js';
 import type * as reports from '../../../spec/reports.js';
 import type { DocumentLink, InternalNote, SavedFilter } from '../../../spec/orders.js';
-import { renderPdf, type PdfPage } from '../domain/pdf.js';
-import { buyerName, fmt, maskEmail, maskPhone, shortDate, variantLabelOf } from '../domain/rules.js';
+import { renderPdf, type PdfLine } from '../../../kernel/lib/pdf.js';
+import { buyerName, fmt, shortDate, variantLabelOf } from '../domain/rules.js';
 import type { DocumentRec, GroupRec } from '../ports.js';
 import { invalid, notFound, unavailable, type Agg, type By, type Core } from './core.js';
 import type { AdminListQuery, Reads, SellerListQuery } from './reads.js';
@@ -207,8 +208,8 @@ export class Admin {
             ref: row.ref,
             placedAt: row.placedAt,
             customerName: row.customerName,
-            customerEmail: contact ? agg.order.contact_email : maskEmail(agg.order.contact_email),
-            customerPhone: contact ? agg.order.contact_phone : maskPhone(agg.order.contact_phone),
+            customerEmail: contact ? agg.order.contact_email : maskText(agg.order.contact_email, 'email'),
+            customerPhone: contact ? agg.order.contact_phone : maskText(agg.order.contact_phone, 'phone'),
             city: row.customerCity,
             guest: row.guest,
             sellers: row.sellers.map((s) => s.name).join(', '),
@@ -244,8 +245,8 @@ export class Admin {
 
   /* ---------------------------------------------------------------- documents */
 
-  private lineRows(agg: Agg, g: GroupRec, prices: boolean): PdfPage['lines'] {
-    const out: PdfPage['lines'] = [];
+  private lineRows(agg: Agg, g: GroupRec, prices: boolean): PdfLine[] {
+    const out: PdfLine[] = [];
     for (const i of agg.items.filter((x) => x.group_id === g.id)) {
       const label = `${i.quantity} × ${i.product_snapshot.title}${variantLabelOf(i.product_snapshot.options) ? ` (${variantLabelOf(i.product_snapshot.options)})` : ''}`;
       const state = i.state === 'cancelled' ? ' [cancelled]' : '';
@@ -255,18 +256,18 @@ export class Admin {
     return out;
   }
 
-  private documentPages(agg: Agg, d: DocumentRec): PdfPage[] {
+  private documentPages(agg: Agg, d: DocumentRec): PdfLine[][] {
     const o = agg.order;
     const c = o.currency;
     const a = o.delivery_address;
-    const head: PdfPage['lines'] = [
+    const head: PdfLine[] = [
       { text: 'Marketly', bold: true, size: 16 },
       { text: d.kind === 'receipt' ? 'Order receipt' : d.kind === 'invoice' ? 'Invoice' : 'Credit note', bold: true, size: 13, gap: 6 },
       { text: `Number ${d.number} · Order ${o.ref} · Placed ${shortDate(o.placed_at, this.core.tz)}` },
       { text: `Bill to ${o.contact_name}, ${a.line1}${a.line2 ? `, ${a.line2}` : ''}, ${a.city}, ${a.region} ${a.postalCode}` },
     ];
     const groups = d.group_id ? agg.groups.filter((g) => g.id === d.group_id) : agg.groups;
-    const body: PdfPage['lines'] = [];
+    const body: PdfLine[] = [];
     for (const g of groups) {
       body.push({ text: this.views.soldBy(g), bold: true, gap: 8 });
       body.push(...this.lineRows(agg, g, true));
@@ -279,7 +280,7 @@ export class Admin {
       for (const x of credited) for (const l of x.refund_preview.lines) body.push({ text: `${l.quantity} × ${l.title}  ${fmt(l.refund.amount, c)}` });
     }
     for (const p of o.policy_versions ?? []) body.push({ text: `Accepted ${p.policyKey.replace('_', ' ')} policy version ${p.version}`, size: 8 });
-    return [{ lines: [...head, ...body] }];
+    return [[...head, ...body]];
   }
 
   private async link(owner: { kind: 'seller' | 'staff' | 'customer' | 'guest' | 'platform'; id?: string | null; label?: string | null }, fileName: string, pdf: Uint8Array, principal: identity.Principal): Promise<DocumentLink> {
@@ -303,10 +304,9 @@ export class Admin {
     return this.link(this.ownerOf(principal), `${d.number}.pdf`, renderPdf(this.documentPages(agg, d)), principal);
   }
 
-  private slip(agg: Agg, g: GroupRec, hidePrices: boolean): PdfPage {
+  private slip(agg: Agg, g: GroupRec, hidePrices: boolean): PdfLine[] {
     const a = agg.order.delivery_address;
-    return {
-      lines: [
+    return [
         { text: 'Packing slip', bold: true, size: 14 },
         { text: `Order ${agg.order.ref} · Package ${g.position} of ${agg.groups.length}` },
         { text: `Ship to ${a.name}, ${a.line1}${a.line2 ? `, ${a.line2}` : ''}, ${a.city}, ${a.region} ${a.postalCode}, ${a.country}` },
@@ -318,8 +318,7 @@ export class Admin {
           g,
           !hidePrices,
         ),
-      ],
-    };
+    ];
   }
 
   async packingSlip(sellerId: string, groupId: string, hidePrices: boolean | undefined, principal: identity.Principal): Promise<DocumentLink> {

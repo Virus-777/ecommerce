@@ -1,3 +1,4 @@
+import { initials, tileTint } from '@marketly/web-shared/lib/format';
 import { renditionUrl, type components } from '@marketly/web-shared/api';
 import type { IconName, Tone } from '@marketly/web-shared/ui';
 
@@ -99,11 +100,8 @@ export function brandNote(b: BrandAdmin): { text: string; warn: boolean } {
   return { text: b.pageLive ? 'Brand page live' : 'Brand page not live (no product in stock)', warn: false };
 }
 
-export const initialsOf = (name: string) => {
-  const words = name.split(/\s+/).filter((w) => /^[A-Za-z0-9&]/.test(w));
-  return (words.length > 1 ? words.slice(0, 2).map((w) => w[0]).join('') : name.slice(0, 2)).toUpperCase();
-};
-export const tintOf = (id: string) => String((id.split('').reduce((s, ch) => s + ch.charCodeAt(0), 0) % 6) + 1);
+export const initialsOf = (name: string) => initials(name);
+export const tintOf = (name: string) => tileTint(name);
 
 /** A change request as one line in "Brand claims waiting". */
 export function claimLine(c: ChangeRequest): string {

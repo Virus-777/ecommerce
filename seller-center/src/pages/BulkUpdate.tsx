@@ -236,7 +236,7 @@ export default function BulkUpdate() {
   const top = (
     <>
       <PageHeader crumbs={[{ label: 'Inventory', to: href('seller/inventory') }, { label: 'Bulk update' }]} title="Bulk price and stock update" sub="Update prices and quantities for many SKUs with one CSV file." />
-      <Steps items={['Download template', 'Upload file', applied ? 'Check preview' : <><span className="sr-only">Step 3 of 4: </span>Check preview</>, 'Apply']} current={applied ? 4 : j ? 2 : 0} />
+      <Steps items={['Download template', 'Upload file', 'Check preview', 'Apply']} current={applied ? 4 : j ? 2 : 0} />
     </>
   );
 

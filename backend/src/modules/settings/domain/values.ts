@@ -2,6 +2,8 @@
  * Value rules (pure): validation of a proposed value against its definition, and the human text
  * shown on the settings page, in change items and in history.
  */
+import { format as moneyFormat } from '../../../kernel/lib/money.js';
+import { isTimeZone } from '../../../kernel/lib/dates.js';
 import { z } from 'zod';
 import type { Closure, DayHours, MaintenanceNotice, ServiceRegion } from '../../../spec/settings.js';
 import type { Definition } from './catalogue.js';
@@ -48,14 +50,6 @@ const maintenance = z
 
 const money = z.object({ amount: z.number().int().min(0), currency: z.string().regex(/^[A-Z]{3}$/) }).strict();
 
-const isTimeZone = (tz: string) => {
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz });
-    return tz.includes('/') || tz === 'UTC';
-  } catch {
-    return false;
-  }
-};
 const isLocale = (l: string) => {
   try {
     return Intl.getCanonicalLocales(l).length === 1;
@@ -262,8 +256,7 @@ export function dateText(at: Date | string, timeZone: string): string {
   return new Intl.DateTimeFormat('en-US', { timeZone, month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(at));
 }
 
-const moneyText = (m: { amount: number; currency: string }) =>
-  new Intl.NumberFormat('en-US', { style: 'currency', currency: m.currency }).format(m.amount / 100);
+const moneyText = (m: { amount: number; currency: string }) => moneyFormat(m);
 
 const clip = (s: string, n = 80) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 

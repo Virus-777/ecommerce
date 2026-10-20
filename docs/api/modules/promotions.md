@@ -1396,7 +1396,6 @@ Checked through the access module (limits per role, second reviewer).
 | budgetWarningPct | `90` | number, %, 1–100 | Notify Marketing and Finance when budget use crosses this |
 | restoreUsageOnCancel | `true` | bool | Give the use back to the customer when an item is cancelled before dispatch |
 | refundRestoresBudget | `false` | bool, approval: second reviewer | Whether refunds after delivery free budget |
-| sellerLeaveCutoff | `"campaign start"` | string, seller-visible | Until when a seller can leave without approval |
 | codeCheckRateLimit | `"10 per minute per session"` | string | Brute-force protection for code lookups |
 
 ## Notes

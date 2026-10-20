@@ -2,8 +2,9 @@
  * The seller account: snapshots for other modules, account / setup / launch review, business details,
  * payout account and readiness, agreements, closure, the Verified label and the admin seller views.
  */
+import { stringList } from '../../../kernel/lib/text.js';
 import type { Principal } from '../../../kernel/auth/index.js';
-import { AppError, isAppError, isNotImplemented } from '../../../kernel/errors/index.js';
+import { AppError, isNotImplemented } from '../../../kernel/errors/index.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import { pageOf, toPageRequest, type PageRequest } from '../../../kernel/lib/pagination.js';
@@ -35,9 +36,9 @@ import { AGREEMENT_KEYS, type AgreementKey } from '../domain/catalogue.js';
 import { addDays, holderMatches, locationOf, payoutLabel, payoutProblems, type StoredPayout, type StoredPayoutDetails, type StoredVerification } from '../domain/rules.js';
 import { launchReadinessReviewMachine, payoutReadinessMachine, sellerAccountStatusMachine, verifiedSellerLabelMachine } from '../domain/state-machines.js';
 import * as map from '../mappers.js';
-import type { ApplicationRec, SellerListFilter, SellerRec } from '../ports.js';
+import type { SellerListFilter, SellerRec } from '../ports.js';
 import type { SellersRepository } from '../repository.js';
-import { invalid, notFound, Part, SYSTEM, type By } from './core.js';
+import { invalid, notFound, Part, type By } from './core.js';
 
 const SELLING = ['approved', 'restricted', 'suspended'];
 const DATASET = 'sellers.admin.accounts';
@@ -138,7 +139,6 @@ export class AccountsPart extends Part {
 
   /** The account view; staff views also show a closure waiting for a second reviewer and its approval */
   async account(s: SellerRec, me: MemberAccess | null, unavailable: string[] = [], o: { staff?: boolean } = {}): Promise<SellerAccount> {
-    const app = await this.core.applicationOf(s);
     const closure = o.staff ? (await this.core.pendingChangesFor('closure', [s.id])).get(s.id) : undefined;
     return {
       id: s.id,
@@ -173,7 +173,6 @@ export class AccountsPart extends Part {
   }
 
   async setupSteps(s: SellerRec, unavailable: string[]) {
-    const app = await this.core.applicationOf(s);
     const profile = await this.repo.getProfile(s.id);
     const pa = await this.productApproval(s.id, unavailable);
     const readiness = map.payoutReadiness(s, await this.core.payoutState(s));
@@ -291,7 +290,9 @@ export class AccountsPart extends Part {
     const state = this.core.step(launchReadinessReviewMachine, lr.state, 'request');
     const after = await this.repo.update('sellers', s.id, { launch_review: { ...lr, state, requestedAt: this.now().toISOString(), note: note?.trim() || null, issues: [] } as never, updated_at: this.now() });
     await this.core.timeline(this.repo, s.id, { kind: 'launch_review_requested', title: 'Launch readiness review requested', detail: note ?? null, actor: by.actor });
-    this.core.publish('sellers.launch_review.requested', { sellerId: s.id }, by);
+    // the review target (setting launchReviewBusinessDays) becomes the work item's deadline
+    const reviewBy = this.core.addBusinessDays(this.now(), await this.core.setting('launchReviewBusinessDays')).toISOString();
+    this.core.publish('sellers.launch_review.requested', { sellerId: s.id, reviewBy }, by);
     return map.launchReview(after);
   }
 
@@ -712,7 +713,7 @@ export class AccountsPart extends Part {
   }
 
   /** Grant the Verified label for `validDays` (read with labelValidDays() before the transaction) */
-  async grantLabel(tx: SellersRepository, s: SellerRec, by: By, validDays: number, reason?: string): Promise<SellerRec> {
+  async grantLabel(tx: SellersRepository, s: SellerRec, validDays: number, reason?: string): Promise<SellerRec> {
     const { checked } = await this.labelChecks(s, tx);
     const now = this.now();
     return tx.update('sellers', s.id, {
@@ -732,7 +733,7 @@ export class AccountsPart extends Part {
       const { blocking } = await this.labelChecks(s);
       if (blocking.length) throw new AppError('CHECKS_UNRESOLVED', 'These checks must pass before the label is granted', { checks: blocking });
       const days = await this.labelValidDays();
-      after = await this.repo.transaction((tx) => this.grantLabel(tx, s, by, days));
+      after = await this.repo.transaction((tx) => this.grantLabel(tx, s, days));
     } else {
       after = await this.repo.update('sellers', s.id, {
         verification_state: this.core.step(verifiedSellerLabelMachine, s.verification_state, 'revoke'),
@@ -905,7 +906,7 @@ export class AccountsPart extends Part {
       if (b) payouts = { pending: b.pending, available: b.available, held: b.held, holds: b.holds, nextPayout: b.nextPayout ?? null };
     } else unavailable.push('payouts');
     const changeRows = await this.repo.find('change_requests', { seller_id: s.id }, { orderBy: [['submitted_at', 'desc']], limit: 50 });
-    const crRefs = await this.core.mediaRefs(changeRows.flatMap((c) => map.strings(c.evidence_media_ids)));
+    const crRefs = await this.core.mediaRefs(changeRows.flatMap((c) => stringList(c.evidence_media_ids)));
     const notes = await this.repo.find('seller_notes', { seller_id: s.id }, { orderBy: [['created_at', 'desc']] });
     return {
       account: await this.account(s, null, unavailable, { staff: true }),
@@ -964,6 +965,12 @@ export class AccountsPart extends Part {
   }
 
   /* ---------------------------------------------------------------- exports */
+
+  /** At boot, so the export screen shows the dataset's title and columns before anyone exports (retried on the first export) */
+  async registerExportDataset(): Promise<void> {
+    const api = this.ctx.tryUse('reports');
+    if (api) await this.registerDataset(api);
+  }
 
   private registerDataset(api: reports.ReportsPublicApi) {
     this.#datasetRegistered ??= api

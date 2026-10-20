@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, call, errorMessage, useApi } from '@marketly/web-shared/api';
-import { formatMoney } from '@marketly/web-shared/lib/format';
+import { formatMoney, parseCents } from '@marketly/web-shared/lib/format';
 import { Alert, Button, Field, IconButton, SearchInput, StatusBadge, TableWrap, TextInput, announce } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { SkeletonLines } from '@/app/parts';
@@ -16,7 +16,7 @@ import type { Campaign } from './data/promotions';
 // offer can be added by its ID.
 
 const USD = (amount: number) => ({ amount, currency: 'USD' });
-const toCents = (s: string) => Math.round(Number(s.replace(/[$,\s]/g, '')) * 100);
+const toCents = (s: string) => parseCents(s) ?? NaN;
 const ITEM_STATE: Record<string, string> = { active: 'Active', sold_out: 'Sold out', ended: 'Ended' };
 
 interface Row {

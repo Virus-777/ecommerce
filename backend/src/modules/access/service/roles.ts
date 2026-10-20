@@ -18,7 +18,7 @@ import type {
 } from '../../../spec/access.js';
 import { loadDirectory, type Directory } from '../directory.js';
 import { limitSummary, type Issue, type LimitKind, type SecondMode } from '../domain/limits.js';
-import { BUSINESS_OWNER, actionNoun, defaultEligibleRoleKeys, slugKey } from '../domain/seed.js';
+import { BUSINESS_OWNER, actionNoun, slugKey } from '../domain/seed.js';
 import { OPEN_ASSIGNMENT, type ActionRow, type LimitRow, type RoleRow } from '../ports.js';
 import { type Core, type Caller, SENSITIVE_GRANT, uniq, by, roleRef, validation, notFound } from './core.js';
 import type { Approvals } from './approvals.js';
@@ -40,7 +40,7 @@ export class Roles {
     return this.core.parts.limits;
   }
 
-  async listRoles(caller: Caller, query: { q?: string; includeArchived?: boolean }): Promise<Role[]> {
+  async listRoles(_caller: Caller, query: { q?: string; includeArchived?: boolean }): Promise<Role[]> {
     await this.core.ready();
     const dir = await loadDirectory(this.core.repo, this.core.now());
     const q = query.q?.trim().toLowerCase();
@@ -48,7 +48,7 @@ export class Roles {
     return this.roleViews(rows, dir);
   }
 
-  async getRole(caller: Caller, id: string): Promise<RoleDetail> {
+  async getRole(_caller: Caller, id: string): Promise<RoleDetail> {
     await this.core.ready();
     const dir = await loadDirectory(this.core.repo, this.core.now());
     const row = dir.roleById.get(id);

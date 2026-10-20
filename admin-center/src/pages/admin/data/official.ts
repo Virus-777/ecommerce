@@ -5,7 +5,6 @@ import type { components } from '@marketly/web-shared/api';
 
 export type OfficialRow = components['schemas']['offers.OfficialOfferRow'];
 export type PriceChange = components['schemas']['offers.PriceChange'];
-export type Trading = components['schemas']['finance.TradingSummary'];
 export type OfferStatusKey = OfficialRow['offer']['status'];
 
 export const STATUS_LABEL: Record<OfferStatusKey, string> = {

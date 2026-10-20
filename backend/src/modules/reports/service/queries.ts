@@ -2,6 +2,7 @@
  * Report queries and dashboards from the read models. Every result states its range, date basis,
  * currency, time zone, tax treatment, freshness and the definition versions it used (plan ch. 19).
  */
+import { isIsoDate, isTimeZone } from '../../../kernel/lib/dates.js';
 import type { MediaRef, Money } from '../../../spec/common.js';
 import type { AdminDashboard, KpiValue, MetricDefinition, ReportQuery, ReportResult, Series, SellerDashboard, SellerWorkTile } from '../../../spec/reports.js';
 import { OFFICIAL_KEY, metricSeed } from '../domain/catalogue.js';
@@ -15,8 +16,6 @@ import {
   display,
   displayMoney,
   instantsOf,
-  isDay,
-  isTimeZone,
   marketDay,
   pct,
   presetRange,
@@ -130,7 +129,7 @@ export class Queries {
       if (!query.range) issues.push({ path: 'range', message: 'Choose the first and last day' });
       range = query.range ?? presetRange('last_14_days', today);
     } else range = query.range && query.preset == null ? query.range : presetRange(preset, today);
-    if (!isDay(range.from) || !isDay(range.to)) issues.push({ path: 'range', message: 'Dates are YYYY-MM-DD' });
+    if (!isIsoDate(range.from) || !isIsoDate(range.to)) issues.push({ path: 'range', message: 'Dates are YYYY-MM-DD' });
     else if (range.from > range.to) issues.push({ path: 'range.from', message: 'The first day is after the last day' });
     const currency = (query.currency ?? cfg.currency).toUpperCase();
     if (currency !== cfg.currency) issues.push({ path: 'currency', message: `Reports are in ${cfg.currency}; one currency at launch` });
@@ -277,7 +276,7 @@ export class Queries {
       case 'commerce.sales':
         return this.salesReport(rq, scope, cfg, true);
       case 'commerce.refunds':
-        return this.refundsReport(rq, scope, cfg);
+        return this.refundsReport(rq, scope);
       case 'trading.margin':
         return this.marginReport(rq, cfg);
       case 'marketplace.fees':
@@ -304,7 +303,7 @@ export class Queries {
       case 'marketplace.discount_funding':
         return this.discountFundingReport(rq, scope, cfg);
       case 'marketplace.owed_to_sellers':
-        return this.sellerBalancesReport(rq, scope, cfg);
+        return this.sellerBalancesReport(rq, scope);
       case 'marketplace.payouts':
         return this.payoutsReport(rq, scope);
       case 'discovery.stockouts':
@@ -506,7 +505,7 @@ export class Queries {
     return out;
   }
 
-  private async refundsReport(rq: ResolvedQuery, scope: ReportScope, cfg: Settings): Promise<Part> {
+  private async refundsReport(rq: ResolvedQuery, scope: ReportScope): Promise<Part> {
     const c = rq.currency;
     const f = this.salesFilter(rq, scope, rq.range);
     const rf = (range: DayRange) => {
@@ -886,7 +885,7 @@ export class Queries {
   }
 
   /** Seller balances now (finance.sellerBalanceTotals, getSellerBalances) for the sellers active in the range */
-  private async sellerBalancesReport(rq: ResolvedQuery, scope: ReportScope, cfg: Settings): Promise<Part> {
+  private async sellerBalancesReport(rq: ResolvedQuery, scope: ReportScope): Promise<Part> {
     const c = rq.currency;
     const finance = this.core.api('finance');
     if (!finance || !this.core.running('finance')) return { kpis: [], series: [], callouts: [], unavailable: ['marketplace.seller_balances', 'marketplace.amounts_owed'], models: [] };
@@ -991,7 +990,7 @@ export class Queries {
   private async serviceFocusReport(key: string, rq: ResolvedQuery, scope: ReportScope): Promise<Part> {
     const c = rq.currency;
     const sellerId = this.sellerOf(rq, scope);
-    const { f, total, prev, byBucket, bySeller } = await this.serviceSums(rq, sellerId, true);
+    const { total, prev, byBucket, bySeller } = await this.serviceSums(rq, sellerId, true);
     const buckets = bucketsOf(rq.range, rq.granularity);
     const names = await this.sellerNames(bySeller.map((s) => s.key!));
     const onTime = (t: Record<string, number | null>) => pct(t.dispatched_on_time!, t.dispatched!);

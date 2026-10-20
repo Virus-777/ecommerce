@@ -7,6 +7,7 @@
  * to the inviter in the invite and resend responses, printed by npm run bootstrap-owner and npm run staff-link). The link alone, e.g. from a forwarded email, does not let
  * anyone in. Only a keyed hash is stored, and the 5th wrong pass code ends the link.
  */
+import { maskEmail } from '../../../kernel/lib/mask.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
@@ -21,7 +22,6 @@ import type {
 import { hashPassword, newPassCode, randomToken, safeEqual, tokenHash, verifyPassword } from '../domain/crypto.js';
 import { lockInForce, normalizeEmail, type Realm } from '../domain/policy.js';
 import { accountStatusMachine, invitationMachine } from '../domain/state-machines.js';
-import { maskEmail } from '../domain/text.js';
 import * as map from '../mappers.js';
 import type { AccountRow, InvitationRow } from '../ports.js';
 import type { IdentityRepository } from '../repository.js';

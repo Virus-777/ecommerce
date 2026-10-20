@@ -1,4 +1,5 @@
 /** Fulfilled by Marketly: seller-owned stock at the service location, its inbound shipments and receipts. */
+import { isIsoDate } from '../../../kernel/lib/dates.js';
 import { createHash } from 'node:crypto';
 import { AppError } from '../../../kernel/errors/index.js';
 import { inventoryError } from '../errors.js';
@@ -127,7 +128,7 @@ export class ServiceStock {
     const lines = input.lines ?? [];
     for (const [i, l] of lines.entries()) {
       if (!Number.isInteger(l.quantity) || l.quantity < 0) throw invalid(`lines[${i}].quantity`, 'Quantity must be 0 or more');
-      if (l.expectedDate != null && !/^\d{4}-\d{2}-\d{2}$/.test(l.expectedDate)) throw invalid(`lines[${i}].expectedDate`, 'Not a date (YYYY-MM-DD)');
+      if (l.expectedDate != null && !isIsoDate(l.expectedDate)) throw invalid(`lines[${i}].expectedDate`, 'Not a date (YYYY-MM-DD)');
     }
     await this.#sellerItems(
       lines.map((l) => l.stockItemId),

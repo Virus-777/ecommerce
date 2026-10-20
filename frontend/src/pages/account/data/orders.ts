@@ -1,6 +1,8 @@
 // Orders, tracking, cancellations and returns for My account: GraphQL screen queries (OrderList,
 // OrderDetail, ReturnDetail, AccountOverview), their result types, and the date, money and status
 // helpers the account order screens share. See web-shared/docs/API.md.
+import { productHref as productLink } from '@/api/search';
+import { slugify as slugText, humanize, initials } from '@marketly/web-shared/lib/format';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { useSession } from '@/app/session';
@@ -435,10 +437,7 @@ export const thisYear = () => new Date().toLocaleString('en-US', { timeZone: TZ,
 /* ---------------- Labels, tones, links ---------------- */
 
 /** "PARTLY_DELIVERED" -> "Partly delivered" */
-export const humanize = (v: string) => {
-  const s = v.toLowerCase().replace(/_/g, ' ');
-  return s.charAt(0).toUpperCase() + s.slice(1);
-};
+export { humanize };
 
 /** "+15035550148" -> "(503) 555-0148" */
 export const fmtPhone = (p: string) => {
@@ -464,22 +463,17 @@ export const returnTone = (status: string | null | undefined): Tone => RETURN_TO
 const REFUND_TONE: Record<string, Tone> = { REQUESTED: 'info', PROCESSING: 'info', SENT: 'success', FAILED: 'danger', CANCELLED: '', NONE: '' };
 export const refundTone = (status: string | null | undefined): Tone => REFUND_TONE[(status ?? '').toUpperCase()] ?? '';
 
-/** Package-card tone: delivered green, late amber, failed red, cancelled neutral, otherwise blue. */
-export function groupTone(status: string): 'success' | 'info' | 'warning' | 'danger' | '' {
+/** Package-card tone: the same as the package's status badge (stateTone); a status it doesn't know is blue. */
+export function groupTone(status: string): Tone {
   const s = status.toUpperCase();
-  if (s === 'DELIVERED' || s === 'COMPLETED') return 'success';
-  if (s === 'DELAYED' || s === 'PAYMENT_PENDING') return 'warning';
-  if (s.includes('FAILED') || s === 'EXCEPTION') return 'danger';
-  if (s.includes('CANCELLED') || s.includes('REFUNDED')) return '';
-  return 'info';
+  return s in STATE_TONE ? STATE_TONE[s]! : 'info';
 }
 
 /** "Halden Aurora ANC Wireless Headphones" -> "halden-aurora-anc-wireless-headphones": the stand-in slug where a screen has no product slug (product routes resolve by id). */
-export const slugify = (s: string) =>
-  s.toLowerCase().normalize('NFKD').replace(/[^\w\s-]/g, '').trim().replace(/[\s_-]+/g, '-').slice(0, 80) || 'product';
+export const slugify = (s: string) => slugText(s, 'product');
 
 /** Product page link: the API's product slug, else one made from the title (OrderDetail doesn't select OrderItem.productSlug yet). */
-export const productHref = (productId: string, title: string, slug?: string | null) => href('store/product', '', { slug: slug || slugify(title), id: productId });
+export const productHref = (productId: string, title: string, slug?: string | null) => productLink({ id: productId, slug, title });
 export const orderHref = (ref: string) => href('account/order', '', { ref });
 export const returnHref = (ref: string) => href('account/return', '', { ref });
 export const caseHref = (ref: string) => href('help/case', '', { ref });
@@ -490,11 +484,4 @@ export const shortPackageLabel = (label: string) => label.replace(/^Package 1 of
 export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** First letters of a seller name for its logo tile ("Casa Verde Home" -> "CV"). */
-export const sellerInitials = (name: string) =>
-  name
-    .replace(/&/g, ' ')
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((w) => w[0]!.toUpperCase())
-    .slice(0, 2)
-    .join('');
+export const sellerInitials = (name: string) => initials(name);

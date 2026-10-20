@@ -6,12 +6,10 @@ type S = components['schemas'];
 export type ConversationSummary = S['messaging.ConversationSummary'];
 export type Conversation = S['messaging.Conversation'];
 export type Message = S['messaging.Message'];
-export type ReplyTemplate = S['messaging.ReplyTemplate'];
 export type ResponseStats = S['messaging.ResponseStats'];
 export type QuestionRow = S['reviews.SellerQuestionRow'];
 export type Answer = S['reviews.Answer'];
 export type FeedbackRow = S['reviews.SellerFeedbackRow'];
-export type FeedbackSummary = S['reviews.SellerFeedbackSummary'];
 export type SellerResponse = S['reviews.SellerResponse'];
 
 export type InboxFilter = 'all' | 'awaiting_reply' | 'overdue' | 'unread';
@@ -35,7 +33,9 @@ export const TEMPLATE_NAME_MAX = 80;
 /* ---------------------------------------------------------------- dates (market time zone) */
 
 const TZ = 'America/Los_Angeles';
-const fmt = (iso: string | Date, o: Intl.DateTimeFormatOptions) => new Date(iso).toLocaleString('en-US', { timeZone: TZ, ...o });
+/** A calendar date (YYYY-MM-DD) is shown as that day; an instant in market time */
+const fmt = (iso: string | Date, o: Intl.DateTimeFormatOptions) =>
+  typeof iso === 'string' && iso.length === 10 ? new Date(`${iso}T12:00:00Z`).toLocaleString('en-US', { timeZone: 'UTC', ...o }) : new Date(iso).toLocaleString('en-US', { timeZone: TZ, ...o });
 const sameYear = (iso: string) => fmt(iso, { year: 'numeric' }) === fmt(new Date(), { year: 'numeric' });
 
 /** "Oct 7" (with the year when it isn't this year) */

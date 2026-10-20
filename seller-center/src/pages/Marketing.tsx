@@ -1,3 +1,4 @@
+import { LoadError as SellerLoadError } from '@/pages/data/home';
 import { useEffect, useState } from 'react';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
@@ -7,7 +8,7 @@ import { cx } from '@marketly/web-shared/lib/cx';
 import { formatMoney } from '@marketly/web-shared/lib/format';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Badge, Button, Card, Checkbox, EmptyState, Field, Icon, Img, KeyValue, Meter, PageHeader, Price, Select, Stat, StatusBadge, SummaryRow, TableWrap, Tabs, TextInput, announce } from '@marketly/web-shared/ui';
+import { Alert, Badge, Button, Card, Checkbox, EmptyState, Field, Icon, Img, KeyValue, Meter, PageHeader, Price, Select, Stat, StatusBadge, SummaryRow, TableWrap, Tabs, TextInput, announce, sameOriginFile } from '@marketly/web-shared/ui';
 import { useSellerSession } from '@/app/session';
 import {
   DISCOUNT_TYPES,
@@ -23,7 +24,7 @@ import {
   offersLabel,
   parsePT,
   participationState,
-  pct,
+  bpsPercent,
   periodShort,
   retryUnlessLater,
   shortDay,
@@ -48,14 +49,7 @@ const money = formatMoney;
 const sk = <span className="sk sk-line" aria-hidden="true" />;
 
 function LoadError({ error, retry, title }: { error: unknown; retry: () => void; title: string }) {
-  return (
-    <Alert tone="danger" title={title}>
-      {errorMessage(error)}{' '}
-      <Button variant="secondary" size="sm" onClick={retry}>
-        Try again
-      </Button>
-    </Alert>
-  );
+  return <SellerLoadError error={error} onRetry={retry} title={title} />;
 }
 
 /* ================================================================== discounts */
@@ -416,7 +410,7 @@ function InvitationView({ inv }: { inv: Invitation }) {
           <div className="card-body">
             {c.banner?.url ? (
               <div className="imgph wide tint-3" style={{ aspectRatio: '5/1' }}>
-                <img src={c.banner.url} alt={c.banner.alt ?? ''} />
+                <img src={sameOriginFile(c.banner.url)} alt={c.banner.alt ?? ''} onError={(e) => (e.currentTarget.style.display = 'none')} />
               </div>
             ) : (
               <div className="imgph wide tint-3" style={{ aspectRatio: '5/1' }}>
@@ -446,8 +440,8 @@ function InvitationView({ inv }: { inv: Invitation }) {
                 <KeyValue
                   pairs={[
                     ['Campaign discount', c.discountLabel],
-                    ['You fund', `${pct(c.funding.sellerFundsBps)} of the price`],
-                    ['Marketly funds', `${pct(c.funding.platformFundsBps)} of the price`],
+                    ['You fund', `${bpsPercent(c.funding.sellerFundsBps)} of the price`],
+                    ['Marketly funds', `${bpsPercent(c.funding.platformFundsBps)} of the price`],
                     ['Fee basis', c.funding.feeBasisNote],
                   ]}
                 />
@@ -526,9 +520,9 @@ function InvitationView({ inv }: { inv: Invitation }) {
             <div className="sb-recon">
               <SummaryRow k="Regular price" v={money(impact.basePrice)} />
               <SummaryRow k="Campaign price for customers" v={<span className="t-deal-text strong">{money(impact.customerPays)}</span>} />
-              <SummaryRow k={`You fund (${pct(c.funding.sellerFundsBps)})`} v={<span className="sb-neg">−{money(impact.sellerFunds)}</span>} />
-              <SummaryRow k={`Marketly funds (${pct(c.funding.platformFundsBps)})`} v={money(impact.platformFunds)} />
-              <SummaryRow k={`Fee, ${pct(impact.feeRateBps)} of ${money(impact.feeBasis)}`} v={<span className="sb-neg">−{money(impact.fee)}</span>} />
+              <SummaryRow k={`You fund (${bpsPercent(c.funding.sellerFundsBps)})`} v={<span className="sb-neg">−{money(impact.sellerFunds)}</span>} />
+              <SummaryRow k={`Marketly funds (${bpsPercent(c.funding.platformFundsBps)})`} v={money(impact.platformFunds)} />
+              <SummaryRow k={`Fee, ${bpsPercent(impact.feeRateBps)} of ${money(impact.feeBasis)}`} v={<span className="sb-neg">−{money(impact.fee)}</span>} />
               <SummaryRow className="total" k="Your earnings per unit" v={<b>{money(impact.sellerEarns)}</b>} />
               <SummaryRow k="Regular earnings per unit" v={money(impact.regularSellerEarns)} />
             </div>
@@ -559,7 +553,7 @@ function InvitationView({ inv }: { inv: Invitation }) {
                 id="mk-consent"
                 label={
                   inv.consentText ||
-                  `I agree to fund ${pct(c.funding.sellerFundsBps)} of the price on the ${nPicked} selected offer${nPicked === 1 ? '' : 's'} during ${c.period.display}, and not to raise their prices during the campaign. Marketly funds the other ${pct(c.funding.platformFundsBps)}.`
+                  `I agree to fund ${bpsPercent(c.funding.sellerFundsBps)} of the price on the ${nPicked} selected offer${nPicked === 1 ? '' : 's'} during ${c.period.display}, and not to raise their prices during the campaign. Marketly funds the other ${bpsPercent(c.funding.platformFundsBps)}.`
                 }
                 checked={consent}
                 disabled={!canJoin}
@@ -638,7 +632,7 @@ function CampaignsTab({ invitations }: { invitations: ReturnType<typeof useInvit
                   <span className="grow stack gap-0">
                     <span className="small strong">{i.campaign.name}</span>
                     <span className="xs muted">
-                      {periodShort(i.campaign.period.display)} · {i.participation.offerCount} offer{i.participation.offerCount === 1 ? '' : 's'} · you funded {pct(i.participation.sellerShareBps)}
+                      {periodShort(i.campaign.period.display)} · {i.participation.offerCount} offer{i.participation.offerCount === 1 ? '' : 's'} · you funded {bpsPercent(i.participation.sellerShareBps)}
                     </span>
                   </span>
                   <StatusBadge status={new Date(i.campaign.period.endsAt).getTime() < Date.now() && i.participation.state === 'accepted' ? 'Finished' : label} tone={PARTICIPATION_TONE[label] || undefined} />

@@ -22,6 +22,7 @@ export default defineModule({
     ctx.provide(service);
     ctx.http.routes(sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
+    ctx.afterBoot(() => service.registerExportDataset().catch((err) => ctx.log.warn({ err }, 'audit: export dataset not registered; retried on first export')));
 
     // Events this module reacts to (spec events.consumes); the envelope time dates the approval steps
     ctx.events.on("access.approval.requested", (e) => service.onApprovalRequestedFromAccess(e.payload, { at: e.at }));

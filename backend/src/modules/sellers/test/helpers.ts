@@ -18,6 +18,11 @@ export const STORE = '/api/store/sellers';
 export const SELLER = '/api/seller/sellers';
 export const ADMIN = '/api/admin/sellers';
 
+/** Set on to make the audit API fail (an audit store outage) */
+export const auditOutage = { on: false };
+/** Files media no longer knows (deleted): refs leaves them out */
+export const mediaGone = new Set<string>();
+
 export type Decision = 'allowed' | 'approval_required' | 'denied';
 
 export interface Kit {
@@ -75,7 +80,7 @@ export async function boot(o: { apiStubs?: NonNullable<Parameters<typeof buildTe
         getAsset: async (id: string) => ({ id, kind: 'document', purpose: 'verification_document', status: 'ready', fileName: `${id.slice(0, 6)}.pdf`, contentType: 'application/pdf', sizeBytes: 2048, owner: { kind: 'customer' }, visibility: 'private', renditions: [], inUse: false, usageCount: 0, createdAt: clock.now().toISOString() }) as any,
         attach: async (...args: unknown[]) => rec('media.attach', ...args),
         detach: async (...args: unknown[]) => rec('media.detach', ...args),
-        refs: async (ids: string[]) => ids.map((id) => ({ id, url: `https://media.example.com/${id}` })),
+        refs: async (ids: string[]) => ids.filter((id) => !mediaGone.has(id)).map((id) => ({ id, url: `https://media.example.com/${id}` })),
       },
       access: {
         check: async (_p: any, action: string) => {
@@ -98,6 +103,7 @@ export async function boot(o: { apiStubs?: NonNullable<Parameters<typeof buildTe
       },
       audit: {
         record: async (entry: audit.RecordInput) => {
+          if (auditOutage.on) throw new Error('audit store unavailable');
           audits.push(entry);
           return newId();
         },

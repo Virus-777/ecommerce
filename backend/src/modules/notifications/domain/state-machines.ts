@@ -11,5 +11,3 @@ export const deliveryMachine = createStateMachine("Delivery", spec.stateMachines
 /** Broadcast: Broadcast.status. Recipients are resolved at start from consent (customers.getMarketingConsent, seller member promotions group) minus suppressions; quiet hours apply to SMS and push. */
 export const broadcastMachine = createStateMachine("Broadcast", spec.stateMachines["Broadcast"]);
 
-/** Action notice: Notice.resolvedAt. Only notices with actionRequired. resolve comes from the owning module (resolve(dedupeKey)) when the work is done; expire when the notice ages out. Read state is separate and per person. */
-export const actionNoticeMachine = createStateMachine("Action notice", spec.stateMachines["Action notice"]);

@@ -3,13 +3,14 @@
  * execution is confirmed, whether it can be appealed and where), parameter normalisation for the owning modules,
  * the explainable risk score, deadlines and the labels reporters and affected parties see. No I/O.
  */
+import { isIsoDate } from '../../../kernel/lib/dates.js';
 import { createHash } from 'node:crypto';
+import { dateInZone } from '../../../kernel/lib/clock.js';
 import type * as common from '../../../spec/common.js';
 import type { MyReport, Recommendation, RiskFactor, TrustReport, TrustSubject } from '../../../spec/trust.js';
 
 export type ReportType = TrustReport['type'];
 export type ReportStatus = TrustReport['status'];
-export type Source = TrustReport['source'];
 export type Action = Recommendation['action'];
 export type OwnerTeam = Recommendation['ownerTeam'];
 export type SubjectType = TrustSubject['type'];
@@ -275,7 +276,6 @@ export const ACTIONS: Record<Action, ActionDef> = {
   },
 };
 
-export const ACTION_KEYS = Object.keys(ACTIONS) as Action[];
 export const isAction = (a: unknown): a is Action => typeof a === 'string' && a in ACTIONS;
 export const isTeam = (t: unknown): t is OwnerTeam => typeof t === 'string' && (OWNER_TEAMS as readonly string[]).includes(t);
 
@@ -325,10 +325,8 @@ export const SCREENS: Partial<Record<SubjectType, string>> = {
 type Issue = { path: string; message: string };
 type Params = Record<string, unknown>;
 
-const isDate = (v: unknown) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v));
 const isDateTime = (v: unknown) => typeof v === 'string' && !Number.isNaN(Date.parse(v));
 const isMoney = (v: unknown): v is common.Money => !!v && typeof v === 'object' && Number.isInteger((v as common.Money).amount) && (v as common.Money).amount > 0 && typeof (v as common.Money).currency === 'string';
-const isoDate = (d: Date) => d.toISOString().slice(0, 10);
 const addDays = (d: Date, n: number) => new Date(d.getTime() + n * 86_400_000);
 
 export const SELLER_REASON_CODES = ['performance', 'policy_violation', 'brand_claim', 'counterfeit_risk', 'fraud_risk', 'unresolved_cases', 'verification_lapsed', 'approval_condition', 'other'];
@@ -348,16 +346,18 @@ export const CUSTOMER_REASON_CODES = ['customer_request', 'suspected_takeover', 
  *  refund_buyers     { amount?: Money }
  * Defaults come from the recommendation (rationale) so a recommendation drafted without params still executes.
  */
-export function normalizeParams(action: Action, raw: unknown, o: { now: Date; rationale: string; appealWindowDays: number }): { params: Params; issues: Issue[] } {
+/** timeZone: the market's; review dates and "today" are market days */
+export function normalizeParams(action: Action, raw: unknown, o: { now: Date; rationale: string; appealWindowDays: number; timeZone: string }): { params: Params; issues: Issue[] } {
   const p: Params = raw && typeof raw === 'object' && !Array.isArray(raw) ? { ...(raw as Params) } : {};
   const issues: Issue[] = [];
   const bad = (k: string, message: string) => issues.push({ path: `params.${k}`, message });
-  const today = isoDate(o.now);
+  const marketDay = (d: Date) => dateInZone(d, o.timeZone);
+  const today = marketDay(o.now);
   switch (action) {
     case 'restrict_seller': {
       if (p.reasonCode !== undefined && !SELLER_REASON_CODES.includes(p.reasonCode as string)) bad('reasonCode', `One of ${SELLER_REASON_CODES.join(', ')}`);
       if (p.affectedActivities !== undefined && (!Array.isArray(p.affectedActivities) || !p.affectedActivities.length || p.affectedActivities.some((a) => !SELLER_ACTIVITIES.includes(a as string)))) bad('affectedActivities', `Choose from ${SELLER_ACTIVITIES.join(', ')}`);
-      if (p.reviewDate !== undefined && (!isDate(p.reviewDate) || (p.reviewDate as string) < today)) bad('reviewDate', 'A review date from today on (YYYY-MM-DD)');
+      if (p.reviewDate !== undefined && (!isIsoDate(p.reviewDate) || (p.reviewDate as string) < today)) bad('reviewDate', 'A review date from today on (YYYY-MM-DD)');
       if (p.endsAt !== undefined && p.endsAt !== null && !isDateTime(p.endsAt)) bad('endsAt', 'A date and time');
       p.title ??= 'Selling restricted after a Trust and Risk review';
       p.reasonCode ??= 'policy_violation';
@@ -365,7 +365,7 @@ export function normalizeParams(action: Action, raw: unknown, o: { now: Date; ra
       p.affectedActivities ??= ['new_offers', 'new_listings'];
       p.toResolve ??= 'Contact your Seller Manager or appeal with documents that answer the findings.';
       p.appealDays ??= o.appealWindowDays;
-      p.reviewDate ??= isoDate(addDays(o.now, 30));
+      p.reviewDate ??= marketDay(addDays(o.now, 30));
       break;
     }
     case 'warn_seller':
@@ -377,15 +377,15 @@ export function normalizeParams(action: Action, raw: unknown, o: { now: Date; ra
     case 'suspend_seller':
       if (p.reasonCode !== undefined && !SELLER_REASON_CODES.includes(p.reasonCode as string)) bad('reasonCode', `One of ${SELLER_REASON_CODES.join(', ')}`);
       if (p.openOrders !== undefined && !['seller_keeps_fulfilling', 'cancel_unshipped_and_refund'].includes(p.openOrders as string)) bad('openOrders', 'seller_keeps_fulfilling or cancel_unshipped_and_refund');
-      if (p.reviewDate !== undefined && (!isDate(p.reviewDate) || (p.reviewDate as string) < today)) bad('reviewDate', 'A review date from today on (YYYY-MM-DD)');
+      if (p.reviewDate !== undefined && (!isIsoDate(p.reviewDate) || (p.reviewDate as string) < today)) bad('reviewDate', 'A review date from today on (YYYY-MM-DD)');
       p.reasonCode ??= 'policy_violation';
       p.reason ??= o.rationale;
-      p.reviewDate ??= isoDate(addDays(o.now, 30));
+      p.reviewDate ??= marketDay(addDays(o.now, 30));
       p.openOrders ??= 'seller_keeps_fulfilling';
       break;
     case 'suspend_offer':
       if (p.mode !== undefined && !['remove', 'hold'].includes(p.mode as string)) bad('mode', 'remove or hold');
-      if (p.reviewDate !== undefined && p.reviewDate !== null && !isDate(p.reviewDate)) bad('reviewDate', 'A date (YYYY-MM-DD)');
+      if (p.reviewDate !== undefined && p.reviewDate !== null && !isIsoDate(p.reviewDate)) bad('reviewDate', 'A date (YYYY-MM-DD)');
       p.mode ??= 'remove';
       break;
     case 'restrict_customer_messaging':
@@ -396,8 +396,8 @@ export function normalizeParams(action: Action, raw: unknown, o: { now: Date; ra
       break;
     case 'hold_payout':
       if (p.amount !== undefined && !isMoney(p.amount)) bad('amount', 'An amount in minor units with a currency');
-      if (p.reviewDate !== undefined && (!isDate(p.reviewDate) || (p.reviewDate as string) < today)) bad('reviewDate', 'A review date from today on (YYYY-MM-DD)');
-      p.reviewDate ??= isoDate(addDays(o.now, 14));
+      if (p.reviewDate !== undefined && (!isIsoDate(p.reviewDate) || (p.reviewDate as string) < today)) bad('reviewDate', 'A review date from today on (YYYY-MM-DD)');
+      p.reviewDate ??= marketDay(addDays(o.now, 14));
       break;
     case 'refund_buyers':
       if (p.amount !== undefined && !isMoney(p.amount)) bad('amount', 'An amount in minor units with a currency');

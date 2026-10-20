@@ -2,7 +2,8 @@
  * Pure order rules (no I/O): status derivation, labels, money splits, refund previews, deadlines.
  * Everything here works on plain values so it can be tested and reused by every view.
  */
-import { allocate, format as formatMoney, money } from '../../../kernel/lib/money.js';
+import { durationText } from '../../../kernel/lib/dates.js';
+import { allocate, format as formatMoney, money, sum } from '../../../kernel/lib/money.js';
 import { dateInZone, zonedTimeToUtc } from '../../../kernel/lib/clock.js';
 import type * as common from '../../../spec/common.js';
 import type { DiscountAllocation, OrderDisplayStatus, RefundPreviewLine } from '../../../spec/orders.js';
@@ -150,13 +151,6 @@ export const SHIPMENT_STATUS_LABEL: Record<string, string> = {
   cancelled: 'Shipment cancelled',
 };
 
-/** Seller-area tabs → group statuses (seller_groups.status) */
-export const SELLER_TAB_STATUSES: Record<string, GroupStatus[]> = {
-  new: ['new'],
-  preparing: ['preparing', 'delayed', 'partly_shipped'],
-  shipped: ['shipped', 'partly_delivered'],
-  completed: ['delivered', 'partly_cancelled', 'cancelled'],
-};
 /** Groups still waiting for something to ship */
 export const OPEN_GROUP: readonly GroupStatus[] = ['new', 'preparing', 'delayed', 'partly_shipped'];
 
@@ -213,9 +207,6 @@ export function displayStatus(lifecycle: Lifecycle, items: readonly StatusItem[]
 }
 
 /* ------------------------------------------------------------------ money */
-
-/** Integer amount of a Money-like json value */
-export const amountOf = (m: { amount?: number } | null | undefined) => m?.amount ?? 0;
 
 /** Sum of a line's discount allocations */
 export const discountSum = (discounts: readonly DiscountAllocation[]) => discounts.reduce((s, d) => s + d.amount.amount, 0);
@@ -293,7 +284,8 @@ export function refundLines(lines: readonly PreviewLineInput[], currency: string
   });
 }
 
-export const sumMoney = (list: readonly common.Money[], currency: string) => money(list.reduce((s, m) => s + m.amount, 0), currency);
+/** Money of one currency added up (the kernel refuses mixed currencies) */
+export const sumMoney = (list: readonly common.Money[], currency: string) => sum([...list], currency);
 
 export const fmt = (amount: number, currency: string) => formatMoney(money(amount, currency));
 
@@ -308,13 +300,6 @@ export function deadline(dueAt: Date, now: Date, open: boolean, dueSoonMinutes: 
   return { dueAt: dueAt.toISOString(), state };
 }
 
-export const human = (ms: number) => {
-  const h = Math.round(ms / HOUR);
-  if (h < 1) return `${Math.max(1, Math.round(ms / MINUTE))} min`;
-  if (h < 48) return `${h} h`;
-  return `${Math.round(ms / DAY)} d`;
-};
-
 export const shortDate = (d: Date | string, timeZone: string) =>
   new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(d));
 export const monthDay = (d: Date | string, timeZone: string) => new Intl.DateTimeFormat('en-US', { timeZone, month: 'short', day: 'numeric' }).format(new Date(d));
@@ -328,10 +313,10 @@ export const dayLabel = (ymd: string) => new Intl.DateTimeFormat('en-US', { time
 export function deadlineLabel(dueAt: Date, now: Date, shippedAt: Date | null, open: boolean, timeZone: string): string {
   if (shippedAt) {
     const late = shippedAt.getTime() - dueAt.getTime();
-    return late > 0 ? `Shipped ${monthDay(shippedAt, timeZone)} · ${human(late)} late` : `Shipped ${monthDay(shippedAt, timeZone)} · on time`;
+    return late > 0 ? `Shipped ${monthDay(shippedAt, timeZone)} · ${durationText(late)} late` : `Shipped ${monthDay(shippedAt, timeZone)} · on time`;
   }
   if (!open) return `Was due ${monthDay(dueAt, timeZone)}`;
-  if (now.getTime() > dueAt.getTime()) return `Overdue ${human(now.getTime() - dueAt.getTime())}`;
+  if (now.getTime() > dueAt.getTime()) return `Overdue ${durationText(now.getTime() - dueAt.getTime())}`;
   const today = dateInZone(now, timeZone);
   const due = dateInZone(dueAt, timeZone);
   if (due === today) return `Due today ${clockTime(dueAt, timeZone)}`;
@@ -343,7 +328,7 @@ export function deadlineLabel(dueAt: Date, now: Date, shippedAt: Date | null, op
 export function dispatchResult(dueAt: Date, shippedAt: Date | null): string | null {
   if (!shippedAt) return null;
   const late = shippedAt.getTime() - dueAt.getTime();
-  return late > 0 ? `Shipped ${human(late)} late` : 'Shipped on time';
+  return late > 0 ? `Shipped ${durationText(late)} late` : 'Shipped on time';
 }
 
 /** End of the market day of an instant (start of the next day) */
@@ -405,8 +390,3 @@ export const dayStart = (ymd: string, timeZone: string, end = false) => {
   return end ? endOfMarketDay(start, timeZone) : start;
 };
 
-export const maskEmail = (email: string) => {
-  const [user = '', domain = ''] = email.split('@');
-  return `${user.slice(0, 1)}***@${domain}`;
-};
-export const maskPhone = (phone: string | null | undefined) => (phone ? `***${phone.slice(-2)}` : null);

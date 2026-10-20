@@ -1,6 +1,7 @@
 /**
  * Read models: the checkout as the screens show it, change sets, the confirmation and the support views.
  */
+import { format as moneyFormat } from '../../../kernel/lib/money.js';
 import { isAppError } from '../../../kernel/errors/index.js';
 import type * as common from '../../../spec/common.js';
 import type * as orders from '../../../spec/orders.js';
@@ -302,7 +303,7 @@ export class Views {
           shipsFrom: pkgRows.get(key)?.ships_from || info.dispatch.shipsFrom,
           arrivalLabel: opt?.arrivalLabel ?? 'Arrival date to be confirmed',
           // ConfirmationPackage has no soldAndShippedBy: a Marketly-fulfilled package says it on its shipping line
-          shippingLabel: `${opt?.methodName ?? 'Standard'} · ${ship && ship.amount.amount > 0 ? new Intl.NumberFormat('en-US', { style: 'currency', currency: cur }).format(ship.amount.amount / 100) : 'Free'}${fulfilledBy === 'marketly_service' ? ` · ${soldAndShippedBy(info.seller.name, fulfilledBy)}` : ''}`,
+          shippingLabel: `${opt?.methodName ?? 'Standard'} · ${ship && ship.amount.amount > 0 ? moneyFormat({ amount: ship.amount.amount, currency: cur }) : 'Free'}${fulfilledBy === 'marketly_service' ? ` · ${soldAndShippedBy(info.seller.name, fulfilledBy)}` : ''}`,
           items: pl.map((l) => {
             const li = this.info(q, l.id);
             return { title: li.title, variantLabel: li.variantLabel, condition: li.condition, quantity: l.quantity, price: m(l.unit_price, cur), image: li.image, status: 'Confirmed' };

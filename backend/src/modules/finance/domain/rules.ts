@@ -2,6 +2,8 @@
  * Pure finance rules: fee calculation, ledger vocabulary, statement sections, payout schedule dates
  * and small helpers. No I/O.
  */
+import { format as moneyFormat } from '../../../kernel/lib/money.js';
+import { money as checkedMoney } from '../../../kernel/lib/money.js';
 import { createHash } from 'node:crypto';
 import { dateInZone, zonedTimeToUtc } from '../../../kernel/lib/clock.js';
 import type * as common from '../../../spec/common.js';
@@ -16,16 +18,12 @@ export function detId(key: string): string {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-8${h.slice(13, 16)}-${variant}${h.slice(17, 20)}-${h.slice(20, 32)}`;
 }
 
-export const m = (amount: number, currency: string): common.Money => ({ amount, currency });
+/** Money in integer minor units (the kernel refuses anything else) */
+export const m = (amount: number, currency: string): common.Money => checkedMoney(amount, currency);
 
 /** Display money, e.g. $184.00 or -$5.90 */
 export function fmt(amount: number, currency = 'USD'): string {
-  let s: string;
-  try {
-    s = new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(Math.abs(amount) / 100);
-  } catch {
-    s = `${(Math.abs(amount) / 100).toFixed(2)} ${currency}`;
-  }
+  const s = moneyFormat({ amount: Math.abs(amount), currency });
   return amount < 0 ? `-${s}` : s;
 }
 
@@ -219,7 +217,6 @@ export const marketDate = (at: Date, tz: string) => dateInZone(at, tz);
 export const dayStart = (date: string, tz: string) => zonedTimeToUtc(date, '00:00', tz);
 export const daysBetween = (from: string, to: string) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY);
 export const weekday = (date: string) => new Date(`${date}T12:00:00Z`).getUTCDay();
-export const isDate = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(`${s}T00:00:00Z`));
 export const isPeriod = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(s);
 export const daysInMonth = (period: string) => {
   const [y, mo] = period.split('-').map(Number) as [number, number];

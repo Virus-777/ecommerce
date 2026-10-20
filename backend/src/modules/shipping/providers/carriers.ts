@@ -9,7 +9,7 @@
 import { createHash } from 'node:crypto';
 import { money } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
-import { labelPdf } from '../domain/pdf.js';
+import { renderPdf } from '../../../kernel/lib/pdf.js';
 import { CarrierRefused, CarrierUnreachable, type CarrierPort, type CarrierScan } from '../ports.js';
 
 const BASE: Record<string, number> = { ground: 795, two_day: 1495, overnight: 2995, freight: 8900 };
@@ -61,7 +61,7 @@ export function devCarrierAdapter(): CarrierPort {
       const trackingNumber = devTrackingNumber(input.carrierCode, input.reference);
       const to = input.to;
       const from = input.from;
-      const pdf = labelPdf([
+      const pdf = renderPdf([[
         { text: input.serviceName.toUpperCase(), size: 16, bold: true },
         { text: `TRACKING #: ${trackingNumber}`, size: 11, bold: true },
         { text: 'SHIP FROM', size: 8, bold: true },
@@ -71,7 +71,7 @@ export function devCarrierAdapter(): CarrierPort {
         { text: [to.city, to.region, to.postalCode].filter(Boolean).join(' ') },
         { text: `Weight: ${(input.parcel.weightGrams / 1000).toFixed(2)} kg   Ref: ${input.reference}`, size: 8 },
         { text: 'DEVELOPMENT LABEL - NOT VALID FOR SHIPPING', size: 8 },
-      ]);
+      ]], { page: 'label' });
       const qrCode = input.qr ? `QR-${alnum(`${input.reference}:qr`, 12)}` : null;
       if (input.format === 'zpl') {
         // thermal printers: a minimal ZPL label with the same facts

@@ -9,8 +9,6 @@ export type Campaign = S['promotions.Campaign'];
 export type CampaignInput = S['promotions.CampaignInput'];
 export type PromotionsDashboard = S['promotions.PromotionsDashboard'];
 
-export type PromoFunding = 'platform' | 'seller' | 'shared';
-
 /** Campaign kinds (API) with the design's type labels. */
 export const PROMO_KINDS: Array<{ value: string; label: string }> = [
   { value: 'markdown', label: 'Markdown' },

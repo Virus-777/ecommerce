@@ -114,13 +114,16 @@ export const sellerMayDo = (access: SellerMemberAccess, permission: string | und
 
 /* ------------------------------------------------------------------ actors */
 
+/** The Actor of a verified caller (a visitor is its session; staff, sellers and customers their account and name) */
+export function actorOfPrincipal(p: { kind: Principal['kind']; accountId?: string | null; sessionId?: string | null; guestSessionId?: string | null; name?: string | null }): Actor {
+  if (p.kind === 'visitor') return { kind: 'visitor', id: p.sessionId ?? p.guestSessionId ?? null };
+  return { kind: p.kind, id: p.accountId ?? null, ...(p.name ? { name: p.name } : {}) };
+}
+
 /** The Actor recorded in audit entries, timelines and events. `system` is reserved for jobs and event consumers. */
 export function actorOf(auth: RequestAuth | undefined): Actor {
   const p = auth?.principal;
-  if (p) {
-    if (p.kind === 'visitor') return { kind: 'visitor', id: p.sessionId };
-    return { kind: p.kind, id: p.accountId ?? null, ...(p.name ? { name: p.name } : {}) };
-  }
+  if (p) return actorOfPrincipal(p);
   if (auth?.via === 'provider') return { kind: 'provider', name: auth.provider?.name ?? null };
   return { kind: 'anonymous' };
 }

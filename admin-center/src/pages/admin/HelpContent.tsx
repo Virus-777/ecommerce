@@ -1,3 +1,4 @@
+import { fromZonedInput, zonedInput } from '@marketly/web-shared/lib/dates';
 import { Fragment, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
@@ -8,7 +9,7 @@ import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, announce, Badge, Breadcrumbs, Button, Card, Dialog, Field, Icon, IconButton, Pager, SearchInput, Select, Stat, StatusBadge, TableWrap, Tabs, Textarea, TextInput, type IconName } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
-import { LoadError, SkeletonLines, date, dateTime } from '@/app/parts';
+import { LoadError, SkeletonLines, date, dateTime, actorLabel } from '@/app/parts';
 
 // Design: pages/admin/admin-help-content.html · view "edit-policy" = the editor for a policy version (or a help article).
 // Data: GET /api/admin/content/help/summary (KPIs, tab counts), /help/items (the list), /help/categories, /policies.
@@ -82,25 +83,13 @@ function diffWords(a: string, b: string) {
   return out;
 }
 
-/** Offset of a time zone from UTC at an instant, in minutes. */
-function tzOffset(tz: string, at: Date): number {
-  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(at).map((x) => [x.type, x.value]));
-  return (Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour), Number(p.minute), Number(p.second)) - at.getTime()) / 60000;
-}
-const wallToIso = (wall: string) => {
-  const g = new Date(`${wall}:00Z`);
-  return new Date(g.getTime() - tzOffset(TZ, g) * 60000).toISOString();
-};
-const isoToWall = (iso?: string | null) => {
-  if (!iso) return '';
-  const d = new Date(iso);
-  return new Date(d.getTime() + tzOffset(TZ, d) * 60000).toISOString().slice(0, 16);
-};
+const wallToIso = (wall: string) => fromZonedInput(wall, TZ) ?? '';
+const isoToWall = (iso?: string | null) => zonedInput(iso, TZ);
 const nextVersion = (v?: string | null) => {
   const [maj, min] = (v ?? '0.9').split('.').map(Number);
   return `${maj || 0}.${(min ?? 0) + 1}`;
 };
-const actorName = (a: unknown) => (a as { name?: string } | null | undefined)?.name;
+const actorName = (a: unknown) => actorLabel(a as { kind?: string; name?: string } | null) || undefined;
 
 /* ---------------- Shared editor parts ---------------- */
 

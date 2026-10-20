@@ -1,11 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { ApiError, call, errorMessage, exactImageSpec, uploadMedia, useApi, useUploads, type components } from '@marketly/web-shared/api';
 import { SellerLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { initials } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Badge, Button, Card, Checkbox, Field, Icon, IconButton, ImageCropper, Img, PageHeader, SegmentedControl, Select, Stars, Switch, Tabs, Textarea, TextInput, type CropWording, type IconName } from '@marketly/web-shared/ui';
+import { Alert, Badge, Button, Card, Checkbox, Field, Icon, IconButton, ImageCropper, Img, PageHeader, SegmentedControl, Select, Stars, Switch, Tabs, Textarea, TextInput, type CropWording, type IconName, LogoTile } from '@marketly/web-shared/ui';
 import { useSellerSession } from '@/app/session';
 import { fmtDay } from './data/finance';
 
@@ -65,7 +65,6 @@ const REPLY_TARGETS = [
 const INTRO_MAX = 400;
 const TAGLINE_MAX = 80;
 const IMG_MAX_MB = 10;
-const IMG_FILL: CSSProperties = { width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' };
 const TINTS = ['2', '6', '3', '4', '5', '1'];
 
 type Errors = Partial<Record<'name' | 'tagline' | 'location' | 'intro' | 'warranty' | 'logo' | 'banner' | 'brand', string>>;
@@ -111,7 +110,7 @@ function validate(p: Profile, saved: Profile, evidence: number, brandsLoaded: bo
 
 /** .imgph tile that shows the image when there is one. */
 function Pic({ src, icon, className }: { src: string | null; icon: IconName; className: string }) {
-  return <div className={cx('imgph tint-2', className)}>{src ? <img src={src} alt="" style={IMG_FILL} /> : <Icon name={icon} />}</div>;
+  return <Img icon={icon} tint="2" className={className} src={src ?? undefined} />;
 }
 
 function FileError({ msg }: { msg: string }) {
@@ -327,11 +326,7 @@ export default function Store() {
   const busy = save.isPending || logo.uploading || banner.uploading || evidence.uploading;
   const chosenBrand = brands.find((b) => b.id === p?.brandId);
 
-  const logoTile = (
-    <span className="logo-tile lg tint-2" aria-hidden="true">
-      {logoSrc ? <img src={logoSrc} alt="" style={IMG_FILL} /> : initials(profile?.storeName ?? '')}
-    </span>
-  );
+  const logoTile = <LogoTile initials={initials(profile?.storeName ?? '')} tint="2" className="lg" src={logoSrc} />;
 
   const header = (
     <>

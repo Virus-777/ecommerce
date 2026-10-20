@@ -2,6 +2,7 @@
  * Decisions and what follows them: remedies (through returns, wallet and access approvals), decision drafts,
  * appeals reviewed by a different staff member, resolving and reopening.
  */
+import { format as formatMoney, money as moneyOf } from '../../../kernel/lib/money.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
@@ -146,7 +147,7 @@ export class Decisions {
       action: APPROVE_ACTION,
       target: { type: 'case', id: agg.c.id, ref: agg.c.ref, label: `Case ${agg.c.ref}: ${agg.c.subject}`, sellerId: agg.c.seller_id, screen: 'admin/case' },
       amount,
-      summary: `${pending.kind === 'appeal' ? 'Appeal decision' : 'Decision'} on ${agg.c.ref} with $${(total / 100).toFixed(2)} funded by Marketly`,
+      summary: `${pending.kind === 'appeal' ? 'Appeal decision' : 'Decision'} on ${agg.c.ref} with ${formatMoney(amount)} funded by Marketly`,
       details: { remedies: planned.map((p) => ({ kind: p.kind, amount: p.amount, chargedTo: p.chargedTo, orderItemIds: p.orderItemIds })) },
       reason,
       requestedBy: by.principal,
@@ -312,7 +313,7 @@ export class Decisions {
   }
 
   private async decisionMessage(tx: SupportRepository, a: Agg, batch: Batch, d: StoredDecision, remedies: RemedyRec[], by: By) {
-    const what = remedies.length ? ` Remedy: ${remedies.map((r) => `${human(r.kind)}${r.amount ? ` $${(r.amount / 100).toFixed(2)}` : ''}`).join(', ')}.` : '';
+    const what = remedies.length ? ` Remedy: ${remedies.map((r) => `${human(r.kind)}${r.amount ? ` ${formatMoney(moneyOf(r.amount, this.core.currency))}` : ''}`).join(', ')}.` : '';
     const appeal = d.final ? ' This decision is final.' : d.appealDeadline ? ` Either party can appeal until ${new Date(d.appealDeadline).toISOString().slice(0, 10)}.` : '';
     const m = await this.core.message(tx, a.c.id, { author: by.actor, authorLabel: 'Marketly decision', role: 'system', audience: 'all', body: `${human(d.outcome)}: ${d.reason}.${what}${appeal}`.replace(/\.\./g, '.') });
     batch.push('support.case.message_added', this.core.messageAdded(a.c, m.id, 'all', 'system'));
@@ -400,7 +401,7 @@ export class Decisions {
           {
             kind: 'refunds_not_cancellable',
             label: 'Refunds of the earlier decision could not be cancelled: the money is already moving',
-            detail: refunds.notCancellable.map((r) => `${r.ref} (${r.status}, ${(r.breakdown.total.amount / 100).toFixed(2)} ${r.breakdown.total.currency})`).join(', '),
+            detail: refunds.notCancellable.map((r) => `${r.ref} (${r.status}, ${formatMoney(r.breakdown.total)})`).join(', '),
             visibility: 'staff',
             actor: by.actor,
           },

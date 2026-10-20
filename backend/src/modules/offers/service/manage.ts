@@ -2,13 +2,16 @@
  * Creating and editing offers (seller and Official Store) and their lifecycle: publish, pause, resume,
  * end, delete drafts, and the staff actions remove, hold, release and reinstate.
  */
+import { stringList } from '../../../kernel/lib/text.js';
+import { isIsoDate } from '../../../kernel/lib/dates.js';
+import { format as formatMoney } from '../../../kernel/lib/money.js';
 import { AppError, isAppError } from '../../../kernel/errors/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type * as catalog from '../../../spec/catalog.js';
 import type * as common from '../../../spec/common.js';
 import type { CompareAtInput, HoldOfferRequest, OfferInput, OfferUpdate, OfficialOfferInput, RemoveOfferRequest, ReturnTerms, ReturnTermsInput, StatusReason, WarrantyInput } from '../../../spec/offers.js';
 import { activityLabel, conditionLabel, needsConditionNotes, returnTermsOf, warrantyTerms, type Condition } from '../domain/rules.js';
-import { money, offerTitle, strings, variantLabel } from '../mappers.js';
+import { money, offerTitle, variantLabel } from '../mappers.js';
 import type { OfferRec } from '../ports.js';
 import { invalidField, notFound, Part, SYSTEM, type By } from './core.js';
 
@@ -116,7 +119,7 @@ export class ManagePart extends Part {
     if (!Number.isInteger(price.amount) || price.amount <= 0) throw invalidField(`${path}.amount`, 'Enter a price above zero');
     const mins = ((await this.core.setting('minimumPriceByCategory')) ?? {}) as Record<string, number>;
     const min = categoryId ? Number(mins[categoryId] ?? 0) : 0;
-    if (min > 0 && price.amount < min) throw this.core.error('PRICE_BELOW_MINIMUM', `The minimum price in this category is ${(min / 100).toFixed(2)}`, { minimum: this.core.money(min) });
+    if (min > 0 && price.amount < min) throw this.core.error('PRICE_BELOW_MINIMUM', `The minimum price in this category is ${formatMoney(this.core.money(min))}`, { minimum: this.core.money(min) });
   }
 
   async checkPurchaseLimit(limit: number | null | undefined) {
@@ -720,7 +723,7 @@ export class ManagePart extends Part {
       if (patch.missing_items_stale === false) {
         this.core.publish(
           'offers.offer.missing_items_reviewed',
-          { offerId: after.id, productId: after.product_id, ownerType: after.owner_type as 'official' | 'seller', sellerId: after.seller_id, missingItems: strings(after.missing_items), changed: JSON.stringify(strings(after.missing_items)) !== JSON.stringify(strings(row.missing_items)), reviewedBy: by.actor },
+          { offerId: after.id, productId: after.product_id, ownerType: after.owner_type as 'official' | 'seller', sellerId: after.seller_id, missingItems: stringList(after.missing_items), changed: JSON.stringify(stringList(after.missing_items)) !== JSON.stringify(stringList(row.missing_items)), reviewedBy: by.actor },
           by,
         );
       }
@@ -763,7 +766,7 @@ export class ManagePart extends Part {
 
   async hold(id: string, body: HoldOfferRequest, by: By): Promise<OfferRec> {
     if (!body.reason?.trim()) throw invalidField('reason', 'Give the reason for the hold');
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(body.reviewDate ?? '') || body.reviewDate < this.core.today()) throw invalidField('reviewDate', 'The review date is today or later');
+    if (!isIsoDate(body.reviewDate) || body.reviewDate < this.core.today()) throw invalidField('reviewDate', 'The review date is today or later');
     const text = body.reference ? `${body.reason.trim()} (${body.reference})` : body.reason.trim();
     const reason = this.core.statusReason('staff_hold', text, by, { reviewDate: body.reviewDate, appealRoute: null });
     const t = await this.core.move(id, { event: 'makeIneligible', by, reason, source: { kind: 'staff', id: by.actor.id ?? null }, log: { reasonCode: 'staff_hold', reason: text, reviewDate: body.reviewDate } });

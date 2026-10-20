@@ -1,3 +1,4 @@
+import { slugify as slugText } from '@marketly/web-shared/lib/format';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react';
 import { call, errorMessage, resolveProductImageSpec, uploadMedia, useApi } from '@marketly/web-shared/api';
@@ -25,7 +26,8 @@ type CatStatus = 'visible' | 'hidden' | 'soon';
 type AttrSet = { attrs: CategoryAttribute[]; rules: ImageRule[] };
 
 const catStatus = (c: CategoryNode): CatStatus => (!c.visible ? 'hidden' : c.count === 0 ? (c.empty === 'soon' ? 'soon' : 'hidden') : 'visible');
-const slugify = (s: string) => s.toLowerCase().replace(/&/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+/** The slug the backend will save for a new category (the same rule) */
+const slugify = (s: string) => slugText(s, 'item');
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 function TreeBadge({ status }: { status: CatStatus }) {
@@ -614,7 +616,7 @@ function BrandsTab({ notify, addOpen, setAddOpen }: { notify: (n: Notice) => voi
                   <td>
                     {note.warn && <span className="sr-only">At risk: </span>}
                     <span className="row nowrap gap-3">
-                      <LogoTile initials={initialsOf(b.brand.name)} tint={tintOf(b.brand.id)} size="sm" />
+                      <LogoTile initials={initialsOf(b.brand.name)} tint={tintOf(b.brand.name)} size="sm" />
                       <span className="stack gap-0">
                         <span className="small strong">{b.brand.name}</span>
                         <span className={note.warn ? 'xs t-warning-text strong' : 'xs muted'}>{note.text}</span>
@@ -677,7 +679,7 @@ function BrandsTab({ notify, addOpen, setAddOpen }: { notify: (n: Notice) => voi
           <ul className="list pad">
             {claims.map((c) => (
               <li key={c.id}>
-                <LogoTile initials={initialsOf(c.storeName)} tint={tintOf(c.sellerId)} size="sm" />
+                <LogoTile initials={initialsOf(c.storeName)} tint={tintOf(c.storeName)} size="sm" />
                 <span className="grow stack gap-0">
                   <span className="small strong">{claimLine(c)}</span>
                   <span className="xs muted">
@@ -759,7 +761,7 @@ function BrandsTab({ notify, addOpen, setAddOpen }: { notify: (n: Notice) => voi
           <>
             {error && <Alert tone="danger" title={error} />}
             <div className="row nowrap gap-3">
-              <LogoTile initials={initialsOf(claim.storeName)} tint={tintOf(claim.sellerId)} size="sm" />
+              <LogoTile initials={initialsOf(claim.storeName)} tint={tintOf(claim.storeName)} size="sm" />
               <span className="stack gap-0">
                 <span className="small strong">{claimLine(claim)}</span>
                 <span className="xs muted">

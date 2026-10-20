@@ -2,6 +2,8 @@
  * Pure payment rules: customer-facing states and texts, decline messages, backoff, card expiry, refund
  * caps and views. No I/O.
  */
+import { format as moneyFormat } from '../../../kernel/lib/money.js';
+import { money as checkedMoney } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
 import type { Decline, PaymentDetail, Refund, RefundView } from '../../../spec/payments.js';
 import type { DeclineCategory } from '../ports.js';
@@ -19,9 +21,6 @@ export const DAY = 24 * HOUR;
 export const ACCEPTED: readonly IntentStatus[] = ['authorized', 'partially_captured', 'captured'];
 export const PENDING: readonly IntentStatus[] = ['created', 'authorizing', 'requires_action', 'pending_check'];
 export const ENDED: readonly IntentStatus[] = ['failed', 'voided', 'expired'];
-/** Refund statuses that reserve part of the refundable amount until sent or cancelled */
-export const RESERVING: readonly RefundStatus[] = ['requested', 'processing', 'failed'];
-
 export const is = <T extends string>(list: readonly T[], v: string): v is T => (list as readonly string[]).includes(v);
 
 export const STATUS_LABEL: Record<IntentStatus, string> = {
@@ -106,14 +105,11 @@ export function validExpiry(expMonth: number, expYear: number): boolean {
   return Number.isInteger(expMonth) && expMonth >= 1 && expMonth <= 12 && Number.isInteger(expYear) && expYear >= 2000 && expYear <= 2100;
 }
 
-export const money = (amount: number, currency: string): common.Money => ({ amount, currency });
+/** Money in integer minor units (the kernel refuses anything else) */
+export const money = (amount: number, currency: string): common.Money => checkedMoney(amount, currency);
 
 export function fmt(m: common.Money): string {
-  try {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: m.currency }).format(m.amount / 100);
-  } catch {
-    return `${(m.amount / 100).toFixed(2)} ${m.currency}`;
-  }
+  return moneyFormat(m);
 }
 
 /* ---------------------------------------------------------------- refunds */

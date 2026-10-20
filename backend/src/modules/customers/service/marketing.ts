@@ -7,7 +7,7 @@ import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type { MarketingPreferences, MarketingPreferencesInput } from '../../../spec/customers.js';
 import * as map from '../mappers.js';
 import type { ConsentRow, CustomerRow, PreferencesRow } from '../ports.js';
-import { type Core, type By, type PrefKey, PREFS, PROMOTIONAL_OFF, invalid, notFound } from './core.js';
+import { type Core, type By, type PrefKey, PREFS, PROMOTIONAL_OFF, notFound } from './core.js';
 import type { Profiles } from './profiles.js';
 
 export class Marketing {

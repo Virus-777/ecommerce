@@ -1,4 +1,5 @@
 /** Lists, review queue, stats, exports, corrections, merges, bulk edits, catalog matching and the listing read model. */
+import { stringList } from '../../../kernel/lib/text.js';
 import type { Principal } from '../../../kernel/auth/index.js';
 import { AppError, isNotImplemented } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
@@ -9,7 +10,7 @@ import type { AffectedSeller, CatalogMatch, CorrectionSuggestion, MergedRecord, 
 import type { ExportJob } from '../../../spec/reports.js';
 import { IDENTITY_FIELDS, isCorrectableField, linesOf, matchQuality, PARCEL_COLUMNS, PARCEL_FIELDS, sameOptions, variantLabel } from '../domain/rules.js';
 import { checkListPrice, checkParcelValue, currentListPrice } from './products.js';
-import { groupBy, stringMap, strings, toCorrection } from '../mappers.js';
+import { groupBy, stringMap, toCorrection } from '../mappers.js';
 import type { CorrectionRow, OfferIndexRow, ProductFilter, ProductRow, VariantRow } from '../ports.js';
 import { invalid, notFound, requireReason, type By, type Viewer } from './base.js';
 import { CatalogReview } from './review.js';
@@ -183,9 +184,9 @@ export class CatalogAdmin extends CatalogReview {
       case 'description':
         return p.description;
       case 'keyFeatures':
-        return strings(p.key_features).join('\n');
+        return stringList(p.key_features).join('\n');
       case 'includedItems':
-        return strings(p.included_items).join('\n');
+        return stringList(p.included_items).join('\n');
       case 'modelNumber':
         return p.model_number;
       case 'manufacturerPartNumber':
@@ -246,7 +247,7 @@ export class CatalogAdmin extends CatalogReview {
 
   async listCorrections(state: string | undefined, page: PageRequest): Promise<common.Page<CorrectionSuggestion>> {
     const p = await this.repo.listCorrections({ state: state ?? 'open' }, page);
-    const refs = await this.refsMap(p.items.flatMap((c) => strings(c.evidence_media_ids)));
+    const refs = await this.refsMap(p.items.flatMap((c) => stringList(c.evidence_media_ids)));
     return { ...p, items: p.items.map((c) => toCorrection(c, refs)) };
   }
 
@@ -309,7 +310,7 @@ export class CatalogAdmin extends CatalogReview {
       },
       by,
     );
-    return toCorrection(after, await this.refsMap(strings(after.evidence_media_ids)));
+    return toCorrection(after, await this.refsMap(stringList(after.evidence_media_ids)));
   }
 
   private async correctionPatch(p: ProductRow, field: string, proposed: string): Promise<Partial<ProductRow>> {
@@ -473,7 +474,7 @@ export class CatalogAdmin extends CatalogReview {
             product_id: kept.id,
             options: options as never,
             gtin,
-            media_ids: (single ? strings(single.media_ids) : []) as never,
+            media_ids: (single ? stringList(single.media_ids) : []) as never,
             position: position++,
             // parcel data and list price describe the same unit, so they move with it
             weight_grams: single?.weight_grams ?? null,

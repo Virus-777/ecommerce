@@ -6,7 +6,6 @@ import type { IconName } from '@marketly/web-shared/ui';
 
 export type Member = components['schemas']['sellers.SellerMember'];
 export type PermissionEntry = components['schemas']['sellers.PermissionEntry'];
-export type RoleTemplate = components['schemas']['sellers.SellerRoleTemplate'];
 export type MemberPreference = components['schemas']['notifications.MemberPreference'];
 export type StaffRole = Exclude<Member['role'], 'owner'>;
 export type Channel = MemberPreference['channel'];
