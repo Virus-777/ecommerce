@@ -597,10 +597,17 @@ One full reindex at a time (REINDEX_ALREADY_RUNNING). Scoped jobs only mark docu
 | version | bigint |
 | indexed_at | timestamptz |
 | offers | jsonb? (the product's offers as search_offers stores them, kept in step by the repository; the MongoDB engine reads them here instead of joining search_offers on every query, docs/07-search-speed-plan.md) |
+| card_all | jsonb? (MongoDB engine: the card offer among all offers — featured first, then in stock, cheapest, offer id — with its featured flag; recomputed from offers and featured_offer_id on every change) |
+| card_all_n | int? (number of offers) |
+| card_in_stock | jsonb? (the card offer among the in-stock offers, same order; null when none is in stock) |
+| card_in_stock_n | int? (number of in-stock offers) |
+| rank_all | jsonb? (MongoDB engine: the recommended-sort score of a listing (no words) with card_all, under the ranking weights of rank_key; a number) |
+| rank_in_stock | jsonb? (the same with card_in_stock (in-stock only listings); a number) |
+| rank_key | text? (the ranking weights rank_all and rank_in_stock were computed with; null when an input changed since, and the engine recomputes them before a listing) |
 | best_seller_rank | int? (rank in best_seller_category_id by sales_30d; null outside the top 100) |
 | best_seller_category_id | uuid? |
 
-Indexes: `gin(terms jsonb_path_ops)`, `gin(title_norm gin_trgm_ops)`, `gin(seller_ids)`, `gin(category_path_ids)`, `gin(attributes jsonb_path_ops)`, `(in_stock, featured_price)`, `(first_listed_at)`, `(rating, rating_count)`, `(brand_id)`, `(sales_30d)`
+Indexes: `gin(terms jsonb_path_ops)`, `gin(title_norm gin_trgm_ops)`, `gin(seller_ids)`, `gin(category_path_ids)`, `gin(attributes jsonb_path_ops)`, `(in_stock, featured_price)`, `(first_listed_at)`, `(rating, rating_count)`, `(brand_id)`, `(sales_30d)`, `(rank_key)`, `(category_path_ids, rank_in_stock desc, product_id)`, `(category_path_ids, rank_all desc, product_id)`
 
 **search_offers**: Offer-level rows so seller, condition and price filters show the matching seller's price (e.g. Official Store filter shows company offers)
 
