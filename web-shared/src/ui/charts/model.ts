@@ -67,8 +67,8 @@ const compact = (v: number) => {
 };
 const trim = (n: number) => (n >= 100 ? String(Math.round(n)) : n.toFixed(1).replace(/\.0$/, ''));
 
-/** Cents → "$1,234.50" (tooltips, tables). */
-export const fmtMoney: Fmt = (cents) => (cents < 0 ? `−${money(-cents / 100)}` : money(cents / 100));
+/** Cents → "$1,234.50", "−$213.30" (tooltips, tables). */
+export const fmtMoney: Fmt = (cents) => money(cents / 100);
 /** Cents → "$1.2k" (axis ticks). */
 export const fmtMoneyCompact: Fmt = (cents) => {
   const c = compact(cents / 100);
