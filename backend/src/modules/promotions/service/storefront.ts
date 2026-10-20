@@ -25,8 +25,6 @@ const COUPON_RULES = (perPackage: number) => [
 ];
 
 export class StorefrontPart extends Part {
-  #codeChecks = new Map<string, number[]>();
-
   /* ---------------------------------------------------------------- prices */
 
   isCouponType = (c: CampaignModel) => COUPON_KINDS.includes(c.kind) || SHIPPING_KINDS.includes(c.kind);
@@ -374,12 +372,9 @@ export class StorefrontPart extends Part {
     const setting = String(await this.core.setting('codeCheckRateLimit'));
     const max = Number(/\d+/.exec(setting)?.[0] ?? 10) || 10;
     const window = /hour/i.test(setting) ? 3_600_000 : 60_000;
-    const now = Date.now();
-    const hits = (this.#codeChecks.get(sessionKey) ?? []).filter((t) => now - t < window);
-    if (hits.length >= max) throw new AppError('RATE_LIMITED', 'Too many code checks. Try again in a minute.', { retryAfterSeconds: Math.ceil((window - (now - hits[0]!)) / 1000) });
-    hits.push(now);
-    this.#codeChecks.set(sessionKey, hits);
-    if (this.#codeChecks.size > 10_000) this.#codeChecks.clear();
+    // counted in the kernel's shared store: the same across server instances and restarts
+    const r = await this.ctx.rateLimit(`code-check:${sessionKey}`, { limit: max, windowMs: window });
+    if (!r.allowed) throw new AppError('RATE_LIMITED', 'Too many code checks. Try again in a minute.', { retryAfterSeconds: Math.max(1, Math.ceil(r.retryAfterMs / 1000)) });
   }
 
   async checkCode(code: string, customerId: string | null, sessionKey: string): Promise<CodeCheck> {
