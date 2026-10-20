@@ -9,7 +9,8 @@ import '../Report.css';
 
 /**
  * The KPI tiles of a result, in the order of `keys` when given (keys the result lacks are skipped; without keys
- * every KPI is shown). A delta shows only with a comparison, with "vs <comparison dates>" under it.
+ * every KPI is shown). A delta shows only with a comparison, with "vs <comparison dates>" under it; the KPI's own
+ * note ("Not taken off the margin") stays in front of it.
  */
 export function ReportKpis({ res, keys, compared, cmpText, skeletons = 4, error }: { res?: ReportResult; keys?: string[]; compared: boolean; cmpText?: string; skeletons?: number; error?: boolean }) {
   if (!res)
@@ -33,7 +34,7 @@ export function ReportKpis({ res, keys, compared, cmpText, skeletons = 4, error 
               label={k.label}
               value={k.display}
               {...(dl && dl.direction !== 'flat' && compared
-                ? { delta: `${Math.abs(dl.value).toFixed(1)}${dl.unit === 'pct' ? '%' : ' pts'}`, dir: dl.direction, good: dl.good, note: cmpText ? `vs ${cmpText}` : undefined }
+                ? { delta: `${Math.abs(dl.value).toFixed(1)}${dl.unit === 'pct' ? '%' : ' pts'}`, dir: dl.direction, good: dl.good, note: [k.note, cmpText ? `vs ${cmpText}` : null].filter(Boolean).join(' · ') || undefined }
                 : { note: k.note ?? undefined })}
             />
           </div>

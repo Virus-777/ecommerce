@@ -61,3 +61,15 @@ export const DEMO_FEES: DonutSlice[] = [
   { key: 'disputes', label: 'Disputes', value: 1000 },
   { key: 'other', label: 'Adjustments', value: 500 },
 ];
+
+/** Fee income by seller: store names that share a long start (cut in the middle on the axis). */
+export const DEMO_SELLERS: ChartRow[] = [
+  { x: 's1', label: 'Rose City Audio Gear GZ0O99-2', fees: 18400 },
+  { x: 's2', label: 'Rose City Audio Gear GZ0O99-7', fees: 14100 },
+  { x: 's3', label: 'Willamette Outdoor Supply KQ81-1', fees: 10200 },
+  { x: 's4', label: 'Rose City Audio Gear GZ0O99-4', fees: 9600 },
+  { x: 's5', label: 'Stumptown Brew Supply', fees: 6500 },
+];
+
+/** A count with small values (whole-number ticks) and a money series with nothing but zeros (one $0 tick). */
+export const DEMO_SMALL: ChartRow[] = LABELS.slice(0, 7).map((label, i) => ({ x: `d${i}`, label, below: i === 3 || i === 4 ? 1 : 0, payouts: 0 }));

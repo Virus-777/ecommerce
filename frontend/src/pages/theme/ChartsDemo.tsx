@@ -1,7 +1,7 @@
 import {
-  BarsChart, ChartFrame, ComboChart, DonutChart, donutTable, fmtMoney, fmtMoneyCompact, PeriodControl, seriesTable, ShareBar, TrendChart, usePeriod, WaterfallChart, waterfallTable,
+  BarsChart, ChartFrame, ComboChart, DonutChart, donutTable, fmtCount, fmtCountCompact, fmtMoney, fmtMoneyCompact, PeriodControl, seriesTable, ShareBar, TrendChart, usePeriod, WaterfallChart, waterfallTable,
 } from '@marketly/web-shared/ui';
-import { DEMO_COMBO, DEMO_FEES, DEMO_RANKING, DEMO_TREND, DEMO_WATERFALL } from './data/charts-demo';
+import { DEMO_COMBO, DEMO_FEES, DEMO_RANKING, DEMO_SELLERS, DEMO_SMALL, DEMO_TREND, DEMO_WATERFALL } from './data/charts-demo';
 
 // Chart gallery of the design components page: every shared chart (web-shared/src/ui/charts) and the period
 // control, on sample data, so they can be checked in light and dark mode and at phone width.
@@ -16,6 +16,9 @@ const COMBO_BARS = [
 ];
 const MARGIN = { key: 'margin', label: 'Margin', axis: 'right' as const };
 const RANKING = [{ key: 'profit', label: 'Profit' }];
+const FEES = [{ key: 'fees', label: 'Fee income' }];
+const BELOW = [{ key: 'below', label: 'Sellers below zero' }];
+const PAYOUTS = [{ key: 'payouts', label: 'Payouts paid' }];
 
 export function ChartsDemo() {
   const period = usePeriod();
@@ -43,6 +46,15 @@ export function ChartsDemo() {
         </ChartFrame>
         <ChartFrame title="Sales per day, stacked" sub="BarsChart · stacked; the loading and empty states below" table={seriesTable(DEMO_TREND, TREND, fmtMoney)}>
           <BarsChart rows={DEMO_TREND} series={TREND} fmt={fmtMoney} axisFmt={fmtMoneyCompact} stacked label="Daily sales stacked, Sep 25 to Oct 8" />
+        </ChartFrame>
+        <ChartFrame title="Top sellers by fee income" sub="BarsChart · long names that share a start are cut in the middle" table={seriesTable(DEMO_SELLERS, FEES, fmtMoney, { xLabel: 'Seller' })}>
+          <BarsChart rows={DEMO_SELLERS} series={FEES} fmt={fmtMoney} axisFmt={fmtMoneyCompact} horizontal label="Fee income by seller, October" />
+        </ChartFrame>
+        <ChartFrame title="Small counts and zeros" sub="TrendChart · whole-number ticks for a count; a series of zeros keeps one $0 tick">
+          <div className="stack gap-2">
+            <TrendChart rows={DEMO_SMALL} series={BELOW} fmt={fmtCount} axisFmt={fmtCountCompact} height={140} label="Sellers below zero per day" />
+            <TrendChart rows={DEMO_SMALL} series={PAYOUTS} fmt={fmtMoney} axisFmt={fmtMoneyCompact} height={120} label="Payouts paid per day" />
+          </div>
         </ChartFrame>
         <ChartFrame title="Loading" loading height={160}>
           {null}

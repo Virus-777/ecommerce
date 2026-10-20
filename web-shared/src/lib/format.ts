@@ -1,6 +1,12 @@
-/** $1,234.50: prices are USD at launch (plan ch. 21). */
-export const money = (n: number) =>
-  '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+/**
+ * $1,234.50: prices are USD at launch (plan ch. 21). A negative amount is "−$213.30" (minus sign before the dollar,
+ * the same as the statistics tiles and charts), never "$-213.30".
+ */
+export const money = (n: number) => {
+  const v = Number(n);
+  const text = '$' + Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return v < 0 && text !== '$0.00' ? `−${text}` : text;
+};
 
 /** 1,234 */
 export const num = (n: number) => Number(n).toLocaleString('en-US');

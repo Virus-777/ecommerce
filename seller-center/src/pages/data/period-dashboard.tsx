@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { call, useApi } from '@marketly/web-shared/api';
 import { formatMoney, type MoneyValue } from '@marketly/web-shared/lib/format';
@@ -10,6 +10,7 @@ import {
 import { useSellerSession } from '@/app/session';
 import { dayKey, LoadError, SkeletonLines } from './home';
 import { breakdownsOf, kpiOf, REPORT, statDelta, tableOf, type Kpi, type ProductSalesRow, type ReportQuery, type ReportResult } from './reports';
+import { costCoverage } from './statistics';
 
 // Dashboard "Sales by period" (designed in React; no design file): the seller's sales, orders, units, average
 // order, returns and dispatch for the last 30 days, 12 weeks, 12 months or 4 quarters, each compared with the
@@ -119,7 +120,7 @@ function quarterRates(rate: Point[], volume: Point[]): Point[] {
 const money = (cents: number) => formatMoney({ amount: cents, currency: 'USD' });
 const num = (n: number) => n.toLocaleString('en-US');
 
-function KpiCard({ k, label, value, note, loading }: { k?: Kpi; label: string; value?: string; note?: string; loading: boolean }) {
+function KpiCard({ k, label, value, note, loading }: { k?: Kpi; label: string; value?: string; note?: ReactNode; loading: boolean }) {
   return <div className="card pad">{loading ? <span className="sk sk-line" aria-hidden="true" /> : <Stat label={label} value={value ?? k?.display ?? '—'} {...statDelta(k)} note={note} />}</div>;
 }
 
@@ -189,7 +190,8 @@ export function PeriodPerformance({ part = 'summary', today: todaySales }: { par
   const onTime = kpiOf(service.data, 'service.on_time_dispatch');
   const net = kpiOf(earnings.data, 'seller.net_earnings');
   const profit = kpiOf(earnings.data, 'seller.profit');
-  const coverage = kpiOf(earnings.data, 'seller.cost_coverage_pct');
+  // no unit cost on any sale: profit would repeat net earnings, so the tile shows "—" and asks for costs
+  const costs = costCoverage(earnings.data);
   // the figures exist only once the backend has the report; a failed earnings query leaves the sales tiles alone
   const earningsLoading = earnings.isPending && !earnings.isError;
 
@@ -398,7 +400,12 @@ export function PeriodPerformance({ part = 'summary', today: todaySales }: { par
         {canMoney && (
           <>
             <KpiCard k={net} label="Net earnings" loading={earningsLoading} note={earnings.isError ? 'Not available yet' : 'after fees, refunds and charges'} />
-            <KpiCard k={profit} label="Profit" loading={earningsLoading} note={earnings.isError ? 'Not available yet' : coverage ? `costs set for ${coverage.display} of sales` : undefined} />
+            <KpiCard
+              k={costs.state === 'none' ? undefined : profit}
+              label="Profit"
+              loading={earningsLoading}
+              note={earnings.isError ? 'Not available yet' : costs.state === 'none' ? <Link to={`${href('seller/reports')}?view=products`}>Add unit costs to see profit</Link> : (costs.note ?? undefined)}
+            />
           </>
         )}
       </div>
