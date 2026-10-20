@@ -4,14 +4,16 @@ import {
   ChartFrame, ComboChart, DonutChart, donutTable, fmtMoney, fmtMoneyCompact, fmtPercent, LoadError, seriesFromReport, seriesTable, TrendChart, WaterfallChart, waterfallTable, type WaterfallStepInput,
 } from '@marketly/web-shared/ui';
 import { fmtPeriod } from '../data/finance';
-import { kpiOf, metaOf, type ReportQuery } from '../data/reports';
-import { breakdownOf, centsOf, compareNote, KpiTile, M, metaLine, picks, ReportCallouts, ReportTableCard, STATS, unavailable, useSellerReport, useTabLink } from '../data/statistics';
+import { metaOf, type ReportQuery } from '../data/reports';
+import { breakdownOf, centsOf, compareNote, costCoverage, KpiTile, M, metaLine, picks, ReportCallouts, ReportTableCard, STATS, unavailable, useSellerReport, useTabLink } from '../data/statistics';
 
 // Statistics → Earnings and profit (seller.earnings, docs/09 §3.3): net earnings, profit, margin and paid out with
 // their change against the comparison; net earnings against profit per period (with the comparison drawn dashed);
 // how item sales become net earnings and profit (waterfall); fees by type; item sales against product cost with
 // the margin line; and the period table. Item sales, refunds, fees and product cost count by order date; ad
 // spend, service fees, labels, adjustments and payouts by the day they were charged (the report's callout says so).
+// Profit needs unit costs: with none on the period's sales the profit and margin tiles show "—" and a link to the
+// Products tab, and the charts stop at net earnings; with some, the tiles say what share of item sales has a cost.
 
 export function EarningsTab({ query }: { query: ReportQuery }) {
   const report = useSellerReport(STATS.earnings, query);
@@ -21,16 +23,21 @@ export function EarningsTab({ query }: { query: ReportQuery }) {
   const grain = meta?.granularity ?? 'day';
   const range = fmtPeriod(meta?.range).replace(' – ', ' to ');
 
+  // no unit cost on any sale: profit would only repeat net earnings, so it is left out of the tiles and charts
+  const costs = costCoverage(r);
+  const noCosts = costs.state === 'none';
+
   const view = useMemo(() => {
-    const trend = seriesFromReport(r, picks(r, [{ key: M.netEarnings, label: 'Net earnings' }, ...(unavailable(r, M.profit) ? [] : [{ key: M.profit, label: 'Profit' }])]));
+    const withProfit = !noCosts && !unavailable(r, M.profit);
+    const trend = seriesFromReport(r, picks(r, [{ key: M.netEarnings, label: 'Net earnings' }, ...(withProfit ? [{ key: M.profit, label: 'Profit' }] : [])]));
     const combo = seriesFromReport(r, picks(r, [{ key: M.itemSales, label: 'Item sales' }, { key: M.productCost, label: 'Product cost' }, { key: M.marginPct, label: 'Margin', axis: 'right' }]));
-    const waterfall = breakdownOf<WaterfallStepInput>(r, 'waterfall');
+    // without costs the waterfall ends at net earnings (product cost $0, profit = net earnings says nothing)
+    const steps = breakdownOf<WaterfallStepInput>(r, 'waterfall');
+    const waterfall = noCosts ? steps.filter((st) => st.key !== M.productCost && st.key !== M.profit) : steps;
     const fees = breakdownOf<{ key: string | null; label: string; amount?: unknown }>(r, 'fees_by_type').map((f) => ({ key: f.key ?? f.label, label: f.label, value: Math.abs(centsOf(f.amount)) }));
     return { trend, combo, waterfall, fees };
-  }, [r]);
+  }, [r, noCosts]);
 
-  const coverage = kpiOf(r, M.costCoveragePct);
-  const profitNote = coverage && !unavailable(r, M.costCoveragePct) ? `Costs set for ${coverage.display} of item sales` : null;
   const anyMoney = view.trend.rows.some((row) => view.trend.series.some((s) => Number(row[s.key] ?? 0) !== 0));
   const [comboBars, comboLine] = [view.combo.series.filter((s) => s.axis !== 'right'), view.combo.series.find((s) => s.axis === 'right')];
   const hasCosts = view.combo.rows.some((row) => Number(row[comboBars[1]?.key ?? ''] ?? 0) > 0);
@@ -40,6 +47,12 @@ export function EarningsTab({ query }: { query: ReportQuery }) {
       No product costs for these sales yet. <Link to={tabLink('products')}>Add unit costs</Link> to see profit.
     </span>
   );
+  const addCosts = (
+    <>
+      <Link to={tabLink('products')}>Add unit costs</Link> to see profit
+    </>
+  );
+  const trendTitle = view.trend.series.length > 1 ? 'Net earnings and profit' : 'Net earnings';
 
   return (
     <>
@@ -47,31 +60,31 @@ export function EarningsTab({ query }: { query: ReportQuery }) {
       {report.isError && <LoadError error={report.error} title="We couldn’t load your earnings" forbiddenHint="Earnings and profit need the permission to view balances. Ask the store owner if you need them." onRetry={() => void report.refetch()} />}
       <div className="sb-kpis">
         <KpiTile result={r} metricKey={M.netEarnings} label="Net earnings" note={compareNote(r)} />
-        <KpiTile result={r} metricKey={M.profit} label="Profit" note={profitNote} />
-        <KpiTile result={r} metricKey={M.marginPct} label="Margin" />
+        <KpiTile result={r} metricKey={M.profit} label="Profit" note={costs.note} blank={noCosts && addCosts} />
+        <KpiTile result={r} metricKey={M.marginPct} label="Margin" note={costs.note} blank={noCosts && addCosts} />
         <KpiTile result={r} metricKey={M.paidOut} label="Paid out" />
       </div>
       <ChartFrame
         titleAs="h2"
-        title={`Net earnings and profit per ${grain}`}
-        sub="What your sales left after refunds, fees and charges, and after product cost"
+        title={`${trendTitle} per ${grain}`}
+        sub={noCosts ? 'What your sales left after refunds, fees and charges' : 'What your sales left after refunds, fees and charges, and after product cost'}
         loading={!r && !report.isError}
         refreshing={report.isPlaceholderData}
         empty={empty}
         table={seriesTable(view.trend.rows, view.trend.series, fmtMoney, { compareLabel: view.trend.compareLabel })}
       >
-        <TrendChart rows={view.trend.rows} series={view.trend.series} fmt={fmtMoney} axisFmt={fmtMoneyCompact} compareLabel={view.trend.compareLabel} label={`Net earnings and profit per ${grain}, ${range}`} />
+        <TrendChart rows={view.trend.rows} series={view.trend.series} fmt={fmtMoney} axisFmt={fmtMoneyCompact} compareLabel={view.trend.compareLabel} label={`${trendTitle} per ${grain}, ${range}`} />
       </ChartFrame>
       <div className="grid lg2 gap-5">
         <ChartFrame
-          title="From item sales to profit"
+          title={noCosts ? 'From item sales to net earnings' : 'From item sales to profit'}
           sub="Each amount for the whole period"
           loading={!r && !report.isError}
           refreshing={report.isPlaceholderData}
           empty={r && !view.waterfall.length ? 'No sales or charges in this period.' : empty}
           table={waterfallTable(view.waterfall, fmtMoney)}
         >
-          <WaterfallChart steps={view.waterfall} fmt={fmtMoney} axisFmt={fmtMoneyCompact} label={`From item sales to net earnings and profit, ${range}`} />
+          <WaterfallChart steps={view.waterfall} fmt={fmtMoney} axisFmt={fmtMoneyCompact} label={`${noCosts ? 'From item sales to net earnings' : 'From item sales to net earnings and profit'}, ${range}`} />
         </ChartFrame>
         <ChartFrame
           title="Fees by type"

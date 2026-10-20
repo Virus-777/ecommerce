@@ -1,4 +1,5 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
 import { useSearchParams } from 'react-router';
 import { call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { formatMoney, num, type MoneyValue } from '@marketly/web-shared/lib/format';
@@ -99,16 +100,34 @@ export const compareNote = (result?: ReportResult) => {
 };
 
 /**
- * One KPI tile of a report: the backend's display value and comparison delta; "Not available" when the report
- * lists the metric as unavailable; a skeleton until the first result.
+ * How far the profit figures of seller.earnings can be trusted, from seller.cost_coverage_pct (the share of item
+ * sales whose offer has a unit cost):
+ * - 'none': there were item sales but none has a cost, so profit would only repeat net earnings and margin read
+ *   0.0%; the tiles show "—" and ask for unit costs instead;
+ * - 'partial': some sales have a cost; the figures stand with "Costs set for 42.5% of item sales";
+ * - 'full': every sale has a cost, or there were no item sales (nothing is missing).
  */
-export function KpiTile({ result, metricKey, label, note, value }: { result?: ReportResult; metricKey: string; label: string; note?: string | false | null; value?: (k: Kpi) => string }) {
+export function costCoverage(result?: ReportResult): { state: 'none' | 'partial' | 'full'; note: string | null } {
+  const coverage = kpiOf(result, M.costCoveragePct);
+  const sales = kpiOf(result, M.itemSales);
+  if (!coverage || unavailable(result, M.costCoveragePct) || !sales || sales.value <= 0) return { state: 'full', note: null };
+  if (coverage.value <= 0) return { state: 'none', note: null };
+  if (coverage.value < 100) return { state: 'partial', note: `Costs set for ${coverage.display} of item sales` };
+  return { state: 'full', note: null };
+}
+
+/**
+ * One KPI tile of a report: the backend's display value and comparison delta; "Not available" when the report
+ * lists the metric as unavailable; a skeleton until the first result. `blank` shows "—" with that note instead of
+ * the figure (profit and margin when no sale has a unit cost).
+ */
+export function KpiTile({ result, metricKey, label, note, value, blank }: { result?: ReportResult; metricKey: string; label: string; note?: string | false | null; value?: (k: Kpi) => string; blank?: ReactNode }) {
   if (!result) return <div className="card pad">{statSkeleton}</div>;
   const k = kpiOf(result, metricKey);
-  if (!k || unavailable(result, metricKey)) {
+  if (!k || unavailable(result, metricKey) || blank) {
     return (
       <div className="card pad">
-        <Stat label={label} value="—" note="Not available yet" />
+        <Stat label={label} value="—" note={blank || 'Not available yet'} />
       </div>
     );
   }
