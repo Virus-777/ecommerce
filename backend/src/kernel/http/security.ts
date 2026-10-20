@@ -55,7 +55,15 @@ declare module 'fastify' {
 /** Response headers a browser app needs to read across origins */
 export const EXPOSED_HEADERS = 'WWW-Authenticate, X-Request-Id, Idempotent-Replayed, Retry-After';
 /** Request headers the apps may send */
-export const ALLOWED_HEADERS = 'authorization, content-type, idempotency-key, x-app-proof, x-client, x-request-id, x-requested-with';
+export const ALLOWED_HEADERS = 'authorization, content-type, idempotency-key, last-event-id, x-app-proof, x-client, x-request-id, x-requested-with';
+
+/** Headers of every /api, /graphql and /webhooks response. Event streams write them themselves (a stream never reaches onSend). */
+export const apiResponseHeaders = (config: Config): Record<string, string> => ({
+  'cache-control': 'private, no-store',
+  'x-content-type-options': 'nosniff',
+  'referrer-policy': 'no-referrer',
+  ...(config.env === 'production' ? { 'strict-transport-security': 'max-age=31536000; includeSubDomains' } : {}),
+});
 
 function areaOf(url: string): AppArea | undefined {
   const m = /^\/(?:api|graphql)\/(store|seller|admin|public)\b/.exec(url);
@@ -101,10 +109,7 @@ export function installSecurity(app: FastifyInstance, config: Config) {
   });
 
   app.addHook('onSend', async (request, reply, payload) => {
-    if (/^\/(api|graphql|webhooks)\//.test(request.url)) {
-      reply.header('cache-control', 'private, no-store').header('x-content-type-options', 'nosniff').header('referrer-policy', 'no-referrer');
-      if (config.env === 'production') reply.header('strict-transport-security', 'max-age=31536000; includeSubDomains');
-    }
+    if (/^\/(api|graphql|webhooks)\//.test(request.url)) reply.headers(apiResponseHeaders(config));
     // only the middleware's UNAUTHORIZED is about the token; business 401s (INVALID_CREDENTIALS …) are not,
     // nor is a bad file link (no Bearer token can help: the app asks for a new link)
     if (reply.statusCode === 401 && !request.url.startsWith(FILES_PREFIX) && typeof payload === 'string' && payload.includes('"code":"UNAUTHORIZED"')) {

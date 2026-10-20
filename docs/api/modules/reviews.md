@@ -1040,14 +1040,14 @@ Indexes: `(state, due_at)`, `(customer_id)`
 
 | Publishes | When | Payload | Consumed by |
 |---|---|---|---|
-| `reviews.review.published` | A product review becomes visible (new, edited, kept or reinstated) | `{ reviewId: uuid, productId: uuid, sellerId: uuid, rating: int, verified: bool }` | search, trust |
+| `reviews.review.published` | A product review becomes visible (new, edited, kept or reinstated) | `{ reviewId: uuid, productId: uuid, sellerId: uuid, rating: int, verified: bool }` | notifications, search, trust |
 | `reviews.review.updated` | An author edits a review | `{ reviewId: uuid, productId: uuid }` | - |
 | `reviews.review.removed` | A review is removed by moderation or a trust enforcement, or deleted by its author | `{ reviewId: uuid, productId: uuid, sellerId: uuid, customerId: uuid, byModeration: bool, reasonCode: string?, trustEnforcementId: uuid? }` | - |
 | `reviews.report.created` | Content is reported | `{ reportId: uuid, targetType: string, targetId: uuid, reason: string, reporterKind: string }` | notifications |
-| `reviews.feedback.published` | Seller feedback becomes visible | `{ feedbackId: uuid, sellerId: uuid, orderId: uuid, sentiment: string }` | - |
+| `reviews.feedback.published` | Seller feedback becomes visible | `{ feedbackId: uuid, sellerId: uuid, orderId: uuid, sentiment: string }` | notifications |
 | `reviews.feedback.removed` | Seller feedback is removed or deleted | `{ feedbackId: uuid, sellerId: uuid }` | - |
-| `reviews.question.asked` | A question is published (sellers with an offer are told; Official Store questions go to staff) | `{ questionId: uuid, productId: uuid, customerId: uuid, sellerIds: uuid[], officialStore: bool }` | - |
-| `reviews.answer.published` | An answer is published (the asker is told) | `{ answerId: uuid, questionId: uuid, productId: uuid, label: string, askerCustomerId: uuid, sellerId: uuid? }` | - |
+| `reviews.question.asked` | A question is published (sellers with an offer are told; Official Store questions go to staff) | `{ questionId: uuid, productId: uuid, customerId: uuid, sellerIds: uuid[], officialStore: bool }` | notifications |
+| `reviews.answer.published` | An answer is published (the asker is told) | `{ answerId: uuid, questionId: uuid, productId: uuid, label: string, askerCustomerId: uuid, sellerId: uuid? }` | notifications |
 | `reviews.response.published` | A seller or Official Store response is published or held (the reviewer is told when published) | `{ responseId: uuid, sellerId: uuid, targetType: string, targetId: uuid, status: string, customerId: uuid }` | - |
 | `reviews.moderation.decided` | A moderation decision is recorded (reporter and author are notified), including removals and keeps for a trust enforcement | `{ moderationItemId: uuid, contentType: string, contentId: uuid, decision: string, reasonCode: string, author: ContentParty?, reporters: ContentParty[], reporterOutcome: text?, appealUntil: datetime?, trustEnforcementId: uuid? }` | notifications, trust, workqueues |
 | `reviews.appeal.submitted` | An author appeals | `{ appealId: uuid, contentType: string, contentId: uuid }` | - |

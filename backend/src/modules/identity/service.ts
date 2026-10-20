@@ -163,6 +163,11 @@ export class IdentityService implements IdentityPublicApi {
     return this.sessions.touchStaffSession(sessionId);
   }
 
+  /** The same answer without recording activity: open live notification streams check it every heartbeat (kernel/auth/chain.ts) */
+  staffSessionState(sessionId: string): Promise<{ live: boolean; reason?: 'revoked' | 'expired' | 'idle' | 'unknown' }> {
+    return this.sessions.staffSessionState(sessionId);
+  }
+
   async getAccount(accountId: string): Promise<AccountSummary | null> {
     if (!isUuid(accountId)) return null;
     const a = await this.core.repo.getAccount(accountId);

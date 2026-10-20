@@ -30,6 +30,7 @@ export interface EndpointSpec {
   paging?: boolean;
   /** A type, or "binary": the raw request bytes (any content type), received as a Uint8Array */
   body?: TypeExpr;
+  /** A type, null (no content), or "event-stream": the response stays open and carries Server-Sent Events */
   response?: TypeExpr | null;
   status?: number;
   errors?: string[];

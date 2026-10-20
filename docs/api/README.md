@@ -1,6 +1,6 @@
 # Marketly API design
 
-Generated from `docs/api/spec/` by `node docs/api/tools/build.mjs`. 34 modules, 1,352 endpoints.
+Generated from `docs/api/spec/` by `node docs/api/tools/build.mjs`. 34 modules, 1,356 endpoints.
 
 - **GraphQL read layer:** [graphql/README.md](graphql/README.md), composed schemas `graphql/schema.{store,seller,admin}.graphql`, screen queries in `graphql/operations/`
 - **OpenAPI 3.1:** [openapi.json](openapi.json) (open in Swagger UI, Redoc or Postman)
@@ -12,8 +12,8 @@ Generated from `docs/api/spec/` by `node docs/api/tools/build.mjs`. 34 modules, 
 | Area | Prefix | Who | Auth | Endpoints |
 |---|---|---|---|---|
 | Store API | `/api/store/{module}` | Customers and guests on the website and the Android app | Every request carries a token: a visitor token (guests, issued when the app opens) or a customer access token. | 270 |
-| Seller API | `/api/seller/{module}` | Seller owners and seller staff in Seller Center (website + Android app) | Seller member session. Every request acts for one seller account; seller member permissions apply. | 273 |
-| Admin API | `/api/admin/{module}` | Internal staff in the Admin Center and Operations Center | Staff session. Role permissions and approval limits apply. | 779 |
+| Seller API | `/api/seller/{module}` | Seller owners and seller staff in Seller Center (website + Android app) | Seller member session. Every request acts for one seller account; seller member permissions apply. | 274 |
+| Admin API | `/api/admin/{module}` | Internal staff in the Admin Center and Operations Center | Staff session. Role permissions and approval limits apply. | 782 |
 | Public API | `/api/public/{module}` | Anyone (sign-in, registration, public settings) | Visitor token of any app. Refresh and sign-out take the refresh token; the bootstrap endpoint takes an app proof. | 21 |
 | Webhooks | `/webhooks/{module}` | Payment, carrier and email providers | Provider signature header, verified per provider | 9 |
 
@@ -27,8 +27,8 @@ Every endpoint needs a token ([../03-auth-middleware.md](../03-auth-middleware.m
 | Store API | `shopper` | A store token that can hold a cart: visitor (guest) or customer | 103 |
 | Store API | `customer` | Signed-in customer | 102 |
 | Store API | `account` | Any signed-in account, any realm (self-service security endpoints) | 11 |
-| Seller API | `seller` | Seller member acting for the seller in the token; optional `permission` narrows it | 273 |
-| Admin API | `staff` | Staff member (email and password sign-in); optional `permission` narrows it | 779 |
+| Seller API | `seller` | Seller member acting for the seller in the token; optional `permission` narrows it | 274 |
+| Admin API | `staff` | Staff member (email and password sign-in); optional `permission` narrows it | 782 |
 | Public API | `visitor` | Any valid token of the app: a visitor token (before sign-in) or a signed-in access token | 18 |
 | Public API | `refresh` | Refresh token only (website: the cookie of the app named by audience in the body; Android: refreshToken in the body) | 2 |
 | Public API | `bootstrap` | No token: an app proof (Play Integrity or bot challenge). Only POST /api/public/identity/app-sessions | 1 |
@@ -43,7 +43,7 @@ Every endpoint needs a token ([../03-auth-middleware.md](../03-auth-middleware.m
 | [backups](modules/backups.md) | 1 | Backups of the whole system (database, uploaded files, settings and keys) from the Admin Center: the list of backups on the server, a backup now, downloads, uploads and restores with two-person approval. The server's root backup service (deploy/linux ops.sh) does the work; this module asks it through request files and reports what it did. | access, identity | 10 |
 | [identity](modules/identity.md) | 1 | Who someone is and how they prove it: accounts for customers, seller members and staff, credentials, email verification, sessions and refresh tokens for the website and the Android app, password recovery, 2-step verification, signed-in devices, guest sessions and the security activity log. | - | 46 |
 | [media](modules/media.md) | 1 | Every uploaded or generated file: images, video and documents. Uploads and signed download links, scanning and processing, renditions, alt text, ownership (seller, staff, customer, platform), image standard checks, where each file is used, and the rules for deleting, removing and retaining files (files in use or kept as evidence cannot be deleted). | - | 32 |
-| [notifications](modules/notifications.md) | 1 | Who is told what, on which channel: notification topics for customers, sellers and staff, routing from platform events to recipients (staff by role, with backups), templates with versions and preview, in-app inboxes for the store, Seller Center and Admin Center, email delivery with retries and suppression, seller and staff channel preferences, promotional broadcasts under consent, and Android push devices (phase 3). | identity | 52 |
+| [notifications](modules/notifications.md) | 1 | Who is told what, on which channel: notification topics for customers, sellers and staff, routing from platform events to recipients (staff by role, with backups), templates with versions and preview, in-app inboxes for the store, Seller Center and Admin Center, email delivery with retries and suppression, seller and staff channel preferences, promotional broadcasts under consent, and Android push devices (phase 3). | identity | 56 |
 | [reports](modules/reports.md) | 1 | Business reporting with stated meanings: metric definitions with a named owner and versions, a report catalogue grouped by business area, report queries with an explicit date basis, currency and time zone, the admin and seller dashboards, and authorized export jobs. All figures come from read models fed by other modules' events, never from their tables. | - | 33 |
 | [settings](modules/settings.md) | 1 | Market-level platform settings: country and service region, currency, time zone, business hours, support contacts, guest checkout, Android app versions and feature flags, plus the effective-dated change process (impact preview, approval, schedule, apply) for every runtime setting a module declares. It also assembles the Admin Center settings page from sections owned by other modules. | access | 17 |
 | [workqueues](modules/workqueues.md) | 1 | The Operations Center's shared to-do system: queue definitions with an owner role, a named lead, a backup and an escalation route, and work items raised from other modules' events (overdue dispatch, low stock, waiting approvals, cases past target, failed payouts, mismatches) with deadlines, assignment and automatic escalation. Also the My work queues view, the dashboard's needs-attention tiles, the day-end review, the daily routine and saved filters. | access | 36 |
@@ -230,6 +230,42 @@ Each area allows its own app's origins (`CORS_STORE_ORIGINS`, `CORS_SELLER_ORIGI
 4. 426 `UPGRADE_REQUIRED`: show the update screen (`details.updateUrl`). 429: wait `Retry-After` seconds. 503: retry with backoff.
 5. Send one `Idempotency-Key` per user action on idempotent endpoints, the same on every retry.
 6. Show or log the `X-Request-Id` of a failed response when reporting a problem.
+
+## Live notifications (Server-Sent Events)
+
+Seller Center and Admin Center receive new inbox notices as they happen: `GET /api/seller/notifications/stream` and `GET /api/admin/notifications/stream`. Each answers `text/event-stream` (UTF-8) and stays open. Customers have no stream (the Android app polls the inbox).
+
+**Request.** `Authorization: Bearer <access token>` like every call: read the stream with `fetch` and a reader (not `EventSource`, which cannot send the header; never put a token in the URL). Optional `Last-Event-ID: <notice id>`, the id of the last notice received. Refusals (401, 403, 503) come before the stream opens, as normal JSON errors.
+
+**Wire format.**
+
+```
+retry: 5000
+
+id: <noticeId>          catch-up notices first, then live ones
+event: notice
+data: <Notice JSON>     exactly one item of GET …/notifications/inbox for this caller
+
+event: ready
+data: {"at":"<ISO time>","caughtUp":<int>}
+
+: ping                  a comment every 25 s (keeps proxies and firewalls from closing the line)
+
+event: end
+data: {"reason":"signed_out" | "session_idle" | "restart" | "max_age"}
+```
+
+- **Catch-up:** with `Last-Event-ID`, the inbox notices created after that notice, only from the last 15 minutes, at most 20, oldest first, then `ready`. An unknown id, or no header: just `ready`.
+- **Who gets a notice:** exactly who sees it in GET /inbox. Staff: the notices routed to them (role, backup, direct), with their own `routedTo`. Sellers: workspace notices whose topic the member receives, and notices addressed to the member. A notice is sent only after it is saved.
+- **`end`**, after which the server closes the response: `signed_out` (session or account revoked, or the staff session expired: stop; the next normal request leads to sign-in), `session_idle` (the staff session went idle: stop), `restart` (the server is shutting down: reconnect after `retry`), `max_age` (seller streams end after 60 minutes so permissions are read again: reconnect at once). Staff streams have no maximum age.
+- **Staff activity:** an open stream is not activity. The connect request counts once, like any request; after that the server re-checks the session at every heartbeat without touching it, so the idle sign-out (identity setting `staffIdleMinutes`) still applies.
+
+**Client rules.**
+
+1. One stream per browser per app: the tab holding the Web Lock `marketly-live:<audience>` (`navigator.locks.request`) opens the stream and relays every event to the other tabs over `BroadcastChannel('marketly-live:<audience>')`; when it closes, another tab takes the lock. Without Web Locks every tab opens its own stream.
+2. When the connection drops (without `end`), reconnect with backoff 1 s, 2 s, 5 s, 10 s, then every 30 s, plus up to 1 s of jitter, sending `Last-Event-ID` = the last notice id.
+3. Tokens: Seller Center may refresh the session as usual before connecting. Admin Center must never refresh just for the stream (a refresh is staff activity and would defeat the idle sign-out): it uses the current access token while it is valid; once it has expired, it waits (checking every 30 s) until normal app activity has refreshed it, then reconnects.
+4. On `ready` and on every `notice`, refetch the inbox and its counts (the bell).
 
 ## Constants
 

@@ -52,6 +52,13 @@ export const MARKETING_OFFERS_VIEW = 'offers.offers.view';
 /** News for customers (docs/06-news.md): the Marketing Manager writes posts; Content Managers (content.*) also publish */
 export const NEWS_MANAGE = 'content.news.manage';
 export const NEWS_PUBLISH = 'content.news.publish';
+/**
+ * Announcements from Marketly to sellers (notifications spec, live topics 2026-10-20): the Seller Manager, who runs the
+ * relationship with sellers, and the Platform Administrator send them. Installs seeded before it get it from access
+ * migration 2026-10-20-announcement-keys.
+ */
+export const ANNOUNCEMENTS_SEND = 'notifications.announcements.send';
+export const ANNOUNCEMENT_ROLES = ['seller_manager', 'platform_administrator'] as const;
 
 export const SYSTEM_ROLES: SeedRole[] = [
   {
@@ -84,6 +91,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
       'settings.flags.manage',
       'notifications.templates.*',
       'notifications.routing.manage',
+      ANNOUNCEMENTS_SEND,
       // reads the action history: told when the hash-chain check fails, and proposes retention changes
       'audit.entries.view',
       // may propose shortening the retention period (the Business Owner approves audit.retention.change)
@@ -191,7 +199,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Sellers',
     description: 'Seller applications, accounts, performance and restrictions.',
     escalationRoleKey: BUSINESS_OWNER,
-    permissions: ['sellers.*', 'offers.offers.view', 'offers.offers.remove', FS_REVIEW, OWNER_DECIDES, ...QUEUES],
+    permissions: ['sellers.*', 'offers.offers.view', 'offers.offers.remove', FS_REVIEW, OWNER_DECIDES, ANNOUNCEMENTS_SEND, ...QUEUES],
     limits: {
       'sellers.sellers.restrict': PERMITTED,
       'sellers.sellers.suspend': PERMITTED,

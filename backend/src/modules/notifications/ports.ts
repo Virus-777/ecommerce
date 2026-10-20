@@ -17,6 +17,7 @@ export type StaffPrefRow = NotificationsDb['staff_preferences'];
 export type PushDeviceRow = NotificationsDb['push_devices'];
 export type SuppressionRow = NotificationsDb['suppressions'];
 export type BroadcastRow = NotificationsDb['broadcasts'];
+export type AnnouncementRow = NotificationsDb['announcements'];
 
 /** A notice as one person sees it (with their read state) */
 export type InboxRow = NoticeRow & { read_at: Date | null; archived_at: Date | null; reason: string | null; covering_for: string | null };

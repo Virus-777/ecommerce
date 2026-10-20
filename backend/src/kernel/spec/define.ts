@@ -39,8 +39,10 @@ export interface EndpointDef {
   readonly body?: () => z.ZodType;
   /** binary: the body is the raw request bytes (any content type), handed to the handler as a stream (never buffered) */
   readonly bodyFormat?: 'binary';
-  /** null → no content */
+  /** null → no content (or an event stream, below) */
   readonly response: (() => z.ZodType) | null;
+  /** event-stream: the response stays open and carries Server-Sent Events (kernel/http/event-stream.ts); GET, status 200 */
+  readonly responseFormat?: 'event-stream';
   readonly status: number;
   readonly errors?: readonly string[];
   /** Idempotency-Key header required */

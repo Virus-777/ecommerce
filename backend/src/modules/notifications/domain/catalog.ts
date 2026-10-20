@@ -250,6 +250,13 @@ const VARIABLE_EXAMPLES: Record<string, string> = {
   effective: 'Nov 1',
   days: '90',
   version: '2026-11',
+  // live topics (2026-10-20): refunds, reviews, feedback, questions and announcements for sellers and the Official Store
+  'review.rating': '4',
+  'review.kind': 'verified purchase',
+  'feedback.sentiment': 'positive',
+  'case.topic': 'fees and payouts',
+  'announcement.title': 'Carrier pickups move to 6 PM from Nov 1',
+  'announcement.body': 'From Nov 1, carriers collect seller packages at 6 PM instead of 4 PM. Dispatch deadlines stay the same.',
 };
 
 /* ------------------------------------------------------------------ topics */
@@ -557,6 +564,25 @@ export const TOPICS: readonly TopicDef[] = [
   se('case.decided', { group: 'returns_cases', label: 'Case decision', opens: 'Case', triggers: ['support.case.decided'], pref: 'returns_cases', permission: 'support.cases.respond', icon: 'scale',
     t: { title: 'Decision on case {{case.ref}}', body: 'Decision: {{case.outcome}}. You can appeal until {{appeal.deadline}}.', subject: 'Decision on case {{case.ref}}', button: 'View decision' } }),
 
+  /* ---------------------------------------------------------------- seller: live topics (2026-10-20)
+   * Refunds, reviews, store feedback, customer questions and announcements from Marketly. A refund notice says the
+   * refund was approved and handed to payments, never that the customer has the money (spec notes). */
+  se('refund.approved', { group: 'returns_cases', label: 'Refund approved', opens: 'Seller return', triggers: ['returns.refund.approved'], pref: 'returns_cases', permission: 'returns.refunds.issue', icon: 'banknote',
+    description: 'A refund on one of the seller\'s orders was approved and handed to payments (not sent when a member of the seller approved it)',
+    t: { title: 'Refund approved on {{order.ref}}', body: 'A refund of {{refund.amount}} to the customer on order {{order.ref}} was approved and handed to payments. We tell the customer when it is sent.', subject: 'Refund approved on {{order.ref}}', button: 'View refund' } }),
+  se('review.new', { group: 'products', label: 'New product review', opens: 'Reviews', triggers: ['reviews.review.published'], pref: 'products', permission: 'reviews.responses.post', icon: 'star',
+    description: 'A customer reviewed one of the seller\'s products (once per review; edits send nothing again)',
+    t: { title: 'New {{review.rating}}-star review', body: 'A customer left a {{review.rating}}-star review on one of your products ({{review.kind}}). You can respond to it in Seller Center.', subject: 'New {{review.rating}}-star review of your product', button: 'View review' } }),
+  se('feedback.new', { group: 'products', label: 'New store feedback', opens: 'Reviews', triggers: ['reviews.feedback.published'], pref: 'products', permission: 'reviews.responses.post', icon: 'thumbs-up',
+    description: 'A customer left feedback on the seller\'s store after an order (once per feedback)',
+    t: { title: 'New {{feedback.sentiment}} store feedback', body: 'A customer left {{feedback.sentiment}} feedback about an order from your store. You can respond to it in Seller Center.', subject: 'New {{feedback.sentiment}} feedback on your store', button: 'View feedback' } }),
+  se('question.asked', { group: 'products', label: 'New customer question', opens: 'Questions', triggers: ['reviews.question.asked'], pref: 'products', permission: 'reviews.responses.post', icon: 'circle-help', tone: 'warning', action: true,
+    description: 'A customer asked about a product the seller has an active offer on; action required until the seller answers',
+    t: { title: 'New customer question', body: 'A customer asked a question about a product you sell. Answer it so other shoppers see the answer too.', subject: 'A customer asked about a product you sell', button: 'Answer' } }),
+  se('announcement', { group: 'account_finance', label: 'Announcement from Marketly', opens: 'Seller Center', icon: 'megaphone', supports: ['in_app', 'email'],
+    description: 'A message from Marketly staff to sellers (Admin › Notifications › Announcements); essential, never promotional',
+    t: { title: '{{announcement.title}}', body: '{{announcement.body}}', subject: 'Marketly: {{announcement.title}}', button: 'Open in Seller Center' } }),
+
   /* ---------------------------------------------------------------- seller: products */
   se('product.changes_requested', { group: 'products', label: 'Requested corrections', opens: 'Product', triggers: ['catalog.product.changes_requested'], pref: 'products', permission: 'catalog.products.submit', icon: 'square-pen', tone: 'warning', action: true,
     t: { title: 'Corrections requested', body: 'Please correct your product and resubmit: {{product.reason}}.', subject: 'Corrections requested for your product', button: 'Fix product' } }),
@@ -701,6 +727,27 @@ export const TOPICS: readonly TopicDef[] = [
   st('official_store.message_received', { group: 'Support', label: 'Official Store: new customer message', opens: 'Conversation', triggers: ['messaging.message.sent'], roles: ['official_store_manager'], action: true, icon: 'message-circle', tone: 'warning',
     description: 'A customer wrote to the Official Store; needs an answer until the conversation is replied to',
     t: { title: 'New message to the Official Store', body: '{{message.from}} wrote to the Official Store. Reply within 24 hours.', subject: 'New message to the Official Store', button: 'Reply' } }),
+
+  /* ---------------------------------------------------------------- staff: live topics (2026-10-20)
+   * The Official Store has no seller members, so its counterparts of the seller notices go to the Official Store
+   * Manager role; a seller's support request goes to the role of the case's team. */
+  st('official_store.order_new', { group: 'Operations', label: 'Official Store: new order', opens: 'Order', triggers: ['orders.order.accepted'], roles: ['official_store_manager'], icon: 'shopping-bag', tone: 'brand',
+    t: { title: 'New Official Store order {{order.ref}}', body: 'A customer ordered from the Official Store: {{order.ref}} ({{order.total}}). Dispatch by {{due.date}}.', subject: 'New Official Store order {{order.ref}}', button: 'Open order' } }),
+  st('official_store.return_requested', { group: 'Returns', label: 'Official Store: return request', opens: 'Return', triggers: ['returns.return.requested'], roles: ['official_store_manager'], action: true, icon: 'rotate-ccw', tone: 'warning',
+    description: 'A customer asked to return Official Store items; action required until the return is approved or rejected',
+    t: { title: 'Official Store return request {{return.ref}}', body: 'A customer asked to return Official Store items from {{order.ref}} ({{return.reason}}). Respond by {{due.date}}.', subject: 'Official Store return request {{return.ref}}', button: 'Respond' } }),
+  st('official_store.refund_approved', { group: 'Returns', label: 'Official Store: refund approved', opens: 'Return', triggers: ['returns.refund.approved'], roles: ['official_store_manager'], icon: 'banknote',
+    t: { title: 'Refund approved on {{order.ref}}', body: 'A refund of {{refund.amount}} to the customer on Official Store order {{order.ref}} was approved and handed to payments. The customer is told when it is sent.', subject: 'Official Store refund approved on {{order.ref}}', button: 'View refund' } }),
+  st('official_store.review_new', { group: 'Support', label: 'Official Store: new product review', opens: 'Official Store reviews', triggers: ['reviews.review.published'], roles: ['official_store_manager'], icon: 'star',
+    t: { title: 'New {{review.rating}}-star Official Store review', body: 'A customer left a {{review.rating}}-star review on an Official Store product ({{review.kind}}).', subject: 'New {{review.rating}}-star Official Store review', button: 'View review' } }),
+  st('official_store.feedback_new', { group: 'Support', label: 'Official Store: new store feedback', opens: 'Official Store reviews', triggers: ['reviews.feedback.published'], roles: ['official_store_manager'], icon: 'thumbs-up',
+    t: { title: 'New {{feedback.sentiment}} Official Store feedback', body: 'A customer left {{feedback.sentiment}} feedback about an Official Store order.', subject: 'New {{feedback.sentiment}} Official Store feedback', button: 'View feedback' } }),
+  st('official_store.question_asked', { group: 'Support', label: 'Official Store: new customer question', opens: 'Official Store questions', triggers: ['reviews.question.asked'], roles: ['official_store_manager'], action: true, icon: 'circle-help', tone: 'warning',
+    description: 'A customer asked about a product the Official Store sells; action required until Marketly staff answer',
+    t: { title: 'New question about an Official Store product', body: 'A customer asked a question about a product the Official Store sells. Answer it so other shoppers see the answer too.', subject: 'New question about an Official Store product', button: 'Answer' } }),
+  st('seller.support_request', { group: 'Sellers', label: 'Seller support request', opens: 'Case', triggers: ['support.case.opened'], roles: ['seller_manager'], action: true, icon: 'life-buoy', tone: 'warning',
+    description: "A seller contacted Marketly (Seller Center › Help); action required until a staff owner is assigned or the case is decided. Goes to the role of the case's team (Seller Manager for seller topics)",
+    t: { title: 'Seller support request {{case.ref}}', body: 'A seller contacted Marketly about {{case.topic}} ({{case.ref}}). Reply by {{due.date}}.', subject: 'Seller support request {{case.ref}}', button: 'Open request' } }),
   st('approval.waiting', { group: 'Approvals', label: 'Waiting approval', opens: 'Approval', triggers: ['access.approval.requested'], action: true, icon: 'user-check', tone: 'warning',
     t: { title: 'Approval needed: {{approval.summary}}', body: '{{approval.by}} asked for your approval: {{approval.summary}}. Due {{due.date}}.', subject: 'Approval needed: {{approval.summary}}', button: 'Review request' } }),
   st('approval.second_needed', { group: 'Approvals', label: 'Second approval needed', opens: 'Approval', triggers: ['access.approval.partially_approved'], action: true, icon: 'user-check', tone: 'warning',

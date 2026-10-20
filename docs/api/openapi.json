@@ -64629,6 +64629,70 @@
         "x-phase": 1
       }
     },
+    "/api/seller/notifications/stream": {
+      "get": {
+        "operationId": "notifications.streamSellerInbox",
+        "tags": [
+          "Seller API · Notifications"
+        ],
+        "summary": "Live notices for my Seller Center inbox (Server-Sent Events)",
+        "description": "The notices GET /inbox shows this member (workspace notices whose topic the member receives, and notices to the member), as they are created. Events: `notice` (id: the notice id; data: one Notice exactly as GET /inbox returns it to this caller), sent only after the notice is saved; `ready` (data { at, caughtUp }) once the catch-up is sent; `end` (data { reason }) just before the server closes the stream. A `: ping` comment every 25 s keeps proxies from closing the line. With the Last-Event-ID header (the id of the last notice received), first the notices of this inbox created after that one, only from the last 15 minutes, at most 20, oldest first; an unknown id catches up nothing. End reasons: `signed_out` (the session or account was revoked: stop; the next request leads to sign-in), `restart` (the server is shutting down: reconnect after retry), `max_age` (after 60 minutes, so permissions and topics are read again: reconnect at once). Wire format and client rules: docs/api/README.md, \"Live notifications\".\n\n**Screens:** seller/notifications",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A stream of Server-Sent Events (text/event-stream, UTF-8): the response stays open and the server writes each event as it happens. The endpoint description names the event types.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "notifications",
+        "x-area": "seller",
+        "x-auth": "seller",
+        "x-screens": [
+          "seller/notifications"
+        ],
+        "x-phase": 1
+      }
+    },
     "/api/seller/notifications/inbox/{id}/read": {
       "post": {
         "operationId": "notifications.markSellerRead",
@@ -65567,6 +65631,70 @@
         "x-screens": [
           "admin/inbox",
           "admin/dashboard"
+        ],
+        "x-phase": 1
+      }
+    },
+    "/api/admin/notifications/stream": {
+      "get": {
+        "operationId": "notifications.streamStaffInbox",
+        "tags": [
+          "Admin API · Notifications"
+        ],
+        "summary": "Live notices for my Admin Center inbox (Server-Sent Events)",
+        "description": "The notices GET /inbox shows this staff member (routed to them by role, as a backup or directly), as they are created, with their own reason and cover. Events: `notice` (id: the notice id; data: one Notice exactly as GET /inbox returns it to this caller), sent only after the notice is saved; `ready` (data { at, caughtUp }) once the catch-up is sent; `end` (data { reason }) just before the server closes the stream. A `: ping` comment every 25 s keeps proxies from closing the line. With the Last-Event-ID header (the id of the last notice received), first the notices of this inbox created after that one, only from the last 15 minutes, at most 20, oldest first; an unknown id catches up nothing. The open stream is not activity: the connect request counts once, and staffIdleMinutes still signs out a person who only has the stream open. End reasons: `signed_out` (the session or account was revoked, or the session expired: stop), `session_idle` (the staff session went idle: stop), `restart` (the server is shutting down: reconnect after retry). No maximum age. Wire format and client rules: docs/api/README.md, \"Live notifications\".\n\n**Screens:** admin/inbox",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A stream of Server-Sent Events (text/event-stream, UTF-8): the response stays open and the server writes each event as it happens. The endpoint description names the event types.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "notifications",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-screens": [
+          "admin/inbox"
         ],
         "x-phase": 1
       }
@@ -68710,6 +68838,222 @@
         "x-area": "admin",
         "x-auth": "staff",
         "x-permission": "notifications.broadcasts.manage",
+        "x-screens": [
+          "admin/notifications"
+        ],
+        "x-audited": true,
+        "x-phase": 1
+      }
+    },
+    "/api/admin/notifications/announcements": {
+      "get": {
+        "operationId": "notifications.listAnnouncements",
+        "tags": [
+          "Admin API · Notifications"
+        ],
+        "summary": "Announcements sent to sellers, newest first",
+        "description": "**Permission:** `notifications.announcements.send`\n\n**Screens:** admin/notifications",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from the previous response. Used by the Android app's infinite scroll.",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Opaque cursor from the previous response. Used by the Android app's infinite scroll."
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "1-based page number. Used by the website's numbered pages.",
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "1-based page number. Used by the website's numbered pages."
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Items per batch, 1–100, default 24",
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "Items per batch, 1–100, default 24"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/notifications.Announcement"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Pass as ?cursor= for the next batch (app). Null at the end."
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "totalPages": {
+                      "type": "integer"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "notifications",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "notifications.announcements.send",
+        "x-screens": [
+          "admin/notifications"
+        ],
+        "x-phase": 1
+      },
+      "post": {
+        "operationId": "notifications.sendAnnouncement",
+        "tags": [
+          "Admin API · Notifications"
+        ],
+        "summary": "Send a message from Marketly to sellers (in-app and email)",
+        "description": "Topic seller.announcement (essential, not promotional: no consent check; owners always get the email, other members by their channel choice). To the chosen sellers, or with no sellerIds to every active seller (approved or restricted) when it is sent. Each seller workspace gets one notice (dedupe announcement:<id>) linking to the given Seller Center screen, else seller/notifications. The sends happen before the answer; 202 says the notices are created and their emails queued.\n\n**Permission:** `notifications.announcements.send`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/notifications",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/notifications.AnnouncementInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "announcement": {
+                      "$ref": "#/components/schemas/notifications.Announcement"
+                    }
+                  },
+                  "required": [
+                    "announcement"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "notifications",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "notifications.announcements.send",
         "x-screens": [
           "admin/notifications"
         ],
@@ -182822,6 +183166,122 @@
           "contentType",
           "sizeBytes",
           "downloadUrl"
+        ]
+      },
+      "notifications.AnnouncementLink": {
+        "type": "object",
+        "properties": {
+          "screen": {
+            "type": "string",
+            "description": "A Seller Center screen id (seller/…), e.g. seller/help or seller/store; the notice opens it like any NoticeLink (screen + id)"
+          },
+          "id": {
+            "type": "string",
+            "description": "The record the screen opens, 1–200 characters"
+          },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Button text, at most 40 characters (default Read more)"
+          }
+        },
+        "required": [
+          "screen",
+          "id"
+        ]
+      },
+      "notifications.AnnouncementInput": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "1–120 characters"
+          },
+          "body": {
+            "type": "string",
+            "description": "Plain text, 1–2000 characters"
+          },
+          "sellerIds": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "1–500 seller ids (each must be a known seller); omitted: every active seller (approved or restricted)"
+          },
+          "link": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/notifications.AnnouncementLink"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the notice opens; omitted: the seller's notifications page"
+          }
+        },
+        "required": [
+          "title",
+          "body"
+        ]
+      },
+      "notifications.Announcement": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "audience": {
+            "type": "string",
+            "enum": [
+              "all",
+              "chosen"
+            ],
+            "description": "all: every active seller when it was sent; chosen: the sellerIds of the request"
+          },
+          "sellerCount": {
+            "type": "integer",
+            "description": "Seller workspaces it was sent to"
+          },
+          "link": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/notifications.AnnouncementLink"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sentBy": {
+            "$ref": "#/components/schemas/Actor"
+          },
+          "sentAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "body",
+          "audience",
+          "sellerCount",
+          "sentBy",
+          "sentAt"
         ]
       },
       "offers.Offer": {

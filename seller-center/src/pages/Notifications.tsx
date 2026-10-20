@@ -1,14 +1,14 @@
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { call, errorMessage, useApi, type components } from '@marketly/web-shared/api';
+import { call, errorMessage, LiveAlertSettings, useApi, type components } from '@marketly/web-shared/api';
 import { isoInText } from '@marketly/web-shared/lib/format';
 import { SellerLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
-import { href, type ScreenId } from '@marketly/web-shared/routes';
+import { href } from '@marketly/web-shared/routes';
 import { Alert, Badge, Button, Card, Deadline, EmptyState, Icon, iconFor, PageHeader, Switch } from '@marketly/web-shared/ui';
-import { useSellerSession } from '@/app/session';
-import { dayKey, deadlineLabel, deadlineTone, LoadError, screenHref, shortDate, SkeletonLines, time, weekdayDate, date } from './data/home';
+import { LIVE_FALLBACK, useSellerSession } from '@/app/session';
+import { dayKey, deadlineLabel, deadlineTone, LoadError, noticeHref, shortDate, SkeletonLines, time, weekdayDate, date } from './data/home';
 
 // Design: pages/seller/seller-notifications.html (no views).
 // API: GET /api/seller/notifications/inbox (group, unreadOnly, cursor: "Load older notices"),
@@ -37,20 +37,6 @@ function whenOf(iso: string, now = new Date()): When {
   return now.getTime() - new Date(iso).getTime() < 7 * 86_400_000 ? 'Earlier this week' : 'Older';
 }
 const stamp = (iso: string, w: When) => (w === 'Today' ? time(iso) : w === 'Earlier this week' ? weekdayDate(iso) : date(iso));
-
-/** Where the publishing module shows the record; the list screen when the link lacks what the detail screen needs. */
-const FALLBACK: Partial<Record<string, ScreenId>> = {
-  'seller/order': 'seller/orders',
-  'seller/return': 'seller/returns',
-  'seller/statement': 'seller/finance',
-  'seller/help-article': 'seller/help',
-};
-function noticeHref(n: Notice): string | undefined {
-  const l = n.link;
-  // Statement routes also take the statement id, so a statement notice without a ref opens the statement.
-  const ref = l.ref ?? (l.screen === 'seller/statement' ? l.id : null);
-  return screenHref(l.screen, null, ref ? { ref } : undefined) ?? (FALLBACK[l.screen] ? href(FALLBACK[l.screen]!) : undefined);
-}
 
 /** urgent = red edge + danger badge; action = amber edge + warning badge (open action notices only). */
 function kindOf(n: Notice): 'urgent' | 'action' | undefined {
@@ -99,7 +85,7 @@ export default function Notifications() {
   const [archived, setArchived] = useState(false);
   const [archivedN, setArchivedN] = useState<number | null>(null);
 
-  const summary = useQuery({ queryKey: ['notifications', 'summary', sellerId], queryFn: () => call(api.GET('/api/seller/notifications/inbox/summary')), refetchInterval: 60_000 });
+  const summary = useQuery({ queryKey: ['notifications', 'summary', sellerId], queryFn: () => call(api.GET('/api/seller/notifications/inbox/summary')), refetchInterval: LIVE_FALLBACK });
   const prefs = useQuery({ queryKey: ['notifications', 'preferences', sellerId], queryFn: () => call(api.GET('/api/seller/notifications/preferences')), staleTime: 5 * 60_000 });
   const inbox = useInfiniteQuery({
     queryKey: ['notifications', 'inbox', sellerId, { group: cat, unreadOnly, archived }],
@@ -145,6 +131,8 @@ export default function Notifications() {
         sub={s ? `${s.unread} unread · ${s.actionRequired} need action. Times in Pacific Time.` : 'Times in Pacific Time.'}
         actions={
           <>
+            {/* Desktop alerts and sound for live notices in this browser (toasts always show). */}
+            <LiveAlertSettings audience="seller" />
             <Button variant="secondary" size="sm" icon="check-check" onClick={() => markAll.mutate()} disabled={!s?.unread || markAll.isPending}>
               Mark all as read
             </Button>

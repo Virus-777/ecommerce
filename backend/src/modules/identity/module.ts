@@ -20,7 +20,7 @@ import { IdentityService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '2.1.0',
+  version: '2.2.0',
   schemas,
   mongoMigrations,
   register(ctx) {

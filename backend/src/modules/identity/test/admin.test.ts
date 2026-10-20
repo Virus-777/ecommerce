@@ -316,6 +316,22 @@ describe('staff session idle timeout (checked on every admin request)', () => {
     expect((await kit.call('POST', `${PUBLIC}/sessions/refresh`, { body: { refreshToken: t.refreshToken } })).status).toBe(401);
   });
 
+  it('staffSessionState gives the same answer without recording activity (live notification streams)', async () => {
+    const s = await staffMember('Sam Stream');
+    const id = s.tokens.sessionId;
+    await lastActive(id, 10 * 60_000);
+    const before = await activeAt(id);
+    expect(await identity.staffSessionState(id)).toEqual({ live: true });
+    expect(await activeAt(id), 'never writes last_active_at').toBe(before);
+    // idle after staffIdleMinutes (30) without a request, whatever the stream asks
+    await lastActive(id, 31 * 60_000);
+    expect(await identity.staffSessionState(id)).toEqual({ live: false, reason: 'idle' });
+    expect(await identity.touchStaffSession(id)).toEqual({ live: false, reason: 'idle' });
+    await sessions().update(id, { revoked_at: kit.clock.now(), revoke_reason: 'test' });
+    expect(await identity.staffSessionState(id)).toEqual({ live: false, reason: 'revoked' });
+    expect(await identity.staffSessionState(newId())).toEqual({ live: false, reason: 'unknown' });
+  });
+
   it('refuses a session ended between revocation polls', async () => {
     const s = await staffMember('Rex Revoked');
     const url = `${ADMIN}/accounts/${s.accountId}`;

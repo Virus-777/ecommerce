@@ -3,6 +3,7 @@
  *   URL      the area prefix from common.json + the spec path: /api/<area>/<module><path>, /webhooks/<module><path>
  *   schema   params, query (+ cursor/page/limit), body and response from the spec (Zod), also for /docs
  *   hooks    the authorization chain (kernel/auth/chain.ts) → validation → Idempotency-Key → step-up → handler
+ *   streams  "response": "event-stream" endpoints get an open EventStream (event-stream.ts) instead of sending a body
  */
 import type { FastifyInstance, preHandlerHookHandler } from 'fastify';
 import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
@@ -16,7 +17,9 @@ import type { Config } from '../config/index.js';
 import { errorInfo } from '../errors/index.js';
 import { toPageRequest } from '../lib/pagination.js';
 import type { AuthKind, EndpointDef } from '../spec/define.js';
+import { EVENT_STREAM_TEXT, EventStreams } from './event-stream.js';
 import { hashRequest, type IdempotencyStore } from './idempotency.js';
+import { apiResponseHeaders } from './security.js';
 import type { Handler, RouteSet } from './index.js';
 
 export type { WebhookVerifier } from '../auth/chain.js';
@@ -134,7 +137,9 @@ export function buildRouteSchema(r: EndpointRegistration) {
   if (d.bodyFormat === 'binary') schema.consumes = ['application/octet-stream'];
   // Named types keep their registry id (a $ref in /docs), so they are used as they are, without .describe()
   const item = d.response?.();
-  const response = new Map<number, z.ZodType>([[d.status, item ? (d.paging ? common.page(item) : item) : z.null().describe('Success, no content')]]);
+  const response = new Map<number, unknown>([[d.status, item ? (d.paging ? common.page(item) : item) : z.null().describe('Success, no content')]]);
+  // an event stream is text/event-stream, not JSON: documented per content type, as docs/api/openapi.json has it
+  if (d.responseFormat === 'event-stream') response.set(d.status, { description: EVENT_STREAM_TEXT, content: { 'text/event-stream': { schema: z.string() } } });
   for (const [status, s] of errorResponses(r.module, d)) response.set(status, s);
   schema.response = Object.fromEntries(response);
   return schema;
@@ -149,11 +154,20 @@ export function registerEndpoints(app: FastifyInstance, regs: EndpointRegistrati
     const anyApp = r.def.auth === 'account';
     if (credentials || anyApp) app.corsRoutes?.add(routeUrlOf(r.module, r.def), { credentials, anyApp });
   }
+  // the open event streams ("response": "event-stream"), ended with `restart` when the server shuts down
+  const streams = new EventStreams({
+    heartbeatMs: k.config.eventStreamHeartbeatMs,
+    clock: k.auth.k.clock,
+    headers: apiResponseHeaders(k.config),
+    guard: (request) => k.auth.streamGuard(request),
+    log: app.log,
+  });
+  streams.install(app);
   void app.register(async (scope) => {
     scope.setValidatorCompiler(validatorCompiler);
     if (k.config.responseValidation) scope.setSerializerCompiler(serializerCompiler);
     else scope.setSerializerCompiler(() => (data) => JSON.stringify(data));
-    for (const r of regs) if (r.def.bodyFormat !== 'binary') registerEndpoint(scope, r, k);
+    for (const r of regs) if (r.def.bodyFormat !== 'binary') registerEndpoint(scope, r, k, streams);
     // Raw-bytes endpoints (media's upload target) in their own scope: whatever the content type, the
     // request body is handed to the handler as a stream, never buffered; the handler reads it and enforces
     // its own size limit while it streams (the body is not validated: it is a stream by construction)
@@ -163,13 +177,13 @@ export function registerEndpoints(app: FastifyInstance, regs: EndpointRegistrati
         raw.removeAllContentTypeParsers();
         raw.addContentTypeParser('*', (_request, payload, done) => done(null, payload));
         raw.setValidatorCompiler((req) => (req.httpPart === 'body' ? (data: unknown) => ({ value: data }) : validatorCompiler(req as never)));
-        for (const r of binary) registerEndpoint(raw, r, k);
+        for (const r of binary) registerEndpoint(raw, r, k, streams);
       });
     }
   });
 }
 
-function registerEndpoint(app: FastifyInstance, r: EndpointRegistration, k: HttpKernel) {
+function registerEndpoint(app: FastifyInstance, r: EndpointRegistration, k: HttpKernel, streams: EventStreams) {
   const { module, id, def: d, handler } = r;
   const operationId = `${module}.${id}`;
   const { idempotency, auth } = k;
@@ -214,6 +228,8 @@ function registerEndpoint(app: FastifyInstance, r: EndpointRegistration, k: Http
       }
       const authState = request.auth;
       const principal = authState?.principal ?? null;
+      // event streams: the middleware accepted the request, so the stream opens now (status 200) and the handler writes to it
+      const stream = d.responseFormat === 'event-stream' ? streams.open(request, reply) : undefined;
       try {
         const customerId = d.scope === 'own-customer' ? await auth.customerIdOf(principal) : null;
         let result = await handler({
@@ -230,14 +246,22 @@ function registerEndpoint(app: FastifyInstance, r: EndpointRegistration, k: Http
           requestId: request.id,
           idempotencyKey: request.idempotency?.key,
           operationId,
+          stream,
           request,
           reply,
         } as never);
+        if (stream) return reply; // the stream is the response; it stays open after the handler returns
         if (d.sensitive && (d.area === 'admin' || d.area === 'seller')) result = await maskResponse(result, d.sensitive, (perm) => auth.can(authState, perm));
         if (request.idempotency) await idempotency.complete(request.idempotency.scope, request.idempotency.key, d.status, result ?? null);
         if (reply.sent) return reply;
         return d.response ? reply.code(d.status).send(result) : reply.code(d.status).send();
       } catch (err) {
+        if (stream) {
+          // the 200 head is already out: close without an `end` event, so the client reconnects after `retry`
+          request.log.error({ err }, 'event stream handler failed');
+          reply.raw.end();
+          return reply;
+        }
         if (request.idempotency) await idempotency.release(request.idempotency.scope, request.idempotency.key).catch(() => {});
         throw err;
       }

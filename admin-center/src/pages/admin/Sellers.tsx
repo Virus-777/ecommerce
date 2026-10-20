@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { keepPreviousData, useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
 import { call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
@@ -12,11 +12,14 @@ import { useStaffSession } from '@/app/session';
 import { LoadError, date } from '@/app/parts';
 import { SELLER_STATUS, feedbackLabel, initialsOf, signedMoney, statusLabel, tintOf, useDebounced, useInView, type ApplicationRow, type SellerRow } from './data/seller';
 import { AppealsQueue, LaunchReviewQueue } from './data/seller-queues';
+import { ANNOUNCE_PERMISSION, AnnouncementsList, NewAnnouncementDialog, type Announcement } from './data/seller-announcements';
 
 // Design: pages/admin/admin-sellers.html (single view). Status tabs link to "#" in the design;
 // here they filter the list, in sync with the Status filter.
 // ?filter=appeals | launch_reviews (no design; the work queues sellers.appeals and sellers.launch_reviews link here)
 // swaps the list for the appeals or launch review queue (data/seller-queues).
+// ?filter=announcements (no design; only with notifications.announcements.send): messages from Marketly to sellers
+// and the New announcement button (data/seller-announcements).
 // Data: GET /api/admin/sellers/sellers (q, status, verified, onTimeBelow, categoryId, balance; page on the website,
 // cursor on the phone), …/sellers/stats (header, KPIs, tab counts), …/applications (open applications: the
 // Applications button and links for sellers still in review), …/performance-targets (dispatch target),
@@ -35,7 +38,7 @@ const BAL_OPTS = [
   { value: 'negative', label: 'Negative balance' },
 ];
 const LIMIT = 24;
-const QUEUES = ['appeals', 'launch_reviews'] as const;
+const QUEUES = ['appeals', 'launch_reviews', 'announcements'] as const;
 type Queue = '' | (typeof QUEUES)[number];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -52,9 +55,12 @@ interface Target {
 export default function Sellers() {
   const { api } = useApi();
   const { can } = useStaffSession();
+  const qc = useQueryClient();
   const isPhone = useIsPhone();
   const [params, setParams] = useSearchParams();
-  const queue = QUEUES.find((x) => x === params.get('filter')) ?? '';
+  const canAnnounce = can(ANNOUNCE_PERMISSION);
+  // Without the permission the announcements tab isn't there: its link shows the sellers list instead.
+  const queue = QUEUES.find((x) => x === params.get('filter') && (x !== 'announcements' || canAnnounce)) ?? '';
   const setQueue = (v: Queue) =>
     setParams(
       (prev) => {
@@ -80,6 +86,14 @@ export default function Sellers() {
   const [invited, setInvited] = useState<{ email: string; businessName: string; expiresAt: string; code: string } | null>(null);
   const [showCode, setShowCode] = useState(false);
   const [exported, setExported] = useState('');
+  const [announcing, setAnnouncing] = useState(false);
+  const [announced, setAnnounced] = useState<Announcement | null>(null);
+  const onAnnounced = (a: Announcement) => {
+    setAnnouncing(false);
+    setAnnounced(a);
+    void qc.invalidateQueries({ queryKey: ['notifications', 'announcements'] });
+    setQueue('announcements');
+  };
 
   const term = useDebounced(q.trim());
   const targets = useQuery({ queryKey: ['sellers', 'performance-targets'], queryFn: () => call(api.GET('/api/admin/sellers/performance-targets')) as Promise<Target[]>, staleTime: 300_000 });
@@ -250,8 +264,19 @@ export default function Sellers() {
               Invite seller
             </Button>
           )}
+          {canAnnounce && (
+            <Button variant={can('sellers.invitations.manage') ? 'secondary' : 'primary'} size="sm" icon="megaphone" onClick={() => setAnnouncing(true)}>
+              New announcement
+            </Button>
+          )}
         </div>
       </div>
+
+      {announced && (
+        <Alert tone="success" title="Announcement sent">
+          “{announced.title}” went to {announced.audience === 'all' ? `all ${announced.sellerCount} active sellers` : `${announced.sellerCount} seller${announced.sellerCount === 1 ? '' : 's'}`}. They see it in Seller Center › Notifications; store owners also get it by email.
+        </Alert>
+      )}
 
       {invited && (
         <Alert tone="success" title="Invitation sent">
@@ -304,13 +329,14 @@ export default function Sellers() {
           { value: '', label: 'Sellers' },
           { value: 'appeals', label: 'Appeals', count: stats.data?.appealsUnderReview },
           { value: 'launch_reviews', label: 'Launch reviews', count: launchCount },
+          ...(canAnnounce ? [{ value: 'announcements' as Queue, label: 'Announcements' }] : []),
         ]}
         active={queue}
         onChange={setQueue}
         label="Seller work"
       />
       {queue ? (
-        <section className="card">{queue === 'appeals' ? <AppealsQueue /> : <LaunchReviewQueue />}</section>
+        <section className="card">{queue === 'appeals' ? <AppealsQueue /> : queue === 'launch_reviews' ? <LaunchReviewQueue /> : <AnnouncementsList onNew={() => setAnnouncing(true)} />}</section>
       ) : (
         <section className="card">
           <Tabs<'' | ApiStatus> items={tabs} active={status} onChange={setStatus} label="Seller status" />
@@ -497,6 +523,8 @@ export default function Sellers() {
           </div>
         </section>
       )}
+
+      {canAnnounce && <NewAnnouncementDialog open={announcing} onClose={() => setAnnouncing(false)} onSent={onAnnounced} />}
 
       <Dialog
         open={invite}
