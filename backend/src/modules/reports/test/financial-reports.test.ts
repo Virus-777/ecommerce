@@ -8,11 +8,13 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import type * as orders from '../../../spec/orders.js';
-import type { FinanceService } from '../../finance/service.js';
+import type { FinancePublicApi } from '../../../spec/finance.js';
 import { harness, usd, type Harness } from './harness.js';
 
 let h: Harness;
-let finance: FinanceService;
+/** finance's public API (its collections are read through the database, as reports may not import finance's code) */
+let finance: FinancePublicApi;
+const financeTable = (name: string) => h.app.kernel.mongo.db.collection(`finance.${name}`);
 let today: string;
 const S = newId(); // the seller of the reconciliation
 const T = newId(); // another seller
@@ -41,7 +43,7 @@ const delivered = (d: orders.OrderDetail) => {
 
 beforeAll(async () => {
   h = await harness();
-  finance = h.app.kernel.boot.apis.get('finance') as unknown as FinanceService;
+  finance = h.app.kernel.boot.apis.get('finance') as unknown as FinancePublicApi;
   today = await h.service.core.today();
   h.products.set(PRODUCT_A, { title: 'Brass lamp' });
   h.products.set(PRODUCT_B, { title: 'Linen shade' });
@@ -64,7 +66,7 @@ beforeAll(async () => {
   // platform money: a label Marketly pays and Marketly-funded coupon money on S's item
   h.publish('shipping', 'shipping.label.purchased', { labelId: newId(), shipmentId: null, orderId: other.id, groupId: other.groups[0]!.id, sellerId: T, billedTo: 'platform', cost: usd(700), kind: 'outbound', returnId: null });
   await h.drain();
-  await finance.core.repo.insert('discount_funding', { id: newId(), at: h.clock.now(), redemption_id: newId(), funded_by: 'platform', kind: 'redeemed', amount: 500, currency: 'USD', order_id: o2.id, order_item_id: o2.groups[0]!.items[0]!.id });
+  await financeTable('discount_funding').insertOne({ _id: newId() as never, at: h.clock.now(), redemption_id: newId(), funded_by: 'platform', kind: 'redeemed', amount: 500, currency: 'USD', order_id: o2.id, order_item_id: o2.groups[0]!.items[0]!.id });
   // Official Store costs
   await finance.recordCompanyCost({ kind: 'buying_cost', amount: usd(3_100), reference: { kind: 'order', id: official.id }, at: h.clock.now().toISOString() });
   await finance.recordCompanyCost({ kind: 'write_off', amount: usd(200), reference: { kind: 'order', id: official.id }, at: h.clock.now().toISOString() });
@@ -81,7 +83,7 @@ describe('seller.earnings', () => {
   it('reconciles: net earnings equal the seller ledger for the period orders and charges (payouts excluded)', async () => {
     const res = await h.call('POST', SELLER_Q('seller.earnings'), h.tokens.seller(S), { preset: 'today' });
     expect(res.status, JSON.stringify(res.body)).toBe(200);
-    const entries = await finance.core.repo.find('ledger_entries', { seller_id: S });
+    const entries = await financeTable('ledger_entries').find({ seller_id: S }).toArray();
     const notEarnings = new Set(['payout', 'payout_returned', 'hold', 'hold_release', 'owed_offset']);
     const ledger = entries.filter((e) => !notEarnings.has(e.type)).reduce((n, e) => n + e.amount, 0);
     expect(ledger).toBe(9_000 + 500 - 900 + 8_000 - 800 - 1_200 - 300 - 650 + 250);
@@ -228,7 +230,7 @@ describe('finance.seller_money', () => {
   it('shows end-of-day balances, payouts and the top sellers by fee income', async () => {
     const res = await h.call('POST', ADMIN_Q('finance.seller_money'), h.tokens.staff(), { preset: 'today', sellerId: S });
     expect(res.status, JSON.stringify(res.body)).toBe(200);
-    const account = (await finance.core.repo.findOne('seller_accounts', { seller_id: S }))!;
+    const account = (await financeTable('seller_accounts').findOne({ _id: S as never }))!;
     // the sales are pending (15,800); the charges took the available balance below zero (-1,900)
     expect(account).toMatchObject({ pending: 15_800, available: -1_900, held: 0 });
     const live = account.pending + account.available;
