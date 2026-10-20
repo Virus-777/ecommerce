@@ -41,8 +41,9 @@ export const STATS_TABS: StatsTab[] = [
     label: 'Official Store P&L',
     report: 'trading.pnl',
     permission: 'reports.trading.view',
-    intro: 'Official Store sales less buying cost, discounts, shipping, returns, write-offs and chargeback losses. The same figures as Official Store trading for the same days.',
-    kpis: ['trading.official_sales', 'trading.gross_margin', 'trading.net_margin', 'trading.net_margin_pct'],
+    intro: 'Official Store sales less the cost of the goods sold, shipping, returns, write-offs and chargeback losses, plus supplier credits. Discounts are shown for reference (sales are already after them); stock bought from suppliers is shown on its own, not as a cost of sales.',
+    // the second row holds the two figures shown but not taken off the margin
+    kpis: ['trading.official_sales', 'trading.gross_margin', 'trading.net_margin', 'trading.net_margin_pct', 'trading.discounts', 'trading.stock_bought'],
   },
 ];
 

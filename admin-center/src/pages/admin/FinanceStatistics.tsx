@@ -300,9 +300,12 @@ function SellerMoneyCharts({ res, loading, refreshing, rangeText, grain }: Chart
   );
 }
 
-/** Official Store costs after buying cost, stacked per period (buying cost would dwarf them; it is in the waterfall). */
+/**
+ * The Official Store costs taken off gross margin, stacked per period (cost of goods sold would dwarf them; it is in
+ * the waterfall). Not here: discounts (sales are already after them) and stock bought (not a cost of sales); both
+ * are KPI tiles and table columns.
+ */
 const TRADING_COSTS: ReportSeriesPick[] = [
-  { key: 'trading.discounts', label: 'Discounts' },
   { key: 'trading.shipping_expense', label: 'Shipping' },
   { key: 'trading.returns_cost', label: 'Returns' },
   { key: 'trading.write_offs', label: 'Write-offs' },
@@ -326,8 +329,8 @@ function TradingCharts({ res, loading, refreshing, rangeText, grain }: ChartProp
       />
       <div className="grid lg2 gap-4">
         <Waterfall res={res} loading={loading} refreshing={refreshing} title="From sales to net margin" sub={rangeText} />
-        <ChartFrame title={`Costs after buying cost, by ${grain}`} sub={rangeText} loading={loading} refreshing={refreshing} empty={!loading && costs.rows.length === 0} table={seriesTable(costs.rows, costs.series, fmtMoney)}>
-          <BarsChart rows={costs.rows} series={costs.series} fmt={fmtMoney} axisFmt={fmtMoneyCompact} stacked label={`Official Store costs after buying cost by ${grain}, ${rangeText}`} />
+        <ChartFrame title={`Costs after cost of goods sold, by ${grain}`} sub={rangeText} loading={loading} refreshing={refreshing} empty={!loading && costs.rows.length === 0} table={seriesTable(costs.rows, costs.series, fmtMoney)}>
+          <BarsChart rows={costs.rows} series={costs.series} fmt={fmtMoney} axisFmt={fmtMoneyCompact} stacked label={`Official Store costs after cost of goods sold by ${grain}, ${rangeText}`} />
         </ChartFrame>
       </div>
     </>
