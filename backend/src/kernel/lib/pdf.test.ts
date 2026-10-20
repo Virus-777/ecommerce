@@ -3,7 +3,7 @@ import { renderPdf } from './pdf.js';
 
 const text = (bytes: Uint8Array) => Buffer.from(bytes).toString('latin1');
 const pageCount = (pdf: string) => Number(/\/Count (\d+)/.exec(pdf)?.[1]);
-const shown = (pdf: string) => [...pdf.matchAll(/\((.*?)\) Tj/g)].map((m) => m[1]);
+const shown = (pdf: string) => [...pdf.matchAll(/\((.*?)\) Tj/g)].map((m) => m[1] ?? '');
 const ys = (pdf: string) => [...pdf.matchAll(/ (-?\d+) Tm/g)].map((m) => Number(m[1]));
 
 describe('pdf', () => {
