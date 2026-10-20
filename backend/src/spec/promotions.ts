@@ -3840,12 +3840,6 @@ export const spec = defineModuleSpec({
       "approval": "second_reviewer",
       "sellerVisible": false
     },
-    "sellerLeaveCutoff": {
-      "default": "campaign start",
-      "desc": "Until when a seller can leave without approval",
-      "type": "string",
-      "sellerVisible": true
-    },
     "codeCheckRateLimit": {
       "default": "10 per minute per session",
       "desc": "Brute-force protection for code lookups",

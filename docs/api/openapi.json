@@ -118602,8 +118602,12 @@
                     "type": "string"
                   },
                   "dueAt": {
-                    "type": "string",
-                    "format": "date-time"
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date-time",
+                    "description": "Reply deadline; default now + infoRequestDefaultDays"
                   },
                   "reminder": {
                     "type": "string",
@@ -118616,7 +118620,6 @@
                 "required": [
                   "items",
                   "message",
-                  "dueAt",
                   "reminder"
                 ]
               }

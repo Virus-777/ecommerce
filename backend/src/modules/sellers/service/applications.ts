@@ -1051,7 +1051,9 @@ export class ApplicationsPart extends Part {
     return map.riskReview(row);
   }
 
-  async requestApplicationInformation(id: string, body: { items: unknown[]; message: string; dueAt: string; reminder: 'three_days_before' | 'none' }, by: By) {
+  async requestApplicationInformation(id: string, body: { items: unknown[]; message: string; dueAt?: string | null; reminder: 'three_days_before' | 'none' }, by: By) {
+    // the deadline staff set, else the default reply window (setting infoRequestDefaultDays)
+    const dueAt = body.dueAt ? new Date(body.dueAt) : addDays(this.now(), await this.core.setting('infoRequestDefaultDays'));
     const raw = (body.items ?? []) as { title?: string; detail?: string; neededFor?: string; documentKind?: string | null }[];
     const kinds = ['account', 'business', 'verification', 'payout', 'return_address', 'agreement', 'category'];
     const issues: { path: string; message: string }[] = [];
@@ -1061,7 +1063,7 @@ export class ApplicationsPart extends Part {
       if (!i?.neededFor || !kinds.includes(i.neededFor)) issues.push({ path: `items.${n}.neededFor`, message: `One of ${kinds.join(', ')}` });
     });
     if (!body.message?.trim()) issues.push({ path: 'message', message: 'Write the message the applicant reads' });
-    if (new Date(body.dueAt).getTime() <= this.now().getTime()) issues.push({ path: 'dueAt', message: 'The deadline must be in the future' });
+    if (!(dueAt.getTime() > this.now().getTime())) issues.push({ path: 'dueAt', message: 'The deadline must be in the future' });
     if (issues.length) throw invalid(issues);
     const items: InfoRequestItem[] = raw.map((i) => ({ id: newId(), title: i.title!.trim(), detail: i.detail?.trim() ?? '', neededFor: i.neededFor as InfoRequestItem['neededFor'], documentKind: i.documentKind ?? null, status: 'open', response: null }));
     const now = this.now();
@@ -1074,7 +1076,7 @@ export class ApplicationsPart extends Part {
         application_id: a.id,
         items: items as never,
         message: body.message.trim(),
-        due_at: new Date(body.dueAt),
+        due_at: dueAt,
         reminder: body.reminder,
         reminded_at: null,
         draft_saved_at: null,
@@ -1093,8 +1095,8 @@ export class ApplicationsPart extends Part {
       }
       return row;
     });
-    this.core.publish('sellers.application.information_requested', { applicationId: after.id, sellerId: after.seller_id!, dueAt: new Date(body.dueAt).toISOString(), itemCount: items.length }, by);
-    await this.core.audit({ action: 'sellers.application.request_information', actionLabel: 'Asked an applicant for information', category: 'other', target: this.appTarget(after), reason: body.message, after: { items: items.map((i) => i.title), dueAt: body.dueAt } }, by);
+    this.core.publish('sellers.application.information_requested', { applicationId: after.id, sellerId: after.seller_id!, dueAt: dueAt.toISOString(), itemCount: items.length }, by);
+    await this.core.audit({ action: 'sellers.application.request_information', actionLabel: 'Asked an applicant for information', category: 'other', target: this.appTarget(after), reason: body.message, after: { items: items.map((i) => i.title), dueAt: dueAt.toISOString() } }, by);
     return this.adminView(after);
   }
 

@@ -349,13 +349,12 @@ describe('rules a module declares for its settings', () => {
     expect(res.json().error).toMatchObject({ code: 'SETTING_NOT_EDITABLE', details: { key: 'orders.orderRefPrefix' } });
   });
 
-  it('refuses a value outside the declared bounds or choices', async () => {
+  // an enum's choices: domain.test.ts (no module loaded here declares an enum setting)
+  it('refuses a value outside the declared bounds', async () => {
     const over = await draft(h, { items: [{ key: 'support.maxAttachments', value: 21 }], effectiveAt: inDays(h, 1) });
     expect(over.json().error).toMatchObject({ code: 'VALIDATION_FAILED', details: { issues: [{ path: 'items.0.value', message: 'Must be at most 20' }] } });
     const under = await draft(h, { items: [{ key: 'support.appealWindowDays', value: 0 }], effectiveAt: inDays(h, 1) });
     expect(under.json().error).toMatchObject({ code: 'VALIDATION_FAILED', details: { issues: [{ message: 'Must be at least 1' }] } });
-    const choice = await draft(h, { items: [{ key: 'finance.statementPeriod', value: 'daily' }], effectiveAt: inDays(h, 30) });
-    expect(choice.json().error).toMatchObject({ code: 'VALIDATION_FAILED', details: { issues: [{ message: 'Must be one of weekly, monthly' }] } });
     const ok = await draft(h, { items: [{ key: 'support.maxAttachments', value: 20 }], effectiveAt: inDays(h, 1) });
     expect(ok.statusCode, ok.body).toBe(201);
   });
@@ -363,7 +362,7 @@ describe('rules a module declares for its settings', () => {
 
 describe('cancel and lists', () => {
   it('cancels drafts and scheduled changes; never applied or cancelled ones', async () => {
-    const c = (await draft(h, { items: [{ key: 'support.lateItemRefundAfterDays', value: 10 }], effectiveAt: inDays(h, 2) })).json();
+    const c = (await draft(h, { items: [{ key: 'support.autoCloseAfterDays', value: 10 }], effectiveAt: inDays(h, 2) })).json();
     const cancel = (id: string) => h.app.inject({ method: 'POST', url: `/api/admin/settings/changes/${id}/cancel`, headers: staff(), payload: { reason: 'No longer needed' } });
     const first = await cancel(c.id);
     expect(first.json()).toMatchObject({ status: 'cancelled' });

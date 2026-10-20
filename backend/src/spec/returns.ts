@@ -4685,14 +4685,6 @@ export const spec = defineModuleSpec({
       "max": 20,
       "sellerVisible": false
     },
-    "maxMediaMb": {
-      "default": 10,
-      "desc": "Upload size per file",
-      "type": "int",
-      "min": 1,
-      "unit": "MB",
-      "sellerVisible": false
-    },
     "inspectionChecksByCategory": {
       "default": {},
       "desc": "Category id → functional and hygiene checks added to the inspection checklist (e.g. Headphones: powers on and pairs, ear cushions clean)",

@@ -635,7 +635,7 @@ export const INTAKE: IntakeTable = {
         queues: ['sellers.launch_reviews'],
         title: 'Launch readiness review',
         dedupe: 'launch_review:{sellerId}',
-        deadline: 'now + queue default (business hours)',
+        deadline: 'event.reviewBy (launchReviewBusinessDays), else now + queue default (business hours)',
         priority: 'normal',
         build: (p) => [
           {
@@ -643,6 +643,7 @@ export const INTAKE: IntakeTable = {
             title: 'Launch readiness review',
             subject: { type: 'seller', id: p.sellerId },
             sellerId: p.sellerId,
+            dueAt: p.reviewBy ?? null,
             dedupeKey: `launch_review:${p.sellerId}`,
             links: [L('Open seller', 'admin/seller', p.sellerId)],
           },
@@ -744,7 +745,7 @@ export const INTAKE: IntakeTable = {
         queues: ['sellers.launch_reviews'],
         title: 'Store change to review ({kind})',
         dedupe: 'change_request:{changeRequestId}',
-        deadline: 'now + queue default (business hours)',
+        deadline: 'event.reviewBy (store names and public claims), else now + queue default (business hours)',
         priority: 'normal',
         build: (p) => [
           {
@@ -753,6 +754,7 @@ export const INTAKE: IntakeTable = {
             subject: { type: 'change_request', id: p.changeRequestId, label: human(p.kind) },
             related: list(S('seller', p.sellerId)),
             sellerId: p.sellerId,
+            dueAt: p.reviewBy ?? null,
             dedupeKey: `change_request:${p.changeRequestId}`,
             links: [L('Open seller', 'admin/seller', p.sellerId)],
           },

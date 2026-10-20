@@ -554,7 +554,6 @@
     { "key": "budgetWarningPct", "type": "number", "default": 90, "desc": "Notify Marketing and Finance when budget use crosses this", "min": 1, "max": 100, "unit": "%", "sellerVisible": false },
     { "key": "restoreUsageOnCancel", "type": "bool", "default": true, "desc": "Give the use back to the customer when an item is cancelled before dispatch", "sellerVisible": false },
     { "key": "refundRestoresBudget", "type": "bool", "default": false, "desc": "Whether refunds after delivery free budget", "approval": "second_reviewer", "sellerVisible": false },
-    { "key": "sellerLeaveCutoff", "type": "string", "default": "campaign start", "desc": "Until when a seller can leave without approval", "sellerVisible": true },
     { "key": "codeCheckRateLimit", "type": "string", "default": "10 per minute per session", "desc": "Brute-force protection for code lookups", "sellerVisible": false }
   ],
   "integrations": [],

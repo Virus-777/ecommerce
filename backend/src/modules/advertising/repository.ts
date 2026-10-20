@@ -226,6 +226,11 @@ export class AdvertisingRepository {
   }
 
   /** Deletes stale rows (and every row of ended campaigns), keeping rows of keepCampaignIds (running campaigns with a total cap) */
+  /** Deletes ad events older than `before` (retention; the daily_stats rollups keep the totals) */
+  pruneEvents(before: Date): Promise<number> {
+    return this.#events.deleteMany({ at: { $lt: before } });
+  }
+
   async expireFrequency(now: Date, oldestWindowStart: Date, endedCampaignIds: readonly string[], keepCampaignIds: readonly string[] = []): Promise<number> {
     let n = 0;
     if (endedCampaignIds.length) n += await this.#frequency.deleteMany({ campaign_id: { $in: uniq(endedCampaignIds) } });

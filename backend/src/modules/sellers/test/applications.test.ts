@@ -167,6 +167,16 @@ describe('application', () => {
     kit.clock.advance(-6 * 86_400_000);
   });
 
+  it('information request without a deadline gets the default reply window (infoRequestDefaultDays)', async () => {
+    const s = await submitted(kit);
+    const reviewer = staff();
+    await kit.call('POST', `${ADMIN}/applications/${s.id}/start-review`, reviewer);
+    const req = await kit.call('POST', `${ADMIN}/applications/${s.id}/request-information`, reviewer, { items: [{ title: 'Utility bill', neededFor: 'business' }], message: 'Please send a recent utility bill', reminder: 'none' });
+    expect(req.status, JSON.stringify(req.body)).toBe(200);
+    const due = new Date(kit.last('sellers.application.information_requested').dueAt).getTime();
+    expect(due - kit.clock.now().getTime()).toBe(14 * 86_400_000);
+  });
+
   it('approval is blocked by unresolved checks until a note accepts them', async () => {
     const s = await submitted(kit, { legalName: 'Attention Traders LLC' });
     const reviewer = staff();

@@ -853,7 +853,6 @@
     { "key": "autoApproveOfficialWithinWindow", "type": "bool", "default": true, "desc": "Official Store returns inside the window are approved automatically", "approval": "second_reviewer", "sellerVisible": false },
     { "key": "autoApproveServiceWithinWindow", "type": "bool", "default": true, "desc": "Fulfilled by Marketly returns inside the seller's return window are approved automatically by Marketly (decision D7)", "approval": "second_reviewer", "sellerVisible": true },
     { "key": "maxPhotosPerReturn", "type": "int", "default": 6, "desc": "Photos or short videos per return request", "min": 1, "max": 20, "sellerVisible": false },
-    { "key": "maxMediaMb", "type": "int", "default": 10, "desc": "Upload size per file", "min": 1, "unit": "MB", "sellerVisible": false },
     { "key": "inspectionChecksByCategory", "type": "json", "default": {}, "desc": "Category id → functional and hygiene checks added to the inspection checklist (e.g. Headphones: powers on and pairs, ear cushions clean)", "sellerVisible": false },
     { "key": "refundRefPrefix", "type": "string", "default": "RF-", "desc": "Human reference prefix for refund requests", "editable": false, "sellerVisible": false }
   ],

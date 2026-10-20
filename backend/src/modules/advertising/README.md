@@ -1243,6 +1243,7 @@ Checked through the access module (limits per role, second reviewer).
 | `advertising.accrue-charges` | every 15 min | Accrue billable clicks/displays and fixed daily fees of campaigns the seller requested, capped at daily and total limits; stop delivery at the limit |
 | `advertising.post-charges` | daily 02:00 market time | Post the previous day's charges to finance (advertising.charge.posted), only while paid seller ads are on. A charge of a campaign the seller did not request is voided with the reason instead and never posted |
 | `advertising.expire-frequency-state` | hourly | Delete frequency and suppression rows past their window |
+| `advertising.prune-events` | daily 03:00 market time | Delete ad_events older than eventRetentionMonths (daily_stats keep the totals; attribution looks back at most 30 days) |
 | `advertising.ending-soon-notice` | daily 08:00 market time | Publish advertising.campaign.ending_soon for campaigns ending within endingSoonDays (once per campaign), so owners finish or renew deliberately |
 
 ## Settings

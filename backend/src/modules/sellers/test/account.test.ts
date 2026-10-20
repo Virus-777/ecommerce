@@ -56,7 +56,12 @@ describe('account, setup and launch review', () => {
     expect(after.body.steps.find((x: any) => x.key === 'first_submission').state).toBe('done');
     const req = await kit.call('POST', `${SELLER}/setup/launch-review`, s.sellerToken, { note: 'Ready' });
     expect(req.body.state).toBe('requested');
-    expect(kit.last('sellers.launch_review.requested')).toEqual({ sellerId: s.sellerId });
+    // the review target (launchReviewBusinessDays, 1 business day) travels with the event: the work item's deadline
+    const requested = kit.last('sellers.launch_review.requested');
+    expect(requested).toEqual({ sellerId: s.sellerId, reviewBy: expect.any(String) });
+    const hours = (new Date(requested.reviewBy).getTime() - kit.clock.now().getTime()) / 3_600_000;
+    expect(hours).toBeGreaterThanOrEqual(24);
+    expect(hours).toBeLessThanOrEqual(72); // over a weekend
     const changes = await kit.call('POST', `${ADMIN}/sellers/${s.sellerId}/launch-review/decide`, staff(), { outcome: 'changes_needed', issues: ['Add a logo'] });
     expect(changes.body).toMatchObject({ state: 'changes_needed', issues: ['Add a logo'] });
     await kit.call('POST', `${SELLER}/setup/launch-review`, s.sellerToken, {});
@@ -142,6 +147,10 @@ describe('storefront', () => {
     expect(up.body).toMatchObject({ logo: { id: logoId }, introduction: 'Headphones tested before they ship' });
     expect(up.body.storeName).not.toBe('Northwind Sound');
     expect(up.body.pendingChanges[0]).toMatchObject({ kind: 'store_name', proposed: { storeName: 'Northwind Sound' } });
+    // a store name change carries its review target (claimReviewBusinessDays): the work item's deadline
+    const submitted = kit.of('sellers.change_request.submitted').find((e) => e.kind === 'store_name');
+    expect(submitted?.reviewBy).toEqual(expect.any(String));
+    expect(new Date(submitted!.reviewBy).getTime()).toBeGreaterThan(kit.clock.now().getTime() + 24 * 3_600_000);
     expect(kit.last('sellers.storefront.updated')).toMatchObject({ sellerId: s.sellerId, fields: expect.arrayContaining(['logo', 'introduction', 'contactOptions']) });
     expect(kit.callsOf('media.attach').some((c) => c[0] === logoId && (c[1] as any).kind === 'store_logo' && (c[2] as any).id === s.sellerId)).toBe(true);
     const tooLong = await kit.call('PATCH', `${SELLER}/store-profile`, s.sellerToken, { introduction: 'x'.repeat(401) });

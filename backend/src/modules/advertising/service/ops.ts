@@ -340,6 +340,13 @@ export class OpsPart extends Part {
     }
   }
 
+  /** advertising.prune-events: raw ad events older than eventRetentionMonths go (daily_stats keep the totals) */
+  async pruneEvents(): Promise<void> {
+    const before = new Date(this.now());
+    before.setUTCMonth(before.getUTCMonth() - (await this.core.num('eventRetentionMonths', 13)));
+    await this.repo.pruneEvents(before);
+  }
+
   /** Delete frequency and suppression rows past their window (and rows of ended campaigns) */
   async expireFrequencyState(): Promise<void> {
     const now = this.now();

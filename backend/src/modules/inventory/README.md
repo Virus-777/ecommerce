@@ -1107,8 +1107,6 @@ Checked through the access module (limits per role, second reviewer).
 | pendingPaymentHoldMinutes | `60` | duration, minutes, 1–… | Maximum hold extension while a payment result is being checked |
 | defaultLowStockThreshold | `3` | int, 0–…, seller-visible | Low-stock threshold of stock items without their own (seller items and company SKUs) |
 | lowStockAlertCooldownHours | `24` | duration, hours, 1–… | Minimum time between inventory.stock.low events for one item |
-| costingMethod | `"weighted_average"` | enum (weighted_average \| fifo), approval: business owner | Company stock valuation |
-| allowSellerNegativeAvailable | `false` | bool, read-only | Never sell beyond available quantity (plan ch. 9) |
 
 ## Notes
 - References: transfers are TRF-YYMMDD-NNNN (ctx.refs, numbered per market day).

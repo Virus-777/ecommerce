@@ -1621,7 +1621,6 @@ Checked through the access module (limits per role, second reviewer).
 | creditSecondReviewerThreshold | `{"amount":50000,"currency":"USD"}` | money, 0–…, approval: business owner | Seller credits from other modules (creditSeller) above this wait for a Finance reviewer ($500 example). The only finance threshold setting: a module caller has no access limit of its own; staff actions use access limits |
 | negativeBalanceOwedAfterDays | `30` | duration, days, 1–…, approval: second reviewer, seller-visible | Uncovered negative balance becomes an amount owed |
 | destinationChangePauseHours | `72` | duration, hours, 0–…, approval: business owner, seller-visible | Minimum wait before paying a newly verified destination |
-| statementPeriod | `"weekly"` | enum (weekly \| monthly), approval: second reviewer, seller-visible | Statement period, aligned with the payout schedule |
 | depositConfirmAttempts | `3` | int, 1–10, approval: second reviewer | Tries to enter the two test-deposit amounts before new deposits are sent |
 
 ## Integrations

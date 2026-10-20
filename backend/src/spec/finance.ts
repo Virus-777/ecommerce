@@ -4321,17 +4321,6 @@ export const spec = defineModuleSpec({
       "approval": "business_owner",
       "sellerVisible": true
     },
-    "statementPeriod": {
-      "default": "weekly",
-      "desc": "Statement period, aligned with the payout schedule",
-      "type": "enum",
-      "choices": [
-        "weekly",
-        "monthly"
-      ],
-      "approval": "second_reviewer",
-      "sellerVisible": true
-    },
     "depositConfirmAttempts": {
       "default": 3,
       "desc": "Tries to enter the two test-deposit amounts before new deposits are sent",

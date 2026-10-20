@@ -3217,6 +3217,10 @@ export const spec = defineModuleSpec({
       "schedule": "hourly",
       "does": "Delete frequency and suppression rows past their window"
     },
+    "advertising.prune-events": {
+      "schedule": "daily 03:00 market time",
+      "does": "Delete ad_events older than eventRetentionMonths (daily_stats keep the totals; attribution looks back at most 30 days)"
+    },
     "advertising.ending-soon-notice": {
       "schedule": "daily 08:00 market time",
       "does": "Publish advertising.campaign.ending_soon for campaigns ending within endingSoonDays (once per campaign), so owners finish or renew deliberately"

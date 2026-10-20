@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { auth, callers } from '../../../testing/app.js';
+import { spec } from '../../../spec/advertising.js';
+import { schemas } from '../schema.js';
 import { ADMIN, boot, campaignInput, creative, liveCampaign, SELLER_A, serve, track, type Kit } from './helpers.js';
 
 let k: Kit;
@@ -237,5 +239,19 @@ describe('reports, dashboard and GraphQL', () => {
     expect(data.live[0]).toMatchObject({ status: 'LIVE', advertiser: { kind: 'PLATFORM' } });
     const denied = await k.app.inject({ method: 'POST', url: '/graphql/admin', headers: auth(callers.staff(['orders.view'])), payload: { query: '{ adDashboard { waitingApproval } }' } });
     expect(denied.json().errors?.[0]?.extensions?.code).toBe('FORBIDDEN');
+  });
+});
+
+describe('event retention', () => {
+  it('advertising.prune-events deletes raw events older than eventRetentionMonths and keeps newer ones', async () => {
+    const events = k.app.kernel.mongo.module('advertising', spec.collections, schemas).table<{ id: string }>('ad_events');
+    const event = (at: Date) => ({ id: newId(), impression_id: newId(), campaign_id: newId(), creative_id: newId(), placement_key: 'sponsored_product', kind: 'display', visitor_key: 'v', session_id: 's', customer_id: null, page: 'search', device: 'desktop', at, cost: null });
+    const now = k.clock.now();
+    const old = event(new Date(now.getTime() - 14 * 31 * 86_400_000));
+    const recent = event(new Date(now.getTime() - 12 * 30 * 86_400_000));
+    await events.insertMany([old, recent]);
+    await k.app.kernel.jobs.runNow('advertising.prune-events');
+    expect(await events.get(old.id)).toBeUndefined();
+    expect(await events.get(recent.id)).toBeDefined();
   });
 });

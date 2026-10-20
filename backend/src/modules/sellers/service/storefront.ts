@@ -7,7 +7,7 @@ import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type { ChangeRequest, CollectionInput, ContactOptions, FeaturedCollection, ProfileCategory, PublicClaim, SellerSummary, StoreProfile, StoreProfileInput, Storefront, StorefrontClaim } from '../../../spec/sellers.js';
-import { isWholeAccount, locationOf, normalizeScope, sameStoreName, type StoredVerification } from '../domain/rules.js';
+import { addBusinessDays, isWholeAccount, locationOf, normalizeScope, sameStoreName, type StoredVerification } from '../domain/rules.js';
 import { changeRequestMachine, publicClaimMachine } from '../domain/state-machines.js';
 import * as map from '../mappers.js';
 import type { ChangeRequestRec, ClaimRec, ProfileRec, SellerRec } from '../ports.js';
@@ -50,6 +50,11 @@ export class StorefrontPart extends Part {
   async createProfile(tx: SellersRepository, s: SellerRec) {
     if (await tx.getProfile(s.id)) return;
     await tx.upsertProfile({ ...(await this.profileOf(s.id, tx)), location: locationOf(s.business_address as unknown as common.Address) });
+  }
+
+  /** Review target for a store name change or a public claim (setting claimReviewBusinessDays): the work item's deadline */
+  private async claimReviewBy(): Promise<string> {
+    return addBusinessDays(this.now(), await this.core.setting('claimReviewBusinessDays')).toISOString();
   }
 
   private contactOf(p: ProfileRec): ContactOptions {
@@ -178,7 +183,7 @@ export class StorefrontPart extends Part {
       await this.repo.upsertProfile(next);
       this.core.publish('sellers.storefront.updated', { sellerId: s.id, fields }, by);
     }
-    if (nameRequest) this.core.publish('sellers.change_request.submitted', { changeRequestId: nameRequest.id, sellerId: s.id, kind: 'store_name' }, by);
+    if (nameRequest) this.core.publish('sellers.change_request.submitted', { changeRequestId: nameRequest.id, sellerId: s.id, kind: 'store_name', reviewBy: await this.claimReviewBy() }, by);
     if (taglineRequest) this.core.publish('sellers.change_request.submitted', { changeRequestId: taglineRequest.id, sellerId: s.id, kind: 'tagline' }, by);
     return this.storeProfile(s);
   }
@@ -381,7 +386,7 @@ export class StorefrontPart extends Part {
     });
     await this.parts.enforcement.attachEvidence(evidence, { kind: 'seller', id: s.id }, claim.id, `Public claim: ${claim.text}`);
     const cr = await this.newChangeRequest(s, 'public_claim', null, { claimId: claim.id, kind: claim.kind, text: claim.text, brandId: claim.brand_id }, evidence, by);
-    this.core.publish('sellers.change_request.submitted', { changeRequestId: cr.id, sellerId: s.id, kind: 'public_claim' }, by);
+    this.core.publish('sellers.change_request.submitted', { changeRequestId: cr.id, sellerId: s.id, kind: 'public_claim', reviewBy: await this.claimReviewBy() }, by);
     return map.claim(claim, await this.core.mediaRefs(evidence));
   }
 

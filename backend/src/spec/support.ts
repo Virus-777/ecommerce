@@ -2819,15 +2819,6 @@ export const spec = defineModuleSpec({
       "min": 1,
       "unit": "days"
     },
-    "lateItemRefundAfterDays": {
-      "default": 14,
-      "desc": "Items not shipped this long after the estimate qualify for a full refund (purchase terms)",
-      "type": "duration",
-      "min": 1,
-      "unit": "days",
-      "approval": "business_owner",
-      "sellerVisible": true
-    },
     "maxAttachments": {
       "default": 5,
       "desc": "Files per message",
