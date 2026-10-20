@@ -11,7 +11,7 @@ import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type { FeeLine, Statement, StatementLine, StatementSection, StatementSummary } from '../../../spec/finance.js';
-import { renderPdf, type PdfLine } from '../domain/pdf.js';
+import { renderPdf, type PdfLine } from '../../../kernel/lib/pdf.js';
 import { addDays, feeBasisNote, fmt, marketDate, sectionOf, SECTIONS, type EntryType, type SectionKey } from '../domain/rules.js';
 import { statementMachine } from '../domain/state-machines.js';
 import { reference, toStatementSummary } from '../mappers.js';
@@ -292,7 +292,7 @@ export class StatementsPart extends Part {
     if (!assetId) {
       const st = await this.view(row);
       const fileName = `${st.ref}.${format}`;
-      const bytes = format === 'pdf' ? renderPdf(this.pdfLines(st)) : new Uint8Array(Buffer.from(this.csv(st), 'utf8'));
+      const bytes = format === 'pdf' ? renderPdf([this.pdfLines(st)], { size: 9 }) : new Uint8Array(Buffer.from(this.csv(st), 'utf8'));
       const asset = await media.storeGeneratedFile({ owner: { kind: 'seller', id: sellerId, label: st.sellerName }, fileName, contentType: format === 'pdf' ? 'application/pdf' : 'text/csv', body: new Blob([Buffer.from(bytes)]).stream() as never, purpose: 'statement' });
       assetId = asset.id;
       await this.repo.update('statements', row.id, format === 'pdf' ? { pdf_media_id: assetId } : { csv_media_id: assetId });

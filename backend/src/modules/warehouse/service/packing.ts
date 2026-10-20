@@ -10,7 +10,7 @@ import type * as common from '../../../spec/common.js';
 import type { Principal } from '../../../spec/identity.js';
 import type { FileLink, LabelResult, Package, PackageServiceOption, PackageUpdate } from '../../../spec/warehouse.js';
 import type { LabelQuote } from '../../../spec/shipping.js';
-import { renderPdf, type PdfLine } from '../domain/pdf.js';
+import { renderPdf, type PdfLine } from '../../../kernel/lib/pdf.js';
 import { actorText, itemMatches, matchesChoice, missingForLabel, parcelOf, plural, shortDay, soldByLine, validDimensions } from '../domain/rules.js';
 import { packageMachine, warehouseFulfillmentMachine } from '../domain/state-machines.js';
 import type { BoxRec, FulfillmentRec, LineRec, PackageItemRec, PackageRec } from '../ports.js';
