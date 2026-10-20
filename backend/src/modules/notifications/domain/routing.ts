@@ -129,6 +129,16 @@ const accountHealth = (id: string) =>L('restriction', id, 'seller/performance', 
 const customer = (customerId: string | null | undefined): RouteTarget | null => (customerId ? { kind: 'customer', customerId } : null);
 const seller = (sellerId: string | null | undefined): RouteTarget | null => (sellerId ? { kind: 'seller', sellerId } : null);
 const role = (roleKey: string): RouteTarget => ({ kind: 'role', roleKey });
+/** What a seller change request asks for (sellers.ChangeRequest kind), as staff notices name it */
+const CHANGE_WHAT: Record<string, string> = {
+  store_name: 'Store name change',
+  tagline: 'New tagline',
+  public_claim: 'Storefront claim',
+  brand_request: 'Brand request',
+  legal_name: 'Legal name change',
+  business_address: 'Business address change',
+  ownership: 'Ownership change',
+};
 const external = (email: string | null | undefined, name?: string | null): RouteTarget | null => (email ? { kind: 'external', email, name: name ?? null } : null);
 const staff = (accountId: string | null | undefined, reason: RecipientReason = 'direct'): RouteTarget | null => (accountId && isUuid(accountId) ? { kind: 'staff', accountId, reason } : null);
 const byOrder = (orderId: string | null | undefined): RouteTarget | null => (orderId ? { kind: 'subject', audience: 'customer', key: 'orderId', value: orderId } : null);
@@ -936,14 +946,24 @@ export const ROUTES: Routes = {
     sends: (p) => [{ topic: 'seller.account.warning', to: [seller(p.sellerId)], link: accountHealth(p.warningId), context: { warning: { title: p.title } }, sellerId: p.sellerId, dedupe: `warning:${p.warningId}` }],
   },
   'sellers.appeal.decided': {
+    resolve: (p) => [`seller-appeal:${p.appealId}`],
     sends: (p, f) => [{ topic: 'seller.appeal.decided', to: [seller(p.sellerId)], link: L('appeal', p.appealId, 'seller/performance', 'View appeal'), context: { appeal: { outcome: f.human(p.outcome) } }, sellerId: p.sellerId, dedupe: `appeal:${p.appealId}` }],
   },
   'sellers.payout_account.changed': {
     sends: (p) => [
       { topic: 'seller.payout_account.changed', to: [seller(p.sellerId)], link: L('payout_account', p.changeId, 'seller/finance', 'Review payout settings'), context: { destination: { label: p.label } }, sellerId: p.sellerId, dedupe: `payout-account:${p.changeId}` },
+      // a change of an existing account waits for the Finance review (the first account is verified by its test deposits)
+      !p.isInitial && {
+        topic: 'staff.finance.payout_account_review',
+        to: [role('finance_manager')],
+        link: L('payout_account', p.sellerId, 'admin/payouts', 'Review change'),
+        context: { seller: { id: p.sellerId }, payout: { from: p.previousLabel ?? 'the previous account', to: p.label } },
+        dedupe: `payout-account-review:${p.sellerId}`,
+      },
     ],
   },
   'sellers.change_request.decided': {
+    resolve: (p) => [`change-request:${p.changeRequestId}`],
     sends: (p, f) => [
       {
         topic: 'seller.change_request.decided',
@@ -961,6 +981,7 @@ export const ROUTES: Routes = {
     ],
   },
   'sellers.launch_review.decided': {
+    resolve: (p) => [`launch-review:${p.sellerId}`],
     sends: (p) => [
       {
         topic: 'seller.launch_review.decided',
@@ -987,14 +1008,17 @@ export const ROUTES: Routes = {
 
   /* ---------------------------------------------------------------- finance (destinations), catalog, inventory */
   'finance.destination.verified': {
+    resolve: (p) => [`payout-account-review:${p.sellerId}`],
     sends: (p) => [{ topic: 'seller.payout_destination.verified', to: [seller(p.sellerId)], link: L('payout_account', p.reviewId, 'seller/finance', 'View payout settings'), sellerId: p.sellerId, dedupe: `destination:${p.reviewId}` }],
   },
   'finance.destination.rejected': {
+    resolve: (p) => [`payout-account-review:${p.sellerId}`],
     sends: (p) => [
       { topic: 'seller.payout_destination.rejected', to: [seller(p.sellerId)], link: L('payout_account', p.reviewId, 'seller/finance', 'Update payout settings'), context: { destination: { reason: p.reason } }, sellerId: p.sellerId, dedupe: `destination:${p.reviewId}` },
     ],
   },
   'catalog.product.changes_requested': {
+    resolve: (p) => [`product-review:${p.productId}`],
     sends: (p) => [
       p.ownerSellerId && {
         topic: 'seller.product.changes_requested',
@@ -1007,11 +1031,11 @@ export const ROUTES: Routes = {
     ],
   },
   'catalog.product.approved': {
-    resolve: (p) => [`product:${p.productId}:changes`],
+    resolve: (p) => [`product:${p.productId}:changes`, `product-review:${p.productId}`],
     sends: (p) => [p.ownerSellerId && { topic: 'seller.product.approved', to: [seller(p.ownerSellerId)], link: L('product', p.productId, 'seller/product-new', 'View product'), sellerId: p.ownerSellerId, dedupe: `product:${p.productId}:approved` }],
   },
   'catalog.product.rejected': {
-    resolve: (p) => [`product:${p.productId}:changes`],
+    resolve: (p) => [`product:${p.productId}:changes`, `product-review:${p.productId}`],
     sends: (p) => [
       p.ownerSellerId && { topic: 'seller.product.rejected', to: [seller(p.ownerSellerId)], link: L('product', p.productId, 'seller/product-new', 'View product'), context: { product: { reason: p.reason } }, sellerId: p.ownerSellerId, dedupe: `product:${p.productId}:rejected` },
     ],
@@ -1468,6 +1492,7 @@ export const ROUTES: Routes = {
     },
   },
   'trust.appeal.decided': {
+    resolve: (p) => [`trust-appeal-review:${p.appealId}`],
     sends: (p) => {
       const outcome = p.outcome === 'upheld' ? 'kept' : p.outcome === 'overturned' ? 'overturned' : 'partly overturned';
       const changes = p.outcome === 'upheld' ? 'The action on your account stays in place.' : p.outcome === 'overturned' ? 'We are lifting the action on your account.' : 'We are lifting part of the action on your account.';
@@ -1493,6 +1518,87 @@ export const ROUTES: Routes = {
     },
   },
   'offers.offer.missing_items_reviewed': { resolve: (p) => [`offer-missing-items:${p.offerId}`] },
+
+  /* ---------------------------------------------------------------- reviews sellers (and authors) start */
+  // One action notice per review to the role that decides it (the empty-role fallback reaches the escalation role,
+  // usually the Business Owner), resolved by the event that decides it. seller: { id } names the store (consumers).
+  'catalog.product.submitted': {
+    sends: (p, f) => [
+      {
+        topic: 'staff.catalog.product_submitted',
+        to: [role('catalog_manager')],
+        link: L('product', p.productId, 'admin/product-review', 'Review product', p.ref),
+        context: {
+          product: { title: p.title || 'Untitled product' },
+          submission: { ref: p.ref, what: p.kind === 'resubmitted' ? 'Resubmitted product' : p.kind === 'content_change' ? 'Product change' : 'New product' },
+          seller: p.ownerSellerId ? { id: p.ownerSellerId } : { name: OFFICIAL_STORE_NAME },
+          due: { date: f.dateTime(p.reviewDueAt) },
+        },
+        deadline: p.reviewDueAt,
+        dedupe: `product-review:${p.productId}`,
+      },
+    ],
+  },
+  'catalog.brand.requested': {
+    sends: (p) => [
+      { topic: 'staff.catalog.brand_requested', to: [role('catalog_manager')], link: L('brand', p.brandId, 'admin/categories', 'Review brand', p.name), context: { brand: { name: p.name }, seller: { id: p.sellerId } }, dedupe: `brand-request:${p.brandId}` },
+    ],
+  },
+  'catalog.brand.changed': { resolve: (p) => (p.change === 'status' ? [`brand-request:${p.brandId}`] : []) },
+  'catalog.correction.suggested': {
+    sends: (p) => [{ topic: 'staff.catalog.correction_suggested', to: [role('catalog_manager')], link: L('product', p.productId, 'admin/product-review', 'Review correction'), dedupe: `correction:${p.suggestionId}` }],
+  },
+  'catalog.correction.decided': { resolve: (p) => [`correction:${p.suggestionId}`] },
+  'sellers.change_request.submitted': {
+    sends: (p) => {
+      const what = CHANGE_WHAT[p.kind] ?? 'Store change';
+      // brand requests and storefront claims are decided on the Brands tab; the rest on the seller page
+      const brands = p.kind === 'brand_request' || p.kind === 'public_claim';
+      return [
+        {
+          topic: 'staff.seller.change_requested',
+          to: [role('seller_manager')],
+          link: brands ? L('brand', p.changeRequestId, 'admin/categories', 'Review on the Brands tab') : L('seller', p.sellerId, 'admin/seller', 'Review change'),
+          context: { change: { what, what_lower: what.toLowerCase() }, seller: { id: p.sellerId } },
+          dedupe: `change-request:${p.changeRequestId}`,
+        },
+      ];
+    },
+  },
+  'sellers.launch_review.requested': {
+    sends: (p) => [{ topic: 'staff.seller.launch_review_requested', to: [role('seller_manager')], link: L('seller', p.sellerId, 'admin/seller', 'Open seller'), context: { seller: { id: p.sellerId } }, dedupe: `launch-review:${p.sellerId}` }],
+  },
+  'sellers.application.information_provided': {
+    // the same action notice as the application (resolved by sellers.application.decided)
+    sends: (p) => [{ topic: 'staff.seller.application_information_provided', to: [role('seller_manager')], link: L('seller', p.applicationId, 'admin/seller-application', 'Review application'), context: { seller: { id: p.sellerId } }, dedupe: `seller-application:${p.applicationId}` }],
+  },
+  'sellers.appeal.submitted': {
+    sends: (p, f) => [
+      {
+        topic: 'staff.seller.appeal_submitted',
+        to: [role('seller_manager')],
+        link: L('seller', p.sellerId, 'admin/seller', 'Open seller'),
+        context: { seller: { id: p.sellerId }, appeal: { subject: f.human(p.subject) }, due: { date: f.dateTime(p.decideBy) } },
+        deadline: p.decideBy,
+        dedupe: `seller-appeal:${p.appealId}`,
+      },
+    ],
+  },
+  'sellers.restriction.evidence_submitted': {
+    sends: (p) => [{ topic: 'staff.seller.restriction_evidence', to: [role('seller_manager')], link: L('seller', p.sellerId, 'admin/seller', 'Open seller'), context: { seller: { id: p.sellerId } }, dedupe: `restriction-evidence:${p.restrictionId}` }],
+  },
+  'sellers.restriction.lifted': { resolve: (p) => [`restriction-evidence:${p.restrictionId}`] },
+  'trust.appeal.submitted': {
+    sends: (p, f) => [
+      { topic: 'staff.trust.appeal_submitted', to: [role('trust_and_risk_manager')], link: L('appeal', p.appealId, 'admin/trust', 'Open appeals'), context: { due: { date: f.dateTime(p.decideBy) } }, deadline: p.decideBy, dedupe: `trust-appeal-review:${p.appealId}` },
+    ],
+  },
+  'reviews.appeal.submitted': {
+    sends: (p, f) => [
+      { topic: 'staff.moderation.appeal_submitted', to: [role('content_manager')], link: L('appeal', p.appealId, 'admin/reviews', 'Open moderation queue'), context: { appeal: { what: f.human(p.contentType) } }, dedupe: `moderation-appeal:${p.appealId}` },
+    ],
+  },
+  'reviews.appeal.decided': { resolve: (p) => [`moderation-appeal:${p.appealId}`] },
   'trust.rights_report.received': {
     sends: (p) => [
       {

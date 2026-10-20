@@ -82,6 +82,12 @@ export class World {
     this.roles.set(roleKey, { roleKey, accountIds: [], ccAccountIds: [], viaBackup: false, ...r });
   }
 
+  /** A seller's store name, for sellers.getSeller (staff notices name the store) */
+  readonly storeNames = new Map<string, string>();
+  store(sellerId: string, storeName: string) {
+    this.storeNames.set(sellerId, storeName);
+  }
+
   summary(p: Person): identity.AccountSummary {
     return { id: p.accountId, realm: p.realm, email: p.email, displayName: p.name, status: 'active', emailVerified: true, twoStepEnabled: false };
   }
@@ -137,6 +143,10 @@ export class World {
         ownerOf: async (sellerId) => {
           const o = [...this.members.values()].find((m) => m.sellerId === sellerId && m.isOwner);
           return o ? { accountId: o.accountId, memberId: o.memberId } : null;
+        },
+        getSeller: async (id) => {
+          const storeName = this.storeNames.get(id);
+          return storeName ? { id, ref: 'SL-1', slug: id, storeName, status: 'approved' as const, verified: true, canSellNew: true, activeRestrictionIds: [], launchReady: true } : null;
         },
         searchSellers: async () => ({ items: this.sellersList.map((id) => ({ id, ref: 'SL-1', slug: id, storeName: 'Store', status: 'approved' as const, verified: true, canSellNew: true, activeRestrictionIds: [], launchReady: true })), nextCursor: null }),
       },

@@ -400,10 +400,22 @@ export class Sender {
     return [{ deliveries, ...(notice ? { notice } : {}) }];
   }
 
-  async #role(t: TopicDef, roleKey: string): Promise<Addressee[]> {
+  async #role(t: TopicDef, wantedRole: string): Promise<Addressee[]> {
     const core = this.core;
-    const res = await core.resolveRole(roleKey);
+    let roleKey = wantedRole;
+    let res = await core.resolveRole(roleKey);
     if (!res) core.log.debug({ roleKey, topic: t.key }, 'access is off: role notice without recipients');
+    // nobody can receive it (nobody holds the role, or all of them are away or locked): the escalation role does,
+    // one step, addressed to that role so the notice says who it went to; an away lead keeps its copy
+    const keptCc = res?.ccAccountIds ?? [];
+    if (res && !res.accountIds.length && res.escalationRoleKey && res.escalationRoleKey !== roleKey) {
+      const up = await core.resolveRole(res.escalationRoleKey);
+      if (up?.accountIds.length) {
+        core.log.info({ roleKey, escalatedTo: up.roleKey, topic: t.key }, 'nobody receives this role: notice sent to its escalation role');
+        roleKey = up.roleKey;
+        res = { ...up, ccAccountIds: [...up.ccAccountIds, ...keptCc] };
+      }
+    }
     const acting = [...new Set(res?.accountIds ?? [])];
     const cc = [...new Set(res?.ccAccountIds ?? [])].filter((id) => !acting.includes(id));
     const lead = res?.leadAccountId ?? null;

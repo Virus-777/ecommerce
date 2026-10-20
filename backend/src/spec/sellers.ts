@@ -3159,7 +3159,7 @@ export const SellersInvitationSentEvent: z.ZodType<SellersInvitationSentEvent> =
 
 /** What other modules may call in-process: `ctx.use('sellers')` (or `ctx.tryUse` for an optional dependency). */
 export interface SellersPublicApi {
-  /** Store name, slug, status, verified label and whether new sales are allowed (marketplace sellers only; the Official Store is ownerType official with sellerId null and has no seller record) Used by: offers, orders, catalog, search, finance, returns, support, reviews, promotions, advertising, trust, reports, graphql, messaging. */
+  /** Store name, slug, status, verified label and whether new sales are allowed (marketplace sellers only; the Official Store is ownerType official with sellerId null and has no seller record) Used by: offers, orders, catalog, search, finance, returns, support, reviews, promotions, advertising, trust, reports, graphql, messaging, notifications. */
   getSeller(sellerId: string): Promise<SellerSnapshot | null>;
   /** Batch version for lists Used by: offers, search, orders, reports, wishlist, graphql, advertising, catalog, content, finance, fulfillment-service, promotions, reviews, shipping, trust. */
   getSellers(sellerIds: string[]): Promise<SellerSnapshot[]>;

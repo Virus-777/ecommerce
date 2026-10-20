@@ -744,6 +744,78 @@ export class NotificationsService implements NotificationsPublicApi {
     await this.consumers.handle('trust.rights_report.received', event, eventId);
   }
 
+  /* Reviews that sellers (and authors) start: the staff who decide them hear about each one */
+
+  /** catalog.product.submitted: Staff: product to review (Catalog Manager) */
+  async onProductSubmittedFromCatalog(event: EventPayload<'catalog.product.submitted'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('catalog.product.submitted', event, eventId);
+  }
+
+  /** catalog.brand.requested: Staff: unlisted brand to review (Catalog Manager) */
+  async onBrandRequestedFromCatalog(event: EventPayload<'catalog.brand.requested'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('catalog.brand.requested', event, eventId);
+  }
+
+  /** catalog.brand.changed: resolves the brand request notice once the brand's status is decided */
+  async onBrandChangedFromCatalog(event: EventPayload<'catalog.brand.changed'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('catalog.brand.changed', event, eventId);
+  }
+
+  /** catalog.correction.suggested: Staff: correction to review (Catalog Manager) */
+  async onCorrectionSuggestedFromCatalog(event: EventPayload<'catalog.correction.suggested'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('catalog.correction.suggested', event, eventId);
+  }
+
+  /** catalog.correction.decided: resolves the correction notice */
+  async onCorrectionDecidedFromCatalog(event: EventPayload<'catalog.correction.decided'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('catalog.correction.decided', event, eventId);
+  }
+
+  /** sellers.change_request.submitted: Staff: store or business change to review (Seller Manager) */
+  async onChangeRequestSubmittedFromSellers(event: EventPayload<'sellers.change_request.submitted'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('sellers.change_request.submitted', event, eventId);
+  }
+
+  /** sellers.launch_review.requested: Staff: launch readiness review to decide (Seller Manager) */
+  async onLaunchReviewRequestedFromSellers(event: EventPayload<'sellers.launch_review.requested'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('sellers.launch_review.requested', event, eventId);
+  }
+
+  /** sellers.application.information_provided: Staff: the applicant answered (Seller Manager) */
+  async onApplicationInformationProvidedFromSellers(event: EventPayload<'sellers.application.information_provided'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('sellers.application.information_provided', event, eventId);
+  }
+
+  /** sellers.appeal.submitted: Staff: seller appeal to decide (Seller Manager) */
+  async onAppealSubmittedFromSellers(event: EventPayload<'sellers.appeal.submitted'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('sellers.appeal.submitted', event, eventId);
+  }
+
+  /** sellers.restriction.evidence_submitted: Staff: restriction evidence to review (Seller Manager) */
+  async onRestrictionEvidenceSubmittedFromSellers(event: EventPayload<'sellers.restriction.evidence_submitted'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('sellers.restriction.evidence_submitted', event, eventId);
+  }
+
+  /** sellers.restriction.lifted: resolves the restriction evidence notice */
+  async onRestrictionLiftedFromSellers(event: EventPayload<'sellers.restriction.lifted'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('sellers.restriction.lifted', event, eventId);
+  }
+
+  /** trust.appeal.submitted: Staff: trust appeal to decide (Trust and Risk Manager) */
+  async onAppealSubmittedFromTrust(event: EventPayload<'trust.appeal.submitted'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('trust.appeal.submitted', event, eventId);
+  }
+
+  /** reviews.appeal.submitted: Staff: moderation appeal to decide (Content Manager) */
+  async onAppealSubmittedFromReviews(event: EventPayload<'reviews.appeal.submitted'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('reviews.appeal.submitted', event, eventId);
+  }
+
+  /** reviews.appeal.decided: resolves the moderation appeal notice */
+  async onAppealDecidedFromReviews(event: EventPayload<'reviews.appeal.decided'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('reviews.appeal.decided', event, eventId);
+  }
+
   /* ---------------------------------------------------------------- jobs */
 
   /** Job notifications.dispatch (queue worker): Render and send queued deliveries per channel with provider rate limits; mark sent */

@@ -939,7 +939,7 @@ Indexes: `pk (brand_id, category_id)`, `(category_id, product_count desc)`
 
 | Publishes | When | Payload | Consumed by |
 |---|---|---|---|
-| `catalog.product.submitted` | A seller or the Official Store submits a product | `{ productId: uuid, ownerSellerId: uuid?, submissionId: uuid, ref: string, kind: enum(new|content_change|resubmitted), title: string, reviewDueAt: datetime }` | sellers, workqueues |
+| `catalog.product.submitted` | A seller or the Official Store submits a product | `{ productId: uuid, ownerSellerId: uuid?, submissionId: uuid, ref: string, kind: enum(new|content_change|resubmitted), title: string, reviewDueAt: datetime }` | notifications, sellers, workqueues |
 | `catalog.product.approved` | A reviewer approves | `{ productId: uuid, ownerSellerId: uuid? }` | notifications, offers, search, sellers, workqueues |
 | `catalog.product.changes_requested` | A reviewer asks for changes | `{ productId: uuid, ownerSellerId: uuid?, reason: text, fields: map<string> }` | notifications, sellers, workqueues |
 | `catalog.product.rejected` | A reviewer rejects | `{ productId: uuid, ownerSellerId: uuid?, reason: text }` | notifications, sellers, workqueues |
@@ -947,11 +947,11 @@ Indexes: `pk (brand_id, category_id)`, `(category_id, product_count desc)`
 | `catalog.images.recrop_needed` | A change of the product image spec's aspect ratio left a seller's product images off the ratio (media.product_images.recrop_changed): one event per seller and batch, for the seller's notification | `{ sellerId: uuid, productIds: uuid[], imageCount: int, aspectRatio: string }` | notifications |
 | `catalog.product.updated` | Shared content changes (including variant weight, dimensions and list price) | `{ productId: uuid, version: int, title: string }` | offers, search |
 | `catalog.product.merged` | A duplicate or submission is merged (one event per merged record) | `{ keptProductId: uuid, duplicateProductId: uuid, newVariantId: uuid?, intoVariantId: uuid?, reason: text }` | advertising, content, customers, inventory, offers, promotions, reviews, search, wishlist |
-| `catalog.correction.suggested` | A seller suggests a correction | `{ suggestionId: uuid, productId: uuid }` | - |
-| `catalog.correction.decided` | Staff accept or decline a correction | `{ suggestionId: uuid, accepted: bool }` | - |
+| `catalog.correction.suggested` | A seller suggests a correction | `{ suggestionId: uuid, productId: uuid }` | notifications |
+| `catalog.correction.decided` | Staff accept or decline a correction | `{ suggestionId: uuid, accepted: bool }` | notifications |
 | `catalog.category.changed` | A category is created, renamed, moved, hidden or its attributes change | `{ categoryId: uuid, change: enum(created|updated|attributes) }` | - |
-| `catalog.brand.requested` | A seller submits a product with a brand that is not listed | `{ brandId: uuid, name: string, sellerId: uuid, productId: uuid }` | - |
-| `catalog.brand.changed` | A brand is created, edited, or its status or selling policy changes | `{ brandId: uuid, change: enum(created|updated|status), status: string, sellingPolicy: string }` | offers, search |
+| `catalog.brand.requested` | A seller submits a product with a brand that is not listed | `{ brandId: uuid, name: string, sellerId: uuid, productId: uuid }` | notifications |
+| `catalog.brand.changed` | A brand is created, edited, or its status or selling policy changes | `{ brandId: uuid, change: enum(created|updated|status), status: string, sellingPolicy: string }` | notifications, offers, search |
 
 | Consumes | From | Does |
 |---|---|---|

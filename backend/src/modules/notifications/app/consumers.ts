@@ -94,6 +94,9 @@ export class Consumers {
     const subjects: Record<string, string> = {};
     for (const [k, v] of Object.entries(send.subjects ?? {})) if (typeof v === 'string' && v) subjects[k] = v;
     const context: Record<string, unknown> = structuredClone(send.context ?? {});
+    // routes that know only the seller's id (staff review notices) get the store name here
+    const sellerCtx = context.seller as { id?: unknown; name?: unknown } | undefined;
+    if (sellerCtx && typeof sellerCtx.id === 'string' && !sellerCtx.name) sellerCtx.name = (await core.sellerName(sellerCtx.id)) ?? 'A seller';
     for (const [field, key] of REF_FIELDS) {
       const ref = (context[field] as { ref?: unknown } | undefined)?.ref;
       if (typeof ref === 'string' && ref) subjects[key] = ref;

@@ -1052,8 +1052,8 @@ Indexes: `(state, due_at)`, `(customer_id)`
 | `reviews.answer.published` | An answer is published (the asker is told) | `{ answerId: uuid, questionId: uuid, productId: uuid, label: string, askerCustomerId: uuid, sellerId: uuid? }` | - |
 | `reviews.response.published` | A seller or Official Store response is published or held (the reviewer is told when published) | `{ responseId: uuid, sellerId: uuid, targetType: string, targetId: uuid, status: string, customerId: uuid }` | - |
 | `reviews.moderation.decided` | A moderation decision is recorded (reporter and author are notified), including removals and keeps for a trust enforcement | `{ moderationItemId: uuid, contentType: string, contentId: uuid, decision: string, reasonCode: string, author: ContentParty?, reporters: ContentParty[], reporterOutcome: text?, appealUntil: datetime?, trustEnforcementId: uuid? }` | notifications, trust, workqueues |
-| `reviews.appeal.submitted` | An author appeals | `{ appealId: uuid, contentType: string, contentId: uuid }` | - |
-| `reviews.appeal.decided` | An appeal is decided (the author is told) | `{ appealId: uuid, overturned: bool, contentType: string, contentId: uuid, author: ContentParty?, outcome: text? }` | - |
+| `reviews.appeal.submitted` | An author appeals | `{ appealId: uuid, contentType: string, contentId: uuid }` | notifications |
+| `reviews.appeal.decided` | An appeal is decided (the author is told) | `{ appealId: uuid, overturned: bool, contentType: string, contentId: uuid, author: ContentParty?, outcome: text? }` | notifications |
 | `reviews.content.referred` | Content is referred to Trust and Risk | `{ moderationItemId: uuid, contentType: string, contentId: uuid, authorId: string, note: text }` | trust |
 | `reviews.rating.changed` | A product or seller rating summary changes | `{ productId: uuid?, sellerId: uuid?, average: number?, count: int }` | - |
 | `reviews.invite.due` | inviteDelayDays after delivery, for items not yet reviewed | `{ customerId: uuid, orderItemId: uuid, productId: uuid, sellerId: uuid }` | notifications |

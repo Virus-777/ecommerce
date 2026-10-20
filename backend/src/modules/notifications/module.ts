@@ -149,6 +149,21 @@ export default defineModule({
     ctx.events.on("reviews.moderation.decided", (e) => service.onModerationDecidedFromReviews(e.payload, e.id));
     ctx.events.on("trust.report.resolved", (e) => service.onReportResolvedFromTrust(e.payload, e.id));
     ctx.events.on("trust.rights_report.received", (e) => service.onRightsReportReceivedFromTrust(e.payload, e.id));
+    // reviews sellers (and authors) start: staff notices, resolved when decided
+    ctx.events.on("catalog.product.submitted", (e) => service.onProductSubmittedFromCatalog(e.payload, e.id));
+    ctx.events.on("catalog.brand.requested", (e) => service.onBrandRequestedFromCatalog(e.payload, e.id));
+    ctx.events.on("catalog.brand.changed", (e) => service.onBrandChangedFromCatalog(e.payload, e.id));
+    ctx.events.on("catalog.correction.suggested", (e) => service.onCorrectionSuggestedFromCatalog(e.payload, e.id));
+    ctx.events.on("catalog.correction.decided", (e) => service.onCorrectionDecidedFromCatalog(e.payload, e.id));
+    ctx.events.on("sellers.change_request.submitted", (e) => service.onChangeRequestSubmittedFromSellers(e.payload, e.id));
+    ctx.events.on("sellers.launch_review.requested", (e) => service.onLaunchReviewRequestedFromSellers(e.payload, e.id));
+    ctx.events.on("sellers.application.information_provided", (e) => service.onApplicationInformationProvidedFromSellers(e.payload, e.id));
+    ctx.events.on("sellers.appeal.submitted", (e) => service.onAppealSubmittedFromSellers(e.payload, e.id));
+    ctx.events.on("sellers.restriction.evidence_submitted", (e) => service.onRestrictionEvidenceSubmittedFromSellers(e.payload, e.id));
+    ctx.events.on("sellers.restriction.lifted", (e) => service.onRestrictionLiftedFromSellers(e.payload, e.id));
+    ctx.events.on("trust.appeal.submitted", (e) => service.onAppealSubmittedFromTrust(e.payload, e.id));
+    ctx.events.on("reviews.appeal.submitted", (e) => service.onAppealSubmittedFromReviews(e.payload, e.id));
+    ctx.events.on("reviews.appeal.decided", (e) => service.onAppealDecidedFromReviews(e.payload, e.id));
 
     // Background jobs (spec jobs)
     ctx.jobs.handle("notifications.dispatch", () => service.dispatch());

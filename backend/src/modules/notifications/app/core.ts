@@ -405,6 +405,18 @@ export class Core {
     return (await api.getMemberAccess(sellerId, accountId)) ?? null;
   }
 
+  /** A seller's store name for templates (null when sellers is off or the seller is unknown) */
+  async sellerName(sellerId: string): Promise<string | null> {
+    const api = this.sellers;
+    if (!api) return null;
+    try {
+      return (await api.getSeller(sellerId))?.storeName ?? null;
+    } catch (err) {
+      if (!isNotImplemented(err)) throw err;
+      return null;
+    }
+  }
+
   async resolveRole(roleKey: string): Promise<access.RecipientResolution | null> {
     const api = this.access;
     if (!api) return null;
