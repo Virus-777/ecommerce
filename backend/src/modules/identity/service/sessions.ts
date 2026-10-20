@@ -13,6 +13,9 @@ import type { SessionRow } from '../ports.js';
 import { type Core, type Caller, type WithCookie, KIND_OF, MIN, DAY, REVOCATION_OVERLAP_MS } from './core.js';
 import type { Authentication } from './authentication.js';
 
+/** Whether a staff session may still be used, and why not (publicApi touchStaffSession, staffSessionState) */
+export type StaffSessionState = { live: boolean; reason?: 'revoked' | 'expired' | 'idle' | 'unknown' };
+
 export class Sessions {
   constructor(
     readonly core: Core,
@@ -71,14 +74,26 @@ export class Sessions {
    * live, and the request is activity that keeps it from going idle. The write happens at most once a
    * minute per session, so a busy staff member costs one indexed read per few seconds.
    */
-  async touchStaffSession(sessionId: string): Promise<{ live: boolean; reason?: 'revoked' | 'expired' | 'idle' | 'unknown' }> {
-    const session = await this.core.repo.getSession(sessionId);
-    if (!session || session.audience !== 'admin') return { live: false, reason: 'unknown' };
+  async touchStaffSession(sessionId: string): Promise<StaffSessionState> {
+    const { state, session, now } = await this.#staffSession(sessionId);
+    if (state.live && now.getTime() - session!.last_active_at.getTime() >= MIN) await this.core.repo.updateSession(session!.id, { last_active_at: now });
+    return state;
+  }
+
+  /**
+   * The same answer without recording activity: an open live notification stream asks this at every heartbeat
+   * (kernel/auth/chain.ts streamGuard), and a stream left open must not keep an inactive person signed in.
+   */
+  async staffSessionState(sessionId: string): Promise<StaffSessionState> {
+    return (await this.#staffSession(sessionId)).state;
+  }
+
+  async #staffSession(sessionId: string): Promise<{ state: StaffSessionState; session?: SessionRow; now: Date }> {
     const now = this.core.now();
+    const session = await this.core.repo.getSession(sessionId);
+    if (!session || session.audience !== 'admin') return { state: { live: false, reason: 'unknown' }, now };
     const state = this.sessionState(session, { staffIdleMinutes: await this.core.ctx.settings.get('staffIdleMinutes') }, now);
-    if (state !== 'live') return { live: false, reason: state };
-    if (now.getTime() - session.last_active_at.getTime() >= MIN) await this.core.repo.updateSession(session.id, { last_active_at: now });
-    return { live: true };
+    return { state: state === 'live' ? { live: true } : { live: false, reason: state }, session, now };
   }
 
   /** A rotated refresh token came back after the grace window: theft signal (docs/03 §5: no account lock) */
