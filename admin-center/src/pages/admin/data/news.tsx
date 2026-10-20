@@ -10,14 +10,10 @@ import { Button, Icon, IconButton, ImageCropper, Img, TableWrap, type CropWordin
 type S = components['schemas'];
 export type NewsAdmin = S['content.NewsAdmin'];
 export type NewsRow = S['content.NewsAdminSummary'];
-export type NewsPost = S['content.NewsPost'];
 export type NewsCategory = S['content.NewsCategory'];
 export type NewsInput = S['content.NewsInput'];
-export type NewsVersion = S['content.Version'];
 export type NewsStatus = NewsAdmin['status'];
 export type MediaRef = S['MediaRef'];
-export type DraftReview = NonNullable<NewsAdmin['draftReview']>;
-
 export const TITLE_MAX = 90;
 export const SUMMARY_MAX = 200;
 export const CATEGORY_NAME_MAX = 30;

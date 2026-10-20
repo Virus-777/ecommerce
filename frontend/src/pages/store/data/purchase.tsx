@@ -43,9 +43,6 @@ export function ItemImg({ image, className }: { image?: MediaRef | null; classNa
   return <Img icon="package" src={image?.url} alt={image?.alt ?? ''} className={className} />;
 }
 
-/** Store link for a seller label (Official Store or the seller's storefront). */
-export const sellerHref = (s: SellerLabel) => (s.official ? href('store/official') : href('store/seller', '', { slug: s.slug }));
-
 /** Product page link (the slug is cosmetic; routes carry the id). */
 export const productHref = (productId: string, slug?: string | null) => href('store/product', '', { slug: slug || 'item', id: productId });
 

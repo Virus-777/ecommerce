@@ -303,24 +303,6 @@ export function Stat({ label, value, delta, dir, good, note, icon }: { label: Re
   );
 }
 
-/** Work-queue tile: big count, label, sub and chevron. Tone danger/warning marks urgency. */
-export function QueueTile({ n, label, sub, tone, to = '#' }: { n: ReactNode; label: ReactNode; sub?: ReactNode; tone?: 'danger' | 'warning' | 'info' | 'success'; to?: string }) {
-  return (
-    <Link className={cx('queue-tile', tone && `t-${tone}`)} to={to}>
-      <span className="qn">
-        {n}
-        {tone === 'danger' && <span className="sr-only"> (urgent)</span>}
-        {tone === 'warning' && <span className="sr-only"> (at risk)</span>}
-      </span>
-      <span className="stack gap-0 grow">
-        <span className="small strong">{label}</span>
-        {sub && <span className="xs muted">{sub}</span>}
-      </span>
-      <Icon name="chevron-right" className="ic-sm" />
-    </Link>
-  );
-}
-
 const ALERT_ICONS: Record<string, IconName> = { info: 'info', success: 'circle-check', warning: 'triangle-alert', danger: 'circle-alert', brand: 'sparkles' };
 
 /** Inline alert (.alert). Danger/warning are announced (role=alert). */

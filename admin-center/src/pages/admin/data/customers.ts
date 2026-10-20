@@ -9,7 +9,6 @@ type S = components['schemas'];
 export type CustomerRow = S['customers.AdminCustomerRow'];
 export type CustomerDetail = S['customers.AdminCustomerDetail'];
 export type GuestBuyer = S['customers.GuestBuyerRow'];
-export type DataRequest = S['customers.DataRequest'];
 export type AccountActionInput = S['customers.AccountActionInput'];
 export type AccountStatus = CustomerRow['accountStatus'];
 export type Verification = CustomerRow['verification'];

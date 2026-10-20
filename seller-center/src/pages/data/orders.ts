@@ -8,16 +8,12 @@ import SELLER_ORDER_DETAIL_TEXT from '@marketly/web-shared/api/graphql/seller/Se
 
 type S = components['schemas'];
 export type OrderRow = S['orders.SellerOrderRow'];
-export type OrderCounts = S['orders.SellerOrderCounts'];
 export type OrderDetailRest = S['orders.SellerOrderDetail'];
 export type CancellationRequest = S['orders.CancellationRequest'];
 export type ExportJob = S['reports.ExportJob'];
-export type DocumentLink = S['orders.DocumentLink'];
 export type LabelQuote = S['shipping.LabelQuote'];
 export type LabelResult = S['shipping.LabelResult'];
-export type Shipment = S['shipping.Shipment'];
 export type ShippingSettings = S['shipping.SellerShippingSettings'];
-export type ShippingProfile = S['shipping.ShippingProfile'];
 export type ProfileMethod = S['shipping.ProfileMethod'];
 export type PlatformMethod = S['shipping.ShippingMethod'];
 export type Carrier = S['shipping.Carrier'];

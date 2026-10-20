@@ -9,8 +9,6 @@ export type PayoutRun = S['finance.PayoutRun'];
 export type RunPayoutRow = S['finance.RunPayoutRow'];
 export type Payout = S['finance.Payout'];
 export type DestinationReview = S['finance.DestinationReview'];
-export type RunApproval = S['finance.RunApproval'];
-
 /** Runs that are still being prepared, approved or released: the screen opens the newest of these. */
 export const OPEN_RUN = new Set<PayoutRun['status']>(['draft', 'pending_approval', 'approved', 'releasing']);
 

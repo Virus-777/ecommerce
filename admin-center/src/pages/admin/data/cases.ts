@@ -32,7 +32,6 @@ export function minutesLabel(m: number | null | undefined): string {
 
 export type CaseDetail = S['support.AdminCaseDetail'];
 export type CaseMessage = S['support.CaseMessage'];
-export type Remedy = S['support.Remedy'];
 export type DecisionInput = S['support.DecisionInput'];
 export type Outcome = DecisionInput['outcome'];
 export type RemedyKind = DecisionInput['remedies'][number]['kind'];

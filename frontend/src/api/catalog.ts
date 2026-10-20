@@ -6,7 +6,6 @@ import type { IconName } from '@marketly/web-shared/ui';
 // Home shortcuts, Official Store shortcuts, NotFound) and brands. See web-shared/docs/API.md.
 
 export type Category = components['schemas']['catalog.Category'];
-export type Brand = components['schemas']['catalog.Brand'];
 export type MediaRef = components['schemas']['MediaRef'];
 
 

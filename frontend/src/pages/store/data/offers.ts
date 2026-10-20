@@ -1,10 +1,9 @@
 // API access for the All offers page (store/offers): every offer for one variant, delivering to
 // the shopper's location, with condition counts and the featured-offer rule.
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { call, useApi, type components } from '@marketly/web-shared/api';
+import { call, useApi } from '@marketly/web-shared/api';
 import type { OfferView } from './product';
 
-export type OfferComparison = components['schemas']['offers.OfferComparison'];
 export type ConditionGroup = 'new' | 'used' | 'refurbished';
 export type OfferSort = 'total_cost' | 'fastest_delivery';
 

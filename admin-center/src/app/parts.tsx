@@ -2,7 +2,7 @@
 // the load-error alert, skeletons and links built from the API's screen ids.
 import { ApiError, errorMessage } from '@marketly/web-shared/api';
 import { href, SCREEN_BY_ID, type ScreenId } from '@marketly/web-shared/routes';
-import { Alert, Button, iconFor } from '@marketly/web-shared/ui';
+import { Alert, Button } from '@marketly/web-shared/ui';
 
 /** Admin and Operations Center times are shown in Pacific Time (market time). */
 export const TZ = 'America/Los_Angeles';
@@ -172,5 +172,3 @@ export function SkeletonLines({ rows = 3 }: { rows?: number }) {
   );
 }
 
-/** @deprecated Use iconFor from @marketly/web-shared/ui (maps the API's old icon names; unknown names fall back). */
-export const iconOf = iconFor;

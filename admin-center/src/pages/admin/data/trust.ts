@@ -9,7 +9,6 @@ type S = components['schemas'];
 export type ReportRow = S['trust.ReportRow'];
 export type TrustReportDetail = S['trust.TrustReport'];
 export type TrustSubject = S['trust.TrustSubject'];
-export type TrustOverview = S['trust.TrustOverview'];
 export type TrustAppeal = S['trust.TrustAppeal'];
 export type Recommendation = S['trust.Recommendation'];
 export type EvidenceItem = S['trust.EvidenceItem'];

@@ -30,13 +30,6 @@ const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /** A search word matches at the start of a word ("case" finds "cases", not "briefcase"). */
 const wordStart = (t: string) => new RegExp(`(?<![\\p{L}\\p{N}])${escape(t)}`, 'iu');
 
-/** Every word of the search starts a word somewhere in the texts (case-insensitive). */
-export function matchesAll(toks: string[], ...texts: string[]): boolean {
-  if (!toks.length) return true;
-  const hay = texts.join(' \n ');
-  return toks.every((t) => wordStart(t).test(hay));
-}
-
 /** How many of the search words a text contains (for "similar questions"). */
 export const matchCount = (toks: string[], text: string) => toks.filter((t) => wordStart(t).test(text)).length;
 

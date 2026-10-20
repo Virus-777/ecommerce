@@ -17,7 +17,6 @@ export type ReviewCheck = S['advertising.ReviewCheck'];
 export type AdPreview = S['advertising.AdPreview'];
 export type AdImpression = S['advertising.AdImpression'];
 export type CampaignCheckResult = S['advertising.CampaignCheckResult'];
-export type PerformanceReport = S['advertising.PerformanceReport'];
 export type Page<T> = { items: T[]; nextCursor?: string | null; total?: number | null; totalPages?: number | null };
 
 export type CampaignStatus = AdCampaignSummary['status'];
@@ -86,8 +85,6 @@ export const pageLabel = (p: string) => PAGE_LABEL[p] ?? p;
 export const isOwn = (a: { kind: string; paid?: boolean }) => a.kind === 'platform' || a.kind === 'official_store';
 
 export const num = (n: number | null | undefined) => (n ?? 0).toLocaleString('en-US');
-export const pct = (n: number | null | undefined) => `${(n ?? 0).toFixed(1)}%`;
-
 /** Check tone of a ReviewCheck/LinkCheck state in the design's check lists. */
 export const checkTone = (s: string): 'ok' | 'warn' | 'info' => (s === 'ok' ? 'ok' : s === 'warn' || s === 'fail' ? 'warn' : 'info');
 

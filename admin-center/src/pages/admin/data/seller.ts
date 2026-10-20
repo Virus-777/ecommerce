@@ -7,17 +7,13 @@ import { formatMoney, type MoneyValue } from '@marketly/web-shared/lib/format';
 
 type S = components['schemas'];
 export type SellerRow = S['sellers.SellerRow'];
-export type SellerStats = S['sellers.SellerStats'];
 export type SellerDetail = S['sellers.SellerAdminDetail'];
 export type Restriction = S['sellers.Restriction'];
 export type Appeal = S['sellers.Appeal'];
-export type SuspensionImpact = S['sellers.SuspensionImpact'];
 export type ApplicationAdmin = S['sellers.ApplicationAdmin'];
 export type ApplicationRow = S['sellers.ApplicationRow'];
 export type Actor = S['Actor'];
 export type TimelineEvent = S['TimelineEvent'];
-
-export type DeadlineTone = 'ok' | 'warning' | 'danger';
 
 /** API seller status -> the design's label. */
 export const SELLER_STATUS: Record<string, string> = {

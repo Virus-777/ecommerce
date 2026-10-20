@@ -5,7 +5,7 @@ export { call, newIdempotencyKey, type Api } from './client';
 export { ApiError, errorMessage, toApiError } from './errors';
 export type { Audience, SessionSnapshot, SessionTokens, TokenClaims, TokenKind } from './session';
 export type { paths, components } from './openapi';
-export { useAppConfig, useMarket, APP_CONFIG_KEY, type AppConfig, type PublicMarket, type DeliveryLocation } from './appConfig';
+export { useAppConfig, useMarket, APP_CONFIG_KEY, type PublicMarket, type DeliveryLocation } from './appConfig';
 export { uploadMedia, useUploads, assetPreview, fileSize, mediaFileName, type MediaAsset, type UploadItem, type UploadPurpose } from './uploads';
 export {
   useProductImageSpec, ProductImageRatio, resolveProductImageSpec, exactImageSpec, validateProductImageSetting, parseRatio, renditionUrl, sizeText, productImageSpecKey,

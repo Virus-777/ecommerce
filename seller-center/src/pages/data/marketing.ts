@@ -1,5 +1,4 @@
 import { ApiError, type components } from '@marketly/web-shared/api';
-import { formatMoney, type MoneyValue } from '@marketly/web-shared/lib/format';
 
 // API types and helpers for the Marketing screen (promotions: seller discounts and platform campaign
 // invitations; advertising: sponsored campaigns). Also used by the Ad request screen (dates, phase-3 checks).
@@ -10,10 +9,7 @@ export type DiscountRule = S['promotions.DiscountRule'];
 export type SellerDiscountInput = S['promotions.SellerDiscountInput'];
 export type Invitation = S['promotions.Invitation'];
 export type ParticipationOffer = S['promotions.ParticipationOffer'];
-export type EarningsImpact = S['promotions.EarningsImpact'];
 export type SellerAdCampaign = S['advertising.SellerAdCampaign'];
-export type SellerAdsSummary = S['advertising.SellerAdsSummary'];
-export type SellerOfferRow = S['offers.SellerOfferRow'];
 export type Money = S['Money'];
 
 export const MARKET_TZ = 'America/Los_Angeles';
@@ -33,8 +29,6 @@ export const usd = (dollarsValue: number, currency = 'USD'): Money => ({ amount:
 
 /** 1500 → "15%", 3333 → "33.33%" */
 export const pct = (bps: number): string => `${Number((bps / 100).toFixed(2))}%`;
-
-export const moneyOr = (m: MoneyValue | null | undefined, fallback = '—') => (m ? formatMoney(m) : fallback);
 
 /** "12.50" → true (positive amount with at most two decimals) */
 export const isAmount = (v: string) => /^\d+(\.\d{1,2})?$/.test(v.trim()) && Number(v) > 0;
@@ -88,20 +82,11 @@ export function parsePT(text: string, o: { endOfDay?: boolean } = {}): string | 
 
 const dtf = (o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('en-US', { timeZone: MARKET_TZ, ...o });
 
-/** ISO → "Nov 20, 2026, 12:00 AM" (Pacific Time), the format the date fields take. */
-export const formatPT = (iso?: string | null): string => (iso ? dtf({ month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(iso)) : '');
-
 /** ISO → "Sat, Oct 10" */
 export const weekdayPT = (iso?: string | null): string => (iso ? dtf({ weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(iso)) : '');
 
-/** ISO → "Oct 10" */
-export const dayPT = (iso?: string | null): string => (iso ? dtf({ month: 'short', day: 'numeric' }).format(new Date(iso)) : '');
-
 /** ISO → "Thu, Oct 8, 11:05 AM" */
 export const stampPT = (iso?: string | null): string => (iso ? dtf({ weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(iso)) : '');
-
-/** ISO date (yyyy-mm-dd) of an instant in Pacific Time. */
-export const isoDayPT = (d: Date): string => dtf({ year: 'numeric', month: '2-digit', day: '2-digit' }).format(d).replace(/^(\d{2})\/(\d{2})\/(\d{4})$/, '$3-$1-$2');
 
 /** "2026-10-01" → "Oct 1" */
 export const shortDay = (ymd: string): string => {

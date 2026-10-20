@@ -132,19 +132,6 @@ export function BarChart({ labels, data, height = 200, width, fmt = (v) => Strin
   );
 }
 
-export function Sparkline({ data, series = 1 }: { data: number[]; series?: 1 | 2 }) {
-  const W = 120, H = 32;
-  const max = Math.max(...data), min = Math.min(...data);
-  const x = (i: number) => (data.length > 1 ? (i * W) / (data.length - 1) : W / 2);
-  const y = (v: number) => 3 + (H - 6) * (1 - (v - min) / (max - min || 1));
-  return (
-    <svg className="chart" viewBox={`0 0 ${W} ${H}`} style={{ width: W, height: H }} aria-hidden="true">
-      <polyline className={`s${series}`} points={data.map((v, i) => `${x(i)},${y(v)}`).join(' ')} />
-      <circle className={`end${series}`} cx={x(data.length - 1)} cy={y(data[data.length - 1])} r="3" />
-    </svg>
-  );
-}
-
 export function Legend({ items }: { items: ReactNode[] }) {
   return (
     <div className="legend">

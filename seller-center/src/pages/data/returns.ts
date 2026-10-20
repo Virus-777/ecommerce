@@ -11,7 +11,6 @@ import { formatMoney, type MoneyValue } from '@marketly/web-shared/lib/format';
 
 export type SellerReturnRow = components['schemas']['returns.SellerReturnRow'];
 export type SellerReturnCounts = components['schemas']['returns.SellerReturnCounts'];
-export type SellerReturnTerms = components['schemas']['returns.SellerReturnTerms'];
 type Deadline = components['schemas']['Deadline'];
 
 /** List tab as the URL view ('' = Return requests) and the API's `tab`. */

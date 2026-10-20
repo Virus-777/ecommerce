@@ -10,7 +10,6 @@ import { href } from '@marketly/web-shared/routes';
 import { announce } from '@marketly/web-shared/ui';
 
 export type CatalogProduct = components['schemas']['catalog.Product'];
-export type CatalogVariant = components['schemas']['catalog.Variant'];
 export type Category = components['schemas']['catalog.Category'];
 export type PurchaseBox = components['schemas']['offers.PurchaseBox'];
 export type OfferView = components['schemas']['offers.OfferView'];
@@ -18,7 +17,6 @@ export type SellerCue = components['schemas']['offers.SellerCue'];
 export type RatingSummary = components['schemas']['reviews.RatingSummary'];
 export type SimilarProduct = components['schemas']['search.ProductCard'];
 export type MediaRef = components['schemas']['MediaRef'];
-export type AddItemResult = components['schemas']['cart.AddItemResult'];
 export type CartSource = 'product_page' | 'offers_list';
 
 /** Seller id of first-party offers (docs/api/README.md, Constants). */

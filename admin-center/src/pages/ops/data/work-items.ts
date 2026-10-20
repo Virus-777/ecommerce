@@ -103,8 +103,6 @@ export function allowedActions(it: WorkItem, me: string) {
     reopen: !active,
   };
 }
-export type ActionKey = keyof ReturnType<typeof allowedActions>;
-
 export type ItemAction =
   | { kind: 'claim' | 'start' | 'resume' }
   | { kind: 'wait'; waitingOn: WaitingOn; note: string; followUpAt?: string | null }

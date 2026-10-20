@@ -5,7 +5,6 @@ import { href } from '@marketly/web-shared/routes';
 import { productHref } from './orders';
 
 export type ConversationSummary = components['schemas']['messaging.ConversationSummary'];
-export type Conversation = components['schemas']['messaging.Conversation'];
 export type Message = components['schemas']['messaging.Message'];
 type Subject = ConversationSummary['subject'];
 type Counterparty = ConversationSummary['counterparty'];

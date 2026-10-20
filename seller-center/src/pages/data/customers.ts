@@ -6,12 +6,10 @@ type S = components['schemas'];
 export type ConversationSummary = S['messaging.ConversationSummary'];
 export type Conversation = S['messaging.Conversation'];
 export type Message = S['messaging.Message'];
-export type ReplyTemplate = S['messaging.ReplyTemplate'];
 export type ResponseStats = S['messaging.ResponseStats'];
 export type QuestionRow = S['reviews.SellerQuestionRow'];
 export type Answer = S['reviews.Answer'];
 export type FeedbackRow = S['reviews.SellerFeedbackRow'];
-export type FeedbackSummary = S['reviews.SellerFeedbackSummary'];
 export type SellerResponse = S['reviews.SellerResponse'];
 
 export type InboxFilter = 'all' | 'awaiting_reply' | 'overdue' | 'unread';

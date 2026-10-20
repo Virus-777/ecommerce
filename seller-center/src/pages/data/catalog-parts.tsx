@@ -177,16 +177,6 @@ export const fmtFull = (iso?: string | null) =>
 
 /* ---------------- files ---------------- */
 
-export function downloadCsv(name: string, rows: string[][]) {
-  const csv = rows.map((r) => r.map((c) => (/[",\n]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c)).join(',')).join('\n');
-  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
 /** Opens a signed download link (export files, templates, correction reports). */
 export function openDownload(url: string, fileName?: string | null) {
   const a = document.createElement('a');
