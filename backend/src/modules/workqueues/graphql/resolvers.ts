@@ -1,4 +1,4 @@
-import { gqlActor, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { gqlActor, gqlEnum, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
 import { format as formatMoney } from '../../../kernel/lib/money.js';
 import { toPageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
@@ -9,12 +9,11 @@ import type { WorkqueuesService } from '../service.js';
 
 /* ---------------------------------------------------------------- REST shapes → GraphQL shapes (enums in capitals, Money.formatted) */
 
-const up = (s: string | null | undefined) => (s ? s.toUpperCase() : null);
 const low = (s: string | null | undefined) => (s ? s.toLowerCase() : undefined);
 const actor = gqlActor;
 const money = (m: common.Money | null | undefined) => (m ? { ...m, formatted: formatMoney(m) } : null);
 const staff = (s: StaffRef | null | undefined) => (s ? { staffId: s.staffId, name: s.name, role: s.role ?? null } : null);
-const subject = (s: WorkItem['subject']) => ({ ...s, type: up(s.type) });
+const subject = (s: WorkItem['subject']) => ({ ...s, type: gqlEnum(s.type) });
 const link = (l: unknown) => {
   const x = (l ?? {}) as { label?: string; screen?: string; state?: string | null };
   return { label: x.label ?? 'Open', screen: x.screen ?? 'ops/queues', state: x.state ?? null };
@@ -25,8 +24,8 @@ export function gqlItem(w: WorkItem) {
   const res = w.resolution as { outcome?: string; note?: string | null; by?: common.Actor } | null | undefined;
   return {
     ...w,
-    area: up(w.area),
-    kind: up(w.kind),
+    area: gqlEnum(w.area),
+    kind: gqlEnum(w.kind),
     subject: subject(w.subject),
     relatedSubjects: w.relatedSubjects.map(subject),
     amount: money(w.amount),
@@ -34,10 +33,10 @@ export function gqlItem(w: WorkItem) {
     backup: staff(w.backup),
     assignee: staff(w.assignee),
     escalatedTo: staff(w.escalatedTo),
-    deadline: { dueAt: w.deadline.dueAt, state: up(w.deadline.state) },
-    priority: up(w.priority),
-    state: up(w.state),
-    waitingOn: up(w.waitingOn),
+    deadline: { dueAt: w.deadline.dueAt, state: gqlEnum(w.deadline.state) },
+    priority: gqlEnum(w.priority),
+    state: gqlEnum(w.state),
+    waitingOn: gqlEnum(w.waitingOn),
     source: { module: src.module ?? 'workqueues', event: src.event ?? null, raisedBy: actor(src.raisedBy ?? { kind: 'system' }), dedupeKey: src.dedupeKey ?? '' },
     links: w.links.map(link),
     notes: w.notes.map((n) => ({ ...n, author: actor(n.author) })),
@@ -70,7 +69,7 @@ function gqlQueue(def: QueueDefinition, sum: QueueSummary | undefined, items: (a
   const oldest = (sum?.oldest ?? null) as { itemId: string; subjectRef?: string | null; ref?: string; openedAt: string; ageLabel: string } | null;
   return {
     ...def,
-    area: up(def.area),
+    area: gqlEnum(def.area),
     lead: staff(def.lead),
     backup: staff(def.backup),
     escalationRoute: def.escalationRoute.map((s) => ({ afterMinutes: s.afterMinutes, toName: stepTarget(s)?.name ?? 'Unknown', condition: s.condition ?? null, notify: s.notify })),
@@ -83,21 +82,21 @@ function gqlQueue(def: QueueDefinition, sum: QueueSummary | undefined, items: (a
   };
 }
 
-const routine = (r: RoutineDay) => ({ ...r, checks: r.checks.map((c) => ({ ...c, state: up(c.state), owner: staff(c.owner), doneBy: staff(c.doneBy) })) });
+const routine = (r: RoutineDay) => ({ ...r, checks: r.checks.map((c) => ({ ...c, state: gqlEnum(c.state), owner: staff(c.owner), doneBy: staff(c.doneBy) })) });
 const dayEnd = (d: DayEndReview | null | undefined) =>
   d
     ? {
         ...d,
-        state: up(d.state),
+        state: gqlEnum(d.state),
         completedBy: staff(d.completedBy),
-        items: d.items.map((i) => ({ ...i, key: up(i.key), owner: staff(i.owner), checkedBy: staff(i.checkedBy), link: { ...link(i.link), label: (i.link as { label?: string })?.label ?? i.title } })),
+        items: d.items.map((i) => ({ ...i, key: gqlEnum(i.key), owner: staff(i.owner), checkedBy: staff(i.checkedBy), link: { ...link(i.link), label: (i.link as { label?: string })?.label ?? i.title } })),
       }
     : null;
-const savedFilter = (f: SavedFilter) => ({ ...f, owner: staff(f.owner), target: up(f.target), filters: f.filters ?? {} });
+const savedFilter = (f: SavedFilter) => ({ ...f, owner: staff(f.owner), target: gqlEnum(f.target), filters: f.filters ?? {} });
 
 /**
  * Resolvers for the GraphQL fields this module owns (`@source(module: "workqueues", …)` in graphql/schema.ts).
- * Same visibility as REST: the caller's roles, the queues they lead or back up, view-all.
+ * Same visibility as REST: the caller's roles, the queues they lead or back gqlEnum, view-all.
  *
  *   Seller.openWorkItems → service.listForSubject
  *   Query.myQueues → service.getMyQueues
@@ -146,13 +145,13 @@ export const resolvers = (service: WorkqueuesService): ModuleResolvers => {
         const v = await viewerOf(ctx);
         const s = await service.workSummary(v);
         return {
-          needsAttention: (s.needsAttention as { tone: string }[]).map((t) => ({ ...t, tone: up(t.tone) })),
+          needsAttention: (s.needsAttention as { tone: string }[]).map((t) => ({ ...t, tone: gqlEnum(t.tone) })),
           overdueDispatch: async (args: { limit?: number }) => {
             const limit = args.limit ?? 5;
             const items = limit === 5 ? s.overdueDispatch : (await service.workSummary(v, { dispatchLimit: limit })).overdueDispatch;
             return items.map(gqlItem);
           },
-          team: s.team.map((t) => ({ ...t, staff: staff(t.staff), coveringFor: staff(t.coveringFor), role: up(t.role), status: up(t.status) })),
+          team: s.team.map((t) => ({ ...t, staff: staff(t.staff), coveringFor: staff(t.coveringFor), role: gqlEnum(t.role), status: gqlEnum(t.status) })),
           generatedAt: s.generatedAt,
         };
       },

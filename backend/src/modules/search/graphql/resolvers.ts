@@ -1,13 +1,11 @@
 import { AppError, isAppError } from '../../../kernel/errors/index.js';
-import type { GraphQLContext, ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { gqlEnum, type GraphQLContext, type ModuleResolvers, pageInput, pairs } from '../../../kernel/graphql/index.js';
 import type * as catalog from '../../../spec/catalog.js';
 import type { PageInput } from '../../../spec/common.js';
 import type { CategoryCrumb, SearchContext } from '../../../spec/search.js';
 import type { ConditionGroup, SearchFilters, SearchMatch, SearchResultSet, SortKey } from '../domain/types.js';
 import type { SearchService } from '../service.js';
 
-/** GraphQL enums are the upper-case names of the REST values (price_asc ↔ PRICE_ASC). */
-const up = (s: string | null | undefined) => (s ? s.toUpperCase() : null);
 const down = <T extends string>(s: string | null | undefined): T | undefined => (s ? (s.toLowerCase() as T) : undefined);
 
 interface FilterInput {
@@ -56,14 +54,6 @@ export function filtersIn(f: FilterInput | null | undefined): SearchFilters {
   if (f.attributes?.length) out.attributes = f.attributes.map((a) => ({ key: a.key, values: a.values }));
   return out;
 }
-
-const pagingIn = (p: PageInput | null | undefined): PageInput => ({
-  ...(p?.cursor ? { cursor: p.cursor } : {}),
-  ...(p?.page ? { page: p.page } : {}),
-  ...(p?.limit ? { limit: p.limit } : {}),
-});
-
-const pairs = (m: Record<string, string> | null | undefined) => Object.entries(m ?? {}).map(([name, value]) => ({ name, value }));
 
 export function graphqlMappers(service: SearchService) {
   const catalogApi = () => service.catalogApi();
@@ -124,8 +114,8 @@ export function graphqlMappers(service: SearchService) {
 
   const contextOut = (c: SearchContext) => ({
     ...c,
-    facets: c.facets.map((f) => ({ ...f, group: up(f.group), kind: up(f.kind) })),
-    sorts: c.sorts.map((s) => ({ ...s, key: up(s.key) })),
+    facets: c.facets.map((f) => ({ ...f, group: gqlEnum(f.group), kind: gqlEnum(f.kind) })),
+    sorts: c.sorts.map((s) => ({ ...s, key: gqlEnum(s.key) })),
     category: c.category
       ? {
           ...c.category,
@@ -144,7 +134,7 @@ export function graphqlMappers(service: SearchService) {
     page: r.page.page ?? null,
     totalPages: r.page.totalPages ?? null,
     total: r.page.total ?? r.context.total,
-    sponsoredSlots: r.sponsoredSlots.map((s) => ({ ...s, kind: up(s.kind) })),
+    sponsoredSlots: r.sponsoredSlots.map((s) => ({ ...s, kind: gqlEnum(s.kind) })),
   });
 
   return { categoryOut, categoryById, crumbOut, productOut, productsOut, matchOut, resultsOut };
@@ -178,10 +168,10 @@ export const resolvers = (service: SearchService): ModuleResolvers => {
     Query: {
       search: async (_root, args: ResultArgs & { query: string; exact?: boolean | null }, ctx: GraphQLContext) => {
         const session = await service.sessionFor(ctx.principal);
-        return m.resultsOut(await service.runSearch(queryOf(args), pagingIn(args.paging), session));
+        return m.resultsOut(await service.runSearch(queryOf(args), pageInput(args.paging), session));
       },
       categoryProducts: async (_root, args: ResultArgs & { slug: string }) => {
-        const r = await service.listCategoryProducts(args.slug, queryOf(args), pagingIn(args.paging));
+        const r = await service.listCategoryProducts(args.slug, queryOf(args), pageInput(args.paging));
         if (!r) throw new AppError('NOT_FOUND', 'Category not found');
         return m.resultsOut(r);
       },
@@ -213,7 +203,7 @@ export const resolvers = (service: SearchService): ModuleResolvers => {
     Seller: {
       products: async (root: { id?: string }, args: ResultArgs) => {
         if (!root?.id) throw new AppError('NOT_FOUND', 'Seller not found');
-        return m.resultsOut(await service.listSellerProducts(root.id, queryOf(args), pagingIn(args.paging)));
+        return m.resultsOut(await service.listSellerProducts(root.id, queryOf(args), pageInput(args.paging)));
       },
       categories: async (root: { id?: string }) => {
         if (!root?.id) return [];

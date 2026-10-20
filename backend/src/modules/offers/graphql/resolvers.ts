@@ -1,5 +1,4 @@
-import { isAppError } from '../../../kernel/errors/index.js';
-import { gqlActor, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { createBatchLoader, gqlActor, gqlEnum, type GraphQLContext, type ModuleResolvers, nullOnNotFound, pageInput, pairs } from '../../../kernel/graphql/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
 import type * as catalog from '../../../spec/catalog.js';
 import type * as common from '../../../spec/common.js';
@@ -10,15 +9,12 @@ import type { OffersService } from '../service.js';
 
 /* ---------------------------------------------------------------- REST shapes → GraphQL shapes (enums in capitals, Money.formatted) */
 
-const up = <T extends string | null | undefined>(s: T) => (s ? s.toUpperCase().replace(/-/g, '_') : s);
 const low = (s: string | null | undefined) => (s ? s.toLowerCase() : undefined);
 const money = (m: common.Money | null | undefined) => (m ? { ...m, formatted: formatMoney(m) } : null);
 const actor = gqlActor;
-const pairs = (m: Record<string, string> | null | undefined) => Object.entries(m ?? {}).map(([name, value]) => ({ name, value }));
-const reasons = (list: readonly IneligibilityReason[]) => list.map((r) => ({ ...r, code: up(r.code) }));
-const statusReason = (s: StatusReason | null | undefined) => (s ? { ...s, code: up(s.code), actor: actor(s.actor) } : null);
-const deliverTo = (d: DeliverTo) => ({ ...d, source: up(d.source) });
-const pageInput = (p: common.PageInput | null | undefined): common.PageInput => ({ ...(p?.cursor ? { cursor: p.cursor } : {}), ...(p?.page ? { page: p.page } : {}), ...(p?.limit ? { limit: p.limit } : {}) });
+const reasons = (list: readonly IneligibilityReason[]) => list.map((r) => ({ ...r, code: gqlEnum(r.code) }));
+const statusReason = (s: StatusReason | null | undefined) => (s ? { ...s, code: gqlEnum(s.code), actor: actor(s.actor) } : null);
+const deliverTo = (d: DeliverTo) => ({ ...d, source: gqlEnum(d.source) });
 
 const productOut = (p: catalog.Product) => ({ ...p, category: null, specs: pairs(p.specs), variants: p.variants.map((v) => ({ ...v, options: pairs(v.options) })) });
 
@@ -43,43 +39,14 @@ const priceChangeOut = (c: PriceChange) => ({
   to: money(c.to),
   compareAt: money(c.compareAt),
   revertTo: money(c.revertTo),
-  source: up(c.source),
-  state: up(c.state),
+  source: gqlEnum(c.source),
+  state: gqlEnum(c.state),
   requestedBy: actor(c.requestedBy),
 });
 
 /* ---------------------------------------------------------------- batching per request (one call per key and tick) */
 
-type Batch<V> = { ids: Set<string>; promise: Promise<Map<string, V>> };
-const batches = new WeakMap<object, Map<string, Batch<unknown>>>();
-
-function load<V>(ctx: GraphQLContext, key: string, id: string, fetch: (ids: string[]) => Promise<Map<string, V>>): Promise<V | undefined> {
-  let perCtx = batches.get(ctx);
-  if (!perCtx) batches.set(ctx, (perCtx = new Map()));
-  let batch = perCtx.get(key) as Batch<V> | undefined;
-  if (!batch) {
-    const ids = new Set<string>();
-    const promise = new Promise<Map<string, V>>((resolve, reject) => {
-      setImmediate(() => {
-        perCtx!.delete(key);
-        fetch([...ids]).then(resolve, reject);
-      });
-    });
-    batch = { ids, promise };
-    perCtx.set(key, batch as Batch<unknown>);
-  }
-  batch.ids.add(id);
-  return batch.promise.then((m) => m.get(id));
-}
-
-const nullOnNotFound = async <T,>(p: Promise<T>): Promise<T | null> => {
-  try {
-    return await p;
-  } catch (err) {
-    if (isAppError(err) && (err.status === 404 || err.code === 'VALIDATION_FAILED')) return null;
-    throw err;
-  }
-};
+const load = createBatchLoader();
 
 /**
  * Resolvers for the GraphQL fields this module owns (`@source(module: "offers", …)` in graphql/schema.ts).
@@ -123,7 +90,7 @@ export const resolvers = (service: OffersService): ModuleResolvers => {
 
   /** REST Offer → GraphQL Offer, field by field (the parent is always the REST Offer) */
   const offerFields = {
-    ownerType: (o: Offer) => up(o.ownerType),
+    ownerType: (o: Offer) => gqlEnum(o.ownerType),
     official: (o: Offer) => o.ownerType === 'official',
     product: async (o: Offer, _args: unknown, ctx: GraphQLContext) => {
       const p = await productOf(ctx, o.productId);
@@ -133,16 +100,16 @@ export const resolvers = (service: OffersService): ModuleResolvers => {
       const v = (await productOf(ctx, o.productId))?.variants.find((x) => x.id === o.variantId);
       return { ...(v ?? { id: o.variantId, options: {}, gtin: null, images: [] }), options: pairs(v?.options) };
     },
-    condition: (o: Offer) => up(o.condition),
+    condition: (o: Offer) => gqlEnum(o.condition),
     conditionLabel: (o: Offer) => conditionLabel(o.condition),
     price: (o: Offer) => money(o.price),
-    compareAt: (o: Offer) => (o.compareAt ? { ...o.compareAt, amount: money(o.compareAt.amount), basis: up(o.compareAt.basis) } : null),
+    compareAt: (o: Offer) => (o.compareAt ? { ...o.compareAt, amount: money(o.compareAt.amount), basis: gqlEnum(o.compareAt.basis) } : null),
     // what customers get: Marketly's dispatch and ships-from for Fulfilled by Marketly offers (Offer.shipping)
     dispatch: (o: Offer) => o.shipping.dispatch,
-    fulfilledBy: (o: Offer) => up(o.fulfilledBy),
-    returnTerms: (o: Offer) => ({ ...o.returnTerms, kind: up(o.returnTerms.kind) }),
-    warranty: (o: Offer) => ({ ...o.warranty, kind: up(o.warranty.kind), handledBy: up(o.warranty.handledBy ?? null) }),
-    status: (o: Offer) => up(o.status),
+    fulfilledBy: (o: Offer) => gqlEnum(o.fulfilledBy),
+    returnTerms: (o: Offer) => ({ ...o.returnTerms, kind: gqlEnum(o.returnTerms.kind) }),
+    warranty: (o: Offer) => ({ ...o.warranty, kind: gqlEnum(o.warranty.kind), handledBy: gqlEnum(o.warranty.handledBy ?? null) }),
+    status: (o: Offer) => gqlEnum(o.status),
     statusReason: (o: Offer) => statusReason(o.statusReason),
     featuredEligibility: (o: Offer) => ({ ...o.featuredEligibility, reasons: reasons(o.featuredEligibility.reasons) }),
     priceContext: async (o: Offer) => {
@@ -157,7 +124,7 @@ export const resolvers = (service: OffersService): ModuleResolvers => {
     statusLog: async (o: Offer, args: { limit?: number | null }) =>
       (await core.repo.find('offer_status_log', { offer_id: o.id }, { orderBy: [['at', 'desc']], limit: Math.min(Math.max(args?.limit ?? 20, 1), 200) })).map((l) => {
         const e = statusEntry(l);
-        return { ...e, from: up(e.from ?? null), to: up(e.to), actor: actor(e.actor) };
+        return { ...e, from: gqlEnum(e.from ?? null), to: gqlEnum(e.to), actor: actor(e.actor) };
       }),
     priceChanges: async (o: Offer) => (await service.pricing.changesFor(o.id)).map(priceChangeOut),
   };
@@ -213,8 +180,8 @@ export const resolvers = (service: OffersService): ModuleResolvers => {
           productId: c.product.id,
           variantId: c.variant.id,
           deliverTo: deliverTo(c.deliverTo),
-          sort: up(c.sort),
-          condition: up(args.condition ?? 'all'),
+          sort: gqlEnum(c.sort),
+          condition: gqlEnum(args.condition ?? 'all'),
           featuredOfferId: c.featuredOfferId ?? null,
           items: c.offers.flatMap((v) => (rows.get(v.offerId) ? [offerOut(rows.get(v.offerId)!, ctx, { view: v, deliverTo: c.deliverTo })] : [])),
           conditionCounts: { all: c.conditionCounts.all ?? 0, new: c.conditionCounts.new ?? 0, used: c.conditionCounts.used ?? 0, refurbished: c.conditionCounts.refurbished ?? 0 },

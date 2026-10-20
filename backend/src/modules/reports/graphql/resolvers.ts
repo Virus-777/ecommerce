@@ -1,4 +1,4 @@
-import type { GraphQLContext, ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { gqlEnum, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
 import { format as formatMoney } from '../../../kernel/lib/money.js';
 import type { Money } from '../../../spec/common.js';
 import type { KpiValue, MetricDefinition, Series } from '../../../spec/reports.js';
@@ -9,7 +9,6 @@ import type { ReportsService } from '../service.js';
 
 /* ---------------------------------------------------------------- REST shapes → GraphQL shapes (enums in capitals, Money.formatted) */
 
-const up = (s: string | null | undefined) => (s ? s.toUpperCase() : s);
 const money = (m: Money | null | undefined) => (m ? { ...m, formatted: formatMoney(m) } : null);
 const periodOf = (p: string | null | undefined): Period => (p ? (p.toLowerCase() as Period) : 'last_7_days');
 
@@ -17,12 +16,12 @@ function definition(d: MetricDefinition, area: GraphQLContext['area']) {
   return {
     key: d.key,
     name: d.name,
-    group: up(d.group),
+    group: gqlEnum(d.group),
     definition: d.definition,
-    unit: up(d.unit),
+    unit: gqlEnum(d.unit),
     includes: d.includes,
     excludes: d.excludes,
-    defaultDateBasis: up(d.defaultDateBasis),
+    defaultDateBasis: gqlEnum(d.defaultDateBasis),
     currencyRule: d.currencyRule,
     timeZone: d.timeZone,
     relatedKeys: d.relatedKeys,
@@ -43,8 +42,8 @@ function metricValue(k: KpiValue & { unit: MetricDefinition['unit'] }, defs: Met
     value: k.value,
     money: money(k.money),
     display: k.display,
-    unit: up(k.unit),
-    delta: delta ? { value: delta.value, unit: up(delta.unit), direction: up(delta.direction), good: delta.good } : null,
+    unit: gqlEnum(k.unit),
+    delta: delta ? { value: delta.value, unit: gqlEnum(delta.unit), direction: gqlEnum(delta.direction), good: delta.good } : null,
     note: k.note ?? null,
     definition: def ? definition(def, area) : null,
   };
@@ -58,7 +57,7 @@ function series(s: Series, metricKey: string, currency: string, defs: MetricDefi
     key: s.key,
     label: s.label,
     metricKey,
-    unit: up(unit),
+    unit: gqlEnum(unit),
     granularity: 'day',
     points,
     total: metricValue({ metricKey, label: `${s.label}, total`, value: sum, money: unit === 'money' ? { amount: sum, currency } : null, display: display(sum, unit, currency), unit }, defs, area),
@@ -68,7 +67,7 @@ function series(s: Series, metricKey: string, currency: string, defs: MetricDefi
 function common(d: AdminDashboardData | SellerDashboardData, scope: 'PLATFORM' | 'SELLER') {
   return {
     scope,
-    period: up(d.period),
+    period: gqlEnum(d.period),
     from: d.range.from,
     to: d.range.to,
     compareFrom: d.compare.from,
@@ -113,7 +112,7 @@ export const resolvers = (service: ReportsService): ModuleResolvers => ({
         kpis: d.sales.kpis.map((k) => metricValue(k, d.definitions, ctx.area)),
         series: d.sales.series.map((s) => series(s, 'commerce.gross_sales', d.currency, d.definitions, ctx.area)),
         split: [],
-        workToday: d.workToday.map((t) => ({ ...t, key: up(t.key), tone: up(t.tone), screenState: t.screenState ?? null })),
+        workToday: d.workToday.map((t) => ({ ...t, key: gqlEnum(t.key), tone: gqlEnum(t.tone), screenState: t.screenState ?? null })),
         definitions: d.definitions.map((x) => definition(x, ctx.area)),
       };
     },

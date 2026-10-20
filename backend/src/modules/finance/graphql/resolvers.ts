@@ -1,4 +1,4 @@
-import type { GraphQLContext, ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { createBatchLoader, type GraphQLContext, type ModuleResolvers, pageInput } from '../../../kernel/graphql/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
 import { toPageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
@@ -19,31 +19,10 @@ export function gql<T>(v: T): T {
 }
 
 const lower = (s: string | null | undefined) => (s ? s.toLowerCase() : undefined);
-const pageInput = (p: common.PageInput | null | undefined): common.PageInput => ({ ...(p?.cursor ? { cursor: p.cursor } : {}), ...(p?.page ? { page: p.page } : {}), ...(p?.limit ? { limit: p.limit } : {}) });
 
 /* ---------------------------------------------------------------- batching per request (one call per field and tick) */
 
-type Batch<V> = { ids: Set<string>; promise: Promise<Map<string, V>> };
-const batches = new WeakMap<object, Map<string, Batch<unknown>>>();
-
-function load<V>(ctx: GraphQLContext, key: string, id: string, fetch: (ids: string[]) => Promise<Map<string, V>>): Promise<V | undefined> {
-  let perCtx = batches.get(ctx);
-  if (!perCtx) batches.set(ctx, (perCtx = new Map()));
-  let batch = perCtx.get(key) as Batch<V> | undefined;
-  if (!batch) {
-    const ids = new Set<string>();
-    const promise = new Promise<Map<string, V>>((resolve, reject) => {
-      setImmediate(() => {
-        perCtx!.delete(key);
-        fetch([...ids]).then(resolve, reject);
-      });
-    });
-    batch = { ids, promise };
-    perCtx.set(key, batch as Batch<unknown>);
-  }
-  batch.ids.add(id);
-  return batch.promise.then((m) => m.get(id));
-}
+const load = createBatchLoader();
 
 /**
  * Resolvers for the GraphQL fields this module owns (`@source(module: "finance", …)` in graphql/schema.ts).

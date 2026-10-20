@@ -1,4 +1,4 @@
-import type { GraphQLContext, ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { createBatchLoader, gqlEnum, type GraphQLContext, type ModuleResolvers, pageInput } from '../../../kernel/graphql/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
 import type * as common from '../../../spec/common.js';
 import type { Answer, Author, ProductReview, Question, SellerFeedback, SellerFeedbackSummary, SellerResponse } from '../../../spec/reviews.js';
@@ -6,44 +6,22 @@ import type { ReviewsService } from '../service.js';
 
 /* ---------------------------------------------------------------- REST shapes → GraphQL shapes (enums in capitals) */
 
-const upper = (s: string | null | undefined) => (s ? s.toUpperCase() : null);
 const lower = (s: string | null | undefined) => (s ? s.toLowerCase() : undefined);
 
-const author = (a: Author) => ({ kind: upper(a.kind), displayName: a.displayName, verifiedPurchase: a.verifiedPurchase });
+const author = (a: Author) => ({ kind: gqlEnum(a.kind), displayName: a.displayName, verifiedPurchase: a.verifiedPurchase });
 const response = (r: SellerResponse | null | undefined) =>
-  r ? { id: r.id, fromName: r.fromName, fromKind: upper(r.fromKind), text: r.text, publishedAt: r.publishedAt ?? null, status: upper(r.status), editableUntil: r.editableUntil ?? null } : null;
-const answer = (a: Answer) => ({ id: a.id, text: a.text, by: author(a.by), label: upper(a.label), answeredAt: a.answeredAt, helpfulCount: a.helpfulCount, status: upper(a.status) });
-const question = (q: Question) => ({ ...q, answers: q.answers.map(answer), status: upper(q.status), answerExpectation: q.answerExpectation ?? null });
+  r ? { id: r.id, fromName: r.fromName, fromKind: gqlEnum(r.fromKind), text: r.text, publishedAt: r.publishedAt ?? null, status: gqlEnum(r.status), editableUntil: r.editableUntil ?? null } : null;
+const answer = (a: Answer) => ({ id: a.id, text: a.text, by: author(a.by), label: gqlEnum(a.label), answeredAt: a.answeredAt, helpfulCount: a.helpfulCount, status: gqlEnum(a.status) });
+const question = (q: Question) => ({ ...q, answers: q.answers.map(answer), status: gqlEnum(q.status), answerExpectation: q.answerExpectation ?? null });
 const rating = (s: SellerFeedbackSummary) => s;
 
-const pageInput = (p: common.PageInput | null | undefined): common.PageInput => ({ ...(p?.cursor ? { cursor: p.cursor } : {}), ...(p?.page ? { page: p.page } : {}), ...(p?.limit ? { limit: p.limit } : {}) });
 const pageOut = <T, U>(p: common.Page<T>, f: (x: T) => U) => ({ items: p.items.map(f), nextCursor: p.nextCursor, page: p.page ?? null, totalPages: p.totalPages ?? null, total: p.total ?? null });
 
 const SORT: Record<string, string> = { MOST_HELPFUL: 'most_helpful', NEWEST: 'newest', HIGHEST_RATED: 'highest', LOWEST_RATED: 'lowest' };
 
 /* ---------------------------------------------------------------- batching per request (one call per key and tick) */
 
-type Batch<V> = { ids: Set<string>; promise: Promise<Map<string, V>> };
-const batches = new WeakMap<object, Map<string, Batch<unknown>>>();
-
-function load<V>(ctx: GraphQLContext, key: string, id: string, fetch: (ids: string[]) => Promise<Map<string, V>>): Promise<V | undefined> {
-  let perCtx = batches.get(ctx);
-  if (!perCtx) batches.set(ctx, (perCtx = new Map()));
-  let batch = perCtx.get(key) as Batch<V> | undefined;
-  if (!batch) {
-    const ids = new Set<string>();
-    const promise = new Promise<Map<string, V>>((resolve, reject) => {
-      setImmediate(() => {
-        perCtx!.delete(key);
-        fetch([...ids]).then(resolve, reject);
-      });
-    });
-    batch = { ids, promise };
-    perCtx.set(key, batch as Batch<unknown>);
-  }
-  batch.ids.add(id);
-  return batch.promise.then((m) => m.get(id));
-}
+const load = createBatchLoader();
 
 /**
  * Resolvers for the GraphQL fields this module owns (`@source(module: "reviews", …)` in graphql/schema.ts).
@@ -81,7 +59,7 @@ export const resolvers = (service: ReviewsService): ModuleResolvers => {
     dispatchRating: f.dimensions.dispatchRating,
     communicationRating: f.dimensions.communicationRating ?? null,
     overall: f.overall,
-    sentiment: upper(f.sentiment),
+    sentiment: gqlEnum(f.sentiment),
     comment: f.comment ?? null,
     itemTitle: f.itemTitle ?? null,
     postedAt: f.postedAt,
@@ -146,7 +124,7 @@ export const resolvers = (service: ReviewsService): ModuleResolvers => {
         const customerId = await ctx.customerId();
         if (!customerId) return null;
         const s = await load(ctx, `review-status:${customerId}`, root.id, async (ids) => new Map((await service.reviewStatusForItems(customerId, ids)).map((x) => [x.orderItemId, x])));
-        return s ? { ...s, status: upper(s.status) } : null;
+        return s ? { ...s, status: gqlEnum(s.status) } : null;
       },
     },
   };

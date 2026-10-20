@@ -1,4 +1,4 @@
-import { gqlActor, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { createBatchLoader, gqlActor, gqlDeadline, gqlEnum, type GraphQLContext, type ModuleResolvers, pageInput } from '../../../kernel/graphql/index.js';
 import type * as common from '../../../spec/common.js';
 import type { Enforcement, TrustReport } from '../../../spec/trust.js';
 import type { TrustService } from '../service.js';
@@ -9,11 +9,8 @@ import type { TrustService } from '../service.js';
  * notes. REST shapes are mapped to the GraphQL shapes (enums in capitals, Actor kinds).
  */
 
-const upper = (s: string | null | undefined) => (s ? s.toUpperCase().replace(/-/g, '_') : null);
 const lower = (s: string | null | undefined) => (s ? s.toLowerCase() : undefined);
 const actor = gqlActor;
-const deadline = (d: common.Deadline | null | undefined) => (d ? { dueAt: d.dueAt, state: upper(d.state) } : null);
-const pageInput = (p: common.PageInput | null | undefined): common.PageInput => ({ ...(p?.cursor ? { cursor: p.cursor } : {}), ...(p?.page ? { page: p.page } : {}), ...(p?.limit ? { limit: p.limit } : {}) });
 
 const enforcement = (e: Enforcement) => ({
   id: e.id,
@@ -24,7 +21,7 @@ const enforcement = (e: Enforcement) => ({
   effects: e.effects,
   recordedBy: actor(e.recordedBy),
   recordedAt: e.recordedAt,
-  executionState: upper(e.executionState),
+  executionState: gqlEnum(e.executionState),
   appliedRef: e.appliedRef ?? null,
   appealable: e.appealable,
   appealDeadline: e.appealDeadline ?? null,
@@ -37,17 +34,17 @@ export function gqlReport(r: TrustReport) {
   return {
     id: r.id,
     ref: r.ref,
-    type: upper(r.type),
+    type: gqlEnum(r.type),
     title: r.title,
     description: r.description,
-    source: upper(r.source),
+    source: gqlEnum(r.source),
     reporterCount: r.reporterCount,
-    subjects: r.subjects.map((s) => ({ type: upper(s.type), id: s.id, ref: s.ref ?? null, label: s.label, statusLabel: s.statusLabel ?? null, screen: s.screen ?? null })),
-    status: upper(r.status),
+    subjects: r.subjects.map((s) => ({ type: gqlEnum(s.type), id: s.id, ref: s.ref ?? null, label: s.label, statusLabel: s.statusLabel ?? null, screen: s.screen ?? null })),
+    status: gqlEnum(r.status),
     riskScore: r.riskScore,
-    riskLevel: upper(r.riskLevel),
+    riskLevel: gqlEnum(r.riskLevel),
     assignee: r.assignee ? { kind: 'STAFF', id: r.assignee.staffId, name: r.assignee.name } : null,
-    deadline: deadline(r.deadline),
+    deadline: gqlDeadline(r.deadline),
     recommendations: {
       total: recs.length,
       pending: recs.filter((x) => x.state === 'pending').length,
@@ -65,27 +62,7 @@ export function gqlReport(r: TrustReport) {
 
 /* ---------------------------------------------------------------- batching per request (one call per field and tick) */
 
-type Batch<V> = { ids: Set<string>; promise: Promise<Map<string, V>> };
-const batches = new WeakMap<object, Map<string, Batch<unknown>>>();
-
-function load<V>(ctx: GraphQLContext, key: string, id: string, fetch: (ids: string[]) => Promise<Map<string, V>>): Promise<V | undefined> {
-  let perCtx = batches.get(ctx);
-  if (!perCtx) batches.set(ctx, (perCtx = new Map()));
-  let batch = perCtx.get(key) as Batch<V> | undefined;
-  if (!batch) {
-    const ids = new Set<string>();
-    const promise = new Promise<Map<string, V>>((resolve, reject) => {
-      setImmediate(() => {
-        perCtx!.delete(key);
-        fetch([...ids]).then(resolve, reject);
-      });
-    });
-    batch = { ids, promise };
-    perCtx.set(key, batch as Batch<unknown>);
-  }
-  batch.ids.add(id);
-  return batch.promise.then((m) => m.get(id));
-}
+const load = createBatchLoader();
 
 export const resolvers = (service: TrustService): ModuleResolvers => {
   const counts = (type: 'customer' | 'seller') => async (parent: { id?: string }) => {

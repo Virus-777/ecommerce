@@ -1,5 +1,4 @@
-import { isAppError } from '../../../kernel/errors/index.js';
-import type { GraphQLContext, ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { gqlEnum, type GraphQLContext, type ModuleResolvers, nullOnNotFound, pairs } from '../../../kernel/graphql/index.js';
 import { format as formatMoney } from '../../../kernel/lib/money.js';
 import type * as catalog from '../../../spec/catalog.js';
 import type * as common from '../../../spec/common.js';
@@ -9,20 +8,9 @@ import type { ResolvedHomepage, ResolvedHomeSection } from '../service/homepage.
 
 /* ---------------------------------------------------------------- REST shapes → GraphQL shapes (enums in capitals) */
 
-const up = (s: string | null | undefined) => (s ? s.toUpperCase() : null);
-const pairs = (m: Record<string, string> | null | undefined) => Object.entries(m ?? {}).map(([name, value]) => ({ name, value }));
-const link = (l: LinkRef | null | undefined) => (l ? { label: l.label, url: l.url, kind: up(l.kind) } : null);
-const banner = (b: BannerBlock | null | undefined) => (b ? { ...b, theme: up(b.theme), images: b.images ?? [], primaryCta: link(b.primaryCta), secondaryCta: link(b.secondaryCta) } : null);
+const link = (l: LinkRef | null | undefined) => (l ? { label: l.label, url: l.url, kind: gqlEnum(l.kind) } : null);
+const banner = (b: BannerBlock | null | undefined) => (b ? { ...b, theme: gqlEnum(b.theme), images: b.images ?? [], primaryCta: link(b.primaryCta), secondaryCta: link(b.secondaryCta) } : null);
 export const money = (m: common.Money | null | undefined) => (m ? { ...m, formatted: formatMoney(m) } : null);
-
-const nullOnNotFound = async <T>(p: Promise<T>): Promise<T | null> => {
-  try {
-    return await p;
-  } catch (err) {
-    if (isAppError(err) && err.code === 'NOT_FOUND') return null;
-    throw err;
-  }
-};
 
 function mappers(service: ContentService) {
   const categoryOut = (c: catalog.Category): Record<string, unknown> => ({ ...c, children: (c.children ?? []).map(categoryOut), filters: [], attributes: [] });
@@ -56,7 +44,7 @@ function mappers(service: ContentService) {
       .filter((id) => found.has(id))
       .map((id) => {
         const { card, snapshot } = found.get(id)!;
-        return { ...card, ref: snapshot?.ref ?? '', sellingNow: snapshot?.canSellNew ?? true, status: up(snapshot?.status) };
+        return { ...card, ref: snapshot?.ref ?? '', sellingNow: snapshot?.canSellNew ?? true, status: gqlEnum(snapshot?.status) };
       });
   };
 
@@ -64,13 +52,13 @@ function mappers(service: ContentService) {
 
   const collectionOut = async (pageId: string | null | undefined) => {
     const c = pageId ? await service.collectionInfo(pageId) : null;
-    return c ? { ...c, kind: up(c.kind), curator: c.curator ? { ...c.curator, avatar: null } : null, categoryFilters: [] } : null;
+    return c ? { ...c, kind: gqlEnum(c.kind), curator: c.curator ? { ...c.curator, avatar: null } : null, categoryFilters: [] } : null;
   };
 
   const sectionOut = (s: ResolvedHomeSection) => ({
     id: s.id,
     position: s.position,
-    kind: up(s.kind),
+    kind: gqlEnum(s.kind),
     heading: s.heading ?? null,
     subheading: s.subheading ?? null,
     link: link(s.link),
@@ -93,7 +81,7 @@ function mappers(service: ContentService) {
 
   const blockOut = (b: PageBlock) => ({
     ...b,
-    type: up(b.type),
+    type: gqlEnum(b.type),
     banner: banner(b.banner),
     link: link(b.link),
     items: b.items ?? [],
@@ -104,7 +92,7 @@ function mappers(service: ContentService) {
     const extras = await service.pageExtras(p.id, opts);
     return {
       ...p,
-      kind: up(p.kind),
+      kind: gqlEnum(p.kind),
       breadcrumb: p.breadcrumb.map(link),
       blocks: p.blocks.map(blockOut),
       collection: () => (p.kind === 'collection' ? collectionOut(p.id) : null),
@@ -115,7 +103,7 @@ function mappers(service: ContentService) {
     };
   };
 
-  const helpCategoryOut = (c: HelpCategory) => ({ ...c, audience: up(c.audience) });
+  const helpCategoryOut = (c: HelpCategory) => ({ ...c, audience: gqlEnum(c.audience) });
 
   const summaryOut = (s: HelpArticleSummary, cats: Map<string, HelpCategory>) => {
     const c = cats.get(s.categoryId);
@@ -140,7 +128,7 @@ function mappers(service: ContentService) {
     policyLinks: a.policyLinks.map(link),
   });
 
-  const contactOut = (c: ContactChannel) => ({ ...c, kind: up(c.kind), action: link(c.action) });
+  const contactOut = (c: ContactChannel) => ({ ...c, kind: gqlEnum(c.kind), action: link(c.action) });
 
   const helpCenterOut = async (h: HelpHome) => ({
     topics: h.topics.map(helpCategoryOut),

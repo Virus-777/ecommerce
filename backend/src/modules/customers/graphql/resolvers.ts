@@ -1,4 +1,4 @@
-import { gqlActor, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { gqlActor, gqlEnum, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
 import { dateInZone } from '../../../kernel/lib/clock.js';
 import { format as formatMoney } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
@@ -8,21 +8,11 @@ import * as map from '../mappers.js';
 import type { CustomerStanding } from '../ports.js';
 import type { CustomersService } from '../service.js';
 
-/**
- * Resolvers for the GraphQL fields this module owns (`@source(module: "customers", …)` in graphql/schema.ts).
- *   Query.me → service.getCustomerByUserId (the signed-in customer)
- *   Query.recentlyViewed → service.listRecentlyViewedItems (customer or visitor session)
- *   Query.customer → service.getCustomer (admin)
- *   Query.customers → service.searchCustomers (admin)
- * Customer's own fields without @source resolve from the object built here (functions for the lazy ones).
- * GraphQL enums are upper case; REST values are lower case.
- */
-const upper = <T extends string | null | undefined>(s: T) => (s ? s.toUpperCase() : s);
 const gqlMoney = (m: common.Money) => ({ ...m, formatted: formatMoney(m) });
 
-const gqlRestriction = (r: AccountRestriction) => ({ ...r, scope: upper(r.scope), reasonCode: upper(r.reasonCode), state: upper(r.state), setBy: gqlActor(r.setBy) });
-const gqlRequest = (r: DataRequest) => ({ ...r, kind: upper(r.kind), state: upper(r.state) });
-const gqlAction = (a: AccountActionRecord) => ({ ...a, action: upper(a.action), fromStatus: upper(a.fromStatus), toStatus: upper(a.toStatus), actor: gqlActor(a.actor) });
+const gqlRestriction = (r: AccountRestriction) => ({ ...r, scope: gqlEnum(r.scope), reasonCode: gqlEnum(r.reasonCode), state: gqlEnum(r.state), setBy: gqlActor(r.setBy) });
+const gqlRequest = (r: DataRequest) => ({ ...r, kind: gqlEnum(r.kind), state: gqlEnum(r.state) });
+const gqlAction = (a: AccountActionRecord) => ({ ...a, action: gqlEnum(a.action), fromStatus: gqlEnum(a.fromStatus), toStatus: gqlEnum(a.toStatus), actor: gqlActor(a.actor) });
 const gqlAddress = (a: SavedAddress) => a;
 
 export const resolvers = (service: CustomersService): ModuleResolvers => {
@@ -33,7 +23,7 @@ export const resolvers = (service: CustomersService): ModuleResolvers => {
     return {
       ...snap,
       userId: r.user_id,
-      accountStatus: upper(snap.accountStatus),
+      accountStatus: gqlEnum(snap.accountStatus),
       firstName: r.first_name,
       lastName: r.last_name,
       displayName: displayName(r.first_name, r.last_name),
@@ -48,11 +38,11 @@ export const resolvers = (service: CustomersService): ModuleResolvers => {
       dataRequests: async (args: { includeCancelled?: boolean | null }) =>
         (await service.dataRequests.dataRequestsOf(r.id, ctx.area === 'store' ? ctx.principal : null, { includeCancelled: args?.includeCancelled === true })).map(gqlRequest),
       // the account overview's alerts (store): delays, failed or checked payments, returns and cases waiting on the customer
-      overviewAlerts: async () => (await service.profiles.overviewAlerts(r.id)).map((a) => ({ ...a, kind: upper(a.kind), orderId: a.orderId ?? null, orderRef: a.orderRef ?? null, caseRef: a.caseRef ?? null, returnRef: a.returnRef ?? null })),
+      overviewAlerts: async () => (await service.profiles.overviewAlerts(r.id)).map((a) => ({ ...a, kind: gqlEnum(a.kind), orderId: a.orderId ?? null, orderRef: a.orderRef ?? null, caseRef: a.caseRef ?? null, returnRef: a.returnRef ?? null })),
       location: location !== undefined ? location : async () => map.location((await service.admin.defaultAddressesOf([r.id])).get(r.id)),
       orderCount: r.order_count,
       totalSpend: gqlMoney({ amount: Number(r.total_spend_minor), currency: r.currency }),
-      verification: upper(verificationOf(r.email_verified_at, r.phone_verified_at)),
+      verification: gqlEnum(verificationOf(r.email_verified_at, r.phone_verified_at)),
       notes: async () => (await service.admin.notesOf(r.id)).map((n) => ({ ...n, author: gqlActor(n.author) })),
       accountActions: async (args: { limit?: number }) => (await service.admin.actionsOf(r.id, args?.limit ?? 20)).map(gqlAction),
     };

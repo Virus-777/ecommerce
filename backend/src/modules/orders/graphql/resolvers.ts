@@ -1,5 +1,5 @@
 import { AppError } from '../../../kernel/errors/index.js';
-import { gqlActor, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { createBatchLoader, gqlActor, gqlDeadline, gqlEnum, type GraphQLContext, lazy, type ModuleResolvers, pageInput } from '../../../kernel/graphql/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
 import { format as formatMoney } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
@@ -12,29 +12,22 @@ import type { OrdersService } from '../service.js';
 
 /* ---------------------------------------------------------------- REST shapes → GraphQL shapes (enums in capitals, Money.formatted) */
 
-const upper = (s: string | null | undefined) => (s ? s.toUpperCase().replace(/-/g, '_') : (s ?? null));
 const lower = (s: string | null | undefined) => (s ? s.toLowerCase() : undefined);
 const money = (m: common.Money | null | undefined) => (m ? { ...m, formatted: formatMoney(m) } : null);
 const actor = gqlActor;
 const timeline = (list: readonly common.TimelineEvent[]) => list.map((t) => ({ ...t, actor: actor(t.actor) }));
-const deadline = (d: common.Deadline | null | undefined) => (d ? { dueAt: d.dueAt, state: upper(d.state) } : null);
-const pageInput = (p: common.PageInput | null | undefined): common.PageInput => ({ ...(p?.cursor ? { cursor: p.cursor } : {}), ...(p?.page ? { page: p.page } : {}), ...(p?.limit ? { limit: p.limit } : {}) });
-const lazy = <T,>(f: () => Promise<T>) => {
-  let p: Promise<T> | undefined;
-  return () => (p ??= f());
-};
 
 const sellerLabel = (s: SellerGroup['seller']) => ({ id: s.id ?? null, name: s.name, slug: s.slug, official: s.ownerType === 'official', verified: s.verified, logo: s.logo ?? null });
 
 const cancellation = (c: CancellationRequest) => ({
   id: c.id,
   groupId: c.groupId,
-  initiatedBy: upper(c.initiatedBy),
+  initiatedBy: gqlEnum(c.initiatedBy),
   reasonCode: c.reasonCode,
   reason: c.reason ?? null,
   items: c.items,
-  status: upper(c.status),
-  respondBy: deadline(c.respondBy),
+  status: gqlEnum(c.status),
+  respondBy: gqlDeadline(c.respondBy),
   decidedBy: actor(c.decidedBy),
   decidedAt: c.decidedAt ?? null,
   declineReason: c.declineReason ?? null,
@@ -47,7 +40,7 @@ const cancellation = (c: CancellationRequest) => ({
     taxRefund: money(c.refundPreview.taxRefund),
     total: money(c.refundPreview.total),
   },
-  refundStatus: upper(c.refundStatus),
+  refundStatus: gqlEnum(c.refundStatus),
   createdAt: c.createdAt,
   timeline: timeline(c.timeline),
 });
@@ -64,23 +57,23 @@ function item(i: OrderItem, extra?: { shippedQuantity: number; cancelledQuantity
     quantity: i.quantity,
     unitPrice: money(i.unitPrice),
     lineSubtotal: money(i.lineSubtotal),
-    state: upper(i.state),
+    state: gqlEnum(i.state),
     stateLabel: i.stateLabel,
     product: { ...i.product, options: Object.entries(i.product.options ?? {}).map(([name, value]) => ({ name, value })) },
-    offerTerms: { ...i.offer, condition: upper(i.offer.condition), compareAtPrice: money(i.offer.compareAtPrice) },
-    returnTerms: { ...i.returnTerms, returnShippingPaidBy: upper(i.returnTerms.returnShippingPaidBy), policyVersionId: i.returnTerms.policyVersionId ?? null },
+    offerTerms: { ...i.offer, condition: gqlEnum(i.offer.condition), compareAtPrice: money(i.offer.compareAtPrice) },
+    returnTerms: { ...i.returnTerms, returnShippingPaidBy: gqlEnum(i.returnTerms.returnShippingPaidBy), policyVersionId: i.returnTerms.policyVersionId ?? null },
     shipmentId: i.shipmentId ?? null,
     deliveredAt: i.deliveredAt ?? null,
     returnWindowEndsAt: i.returnWindowEndsAt ?? null,
     splitFromItemId: i.splitFromItemId ?? null,
     replacementOfItemId: i.replacementOfItemId ?? null,
-    afterSales: { ...i.afterSales, refundStatus: upper(i.afterSales.refundStatus), refundedAmount: money(i.afterSales.refundedAmount) },
-    discounts: i.discounts.map((d) => ({ ...d, amount: money(d.amount), fundedBy: upper(d.fundedBy) })),
+    afterSales: { ...i.afterSales, refundStatus: gqlEnum(i.afterSales.refundStatus), refundedAmount: money(i.afterSales.refundedAmount) },
+    discounts: i.discounts.map((d) => ({ ...d, amount: money(d.amount), fundedBy: gqlEnum(d.fundedBy) })),
     shippingShare: money(i.shippingShare),
     taxShare: money(i.taxShare),
     paidAmount: money(i.paidAmount),
     stateNote: i.stateNote ?? null,
-    actions: i.actions.map(upper),
+    actions: i.actions.map(gqlEnum),
     shippedQuantity: extra?.shippedQuantity ?? (is(SHIPPED_OR_LATER, i.state) ? i.quantity : 0),
     cancelledQuantity: extra?.cancelledQuantity ?? (i.state === 'cancelled' ? i.quantity : 0),
     onLabelQuantity: i.onLabelQuantity ?? 0,
@@ -94,10 +87,10 @@ function group(g: SellerGroup, s: SellerOrderDetail | undefined, cancellations: 
     packageLabel: g.packageLabel,
     seller: sellerLabel(g.seller),
     shipsFrom: g.shipsFrom,
-    fulfilledBy: upper(g.fulfilledBy),
-    delivery: { methodName: d.methodName, carrier: d.carrier ?? null, service: d.service ?? null, price: money(d.price), free: d.free, fundedBy: upper(d.fundedBy), arrivalFrom: d.arrival.from, arrivalTo: d.arrival.to, dispatchBy: d.dispatchBy },
-    dispatchDeadline: deadline(g.dispatchDeadline),
-    status: upper(g.status),
+    fulfilledBy: gqlEnum(g.fulfilledBy),
+    delivery: { methodName: d.methodName, carrier: d.carrier ?? null, service: d.service ?? null, price: money(d.price), free: d.free, fundedBy: gqlEnum(d.fundedBy), arrivalFrom: d.arrival.from, arrivalTo: d.arrival.to, dispatchBy: d.dispatchBy },
+    dispatchDeadline: gqlDeadline(g.dispatchDeadline),
+    status: gqlEnum(g.status),
     statusLabel: g.statusLabel,
     items: g.items.map((i) => {
       const si = s?.items.find((x) => x.itemId === i.id);
@@ -108,7 +101,7 @@ function group(g: SellerGroup, s: SellerOrderDetail | undefined, cancellations: 
     estimateLabel: g.estimateLabel,
     returnTermsSummary: g.returnTermsSummary,
     handlingNote: g.handlingNote,
-    alert: g.alert ? { ...g.alert, tone: upper(g.alert.tone), caseRef: g.alert.caseRef ?? null } : null,
+    alert: g.alert ? { ...g.alert, tone: gqlEnum(g.alert.tone), caseRef: g.alert.caseRef ?? null } : null,
     deadlineLabel: s ? (s as SellerOrderDetail & { deadlineLabel?: string }).deadlineLabel ?? '' : '',
     dispatchResult: s?.dispatchResult ?? null,
     shipTo: s?.shipTo ?? null,
@@ -128,8 +121,8 @@ function group(g: SellerGroup, s: SellerOrderDetail | undefined, cancellations: 
         }
       : null,
     timeline: timeline(s?.timeline ?? []),
-    nextAction: upper((s as SellerOrderDetail & { nextAction?: string } | undefined)?.nextAction ?? 'view'),
-    allowedActions: (s?.allowedActions ?? []).map(upper),
+    nextAction: gqlEnum((s as SellerOrderDetail & { nextAction?: string } | undefined)?.nextAction ?? 'view'),
+    allowedActions: (s?.allowedActions ?? []).map(gqlEnum),
   };
 }
 
@@ -147,10 +140,10 @@ function order(o: OrderDetail, x: { summary?: OrderSummary; seller?: SellerOrder
     paymentAccepted: o.lifecycle !== 'payment_pending' && pr.payment.state !== 'failed',
     buyerName: x.buyerName ?? null,
     mixedOrderNote: x.seller?.[0]?.mixedOrderNote ?? null,
-    contact: { ...o.contact, kind: upper(o.contact.kind), customerId: o.contact.customerId ?? null, phone: o.contact.phone ?? null },
-    lifecycle: upper(o.lifecycle),
-    status: upper(o.status.value),
-    statusFlags: o.status.flags.map(upper),
+    contact: { ...o.contact, kind: gqlEnum(o.contact.kind), customerId: o.contact.customerId ?? null, phone: o.contact.phone ?? null },
+    lifecycle: gqlEnum(o.lifecycle),
+    status: gqlEnum(o.status.value),
+    statusFlags: o.status.flags.map(gqlEnum),
     statusLabel: o.statusLabel,
     summaryLine: o.summaryLine,
     itemCount: x.summary?.itemCount ?? o.totals.itemCount,
@@ -159,14 +152,14 @@ function order(o: OrderDetail, x: { summary?: OrderSummary; seller?: SellerOrder
     thumbnails: x.summary?.thumbnails ?? [],
     note: x.summary?.note ?? null,
     progress: {
-      payment: { ...pr.payment, state: upper(pr.payment.state), amountCharged: money(pr.payment.amountCharged), chargedAt: pr.payment.chargedAt ?? null },
-      delivery: { ...pr.delivery, state: upper(pr.delivery.state) },
-      returns: { ...pr.returns, state: upper(pr.returns.state), note: pr.returns.note ?? null },
+      payment: { ...pr.payment, state: gqlEnum(pr.payment.state), amountCharged: money(pr.payment.amountCharged), chargedAt: pr.payment.chargedAt ?? null },
+      delivery: { ...pr.delivery, state: gqlEnum(pr.delivery.state) },
+      returns: { ...pr.returns, state: gqlEnum(pr.returns.state), note: pr.returns.note ?? null },
     },
     totals: {
       ...t,
       items: money(t.items),
-      discounts: t.discounts.map((d) => ({ ...d, amount: money(d.amount), fundedBy: upper(d.fundedBy) })),
+      discounts: t.discounts.map((d) => ({ ...d, amount: money(d.amount), fundedBy: gqlEnum(d.fundedBy) })),
       discountTotal: money(t.discountTotal),
       shippingTotal: money(t.shippingTotal),
       tax: money(t.tax),
@@ -176,16 +169,16 @@ function order(o: OrderDetail, x: { summary?: OrderSummary; seller?: SellerOrder
     },
     deliveryAddress: o.deliveryAddress,
     addressNote: o.addressNote,
-    policyVersions: o.policyVersions.map((p) => ({ ...p, policyKey: upper(p.policyKey) })),
-    documents: o.documents.map((d) => ({ ...d, kind: upper(d.kind), groupId: d.groupId ?? null })),
+    policyVersions: o.policyVersions.map((p) => ({ ...p, policyKey: gqlEnum(p.policyKey) })),
+    documents: o.documents.map((d) => ({ ...d, kind: gqlEnum(d.kind), groupId: d.groupId ?? null })),
     timeline: timeline(o.timeline),
     canCancelSomething: o.canCancelSomething,
-    actions: (x.summary?.actions ?? []).map(upper),
-    channel: upper(o.channel),
+    actions: (x.summary?.actions ?? []).map(gqlEnum),
+    channel: gqlEnum(o.channel),
     customer: a ? { ...a.customer, customerId: a.customer.customerId ?? null, phone: a.customer.phone ?? null } : null,
-    flags: (a?.flags ?? []).map((f) => ({ ...f, kind: upper(f.kind), tone: upper(f.tone) })),
+    flags: (a?.flags ?? []).map((f) => ({ ...f, kind: gqlEnum(f.kind), tone: gqlEnum(f.tone) })),
     openExceptionIds: x.openExceptionIds ?? [],
-    alerts: (a?.alerts ?? []).map((al) => ({ ...al, tone: upper(al.tone), caseRef: al.caseRef ?? null })),
+    alerts: (a?.alerts ?? []).map((al) => ({ ...al, tone: gqlEnum(al.tone), caseRef: al.caseRef ?? null })),
     afterSales: (a?.afterSales ?? []).map((s) => ({ ...s, amount: money(s.amount), owner: s.owner ?? null })),
     moneyBySeller: (a?.moneyBySeller ?? []).map((m) => ({
       ...m,
@@ -200,33 +193,13 @@ function order(o: OrderDetail, x: { summary?: OrderSummary; seller?: SellerOrder
     couponFundingNote: a?.couponFundingNote ?? null,
     notes: (a?.notes ?? []).map((n) => ({ ...n, author: actor(n.author) })),
     history: timeline(a?.history ?? []),
-    allowedActions: (a?.allowedActions ?? []).map(upper),
+    allowedActions: (a?.allowedActions ?? []).map(gqlEnum),
   };
 }
 
 /* ---------------------------------------------------------------- batching per request (one call per field and tick) */
 
-type Batch<V> = { ids: Set<string>; promise: Promise<Map<string, V>> };
-const batches = new WeakMap<object, Map<string, Batch<unknown>>>();
-
-function load<V>(ctx: GraphQLContext, key: string, id: string, fetch: (ids: string[]) => Promise<Map<string, V>>): Promise<V | undefined> {
-  let perCtx = batches.get(ctx);
-  if (!perCtx) batches.set(ctx, (perCtx = new Map()));
-  let batch = perCtx.get(key) as Batch<V> | undefined;
-  if (!batch) {
-    const ids = new Set<string>();
-    const promise = new Promise<Map<string, V>>((resolve, reject) => {
-      setImmediate(() => {
-        perCtx!.delete(key);
-        fetch([...ids]).then(resolve, reject);
-      });
-    });
-    batch = { ids, promise };
-    perCtx.set(key, batch as Batch<unknown>);
-  }
-  batch.ids.add(id);
-  return batch.promise.then((m) => m.get(id));
-}
+const load = createBatchLoader();
 
 /**
  * Resolvers for the GraphQL fields this module owns (`@source(module: "orders", …)` in graphql/schema.ts).
@@ -384,7 +357,7 @@ export const resolvers = (service: OrdersService): ModuleResolvers => {
     Customer: {
       orderCounts: async (root: { id: string }, args: { range?: string | null; q?: string | null }) => service.countOrdersByTab(root.id, lower(args?.range ?? undefined), args?.q?.trim() || undefined),
       delayedItems: async (root: { id: string }) =>
-        (await service.listDelayedItemsForCustomer(root.id)).map((d) => ({ ...d, newDispatchBy: d.newDispatchBy ?? null, newArrivalFrom: d.newArrival?.from ?? null, newArrivalTo: d.newArrival?.to ?? null, options: d.options.map(upper), caseRef: d.caseRef ?? null })),
+        (await service.listDelayedItemsForCustomer(root.id)).map((d) => ({ ...d, newDispatchBy: d.newDispatchBy ?? null, newArrivalFrom: d.newArrival?.from ?? null, newArrivalTo: d.newArrival?.to ?? null, options: d.options.map(gqlEnum), caseRef: d.caseRef ?? null })),
     },
     Seller: {
       orderCounts: async (root: { id: string }, _args: unknown, ctx: GraphQLContext) =>

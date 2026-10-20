@@ -1,5 +1,5 @@
 import { AppError } from '../../../kernel/errors/index.js';
-import { gqlActor, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { createBatchLoader, gqlActor, gqlDeadline, gqlEnum, type GraphQLContext, lazy, type ModuleResolvers, pageInput } from '../../../kernel/graphql/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
 import type * as common from '../../../spec/common.js';
 import type { Appeal, ChangeRequest, PerformanceSummary, PerformanceTarget, Restriction, SellerSnapshot, SellerSummary, SellerWarning, VerificationLabel } from '../../../spec/sellers.js';
@@ -10,25 +10,19 @@ import { sellerPublicProfileOut } from './cards.js';
 
 /* ---------------------------------------------------------------- REST shapes → GraphQL shapes (enums in capitals) */
 
-const upper = (s: string | null | undefined) => (s ? s.toUpperCase().replace(/-/g, '_') : s);
 const actor = gqlActor;
-const deadline = (d: common.Deadline | null | undefined) => (d ? { dueAt: d.dueAt, state: upper(d.state) } : null);
 const timeline = (t: common.TimelineEvent) => ({ ...t, actor: actor(t.actor) });
-const lazy = <T,>(f: () => Promise<T>) => {
-  let p: Promise<T> | undefined;
-  return () => (p ??= f());
-};
 const lower = (list: readonly string[] | null | undefined) => (list ?? []).map((s) => s.toLowerCase());
 
-const verification = (v: VerificationLabel) => ({ ...v, state: upper(v.state) });
-const target = (t: PerformanceTarget) => ({ ...t, metric: upper(t.metric), comparator: upper(t.comparator), unit: t.unit, category: null });
-const warning = (w: SellerWarning) => ({ ...w, kind: upper(w.kind), issuedBy: actor(w.issuedBy) });
+const verification = (v: VerificationLabel) => ({ ...v, state: gqlEnum(v.state) });
+const target = (t: PerformanceTarget) => ({ ...t, metric: gqlEnum(t.metric), comparator: gqlEnum(t.comparator), unit: t.unit, category: null });
+const warning = (w: SellerWarning) => ({ ...w, kind: gqlEnum(w.kind), issuedBy: actor(w.issuedBy) });
 const performance = (p: PerformanceSummary) => ({
   from: p.period.from,
   to: p.period.to,
   orderCount: p.orderCount,
-  overall: upper(p.overall),
-  metrics: p.metrics.map((m) => ({ ...m, key: upper(m.key), status: upper(m.status), target: target(m.target) })),
+  overall: gqlEnum(p.overall),
+  metrics: p.metrics.map((m) => ({ ...m, key: gqlEnum(m.key), status: gqlEnum(m.status), target: target(m.target) })),
   onTimeDispatchPct: p.metrics.find((m) => m.key === 'dispatch_reliability')?.value ?? null,
   warnings: p.warnings.map(warning),
   history: p.history.map(timeline),
@@ -38,41 +32,19 @@ const appeal = (a: Appeal) => {
   const d = a.decision as { outcome?: string; explanation?: string; changes?: string[]; decidedBy?: common.Actor; decidedAt?: string } | null;
   return {
     ...a,
-    subject: upper(a.subject),
-    state: upper(a.state),
+    subject: gqlEnum(a.subject),
+    state: gqlEnum(a.state),
     reviewer: actor(a.reviewer),
     originalDecider: actor(a.originalDecider),
-    decideBy: deadline(a.decideBy),
+    decideBy: gqlDeadline(a.decideBy),
     decision: d ? { outcome: d.outcome ?? '', explanation: d.explanation ?? '', changes: d.changes ?? [], decidedBy: actor(d.decidedBy), decidedAt: d.decidedAt } : null,
   };
 };
-const changeRequest = (c: ChangeRequest) => ({ ...c, state: upper(c.state), submittedBy: actor(c.submittedBy) });
+const changeRequest = (c: ChangeRequest) => ({ ...c, state: gqlEnum(c.state), submittedBy: actor(c.submittedBy) });
 
 /* ---------------------------------------------------------------- batching per request (one call per field and tick) */
 
-type Batch<V> = { ids: Set<string>; promise: Promise<Map<string, V>> };
-const batches = new WeakMap<object, Map<string, Batch<unknown>>>();
-
-function load<V>(ctx: GraphQLContext, key: string, id: string, fetch: (ids: string[]) => Promise<Map<string, V>>): Promise<V | undefined> {
-  let perCtx = batches.get(ctx);
-  if (!perCtx) batches.set(ctx, (perCtx = new Map()));
-  let batch = perCtx.get(key) as Batch<V> | undefined;
-  if (!batch) {
-    const ids = new Set<string>();
-    const promise = new Promise<Map<string, V>>((resolve, reject) => {
-      setImmediate(() => {
-        perCtx!.delete(key);
-        fetch([...ids]).then(resolve, reject);
-      });
-    });
-    batch = { ids, promise };
-    perCtx.set(key, batch as Batch<unknown>);
-  }
-  batch.ids.add(id);
-  return batch.promise.then((m) => m.get(id));
-}
-
-const pageInput = (p: common.PageInput | null | undefined): common.PageInput => ({ ...(p?.cursor ? { cursor: p.cursor } : {}), ...(p?.page ? { page: p.page } : {}), ...(p?.limit ? { limit: p.limit } : {}) });
+const load = createBatchLoader();
 
 /**
  * Resolvers for the GraphQL fields this module owns (`@source(module: "sellers", …)` in graphql/schema.ts).
@@ -93,9 +65,9 @@ export const resolvers = (service: SellersService): ModuleResolvers => {
 
   const restriction = (r: Restriction) => ({
     ...r,
-    state: upper(r.state),
-    reasonCode: upper(r.reasonCode),
-    affectedActivities: r.affectedActivities.map(upper),
+    state: gqlEnum(r.state),
+    reasonCode: gqlEnum(r.reasonCode),
+    affectedActivities: r.affectedActivities.map(gqlEnum),
     scope: {
       wholeAccount: !r.scope.categoryIds?.length && !r.scope.conditions?.length && !r.scope.offerIds?.length && !r.scope.productIds?.length,
       categories: () => categoriesOf(r.scope.categoryIds),
@@ -133,14 +105,14 @@ export const resolvers = (service: SellersService): ModuleResolvers => {
         return sellerPublicProfileOut({ sellerId: s.id, storefront: sf, verification: map.verificationLabel(s), tagline: p.tagline, introduction: p.introduction, warranty: p.warranty });
       },
       legalName: s.legal_name,
-      status: upper(s.status),
+      status: gqlEnum(s.status),
       statusSince: map.isoReq(s.status_since),
       canSellNew: accounts.canSellNew(s),
       launchReady: accounts.launchReady(s),
       verification: verification(map.verificationLabel(s)),
       payoutReadiness: async () => {
         const p = await accounts.getPayoutAccount(s.id);
-        return { ...p.readiness, state: upper(p.readiness.state) };
+        return { ...p.readiness, state: gqlEnum(p.readiness.state) };
       },
       pendingAgreements: async () => (await accounts.pendingAgreements(s.id)).length,
       accountManager: async () => {

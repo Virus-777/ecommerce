@@ -1,10 +1,7 @@
-import { gqlActor, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { gqlActor, gqlEnum, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
 import { format } from '../../../kernel/lib/money.js';
 import type { CreditBalance, GoodwillGrant, LedgerEntry } from '../../../spec/wallet.js';
 import type { WalletService } from '../service.js';
-
-/** GraphQL enums are UPPER_CASE; REST values are lower case */
-const up = (s: string | null | undefined) => (s ? s.toUpperCase() : s);
 
 /** Money gets its display text (Money.formatted); lazy fields (functions) are kept */
 function gql<T>(v: T): T {
@@ -19,8 +16,8 @@ function gql<T>(v: T): T {
 
 const actor = gqlActor;
 
-const entry = (e: LedgerEntry) => ({ ...e, kind: up(e.kind), actor: actor(e.actor) });
-const grant = (g: GoodwillGrant) => ({ ...g, state: up(g.state), chargedTo: up(g.chargedTo), requestedBy: actor(g.requestedBy), decidedBy: actor(g.decidedBy) });
+const entry = (e: LedgerEntry) => ({ ...e, kind: gqlEnum(e.kind), actor: actor(e.actor) });
+const grant = (g: GoodwillGrant) => ({ ...g, state: gqlEnum(g.state), chargedTo: gqlEnum(g.chargedTo), requestedBy: actor(g.requestedBy), decidedBy: actor(g.decidedBy) });
 
 /**
  * Resolvers for the GraphQL fields this module owns (`@source(module: "wallet", …)` in graphql/schema.ts).
@@ -35,7 +32,7 @@ export const resolvers = (service: WalletService): ModuleResolvers => {
   /** WalletBalance: the balance plus lots and the latest entries, loaded only when asked for */
   const balanceOf = (b: CreditBalance, staff: boolean) => gql({
     ...b,
-    lots: async () => gql((await service.ledger.lots(b.customerId)).map((l) => ({ ...l, source: up(l.source) }))),
+    lots: async () => gql((await service.ledger.lots(b.customerId)).map((l) => ({ ...l, source: gqlEnum(l.source) }))),
     recentEntries: async (args: { limit?: number | null }) => gql((await service.ledger.recent(b.customerId, args.limit ?? 5, { staff })).map(entry)),
   });
 

@@ -1,5 +1,5 @@
 import { AppError } from '../../../kernel/errors/index.js';
-import { gqlActor, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { createBatchLoader, gqlActor, gqlDeadline, gqlEnum, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
 import type * as common from '../../../spec/common.js';
 import type { Message } from '../../../spec/messaging.js';
@@ -7,20 +7,18 @@ import type { ConversationView, MessagingService, Viewer } from '../service.js';
 
 /* ---------------------------------------------------------------- REST shapes → GraphQL shapes (enums in capitals) */
 
-const upper = (s: string | null | undefined) => (s ? s.toUpperCase() : null);
 const actor = gqlActor;
-const deadline = (d: common.Deadline | null | undefined) => (d ? { dueAt: d.dueAt, state: upper(d.state) } : null);
 
 const message = (m: Message) => ({
   id: m.id,
   conversationId: m.conversationId,
-  kind: upper(m.kind),
+  kind: gqlEnum(m.kind),
   author: actor(m.author),
   authorLabel: m.authorLabel,
   fromMe: m.fromMe,
   body: m.body,
   attachments: m.attachments,
-  redactions: m.redactions.map(upper),
+  redactions: m.redactions.map(gqlEnum),
   hidden: m.hidden,
   viewerReported: m.viewerReported,
   at: m.at,
@@ -28,27 +26,7 @@ const message = (m: Message) => ({
 
 /* ---------------------------------------------------------------- batching per request (one call per field and tick) */
 
-type Batch<V> = { ids: Set<string>; promise: Promise<Map<string, V>> };
-const batches = new WeakMap<object, Map<string, Batch<unknown>>>();
-
-function load<V>(ctx: GraphQLContext, key: string, id: string, fetch: (ids: string[]) => Promise<Map<string, V>>): Promise<V | undefined> {
-  let perCtx = batches.get(ctx);
-  if (!perCtx) batches.set(ctx, (perCtx = new Map()));
-  let batch = perCtx.get(key) as Batch<V> | undefined;
-  if (!batch) {
-    const ids = new Set<string>();
-    const promise = new Promise<Map<string, V>>((resolve, reject) => {
-      setImmediate(() => {
-        perCtx!.delete(key);
-        fetch([...ids]).then(resolve, reject);
-      });
-    });
-    batch = { ids, promise };
-    perCtx.set(key, batch as Batch<unknown>);
-  }
-  batch.ids.add(id);
-  return batch.promise.then((m) => m.get(id));
-}
+const load = createBatchLoader();
 
 /**
  * Resolvers for the GraphQL fields this module owns (`@source(module: "messaging", …)` in graphql/schema.ts).
@@ -89,14 +67,14 @@ export const resolvers = (service: MessagingService): ModuleResolvers => {
     const s = x.summary;
     return {
       id: c.id,
-      kind: upper(c.kind),
-      counterparty: { ...c.counterparty, kind: upper(c.counterparty.kind), id: c.counterparty.id ?? null },
-      participants: c.participants.map((p) => ({ kind: upper(p.kind), id: p.id, name: p.name, label: p.label, joinedAt: p.joinedAt, joinedFromCaseId: p.joinedFromCaseId ?? null })),
-      subject: { ...c.subject, kind: upper(c.subject.kind) },
-      status: upper(c.status),
+      kind: gqlEnum(c.kind),
+      counterparty: { ...c.counterparty, kind: gqlEnum(c.counterparty.kind), id: c.counterparty.id ?? null },
+      participants: c.participants.map((p) => ({ kind: gqlEnum(p.kind), id: p.id, name: p.name, label: p.label, joinedAt: p.joinedAt, joinedFromCaseId: p.joinedFromCaseId ?? null })),
+      subject: { ...c.subject, kind: gqlEnum(c.subject.kind) },
+      status: gqlEnum(c.status),
       lockedReason: c.lockedReason ?? null,
-      replyState: upper(c.replyState),
-      replyDue: deadline(c.replyDue),
+      replyState: gqlEnum(c.replyState),
+      replyDue: gqlDeadline(c.replyDue),
       privacyNote: c.privacyNote,
       rulesNote: c.rulesNote,
       canSend: c.canSend,

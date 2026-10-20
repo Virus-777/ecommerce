@@ -1,5 +1,5 @@
 import { AppError } from '../../../kernel/errors/index.js';
-import { gqlActor, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { createBatchLoader, gqlActor, gqlEnum, type GraphQLContext, type ModuleResolvers, pageInput } from '../../../kernel/graphql/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
 import { format as formatMoney, money as makeMoney } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
@@ -13,22 +13,20 @@ import type { ShippingService } from '../service.js';
 
 /* ---------------------------------------------------------------- REST shapes → GraphQL shapes (enums in capitals, Money.formatted) */
 
-const upper = (s: string | null | undefined) => (s ? s.toUpperCase().replace(/-/g, '_') : null);
 const lower = (s: string | null | undefined) => (s ? s.toLowerCase() : undefined);
 const money = (m: common.Money | null | undefined) => (m ? { ...m, formatted: formatMoney(m) } : null);
 const actor = gqlActor;
-const pageInput = (p: common.PageInput | null | undefined): common.PageInput => ({ ...(p?.cursor ? { cursor: p.cursor } : {}), ...(p?.page ? { page: p.page } : {}), ...(p?.limit ? { limit: p.limit } : {}) });
 const notice = (n: CustomerNotice) => ({ id: n.id, kind: n.kind, title: n.title, message: n.message, from: n.from, to: n.to });
 
 function exception(e: DeliveryException) {
   return {
     ...e,
-    kind: upper(e.kind),
-    deadline: { dueAt: e.deadline.dueAt, state: upper(e.deadline.state) },
-    status: upper(e.status),
-    escalatedTo: upper(e.escalatedTo),
-    sellerResponse: e.sellerResponse ? { ...e.sellerResponse, action: upper(e.sellerResponse.action), note: e.sellerResponse.note ?? null, shipBy: e.sellerResponse.shipBy ?? null, by: actor(e.sellerResponse.by) } : null,
-    resolution: e.resolution ? { ...e.resolution, kind: upper(e.resolution.kind), by: actor(e.resolution.by) } : null,
+    kind: gqlEnum(e.kind),
+    deadline: { dueAt: e.deadline.dueAt, state: gqlEnum(e.deadline.state) },
+    status: gqlEnum(e.status),
+    escalatedTo: gqlEnum(e.escalatedTo),
+    sellerResponse: e.sellerResponse ? { ...e.sellerResponse, action: gqlEnum(e.sellerResponse.action), note: e.sellerResponse.note ?? null, shipBy: e.sellerResponse.shipBy ?? null, by: actor(e.sellerResponse.by) } : null,
+    resolution: e.resolution ? { ...e.resolution, kind: gqlEnum(e.resolution.kind), by: actor(e.resolution.by) } : null,
     owner: e.owner ? { staffId: e.owner.staffId ?? null, name: e.owner.name, role: e.owner.role ?? null } : null,
     history: e.history.map((h) => ({ ...h, detail: h.detail ?? null, actor: actor(h.actor) })),
     openedBy: actor(e.openedBy),
@@ -42,7 +40,7 @@ function shipment(s: Shipment, extra: { estimateNote: string | null; notices: Cu
   const f = s.failedDelivery;
   return {
     id: s.id,
-    kind: upper(s.kind),
+    kind: gqlEnum(s.kind),
     orderId: s.orderId,
     orderRef: s.orderRef,
     groupId: s.groupId,
@@ -55,7 +53,7 @@ function shipment(s: Shipment, extra: { estimateNote: string | null; notices: Cu
     serviceName: s.serviceName ?? null,
     trackingNumber: s.trackingNumber ?? null,
     trackingUrl: s.trackingUrl ?? null,
-    status: upper(s.status),
+    status: gqlEnum(s.status),
     statusLabel: s.statusLabel,
     steps: STEPS,
     currentStep: stepOf(s.status),
@@ -70,20 +68,20 @@ function shipment(s: Shipment, extra: { estimateNote: string | null; notices: Cu
           reason: f.reason,
           heldAt: f.heldAt ?? null,
           chooseBy: f.chooseBy,
-          options: f.options.map((o) => ({ ...o, choice: upper(o.choice), cost: money(o.cost), costIfNoChoice: money(o.costIfNoChoice), pickupLocation: o.pickupLocation ?? null })),
-          chosen: f.chosen ? { choice: upper(f.chosen.choice), redeliveryDate: f.chosen.redeliveryDate ?? null, chosenAt: f.chosen.chosenAt, chosenBy: actor(f.chosen.chosenBy) } : null,
-          defaultIfNoChoice: upper(f.defaultIfNoChoice),
+          options: f.options.map((o) => ({ ...o, choice: gqlEnum(o.choice), cost: money(o.cost), costIfNoChoice: money(o.costIfNoChoice), pickupLocation: o.pickupLocation ?? null })),
+          chosen: f.chosen ? { choice: gqlEnum(f.chosen.choice), redeliveryDate: f.chosen.redeliveryDate ?? null, chosenAt: f.chosen.chosenAt, chosenBy: actor(f.chosen.chosenBy) } : null,
+          defaultIfNoChoice: gqlEnum(f.defaultIfNoChoice),
         }
       : null,
-    events: s.events.map((e) => ({ ...e, code: upper(e.code), source: upper(e.source), detail: e.detail ?? null, location: e.location ?? null })),
+    events: s.events.map((e) => ({ ...e, code: gqlEnum(e.code), source: gqlEnum(e.source), detail: e.detail ?? null, location: e.location ?? null })),
     headline: headlineOf(s),
     estimateNote: extra.estimateNote,
     helpNote: HELP_NOTE,
     notices: extra.notices.map(notice),
-    trackingState: upper(s.trackingState),
+    trackingState: gqlEnum(s.trackingState),
     dispatchedOnTime: s.dispatchedOnTime ?? null,
     label: s.label
-      ? { id: s.label.id, carrierName: s.label.carrierName, serviceName: s.label.serviceName, cost: money(s.label.cost), trackingNumber: s.label.trackingNumber, labelUrl: s.label.labelUrl ?? null, status: upper(s.label.status), purchasedBy: actor(s.label.purchasedBy), purchasedAt: s.label.purchasedAt, voidedAt: s.label.voidedAt ?? null }
+      ? { id: s.label.id, carrierName: s.label.carrierName, serviceName: s.label.serviceName, cost: money(s.label.cost), trackingNumber: s.label.trackingNumber, labelUrl: s.label.labelUrl ?? null, status: gqlEnum(s.label.status), purchasedBy: actor(s.label.purchasedBy), purchasedAt: s.label.purchasedAt, voidedAt: s.label.voidedAt ?? null }
       : null,
     corrections: s.corrections.map((c) => ({ ...c, by: actor(c.by) })),
     openExceptions: extra.openExceptions.map(exception),
@@ -94,27 +92,7 @@ function shipment(s: Shipment, extra: { estimateNote: string | null; notices: Cu
 
 /* ---------------------------------------------------------------- batching per request (one call per field and tick) */
 
-type Batch<V> = { ids: Set<string>; promise: Promise<Map<string, V>> };
-const batches = new WeakMap<object, Map<string, Batch<unknown>>>();
-
-function load<V>(ctx: GraphQLContext, key: string, id: string, fetch: (ids: string[]) => Promise<Map<string, V>>): Promise<V | undefined> {
-  let perCtx = batches.get(ctx);
-  if (!perCtx) batches.set(ctx, (perCtx = new Map()));
-  let batch = perCtx.get(key) as Batch<V> | undefined;
-  if (!batch) {
-    const ids = new Set<string>();
-    const promise = new Promise<Map<string, V>>((resolve, reject) => {
-      setImmediate(() => {
-        perCtx!.delete(key);
-        fetch([...ids]).then(resolve, reject);
-      });
-    });
-    batch = { ids, promise };
-    perCtx.set(key, batch as Batch<unknown>);
-  }
-  batch.ids.add(id);
-  return batch.promise.then((m) => m.get(id));
-}
+const load = createBatchLoader();
 
 /**
  * Resolvers for the GraphQL fields this module owns (`@source(module: "shipping", …)` in graphql/schema.ts).
@@ -250,7 +228,7 @@ export const resolvers = (service: ShippingService): ModuleResolvers => {
         if (!s) return null;
         return {
           shipsFrom: s.shipsFrom,
-          coverage: upper(s.coverage.area),
+          coverage: gqlEnum(s.coverage.area),
           coverageLabel: s.coverageLabel,
           excluded: s.excluded,
           handlingDays: s.handlingDays,

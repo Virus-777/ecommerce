@@ -1,4 +1,4 @@
-import type { GraphQLContext, ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { createBatchLoader, gqlEnum, type GraphQLContext, type ModuleResolvers, pageInput } from '../../../kernel/graphql/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
 import type * as common from '../../../spec/common.js';
 import type { CouponCard, DealProduct, DealsPage, FlashItem, FlashSaleBlock, FundingSplit, OfferPromotion, PromoBanner, PublicCampaign, UpcomingEvent } from '../../../spec/promotions.js';
@@ -6,30 +6,7 @@ import type { PromotionsService } from '../service.js';
 
 /* ---------------------------------------------------------------- batching per request (one call per field and tick) */
 
-type Batch<V> = { ids: Set<string>; promise: Promise<Map<string, V>> };
-const batches = new WeakMap<object, Map<string, Batch<unknown>>>();
-
-function load<V>(ctx: GraphQLContext, key: string, id: string, fetch: (ids: string[]) => Promise<Map<string, V>>): Promise<V | undefined> {
-  let perCtx = batches.get(ctx);
-  if (!perCtx) batches.set(ctx, (perCtx = new Map()));
-  let batch = perCtx.get(key) as Batch<V> | undefined;
-  if (!batch) {
-    const ids = new Set<string>();
-    const promise = new Promise<Map<string, V>>((resolve, reject) => {
-      setImmediate(() => {
-        perCtx!.delete(key);
-        fetch([...ids]).then(resolve, reject);
-      });
-    });
-    batch = { ids, promise };
-    perCtx.set(key, batch as Batch<unknown>);
-  }
-  batch.ids.add(id);
-  return batch.promise.then((m) => m.get(id));
-}
-
-const upper = (s: string | null | undefined) => (s ? s.toUpperCase() : s);
-const pageInput = (p: common.PageInput | null | undefined): common.PageInput => ({ ...(p?.cursor ? { cursor: p.cursor } : {}), ...(p?.page ? { page: p.page } : {}), ...(p?.limit ? { limit: p.limit } : {}) });
+const load = createBatchLoader();
 
 /**
  * Resolvers for the GraphQL fields this module owns (`@source(module: "promotions", …)` in graphql/schema.ts).
@@ -50,14 +27,14 @@ export const resolvers = (service: PromotionsService): ModuleResolvers => {
   };
 
   const campaignOf = (ctx: GraphQLContext, id: string | null | undefined) => (id && isUuid(id) ? load<PublicCampaign | null>(ctx, 'campaign', id, async (ids) => new Map(await Promise.all(ids.map(async (i) => [i, await service.getPublicCampaign(i)] as const)))).then((c) => (c ? campaign(c) : null)) : Promise.resolve(null));
-  const campaign = (c: PublicCampaign) => ({ ...c, status: upper(c.status) });
+  const campaign = (c: PublicCampaign) => ({ ...c, status: gqlEnum(c.status) });
   const offerOf = (id: string) => () => core.ctx.use('offers').getOffer(id);
   const productOf = (id: string) => () => core.ctx.use('catalog').getProduct(id);
 
   const banner = (ctx: GraphQLContext) => (b: PromoBanner) => ({ ...b, campaign: () => campaignOf(ctx, b.campaignId) });
-  const flashItem = (f: FlashItem) => ({ ...f, offer: offerOf(f.offerId), product: productOf(f.productId), state: upper(f.state) });
-  const flashSale = (ctx: GraphQLContext) => (b: FlashSaleBlock) => ({ id: b.campaignId, campaign: () => campaignOf(ctx, b.campaignId), name: b.name, period: b.period, state: upper(b.state), secondsLeft: b.secondsLeft, items: b.items.map(flashItem) });
-  const coupon = (ctx: GraphQLContext) => (c: CouponCard) => ({ ...c, id: c.campaignId, campaign: () => campaignOf(ctx, c.campaignId), state: upper(c.state) });
+  const flashItem = (f: FlashItem) => ({ ...f, offer: offerOf(f.offerId), product: productOf(f.productId), state: gqlEnum(f.state) });
+  const flashSale = (ctx: GraphQLContext) => (b: FlashSaleBlock) => ({ id: b.campaignId, campaign: () => campaignOf(ctx, b.campaignId), name: b.name, period: b.period, state: gqlEnum(b.state), secondsLeft: b.secondsLeft, items: b.items.map(flashItem) });
+  const coupon = (ctx: GraphQLContext) => (c: CouponCard) => ({ ...c, id: c.campaignId, campaign: () => campaignOf(ctx, c.campaignId), state: gqlEnum(c.state) });
   const dealItem = (d: DealProduct) => ({ ...d, product: productOf(d.productId), offer: offerOf(d.offerId) });
   const event = (ctx: GraphQLContext) => (e: UpcomingEvent) => ({ campaign: () => campaignOf(ctx, e.campaignId), summary: e.summary, reminderSet: e.reminderSet });
   const deal = (ctx: GraphQLContext) => (p: OfferPromotion) => {
@@ -69,10 +46,10 @@ export const resolvers = (service: PromotionsService): ModuleResolvers => {
       wasPrice: p.wasPrice ?? null,
       wasPriceRule: p.wasPriceRule ?? null,
       percentOffBps: off > 0 && p.regularPrice.amount ? Math.round((off * 10000) / p.regularPrice.amount) : null,
-      badges: p.badges.map((b) => ({ label: b.label, kind: upper(b.kind) })),
+      badges: p.badges.map((b) => ({ label: b.label, kind: gqlEnum(b.kind) })),
       campaign: () => campaignOf(ctx, p.campaignId),
       purchaseLimit: p.purchaseLimit ?? null,
-      flash: p.flash ? { ...p.flash, state: upper(p.flash.state) } : null,
+      flash: p.flash ? { ...p.flash, state: gqlEnum(p.flash.state) } : null,
       endsAt: async () => p.flash?.endsAt ?? (p.campaignId ? ((await service.getPublicCampaign(p.campaignId))?.period.endsAt ?? null) : null),
       sellerPromos: p.sellerPromos.map(banner(ctx)),
     };

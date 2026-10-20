@@ -1,5 +1,5 @@
 import { AppError } from '../../../kernel/errors/index.js';
-import { gqlActor, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { createBatchLoader, gqlActor, gqlDeadline, gqlEnum, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
 import type { ApprovalRequest, MyActionLimit, RoleCoverage, StaffRef } from '../../../spec/access.js';
 import type * as common from '../../../spec/common.js';
 import type * as identity from '../../../spec/identity.js';
@@ -8,11 +8,9 @@ import type { AccessService } from '../service.js';
 
 /* ---------------------------------------------------------------- REST shapes → GraphQL shapes (enums in capitals, Money.formatted) */
 
-const upper = (s: string) => s.toUpperCase().replace(/-/g, '_');
 const money = (m: common.Money | null | undefined) => (m ? { ...m, formatted: formatMoney(m) } : null);
 const actor = gqlActor;
 const staff = (s: StaffRef | null | undefined) => (s ? { accountId: s.accountId, name: s.name, away: s.away } : null);
-const deadline = (d: common.Deadline | null | undefined) => (d ? { dueAt: d.dueAt, state: upper(d.state) } : null);
 
 /** One row per required approval: done, waiting, rejected/returned, or skipped when the request ended first */
 function steps(r: ApprovalRequest) {
@@ -36,7 +34,7 @@ function steps(r: ApprovalRequest) {
       decidedBy: null,
       decidedAt: null,
       assignedTo: i === approved.length ? staff(r.nominatedReviewer) : null,
-      deadline: deadline(r.deadline),
+      deadline: gqlDeadline(r.deadline),
       note: null,
     };
   });
@@ -50,13 +48,13 @@ export function approvalToGraphQL(r: ApprovalRequest) {
     action: { key: r.action.key, module: r.action.module, label: r.action.label },
     amount: money(r.amount),
     requestedBy: actor(r.requestedBy),
-    status: upper(r.status),
+    status: gqlEnum(r.status),
     approvalsRemaining: open ? Math.max(0, r.requiredApprovals - approvedCount) : 0,
-    approvals: r.approvals.map((a) => ({ ...a, decision: upper(a.decision), by: actor(a.by), viaDelegationFrom: staff(a.viaDelegationFrom) })),
+    approvals: r.approvals.map((a) => ({ ...a, decision: gqlEnum(a.decision), by: actor(a.by), viaDelegationFrom: staff(a.viaDelegationFrom) })),
     steps: steps(r),
     eligibleApprovers: r.eligibleApprovers.map(staff),
     nominatedReviewer: staff(r.nominatedReviewer),
-    deadline: deadline(r.deadline),
+    deadline: gqlDeadline(r.deadline),
     timeline: r.timeline.map((t) => ({ ...t, actor: actor(t.actor) })),
   };
 }
@@ -65,10 +63,10 @@ function limitToGraphQL(l: MyActionLimit) {
   return {
     actionKey: l.action.key,
     actionLabel: l.action.label,
-    authority: upper(l.value.authority),
+    authority: gqlEnum(l.value.authority),
     limit: money(l.value.limitMoney),
     limitValue: l.value.limitNumber ?? null,
-    unit: upper(l.action.limit),
+    unit: gqlEnum(l.action.limit),
     needsSecondReviewer: l.needsSecondReviewer,
     secondReviewerAbove: money(l.value.secondReviewerAboveMoney),
     route: l.route,
@@ -80,27 +78,7 @@ const coverageToGraphQL = (c: RoleCoverage) => ({ ...c, lead: staff(c.lead), bac
 
 /* ---------------------------------------------------------------- batching per request (one call per parent type and tick) */
 
-type Batch<V> = { ids: Set<string>; promise: Promise<Map<string, V>> };
-const batches = new WeakMap<object, Map<string, Batch<unknown>>>();
-
-function load<V>(ctx: GraphQLContext, key: string, id: string, fetch: (ids: string[]) => Promise<Map<string, V>>): Promise<V | undefined> {
-  let perCtx = batches.get(ctx);
-  if (!perCtx) batches.set(ctx, (perCtx = new Map()));
-  let batch = perCtx.get(key) as Batch<V> | undefined;
-  if (!batch) {
-    const ids = new Set<string>();
-    const promise = new Promise<Map<string, V>>((resolve, reject) => {
-      setImmediate(() => {
-        perCtx!.delete(key);
-        fetch([...ids]).then(resolve, reject);
-      });
-    });
-    batch = { ids, promise };
-    perCtx.set(key, batch as Batch<unknown>);
-  }
-  batch.ids.add(id);
-  return batch.promise.then((m) => m.get(id));
-}
+const load = createBatchLoader();
 
 const principalOf = (ctx: GraphQLContext): identity.Principal => {
   if (!ctx.principal) throw new AppError('UNAUTHORIZED', 'Staff sign-in required');
