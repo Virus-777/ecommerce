@@ -1,7 +1,8 @@
 # Plan: faster MongoDB search for tens of thousands of products
 
-Status: plan, not built (2026-10-20). Scope: the MongoDB search engine (`backend/src/modules/search/mongo-engine.ts`),
-the search copy it reads (`search_documents`, `search_offers`) and a few service steps in `service/queries.ts`.
+Status (2026-10-20): **steps 1–5 built** on branch `perf/search-speed` (see §8 and §9 for results and what differed
+from the plan). Scope: the MongoDB search engine (`backend/src/modules/search/mongo-engine.ts`), the
+search copy it reads (`search_documents`, `search_offers`) and a few service steps in `service/queries.ts`.
 No API changes: the store website and the Android app keep calling the same endpoints and get the same answers.
 
 ## 1. What is slow, measured
@@ -136,3 +137,72 @@ fallback. The ranking formula doesn't change, so OpenSearch's twin ranking scrip
 ## 7. Size
 
 Steps 1–4: about 3–4 days of work including tests. Step 5 only if the benchmark says so.
+
+## 8. Results (steps 1–4, 2026-10-20)
+
+`npm run bench:search`, same machine. The machine's speed varies by up to about 2× between runs (other work on it),
+so compare within a column; step 3 was also checked side by side on one catalog.
+
+| Request (50,000 products) | Before | After steps 1–4 |
+|---|---|---|
+| Specific search | 7 ms | 14 ms (noise level) |
+| Two words | 57 ms | 19 ms |
+| Broad word ("wireless") | 700 ms | 61 ms |
+| Very common word ("battery") | 4,824 ms | 359 ms |
+| Broad word, price low to high | 730 ms | 62 ms |
+| Typo ("wirelss") | 826 ms | 154 ms |
+| Category page: product list | 6,627 ms | 596 ms |
+| Category page: filter counts | 19,230 ms | 1,205 ms |
+| Broad word: filter counts | 1,293 ms | 80 ms |
+| Category with a price filter, by price | 6,164 ms | 247 ms |
+| Suggestions while typing | 638 ms | 14 ms |
+
+The benchmark's category holds all 50,000 products (the worst case); a real category page is proportionally faster.
+
+What differed from the plan:
+
+- **Step 3** went further than planned: since step 2, base()'s first `$match` alone decides which documents pass, so
+  every count reads only that stage. Filter counts that read the same documents the same way share a pass; passes
+  that read document fields only (category, brand, rating, attributes) skip the offer work, and the passes run at once
+  (one big combined pass was slower: it runs on one thread). Spelling correction keeps its count-first order — that
+  count is now cheap. GraphQL search reads results and filter counts at once, but still always computes the filter
+  counts (computing them only when selected was left out: the saving is small now).
+- **Step 4** needed no word-list collection: typo candidates are gathered as distinct words in the database.
+  Behaviour change, as planned: with enough prefix matches, a title that is only similar to the typed text no longer
+  outranks them.
+- **Found, not changed:** the "In stock" filter count counts products whose card offer is in stock. The card prefers
+  the featured offer even when it is out of stock, so the count can be below what selecting "In stock" returns.
+  Fixing it means changing the facet in both engines.
+
+What was left at 50,000 products in one category: choosing each product's card offer (~0.3 s) and scoring and
+sorting every product for the "Recommended" order (~0.3 s). Step 5 (§9) addresses both.
+
+## 9. Step 5 (2026-10-20)
+
+- **Stored card offers** (`cards.ts`): each search document stores its card offer and offer count for the two usual
+  offer filters — none (`card_all`) and in stock only (`card_in_stock`). They are computed in the database from the
+  document's offers and featured offer by every write that changes either (the four offer methods, a rebuilt
+  document, a featured-offer change), by the start-up sync and by a migration. The engine uses them whenever the
+  query's offer filters are one of those two; any other offer filter (seller, condition, price, delivery) still picks
+  the card offer per document.
+- **Stored listing ranks**: `rank_all` / `rank_in_stock` hold the recommended-sort score of a listing (no words) with
+  each card offer, computed by the same `scoreStages` as live ranking, under the weights named in `rank_key`. Writes
+  that change an input (offers, featured offer, rating, popularity, rebuild) set `rank_key` to null; before a
+  recommended listing the engine recomputes the documents whose `rank_key` differs (indexed: usually a handful, all
+  of them once after a new ranking policy or a deploy) and reads the page in index order (category, rank, id). A
+  product changed in the same instant can sort by its previous rank for that one request.
+- **Filter count cache**: facets, summary and price ranges are kept per query for `SEARCH_FACET_CACHE_MS` (default
+  30 s; 0 = off; always off in tests). Product lists are never cached; counts can trail a change by up to the window.
+- Smaller: per-seller and per-condition counts group each document's distinct values first; price presets are
+  counted alongside the other filter counts instead of after them.
+
+| Request (50,000 products in one category) | Before step 5 | After |
+|---|---|---|
+| Category page: product list | 596 ms | 172 ms |
+| Category page: filter counts, first visit | 1,205 ms | 616 ms |
+| Category page: filter counts, repeated within the window | 1,205 ms | ~0 ms |
+| Category with a price filter, by price | 247 ms | 321 ms (noise level; this path doesn't use the stored values) |
+| 20,000 products: list / filter counts | 260 / 510 ms | 61 / 345 ms |
+
+Tests: stored card offers equal the rule through every write; listings equal the computed order for both stock
+states, with extra filters, over several pages, after products change and under new weights; the cache window.

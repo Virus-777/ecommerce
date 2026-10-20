@@ -22,7 +22,9 @@ export function selectSearchEngine(ctx: ModuleContext<'search'>, env: Record<str
   const cfg = openSearchTesting.config ?? readSearchEngineConfig(env);
   const repo = new SearchRepository(ctx.mongo);
   const terms = createMongoTermLookup(ctx.mongo);
-  const mongo = createMongoSearchEngine(ctx.mongo, terms);
+  // filter counts kept per query for SEARCH_FACET_CACHE_MS (default 30 s; 0 = off; always off in tests, which change data and count again)
+  const facetCacheMs = env.NODE_ENV === 'test' ? 0 : Math.max(0, Number(env.SEARCH_FACET_CACHE_MS ?? 30_000) || 0);
+  const mongo = createMongoSearchEngine(ctx.mongo, terms, { facetCacheMs });
   if (cfg.engine === 'mongo') return { repo, engine: mongo };
 
   const os = new OsApi(createOpenSearchClient(cfg.opensearch, openSearchTesting.clientOptions));
