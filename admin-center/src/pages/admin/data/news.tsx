@@ -1,9 +1,10 @@
+import { RichText as SharedRichText, type ContentLink } from '@marketly/web-shared/ui';
 import { actorLabel } from '@/app/parts';
 import { fromZonedInput, zonedInput } from '@marketly/web-shared/lib/dates';
-import { Fragment, useRef, useState, type ReactNode } from 'react';
+import { useRef, useState } from 'react';
 import { errorMessage, resolveProductImageSpec, uploadMedia, useApi, type components } from '@marketly/web-shared/api';
 import { cx } from '@marketly/web-shared/lib/cx';
-import { Button, Icon, IconButton, ImageCropper, Img, TableWrap, type CropWording, type IconName, type ProcessedImage } from '@marketly/web-shared/ui';
+import { Button, Icon, IconButton, ImageCropper, Img, type CropWording, type IconName, type ProcessedImage } from '@marketly/web-shared/ui';
 
 // Helpers of the News page (pages/admin/News.tsx; designed in React from docs/06-news.md): types, status labels,
 // Pacific-time conversions for datetime-local inputs, the body editor (the help article toolbar + textarea), the
@@ -191,62 +192,12 @@ export function CoverField({ cover, preview, alt, icon, disabled, onChange }: { 
 
 /* ---------------- Rich text for the preview ---------------- */
 
-// The body is sanitized by the API; the preview still rebuilds it as React elements from an allowlist (as the store's
-// help pages do) instead of injecting HTML. Links don't navigate from the preview.
-const BLOCK_TAGS = new Set(['p', 'h2', 'h3', 'h4', 'ul', 'ol', 'li', 'blockquote', 'hr', 'pre']);
-const INLINE_TAGS = new Set(['b', 'strong', 'i', 'em', 'u', 'small', 'code', 'br', 'span', 'sub', 'sup', 'mark']);
-const TABLE_TAGS = new Set(['table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'caption']);
-const DROP = new Set(['script', 'style', 'iframe', 'object', 'embed', 'template', 'noscript', 'svg', 'math', 'form', 'input', 'button', 'select', 'textarea', 'head', 'title', 'link', 'meta', 'img']);
+// The store's renderer (web-shared ui/RichText), so the preview shows the post as customers will see it. Links
+// don't navigate from the preview: they show their target on hover.
+const PreviewLink: ContentLink = ({ url, className, children }) => (
+  <span className={className} title={url}>
+    {children}
+  </span>
+);
 
-function convert(node: Node, key: string): ReactNode {
-  if (node.nodeType === 3) return node.textContent;
-  if (node.nodeType !== 1) return null;
-  const el = node as Element;
-  const tag = el.tagName.toLowerCase();
-  if (DROP.has(tag)) return null;
-  const kids = Array.from(el.childNodes).map((c, i) => convert(c, `${key}.${i}`));
-  if (tag === 'a') {
-    return (
-      <span key={key} className="link-inline" title={el.getAttribute('href') ?? undefined}>
-        {kids}
-      </span>
-    );
-  }
-  if (tag === 'br') return <br key={key} />;
-  if (tag === 'hr') return <hr key={key} />;
-  if (tag === 'table') return <table key={key} className="table">{kids}</table>;
-  if (TABLE_TAGS.has(tag)) {
-    const T = tag as 'thead';
-    return <T key={key}>{kids.filter((k) => !(typeof k === 'string' && !k.trim() && tag !== 'td' && tag !== 'th'))}</T>;
-  }
-  if (BLOCK_TAGS.has(tag) || INLINE_TAGS.has(tag)) {
-    const T = tag as 'p';
-    return <T key={key}>{kids}</T>;
-  }
-  if (tag === 'h1') return <h2 key={key}>{kids}</h2>;
-  if (tag === 'h5' || tag === 'h6') return <h4 key={key}>{kids}</h4>;
-  return <Fragment key={key}>{kids}</Fragment>;
-}
-
-export function RichText({ html }: { html: string }) {
-  if (typeof DOMParser === 'undefined') return <p>{html.replace(/<[^>]*>/g, ' ')}</p>;
-  const nodes = Array.from(new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html').body.childNodes);
-  const out: ReactNode[] = [];
-  let run: ReactNode[] = [];
-  const flush = () => {
-    if (run.some((r) => r !== null && !(typeof r === 'string' && !r.trim()))) out.push(<div key={`p${out.length}`} className="prose">{run}</div>);
-    run = [];
-  };
-  nodes.forEach((n, i) => {
-    if (n.nodeType === 1 && (n as Element).tagName.toLowerCase() === 'table') {
-      flush();
-      out.push(
-        <TableWrap key={`t${i}`} label="Table in the post">
-          {convert(n, `t${i}`)}
-        </TableWrap>,
-      );
-    } else run.push(convert(n, `n${i}`));
-  });
-  flush();
-  return <>{out}</>;
-}
+export const RichText = ({ html }: { html: string }) => <SharedRichText html={html} link={PreviewLink} tableLabel="Table in the post" />;
