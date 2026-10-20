@@ -22,7 +22,7 @@ import { schemas } from './schema.js';
  */
 export default defineModule({
   spec,
-  version: '2.1.0',
+  version: '2.2.0',
   schemas,
   async register(ctx) {
     // Providers: deterministic development adapters (no network); real adapters plug in behind the same ports

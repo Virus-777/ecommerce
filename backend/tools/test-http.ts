@@ -132,6 +132,11 @@ async function send(method: string, url: string, headers: Record<string, string>
   // webhooks: sign the exact body, unless the case sends its own (forged) signature
   if (url.startsWith('/webhooks/') && 'x-event-id' in h && !('x-signature' in h)) Object.assign(h, signWebhook(WEBHOOK_SECRET, raw ?? ''));
   const res = await fetch(base + url, { method, headers: h, body: raw, redirect: 'manual' });
+  // an event stream stays open: keep its head, then hang up (the server cleans up when the client goes away)
+  if (res.headers.get('content-type')?.startsWith('text/event-stream')) {
+    await res.body?.cancel();
+    return { status: res.status, headers: res.headers, body: null };
+  }
   const text = await res.text();
   let parsed: unknown = text;
   try {
@@ -158,7 +163,9 @@ const record = (operation: string, check: string, failure: string | null | undef
 
 /** Headers every API response carries, whatever its status */
 function headerProblems(r: Res, url: string): string | null {
-  if (/^\/(api|graphql|webhooks)\//.test(url) && r.headers.get('cache-control') !== 'private, no-store') return `cache-control is ${r.headers.get('cache-control')}`;
+  // event streams add no-transform (proxies must not compress or hold back events)
+  const cache = r.headers.get('cache-control');
+  if (/^\/(api|graphql|webhooks)\//.test(url) && cache !== 'private, no-store' && cache !== 'private, no-store, no-transform') return `cache-control is ${cache}`;
   if (r.status === 401 && code(r) === 'UNAUTHORIZED' && !r.headers.get('www-authenticate')) return '401 without WWW-Authenticate';
   return null;
 }
@@ -265,6 +272,12 @@ async function testEndpoint(module: string, id: string, d: EndpointDef) {
   }
   const r = await send(d.method, url, { ...extra, ...rightToken(d) }, payload(proof));
   if (later(r)) return record(op, 'right token', null, 'later launch phase');
+  if (d.responseFormat === 'event-stream') {
+    // the stream opened (send() hung up after the head): 200 with text/event-stream
+    const type = r.headers.get('content-type') ?? '';
+    record(op, 'right token', r.status === 200 && type.startsWith('text/event-stream') ? headerProblems(r, url) : `expected 200 text/event-stream, got ${brief(r)} (${type})`);
+    return;
+  }
   // the middleware's refusals; a handler may still refuse for business reasons on made-up data (403 without these, 400 with its own message)
   const endpointPermissions = new Set([d.permission, ...(d.permissionWhen ?? []).map((w) => w.permission)]);
   const byMiddleware =
