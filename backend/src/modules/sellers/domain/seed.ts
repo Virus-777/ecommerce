@@ -9,4 +9,6 @@
 export const TEMPLATE_GRANTS: readonly { template: 'products_inventory' | 'shipping' | 'customer_service'; permission: string }[] = [
   { template: 'products_inventory', permission: 'fulfillment-service.inbound.manage' },
   { template: 'products_inventory', permission: 'fulfillment-service.fees.view' },
+  // unit costs per offer (doc 09 §3.1, October 2026): the template that manages prices sets costs too
+  { template: 'products_inventory', permission: 'offers.costs.manage' },
 ];

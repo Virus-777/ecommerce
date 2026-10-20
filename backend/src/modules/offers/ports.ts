@@ -8,7 +8,7 @@ import type { OffersDb } from '../../spec/offers.js';
 export type Db = OffersDb;
 export type Table = keyof Db & string;
 /** Tables keyed by `id` */
-export type IdTable = 'offers' | 'offer_price_history' | 'price_changes' | 'offer_status_log' | 'bulk_update_jobs';
+export type IdTable = 'offers' | 'offer_price_history' | 'price_changes' | 'offer_status_log' | 'bulk_update_jobs' | 'offer_costs';
 
 export type OfferRec = Db['offers'];
 export type PriceHistoryRec = Db['offer_price_history'];
@@ -19,6 +19,7 @@ export type FeaturedRec = Db['featured_offers'];
 export type RuleRec = Db['featured_rules'];
 export type BulkJobRec = Db['bulk_update_jobs'];
 export type BulkRowRec = Db['bulk_update_rows'];
+export type CostRec = Db['offer_costs'];
 
 export interface OfferListFilter {
   ownerType?: 'official' | 'seller';

@@ -43,6 +43,12 @@ export const sellerRoutes = (service: OffersService) => {
     },
     /** POST /price-changes: Change prices of selected offers (up to 100) */
     changeOwnPrices: async ({ sellerId, body, principal, actor, requestId }) => service.pricing.changeOwnPrices(sellerId, body, { actor, requestId, principal }),
+    /** GET /offers/{id}/costs: Unit cost history of one own offer, newest first */
+    listOfferCosts: async ({ sellerId, params, page }) => service.costs.history(sellerId, params.id, page),
+    /** PUT /offers/{id}/cost: Set the unit cost of one own offer from a day on */
+    setOfferCost: async ({ sellerId, params, body, principal, actor, requestId }) => service.costs.setOne(sellerId, params.id, body, { actor, requestId, principal }),
+    /** POST /costs: Set the unit cost of several own offers (1 to 500) */
+    setOfferCosts: async ({ sellerId, body, principal, actor, requestId }) => service.costs.setMany(sellerId, body.items, { actor, requestId, principal }),
     /** POST /offers/exports: Export own offers (selected rows or the current filters) as CSV */
     exportOwnOffers: async ({ sellerId, body, principal, actor, requestId }) => service.views.exportOwn(sellerId, body, { actor, requestId, principal }),
     /** GET /offers/exports/{id}: Offer export status and download link (requesting member only) */
