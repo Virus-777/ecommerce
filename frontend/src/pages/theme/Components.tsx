@@ -4,11 +4,12 @@ import { cx } from '@marketly/web-shared/lib/cx';
 import { money } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
 import {
-  Alert, Badge, Breadcrumbs, Button, Checkbox, Chip, Deadline, Dialog, Drawer, EmptyState, Field, Icon, Legend, LineChart,
+  Alert, Badge, Breadcrumbs, Button, Checkbox, Chip, Deadline, Dialog, Drawer, EmptyState, Field, Icon,
   OptionCard, ProductCard, QuantityStepper, Radio, SegmentedControl, Select, Sponsored, Stat, StatusBadge, StatusLegend, Steps,
   Switch, TableWrap, Tabs, Textarea, TextInput, Timeline, Track,
 } from '@marketly/web-shared/ui';
-import { DEMO_ORDERS, SALES_CHART, STATUS_ROWS } from './data/components';
+import { ChartsDemo } from './ChartsDemo';
+import { DEMO_ORDERS, STATUS_ROWS } from './data/components';
 
 // Design: pages/theme/theme-components.html (design-system reference page, no store chrome).
 // Demos render the real src/ui components, so this page documents the library as built.
@@ -27,7 +28,6 @@ const ORDER_TABS = [
 ];
 const FILTER_CHIPS = ['Brand: Halden', 'Under $200', 'Free delivery', 'Official Store', '4★ & up'];
 const CARD_PRODUCTS = ['aurora', 'kestrel27', 'duvet', 'serum'].map((id) => products.find((p) => p.id === id)!);
-const k = (v: number) => `$${Math.round(v / 1000)}k`;
 
 function emailError(v: string) {
   if (/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(v.trim())) return undefined;
@@ -442,7 +442,9 @@ export default function Components() {
         <section className="th-sec">
           <header>
             <h2 className="h2">Statistics and charts</h2>
-            <p className="small sub measure-lg">Two-series charts compare the Official Store with marketplace sellers. Hover any point for exact values.</p>
+            <p className="small sub measure-lg">
+              Recharts styled with the chart tokens (web-shared/src/ui/charts). Hover, touch or use the arrow keys for exact values; press a legend entry to hide a series; every chart has a table view.
+            </p>
           </header>
           <div className="grid md2 lg4 gap-3">
             <div className="card pad">
@@ -458,10 +460,7 @@ export default function Components() {
               <Stat label="Open cases" value="31" />
             </div>
           </div>
-          <div className="card pad stack gap-3">
-            <Legend items={['Official Store', 'Marketplace sellers']} />
-            <LineChart labels={SALES_CHART.labels} series={SALES_CHART.series} fmt={k} />
-          </div>
+          <ChartsDemo />
         </section>
       </div>
 

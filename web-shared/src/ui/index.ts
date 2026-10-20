@@ -16,7 +16,6 @@ export { ImageCropper, type CropWording, type ProcessedImage } from './ImageCrop
 export { DateTimeField } from './DateTimeField';
 export { RichText, InlineHtml, DataTable, htmlToText, PlainLink, type ContentLink } from './RichText';
 export { LoadError, SkeletonLines, isForbidden } from './Loading';
-export { LineChart, BarChart, Legend, SplitBar } from './Charts';
 // Charts (docs/09 §4.1): Recharts styled with the chart tokens; one file per component under ./charts.
 export { TrendChart, type TrendChartProps } from './charts/TrendChart';
 export { BarsChart, type BarsChartProps } from './charts/BarsChart';

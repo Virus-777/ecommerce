@@ -81,7 +81,7 @@ Each helper in `js/core.js` becomes one React component (and later one Compose c
 | `tabs`, `seg`, `chips`, `steps`, `track`, `timeline`, `pager`, `lazyLoad` | `Tabs`, `SegmentedControl`, `FilterChips`, `Stepper`, `ProgressTrack`, `Timeline`, `Pagination`, `InfiniteList` | Website lists use `Pagination`; the Android app uses infinite scroll (`LazyColumn`/`LazyVerticalGrid` + Paging 3) with skeleton placeholders. The API supports both (cursor-based) |
 | `table`, `searchIn`, `deadline` | `DataTable`, `SearchField`, `Deadline` | |
 | `alert`, `empty`, `modal`, `drawer` | `Alert`, `EmptyState`, `Dialog` (bottom sheet on phone), `Drawer` | |
-| `lineChart`, `barChart`, `sparkline`, `legend`, `splitBar` | `LineChart`, `BarChart`, `Sparkline`, `Legend`, `SplitBar` | |
+| `lineChart`, `barChart`, `sparkline`, `legend`, `splitBar` | `TrendChart`, `BarsChart`, `ComboChart`, `WaterfallChart`, `DonutChart`, `ShareBar`, `ChartFrame`, `PeriodControl` | Recharts 3.10.1 in `web-shared/src/ui/charts` with the chart tokens (docs/09 §4.1); gallery on /design/components |
 | `storeLayout`, `checkoutLayout`, `accountLayout`, `boLayout` | `StoreLayout`, `CheckoutLayout`, `AccountLayout`, `BackOfficeLayout` | `BackOfficeLayout` serves Seller Center, Admin Center and Operations |
 
 ## Screen inventory

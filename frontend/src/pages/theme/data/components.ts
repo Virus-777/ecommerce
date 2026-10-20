@@ -28,12 +28,3 @@ export const DEMO_ORDERS: DemoOrder[] = [
   { ref: 'MK-261007-10433', customer: 'Alex M.', items: 1, total: 59, status: 'Preparing', deadline: { tone: 'danger', text: 'Overdue 3 h' }, flagged: true },
   { ref: 'MK-261007-09811', customer: 'Chris T.', items: 1, total: 190.99, status: 'Shipped', deadline: { tone: 'ok', text: 'Shipped Oct 8' } },
 ];
-
-/** Daily gross sales, Official Store vs marketplace sellers (USD). */
-export const SALES_CHART = {
-  labels: ['Sep 25', 'Sep 26', 'Sep 27', 'Sep 28', 'Sep 29', 'Sep 30', 'Oct 1', 'Oct 2', 'Oct 3', 'Oct 4', 'Oct 5', 'Oct 6', 'Oct 7', 'Oct 8'],
-  series: [
-    { name: 'Official', data: [18200, 19100, 22400, 24800, 17600, 16900, 18400, 20200, 21000, 25600, 27100, 19400, 18800, 20600] },
-    { name: 'Sellers', data: [11400, 12000, 14800, 16200, 12100, 12600, 13000, 14400, 15100, 18900, 20300, 14200, 14900, 16100] },
-  ],
-};
