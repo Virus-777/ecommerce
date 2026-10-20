@@ -1882,18 +1882,6 @@ export const spec = defineModuleSpec({
     }
   },
   settings: {
-    "reportingCurrency": {
-      "default": "USD",
-      "desc": "One currency at launch",
-      "type": "string",
-      "editable": false
-    },
-    "reportingTimeZone": {
-      "default": "America/Los_Angeles",
-      "desc": "Market time zone; days run 00:00–23:59",
-      "type": "string",
-      "editable": false
-    },
     "defaultDateBasis": {
       "default": "placement",
       "desc": "Default basis for sales reports",

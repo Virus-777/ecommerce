@@ -298,8 +298,6 @@
     { "name": "reports.check-lag", "schedule": "every 5 min", "does": "Mark read models stale when their lag exceeds readModelMaxLagMinutes" }
   ],
   "settings": [
-    { "key": "reportingCurrency", "type": "string", "default": "USD", "desc": "One currency at launch", "editable": false },
-    { "key": "reportingTimeZone", "type": "string", "default": "America/Los_Angeles", "desc": "Market time zone; days run 00:00–23:59", "editable": false },
     { "key": "defaultDateBasis", "type": "enum", "default": "placement", "desc": "Default basis for sales reports", "choices": ["placement", "payment", "shipment", "completion"] },
     { "key": "taxIncluded", "type": "bool", "default": false, "desc": "Sales figures exclude tax", "approval": "second_reviewer" },
     { "key": "maxRangeDays", "type": "duration", "default": 400, "desc": "Longest range one query may cover", "unit": "days", "min": 1 },

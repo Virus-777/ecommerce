@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { unzip, zip } from '../domain/zip.js';
+import { unzip, zip } from '../../../kernel/lib/zip.js';
 import { ADMIN, boot, STORE, type Kit } from './helpers.js';
 
 /** Stand-ins for orders and support (closure blockers) and an export hook (messaging): what they answer is set per test */

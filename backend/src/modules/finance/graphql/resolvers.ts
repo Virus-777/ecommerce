@@ -1,3 +1,4 @@
+import { actorOf } from '../../../kernel/auth/index.js';
 import { createBatchLoader, type GraphQLContext, type ModuleResolvers, pageInput } from '../../../kernel/graphql/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
 import { toPageRequest } from '../../../kernel/lib/pagination.js';
@@ -29,7 +30,7 @@ const load = createBatchLoader();
  * A seller reaches only its own money (another seller's → null); staff fields are permission-checked by @auth.
  */
 export const resolvers = (service: FinanceService): ModuleResolvers => {
-  const byOf = (ctx: GraphQLContext): By => ({ actor: { kind: ctx.principal?.kind === 'staff' ? 'staff' : ctx.principal?.kind === 'seller' ? 'seller' : 'visitor', id: ctx.principal?.accountId ?? null, name: ctx.principal?.name ?? null }, requestId: ctx.requestId, principal: ctx.principal, can: (p) => ctx.can(p) });
+  const byOf = (ctx: GraphQLContext): By => ({ actor: actorOf(ctx.principal ? { via: 'token', principal: ctx.principal } : undefined), requestId: ctx.requestId, principal: ctx.principal, can: (p) => ctx.can(p) });
   const ownSeller = (ctx: GraphQLContext, sellerId: string) => ctx.area !== 'seller' || (ctx.principal?.kind === 'seller' && ctx.principal.sellerId === sellerId);
 
   const runOf = (ctx: GraphQLContext) => (r: PayoutRun) =>

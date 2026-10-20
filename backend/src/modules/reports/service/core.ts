@@ -57,9 +57,7 @@ export class ReportsCore {
 
   async cfg(): Promise<Settings> {
     const s = this.ctx.settings;
-    const [currency, timeZone, defaultBasis, taxIncluded, maxRangeDays, exportLinkHours, maxExportRows, readModelMaxLagMinutes, launchMetrics, exportDatasets] = await Promise.all([
-      s.get('reportingCurrency'),
-      s.get('reportingTimeZone'),
+    const [defaultBasis, taxIncluded, maxRangeDays, exportLinkHours, maxExportRows, readModelMaxLagMinutes, launchMetrics, exportDatasets] = await Promise.all([
       s.get('defaultDateBasis'),
       s.get('taxIncluded'),
       s.get('maxRangeDays'),
@@ -71,8 +69,9 @@ export class ReportsCore {
     ]);
     const basis = ['placement', 'payment', 'shipment', 'completion'].includes(defaultBasis) ? (defaultBasis as Settings['defaultBasis']) : 'placement';
     return {
-      currency: currency || this.ctx.config.market.currency,
-      timeZone: timeZone || this.ctx.config.market.timeZone,
+      // the market's, from the server environment like every module (MARKET_CURRENCY, MARKET_TIME_ZONE)
+      currency: this.ctx.config.market.currency,
+      timeZone: this.ctx.config.market.timeZone,
       defaultBasis: basis,
       taxIncluded: Boolean(taxIncluded),
       maxRangeDays: Number(maxRangeDays) || 400,

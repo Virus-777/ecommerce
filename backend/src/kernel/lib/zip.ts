@@ -1,6 +1,6 @@
 /**
- * Minimal ZIP writer (stored entries, no compression) for personal data exports: a handful of JSON
- * files, so no dependency is needed. Format: PKWARE APPNOTE 6.3 local headers + central directory.
+ * Minimal ZIP writer (stored entries, no compression) for personal data exports and spreadsheet (xlsx) files,
+ * so no dependency is needed. Format: PKWARE APPNOTE 6.3 local headers + central directory.
  */
 import { crc32 } from 'node:zlib';
 

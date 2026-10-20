@@ -878,8 +878,6 @@ Indexes: `pk (kind, ref_id)`
 
 | Key | Default | Rules | Meaning |
 |---|---|---|---|
-| reportingCurrency | `"USD"` | string, read-only | One currency at launch |
-| reportingTimeZone | `"America/Los_Angeles"` | string, read-only | Market time zone; days run 00:00–23:59 |
 | defaultDateBasis | `"placement"` | enum (placement \| payment \| shipment \| completion) | Default basis for sales reports |
 | taxIncluded | `false` | bool, approval: second reviewer | Sales figures exclude tax |
 | maxRangeDays | `400` | duration, days, 1–… | Longest range one query may cover |
