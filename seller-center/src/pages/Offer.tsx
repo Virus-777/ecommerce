@@ -437,7 +437,11 @@ function OfferForm({ product, detail, profiles, fees, rules }: { product: Seller
         const { form: _form, ...fields } = apiErrors(costError);
         setServer(fields);
       }
-      if (costChanged && !costError) void qc.invalidateQueries({ queryKey: ['reports'] });
+      if (costChanged && !costError) {
+        void qc.invalidateQueries({ queryKey: ['reports'] });
+        // the saved cost is now the offer's; a later save must not add the same row again
+        setF((s) => ({ ...s, costFrom: costToday(), costNote: '' }));
+      }
       const state = published ? 'published' : editing && !(publish && isDraft) ? 'saved' : 'draft';
       setResult(state);
       announce(state === 'published' ? 'Offer published' : state === 'saved' ? 'Offer saved' : 'Draft saved');

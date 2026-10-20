@@ -92,7 +92,8 @@ export function ProductsTab({ query, periodFrom }: { query: ReportQuery; periodF
       >
         <BarsChart rows={ranking} series={RANK_SERIES} fmt={fmtMoney} axisFmt={fmtMoneyCompact} horizontal label={`${rank === 'top' ? 'Products with the most profit' : 'Products with the least profit'}, ${range}`} />
       </ChartFrame>
-      <ReportCallouts result={r} />
+      {/* the missing-costs warning is the callout above, with its actions */}
+      <ReportCallouts result={r} skip={['Products without a cost']} />
       <Card flush titleAs="h3" title="Profit by product" sub={canEditCost ? 'Set a unit cost with the pencil; it applies from the day you choose' : 'Unit costs are set by members who manage costs'}>
         <TableWrap label="Profit by product">
           <table className="table">
