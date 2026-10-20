@@ -3,12 +3,10 @@ import { createBatchLoader, gqlActor, gqlDeadline, gqlEnum, type GraphQLContext,
 import type { ApprovalRequest, MyActionLimit, RoleCoverage, StaffRef } from '../../../spec/access.js';
 import type * as common from '../../../spec/common.js';
 import type * as identity from '../../../spec/identity.js';
-import { formatMoney } from '../domain/limits.js';
 import type { AccessService } from '../service.js';
 
 /* ---------------------------------------------------------------- REST shapes → GraphQL shapes (enums in capitals, Money.formatted) */
 
-const money = (m: common.Money | null | undefined) => (m ? { ...m, formatted: formatMoney(m) } : null);
 const actor = gqlActor;
 const staff = (s: StaffRef | null | undefined) => (s ? { accountId: s.accountId, name: s.name, away: s.away } : null);
 
@@ -46,7 +44,7 @@ export function approvalToGraphQL(r: ApprovalRequest) {
   return {
     ...r,
     action: { key: r.action.key, module: r.action.module, label: r.action.label },
-    amount: money(r.amount),
+    amount: r.amount ?? null,
     requestedBy: actor(r.requestedBy),
     status: gqlEnum(r.status),
     approvalsRemaining: open ? Math.max(0, r.requiredApprovals - approvedCount) : 0,
@@ -64,11 +62,11 @@ function limitToGraphQL(l: MyActionLimit) {
     actionKey: l.action.key,
     actionLabel: l.action.label,
     authority: gqlEnum(l.value.authority),
-    limit: money(l.value.limitMoney),
+    limit: l.value.limitMoney ?? null,
     limitValue: l.value.limitNumber ?? null,
     unit: gqlEnum(l.action.limit),
     needsSecondReviewer: l.needsSecondReviewer,
-    secondReviewerAbove: money(l.value.secondReviewerAboveMoney),
+    secondReviewerAbove: l.value.secondReviewerAboveMoney ?? null,
     route: l.route,
     summary: l.summary,
   };

@@ -3,14 +3,13 @@ import { isUuid } from '../../../kernel/lib/ids.js';
 import type * as catalog from '../../../spec/catalog.js';
 import type * as common from '../../../spec/common.js';
 import type { DeliverTo, FeaturedDecision, IneligibilityReason, Offer, OfferView, PriceChange, StatusReason } from '../../../spec/offers.js';
-import { conditionLabel, formatMoney } from '../domain/rules.js';
+import { conditionLabel } from '../domain/rules.js';
 import { pricePoint, statusEntry } from '../mappers.js';
 import type { OffersService } from '../service.js';
 
 /* ---------------------------------------------------------------- REST shapes → GraphQL shapes (enums in capitals, Money.formatted) */
 
 const low = (s: string | null | undefined) => (s ? s.toLowerCase() : undefined);
-const money = (m: common.Money | null | undefined) => (m ? { ...m, formatted: formatMoney(m) } : null);
 const actor = gqlActor;
 const reasons = (list: readonly IneligibilityReason[]) => list.map((r) => ({ ...r, code: gqlEnum(r.code) }));
 const statusReason = (s: StatusReason | null | undefined) => (s ? { ...s, code: gqlEnum(s.code), actor: actor(s.actor) } : null);
@@ -21,13 +20,13 @@ const productOut = (p: catalog.Product) => ({ ...p, category: null, specs: pairs
 const quoteOut = (v: OfferView, d: DeliverTo, quantity: number) => ({
   deliverTo: deliverTo(d),
   quantity,
-  price: money(v.price),
-  regularPrice: money(v.regularPrice),
-  automaticDiscount: v.automaticDiscount ? { ...v.automaticDiscount, amount: money(v.automaticDiscount.amount) } : null,
-  shippingCost: v.delivery.shipsToLocation ? money(v.delivery.shippingCost) : null,
+  price: v.price ?? null,
+  regularPrice: v.regularPrice ?? null,
+  automaticDiscount: v.automaticDiscount ? { ...v.automaticDiscount, amount: v.automaticDiscount.amount ?? null } : null,
+  shippingCost: v.delivery.shipsToLocation ? v.delivery.shippingCost ?? null : null,
   freeShipping: v.delivery.free,
-  freeShippingOver: money(v.delivery.freeOver),
-  total: money(v.total),
+  freeShippingOver: v.delivery.freeOver ?? null,
+  total: v.total ?? null,
   featured: v.featured,
   featuredEligible: v.featuredEligible,
   ineligibleNote: v.ineligibleNote ?? null,
@@ -35,10 +34,10 @@ const quoteOut = (v: OfferView, d: DeliverTo, quantity: number) => ({
 
 const priceChangeOut = (c: PriceChange) => ({
   ...c,
-  from: money(c.from),
-  to: money(c.to),
-  compareAt: money(c.compareAt),
-  revertTo: money(c.revertTo),
+  from: c.from ?? null,
+  to: c.to ?? null,
+  compareAt: c.compareAt ?? null,
+  revertTo: c.revertTo ?? null,
   source: gqlEnum(c.source),
   state: gqlEnum(c.state),
   requestedBy: actor(c.requestedBy),
@@ -102,8 +101,8 @@ export const resolvers = (service: OffersService): ModuleResolvers => {
     },
     condition: (o: Offer) => gqlEnum(o.condition),
     conditionLabel: (o: Offer) => conditionLabel(o.condition),
-    price: (o: Offer) => money(o.price),
-    compareAt: (o: Offer) => (o.compareAt ? { ...o.compareAt, amount: money(o.compareAt.amount), basis: gqlEnum(o.compareAt.basis) } : null),
+    price: (o: Offer) => o.price ?? null,
+    compareAt: (o: Offer) => (o.compareAt ? { ...o.compareAt, amount: o.compareAt.amount ?? null, basis: gqlEnum(o.compareAt.basis) } : null),
     // what customers get: Marketly's dispatch and ships-from for Fulfilled by Marketly offers (Offer.shipping)
     dispatch: (o: Offer) => o.shipping.dispatch,
     fulfilledBy: (o: Offer) => gqlEnum(o.fulfilledBy),
@@ -114,12 +113,12 @@ export const resolvers = (service: OffersService): ModuleResolvers => {
     featuredEligibility: (o: Offer) => ({ ...o.featuredEligibility, reasons: reasons(o.featuredEligibility.reasons) }),
     priceContext: async (o: Offer) => {
       const c = await service.views.priceContext(o.variantId, o.id);
-      return { lowestNewPrice: money(c.lowestNewPrice), officialStorePrice: money(c.officialStorePrice), otherOfferCount: c.otherOfferCount };
+      return { lowestNewPrice: c.lowestNewPrice ?? null, officialStorePrice: c.officialStorePrice ?? null, otherOfferCount: c.otherOfferCount };
     },
     priceHistory: async (o: Offer, args: { limit?: number | null }) =>
       (await core.repo.find('offer_price_history', { offer_id: o.id }, { orderBy: [['valid_from', 'desc']], limit: Math.min(Math.max(args?.limit ?? 20, 1), 200) })).map((h) => {
         const p = pricePoint(h, o.price.currency);
-        return { ...p, price: money(p.price), compareAt: money(p.compareAt), changedBy: actor(p.changedBy) };
+        return { ...p, price: p.price ?? null, compareAt: p.compareAt ?? null, changedBy: actor(p.changedBy) };
       }),
     statusLog: async (o: Offer, args: { limit?: number | null }) =>
       (await core.repo.find('offer_status_log', { offer_id: o.id }, { orderBy: [['at', 'desc']], limit: Math.min(Math.max(args?.limit ?? 20, 1), 200) })).map((l) => {
@@ -138,8 +137,8 @@ export const resolvers = (service: OffersService): ModuleResolvers => {
       ...c,
       offer: async () => out(await offersById(ctx, c.offerId), ctx),
       reasons: reasons(c.reasons),
-      total: money(c.total),
-      adjustedTotal: money(c.adjustedTotal),
+      total: c.total ?? null,
+      adjustedTotal: c.adjustedTotal ?? null,
     })),
   });
 
@@ -202,7 +201,7 @@ export const resolvers = (service: OffersService): ModuleResolvers => {
       offerCount: async (root: { id: string }, args: { condition?: string | null }, ctx: GraphQLContext) => (await statsFor(ctx, root.id, args.condition))?.count ?? 0,
       priceRange: async (root: { id: string }, args: { condition?: string | null }, ctx: GraphQLContext) => {
         const s = await statsFor(ctx, root.id, args.condition);
-        return s ? { lowest: money(s.lowest), highest: money(s.highest), lowestOfferId: s.lowestOfferId, lowestSellerName: s.lowestSellerName, offerCount: s.count } : null;
+        return s ? { lowest: s.lowest ?? null, highest: s.highest ?? null, lowestOfferId: s.lowestOfferId, lowestSellerName: s.lowestSellerName, offerCount: s.count } : null;
       },
       myOffers: async (root: { id: string }, _args: unknown, ctx: GraphQLContext) => {
         const sellerId = ctx.principal?.sellerId;
@@ -221,7 +220,7 @@ export const resolvers = (service: OffersService): ModuleResolvers => {
     Variant: {
       offerSummary: async (root: { id: string }, args: { postalCode?: string | null }, ctx: GraphQLContext) => {
         const s = await load(ctx, `variants:${args.postalCode ?? ''}`, root.id, async (ids) => new Map(Object.entries(await service.getVariantOfferSummaries(ids, args.postalCode ?? undefined))));
-        return s ? { variantId: s.variantId, offerCount: s.offerCount, lowestPrice: money(s.lowestPrice), inStock: s.inStock, summary: s.summary } : null;
+        return s ? { variantId: s.variantId, offerCount: s.offerCount, lowestPrice: s.lowestPrice ?? null, inStock: s.inStock, summary: s.summary } : null;
       },
     },
     Query: {

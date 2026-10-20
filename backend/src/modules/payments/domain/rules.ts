@@ -2,6 +2,7 @@
  * Pure payment rules: customer-facing states and texts, decline messages, backoff, card expiry, refund
  * caps and views. No I/O.
  */
+import { money as checkedMoney } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
 import type { Decline, PaymentDetail, Refund, RefundView } from '../../../spec/payments.js';
 import type { DeclineCategory } from '../ports.js';
@@ -103,7 +104,8 @@ export function validExpiry(expMonth: number, expYear: number): boolean {
   return Number.isInteger(expMonth) && expMonth >= 1 && expMonth <= 12 && Number.isInteger(expYear) && expYear >= 2000 && expYear <= 2100;
 }
 
-export const money = (amount: number, currency: string): common.Money => ({ amount, currency });
+/** Money in integer minor units (the kernel refuses anything else) */
+export const money = (amount: number, currency: string): common.Money => checkedMoney(amount, currency);
 
 export function fmt(m: common.Money): string {
   try {

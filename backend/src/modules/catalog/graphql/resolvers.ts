@@ -1,12 +1,10 @@
 import { gqlActor, gqlEnum, type GraphQLContext, type ModuleResolvers, nullOnNotFound, pageInput, pairs } from '../../../kernel/graphql/index.js';
-import { format } from '../../../kernel/lib/money.js';
 import { toPageRequest } from '../../../kernel/lib/pagination.js';
-import type { Money, PageInput } from '../../../spec/common.js';
+import type { PageInput } from '../../../spec/common.js';
 import type { Attribute, Category, Product, ProductAdmin, ProductCheck } from '../../../spec/catalog.js';
 import type { CatalogService } from '../service.js';
 
 const actorOut = gqlActor;
-const money = (m: Money | null | undefined) => (m ? { ...m, formatted: format(m) } : null);
 
 /**
  * A read done once per GraphQL request (the context object) and shared by every field that asks for it: a field
@@ -64,7 +62,7 @@ export function graphqlMappers(service: CatalogService) {
     ...p,
     category: (_args: unknown, ctx?: GraphQLContext) => categoryById(p.categoryId, ctx),
     specs: pairs(p.specs),
-    variants: p.variants.map((v) => ({ ...v, options: pairs(v.options), listPrice: money(v.listPrice) })),
+    variants: p.variants.map((v) => ({ ...v, options: pairs(v.options), listPrice: v.listPrice ?? null })),
   });
 
   const checkOut = (c: ProductCheck) => ({

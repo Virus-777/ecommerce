@@ -2,6 +2,7 @@
  * Pure promotion rules (no I/O): money labels, funding split, scope matching, eligibility, earnings,
  * validation of campaign and discount input. Money is integer minor units throughout.
  */
+import { money as checkedMoney } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
 import type { DiscountRule, EarningsImpact, Eligibility, Funding, Limits, ParticipationSettings, DealsPlacement, Scope, StackingRules, TargetRef } from '../../../spec/promotions.js';
 
@@ -57,7 +58,8 @@ export interface OfferAttrs {
 
 /* ------------------------------------------------------------------ money and labels */
 
-export const m = (amount: number, currency = 'USD'): common.Money => ({ amount, currency });
+/** Money in integer minor units (the kernel refuses anything else) */
+export const m = (amount: number, currency = 'USD'): common.Money => checkedMoney(amount, currency);
 
 /** $10 for whole amounts, $10.50 otherwise */
 export function moneyLabel(amount: number, currency = 'USD'): string {

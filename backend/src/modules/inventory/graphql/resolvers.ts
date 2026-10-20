@@ -1,13 +1,10 @@
 import { GraphQLError } from 'graphql';
 import { gqlActor, gqlEnum, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
-import { format as formatMoney } from '../../../kernel/lib/money.js';
-import type { Money } from '../../../spec/common.js';
 import type { Movement, StockItem } from '../../../spec/inventory.js';
 import type { InventoryService } from '../service.js';
 
 /* ---------------------------------------------------------------- REST shapes → GraphQL shapes (enums in capitals, Money.formatted) */
 
-const money = (m: Money | null | undefined) => (m ? { ...m, formatted: formatMoney(m) } : null);
 const actorOut = gqlActor;
 
 const movementOut = (m: Movement) => ({
@@ -79,8 +76,8 @@ export const resolvers = (service: InventoryService): ModuleResolvers => {
     ...s,
     ownerType: gqlEnum(s.ownerType),
     state: gqlEnum(s.state),
-    unitCost: money(s.unitCost),
-    valueAtCost: money(s.valueAtCost),
+    unitCost: s.unitCost ?? null,
+    valueAtCost: s.valueAtCost ?? null,
     lastChange: (_args: unknown, ctx: GraphQLContext) => lastChange(ctx, s.id).then((v) => v ?? null),
     recentMovements: async (args: { limit?: number | null }, ctx: GraphQLContext) => {
       const limit = Math.min(Math.max(args?.limit ?? 10, 1), 50);
@@ -126,7 +123,7 @@ export const resolvers = (service: InventoryService): ModuleResolvers => {
       myStockSummary: async (_root, _args, ctx) => service.getSellerStockSummary(ctx.principal?.sellerId ?? '00000000-0000-0000-0000-000000000000'),
       stockSummary: async (_root, args: { locationId?: string | null }) => {
         const s = await service.getStockSummary(args.locationId ?? undefined);
-        return { ...s, groups: s.groups.map((g) => ({ ...g, group: gqlEnum(g.group), valueAtCost: money(g.valueAtCost) })) };
+        return { ...s, groups: s.groups.map((g) => ({ ...g, group: gqlEnum(g.group), valueAtCost: g.valueAtCost ?? null })) };
       },
     },
   };

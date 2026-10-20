@@ -2,6 +2,7 @@
  * Pure finance rules: fee calculation, ledger vocabulary, statement sections, payout schedule dates
  * and small helpers. No I/O.
  */
+import { money as checkedMoney } from '../../../kernel/lib/money.js';
 import { createHash } from 'node:crypto';
 import { dateInZone, zonedTimeToUtc } from '../../../kernel/lib/clock.js';
 import type * as common from '../../../spec/common.js';
@@ -16,7 +17,8 @@ export function detId(key: string): string {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-8${h.slice(13, 16)}-${variant}${h.slice(17, 20)}-${h.slice(20, 32)}`;
 }
 
-export const m = (amount: number, currency: string): common.Money => ({ amount, currency });
+/** Money in integer minor units (the kernel refuses anything else) */
+export const m = (amount: number, currency: string): common.Money => checkedMoney(amount, currency);
 
 /** Display money, e.g. $184.00 or -$5.90 */
 export function fmt(amount: number, currency = 'USD'): string {

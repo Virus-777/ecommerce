@@ -3,6 +3,7 @@
  * access spec notes). Seeded limits are the prototype's example values; the Business Owner confirms them.
  * Pure data and pure helpers: no I/O.
  */
+import { money as checkedMoney } from '../../../kernel/lib/money.js';
 import type { LimitValue } from '../../../spec/access.js';
 
 export const BUSINESS_OWNER = 'business_owner';
@@ -23,7 +24,8 @@ export interface SeedRole {
   limits: Record<string, Partial<LimitValue> & { authority: LimitValue['authority'] }>;
 }
 
-const usd = (dollars: number) => ({ amount: dollars * 100, currency: 'USD' });
+/** Whole dollars as Money (the seed limits are written in dollars) */
+const usd = (dollars: number) => checkedMoney(dollars * 100, 'USD');
 const upTo = (dollars: number, extra: Partial<LimitValue> = {}) => ({ authority: 'permitted' as const, limitMoney: usd(dollars), ...extra });
 const PERMITTED = { authority: 'permitted' as const };
 /** May propose a Business-Owner-only action: check() answers approval_required (not denied) and the proposal becomes a Business Owner request (access spec notes, Seeded limits) */

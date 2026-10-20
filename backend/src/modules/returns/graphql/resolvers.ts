@@ -1,5 +1,4 @@
 import { gqlActor, gqlDeadline, gqlEnum, type GraphQLContext, type ModuleResolvers, pageInput } from '../../../kernel/graphql/index.js';
-import { format as formatMoney } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
 import type { EffectiveTerms, RefundBreakdown, RefundRequest, ReturnCase, ReturnDetail } from '../../../spec/returns.js';
 import { OPEN_STATUSES } from '../domain/rules.js';
@@ -12,20 +11,19 @@ import type { ReturnsService } from '../service.js';
  * own returns, staff everything. REST shapes are mapped to GraphQL shapes (enums in capitals, Money.formatted).
  */
 
-const money = (m: common.Money | null | undefined) => (m ? { ...m, formatted: formatMoney(m) } : null);
 const actor = gqlActor;
 const timeline = (list: readonly common.TimelineEvent[]) => list.map((t) => ({ at: t.at, label: t.label, detail: t.detail ?? null, actor: actor(t.actor) }));
 const options = (o: Record<string, string> | null | undefined) => Object.entries(o ?? {}).map(([name, value]) => ({ name, value }));
 const steps = (s: { key: string; label: string; state: string }[]) => s.map((x) => ({ ...x, state: gqlEnum(x.state) }));
 
 const breakdown = (b: RefundBreakdown) => ({
-  itemAmount: money(b.itemAmount),
-  discountShare: money(b.discountShare),
-  shippingRefund: money(b.shippingRefund),
-  returnShippingDeduction: money(b.returnShippingDeduction),
-  deductions: b.deductions.map((d) => ({ label: d.label, amount: money(d.amount), reason: d.reason })),
-  total: money(b.total),
-  maxRefundable: money(b.maxRefundable),
+  itemAmount: b.itemAmount ?? null,
+  discountShare: b.discountShare ?? null,
+  shippingRefund: b.shippingRefund ?? null,
+  returnShippingDeduction: b.returnShippingDeduction ?? null,
+  deductions: b.deductions.map((d) => ({ label: d.label, amount: d.amount ?? null, reason: d.reason })),
+  total: b.total ?? null,
+  maxRefundable: b.maxRefundable ?? null,
   destination: b.destination,
   isEstimate: b.isEstimate,
 });
@@ -34,7 +32,7 @@ export const terms = (t: EffectiveTerms) => ({
   windowDays: t.windowDays,
   changeOfMindAllowed: t.changeOfMindAllowed,
   condition: t.condition ?? null,
-  responsibilities: t.responsibilities.map((r) => ({ reasonGroup: gqlEnum(r.reasonGroup), paidBy: gqlEnum(r.paidBy), customerFee: money(r.customerFee), originalShippingRefunded: r.originalShippingRefunded, officialStoreRule: r.officialStoreRule ?? null, note: r.note ?? null })),
+  responsibilities: t.responsibilities.map((r) => ({ reasonGroup: gqlEnum(r.reasonGroup), paidBy: gqlEnum(r.paidBy), customerFee: r.customerFee ?? null, originalShippingRefunded: r.originalShippingRefunded, officialStoreRule: r.officialStoreRule ?? null, note: r.note ?? null })),
   remedies: t.remedies.map(gqlEnum),
   responseTargetBusinessDays: t.responseTargetBusinessDays,
   summary: t.summary,
@@ -44,7 +42,7 @@ export const terms = (t: EffectiveTerms) => ({
 });
 
 const impact = (e: ReturnCase['earningsImpact']) =>
-  e ? { refundToCustomer: money(e.refundToCustomer), sellerEarningsChange: money(e.sellerEarningsChange), feeReturned: money(e.feeReturned), labelCharge: money(e.labelCharge), labelChargeEstimated: e.labelChargeEstimated, totalBalanceChange: money(e.totalBalanceChange), afterPayout: e.afterPayout, note: e.note } : null;
+  e ? { refundToCustomer: e.refundToCustomer ?? null, sellerEarningsChange: e.sellerEarningsChange ?? null, feeReturned: e.feeReturned ?? null, labelCharge: e.labelCharge ?? null, labelChargeEstimated: e.labelChargeEstimated, totalBalanceChange: e.totalBalanceChange ?? null, afterPayout: e.afterPayout, note: e.note } : null;
 
 export const refundRequest = (r: RefundRequest) => ({
   ...r,
@@ -57,8 +55,8 @@ export const refundRequest = (r: RefundRequest) => ({
   status: gqlEnum(r.status),
   breakdown: breakdown(r.breakdown),
   fundedBy: gqlEnum(r.fundedBy),
-  sellerShare: money(r.sellerShare),
-  platformShare: money(r.platformShare),
+  sellerShare: r.sellerShare ?? null,
+  platformShare: r.platformShare ?? null,
   earningsImpact: impact(r.earningsImpact),
   proposedBy: actor(r.proposedBy),
   approvedBy: actor(r.approvedBy),
@@ -82,7 +80,7 @@ export function gqlReturn(d: ReturnDetail, c?: ReturnCase | null) {
     // seller and admin areas (with the case): the seller and staff wording their lists use, not the customer's
     statusLabel: c ? c.statusLabel : d.statusLabel,
     track: steps(d.track),
-    items: d.items.map((i) => ({ ...i, sku: i.sku ?? null, imageUrl: i.imageUrl ?? null, options: options(i.options), unitPrice: money(i.unitPrice) })),
+    items: d.items.map((i) => ({ ...i, sku: i.sku ?? null, imageUrl: i.imageUrl ?? null, options: options(i.options), unitPrice: i.unitPrice ?? null })),
     itemCount: d.items.reduce((n, i) => n + i.quantity, 0),
     reason: d.reason,
     details: d.details || null,
@@ -97,7 +95,7 @@ export function gqlReturn(d: ReturnDetail, c?: ReturnCase | null) {
           ...d.shipment,
           status: gqlEnum(d.shipment.status),
           method: gqlEnum(d.shipment.method),
-          cost: money(d.shipment.cost),
+          cost: d.shipment.cost ?? null,
           paidBy: gqlEnum(d.shipment.paidBy),
           dropOffPoints: d.shipment.dropOffPoints.map((p) => ({ name: p.name, address: p.address, distanceMiles: p.distanceMiles ?? null, hours: p.hours ?? null })),
           events: timeline(d.shipment.events),
@@ -117,7 +115,7 @@ export function gqlReturn(d: ReturnDetail, c?: ReturnCase | null) {
     // seller and staff
     customer: c?.customer ?? null,
     payment: c
-      ? { itemPaid: money(c.payment.itemPaid), shippingPaid: money(c.payment.shippingPaid), discountShare: money(c.payment.discountShare), maxRefundable: money(c.payment.maxRefundable), refundedSoFar: money(c.payment.refundedSoFar), methodLabel: c.payment.methodLabel }
+      ? { itemPaid: c.payment.itemPaid ?? null, shippingPaid: c.payment.shippingPaid ?? null, discountShare: c.payment.discountShare ?? null, maxRefundable: c.payment.maxRefundable ?? null, refundedSoFar: c.payment.refundedSoFar ?? null, methodLabel: c.payment.methodLabel }
       : null,
     shippingPaidBy: c ? gqlEnum(c.shippingPaidBy) : null,
     deadlines: c ? { respondBy: gqlDeadline(c.deadlines.respondBy), inspectBy: gqlDeadline(c.deadlines.inspectBy), refundBy: gqlDeadline(c.deadlines.refundBy), dropOffBy: gqlDeadline(c.deadlines.dropOffBy) } : null,
@@ -199,7 +197,7 @@ export const resolvers = (service: ReturnsService): ModuleResolvers => {
     Customer: {
       returnsOverview: async (customer: { id: string }) => {
         const o = await service.customerOverview(customer.id);
-        return { ...o, openNote: o.openNote ?? null, refundsOnTheWay: money(o.refundsOnTheWay), refundsOnTheWayNote: o.refundsOnTheWayNote ?? null, refundedThisYear: money(o.refundedThisYear) };
+        return { ...o, openNote: o.openNote ?? null, refundsOnTheWay: o.refundsOnTheWay ?? null, refundsOnTheWayNote: o.refundsOnTheWayNote ?? null, refundedThisYear: o.refundedThisYear ?? null };
       },
       openReturns: async (customer: { id: string }, args: { limit?: number }) => {
         const f = service.reads.storeFilter({ customerId: customer.id }, 'open');

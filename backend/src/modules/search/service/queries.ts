@@ -3,6 +3,7 @@
  * everything around them (facets with counts, applied filters, sorts, store match, category context,
  * empty guidance), sponsored hits, suggestions and recent searches.
  */
+import { money as checkedMoney } from '../../../kernel/lib/money.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
 import type { Principal } from '../../../kernel/auth/index.js';
 import { AppError } from '../../../kernel/errors/index.js';
@@ -51,7 +52,7 @@ const SORT_LABEL: Record<SortKey, string> = {
   best_selling: 'Best selling',
 };
 
-const money = (amount: number, currency: string): common.Money => ({ amount, currency });
+const money = (amount: number, currency: string): common.Money => checkedMoney(amount, currency);
 
 /** Window of a paging request (offset paging: the query string is the state) */
 export function windowOf(page: PageRequest): { offset: number; limit: number } {

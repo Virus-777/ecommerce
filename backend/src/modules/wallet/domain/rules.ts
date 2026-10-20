@@ -2,6 +2,7 @@
  * Pure wallet rules: lot allocation, expiry dates, ledger labels, gift card codes, actor encoding.
  * No I/O here; the service feeds rows in and writes what comes out.
  */
+import { money as checkedMoney } from '../../../kernel/lib/money.js';
 import { addMonths } from '../../../kernel/lib/dates.js';
 import { createHash, createHmac, randomInt } from 'node:crypto';
 import { format } from '../../../kernel/lib/money.js';
@@ -12,7 +13,8 @@ import type { LotAllocation } from '../ports.js';
 export type EntryKind = LedgerEntry['kind'];
 export type LotSource = CreditLot['source'];
 
-export const m = (amount: number, currency: string): common.Money => ({ amount, currency });
+/** Money in integer minor units (the kernel refuses anything else) */
+export const m = (amount: number, currency: string): common.Money => checkedMoney(amount, currency);
 
 /** Entries that only move credit between available and held (shown to staff; the customer sees the balance) */
 export const RESERVATION_KINDS: readonly EntryKind[] = ['hold', 'release'];

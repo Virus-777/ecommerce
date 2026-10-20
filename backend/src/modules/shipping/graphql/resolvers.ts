@@ -1,7 +1,7 @@
 import { AppError } from '../../../kernel/errors/index.js';
 import { createBatchLoader, gqlActor, gqlEnum, type GraphQLContext, type ModuleResolvers, pageInput } from '../../../kernel/graphql/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
-import { format as formatMoney, money as makeMoney } from '../../../kernel/lib/money.js';
+import { money as makeMoney } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
 import type { CustomerNotice, DeliveryException, OfferEstimate, Shipment } from '../../../spec/shipping.js';
 import { businessDaysLabel, rangeLabel } from '../domain/calendar.js';
@@ -14,7 +14,6 @@ import type { ShippingService } from '../service.js';
 /* ---------------------------------------------------------------- REST shapes → GraphQL shapes (enums in capitals, Money.formatted) */
 
 const lower = (s: string | null | undefined) => (s ? s.toLowerCase() : undefined);
-const money = (m: common.Money | null | undefined) => (m ? { ...m, formatted: formatMoney(m) } : null);
 const actor = gqlActor;
 const notice = (n: CustomerNotice) => ({ id: n.id, kind: n.kind, title: n.title, message: n.message, from: n.from, to: n.to });
 
@@ -68,7 +67,7 @@ function shipment(s: Shipment, extra: { estimateNote: string | null; notices: Cu
           reason: f.reason,
           heldAt: f.heldAt ?? null,
           chooseBy: f.chooseBy,
-          options: f.options.map((o) => ({ ...o, choice: gqlEnum(o.choice), cost: money(o.cost), costIfNoChoice: money(o.costIfNoChoice), pickupLocation: o.pickupLocation ?? null })),
+          options: f.options.map((o) => ({ ...o, choice: gqlEnum(o.choice), cost: o.cost ?? null, costIfNoChoice: o.costIfNoChoice ?? null, pickupLocation: o.pickupLocation ?? null })),
           chosen: f.chosen ? { choice: gqlEnum(f.chosen.choice), redeliveryDate: f.chosen.redeliveryDate ?? null, chosenAt: f.chosen.chosenAt, chosenBy: actor(f.chosen.chosenBy) } : null,
           defaultIfNoChoice: gqlEnum(f.defaultIfNoChoice),
         }
@@ -81,7 +80,7 @@ function shipment(s: Shipment, extra: { estimateNote: string | null; notices: Cu
     trackingState: gqlEnum(s.trackingState),
     dispatchedOnTime: s.dispatchedOnTime ?? null,
     label: s.label
-      ? { id: s.label.id, carrierName: s.label.carrierName, serviceName: s.label.serviceName, cost: money(s.label.cost), trackingNumber: s.label.trackingNumber, labelUrl: s.label.labelUrl ?? null, status: gqlEnum(s.label.status), purchasedBy: actor(s.label.purchasedBy), purchasedAt: s.label.purchasedAt, voidedAt: s.label.voidedAt ?? null }
+      ? { id: s.label.id, carrierName: s.label.carrierName, serviceName: s.label.serviceName, cost: s.label.cost ?? null, trackingNumber: s.label.trackingNumber, labelUrl: s.label.labelUrl ?? null, status: gqlEnum(s.label.status), purchasedBy: actor(s.label.purchasedBy), purchasedAt: s.label.purchasedAt, voidedAt: s.label.voidedAt ?? null }
       : null,
     corrections: s.corrections.map((c) => ({ ...c, by: actor(c.by) })),
     openExceptions: extra.openExceptions.map(exception),
@@ -135,10 +134,10 @@ export const resolvers = (service: ShippingService): ModuleResolvers => {
       locationLabel: locationLabel(destinationOf({ postalCode: zip })) || zip,
       methodName: o?.methodName ?? null,
       carrierService: o?.carrierService ?? null,
-      price: money(o?.price),
+      price: o?.price ?? null,
       free: o?.free ?? false,
       freeReason: o?.freeReason ?? null,
-      totalWithShipping: o && offerPrice && offerPrice.currency === o.price.currency ? money(makeMoney(offerPrice.amount + o.price.amount, o.price.currency)) : null,
+      totalWithShipping: o && offerPrice && offerPrice.currency === o.price.currency ? makeMoney(offerPrice.amount + o.price.amount, o.price.currency) ?? null : null,
       arrivalFrom: o?.arrival.from ?? null,
       arrivalTo: o?.arrival.to ?? null,
       arrivalLabel: o?.arrivalLabel ?? null,
@@ -238,7 +237,7 @@ export const resolvers = (service: ShippingService): ModuleResolvers => {
           closures: s.closures.map((c) => ({ name: c.name, from: c.from, to: c.to })),
           carriers: s.carriers,
           methods: s.methods.map((m) => ({ name: m.name, transitMinDays: m.transit.min, transitMaxDays: m.transit.max, priceLabel: m.priceLabel })),
-          freeShippingThreshold: money(s.freeShippingThreshold),
+          freeShippingThreshold: s.freeShippingThreshold ?? null,
           freeShippingLabel: s.freeShippingLabel,
           notices: s.notices.map(notice),
         };

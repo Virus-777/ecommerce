@@ -1,6 +1,5 @@
 import { createBatchLoader, gqlEnum, type GraphQLContext, type ModuleResolvers, nullOnNotFound, pageInput, pairs } from '../../../kernel/graphql/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
-import { format } from '../../../kernel/lib/money.js';
 import { toPageRequest } from '../../../kernel/lib/pagination.js';
 import type * as catalog from '../../../spec/catalog.js';
 import type * as common from '../../../spec/common.js';
@@ -12,7 +11,6 @@ import type { ItemDetail, Lookups } from '../views.js';
 
 /* ---------------------------------------------------------------- REST shapes → GraphQL shapes (enums in capitals, Money.formatted) */
 
-const money = (m: common.Money | null | undefined) => (m ? { ...m, formatted: format(m) } : null);
 
 const CONDITION_LABEL: Record<string, string> = { new: 'New', used_like_new: 'Used – Like new', used_good: 'Used – Good', used_acceptable: 'Used – Acceptable', refurbished: 'Refurbished' };
 
@@ -35,8 +33,8 @@ const offerOut = (o: offers.Offer, product: () => Promise<catalog.Product | null
   },
   condition: gqlEnum(o.condition),
   conditionLabel: CONDITION_LABEL[o.condition] ?? o.condition,
-  price: money(o.price),
-  compareAt: o.compareAt ? { ...o.compareAt, amount: money(o.compareAt.amount), basis: gqlEnum(o.compareAt.basis) } : null,
+  price: o.price ?? null,
+  compareAt: o.compareAt ? { ...o.compareAt, amount: o.compareAt.amount ?? null, basis: gqlEnum(o.compareAt.basis) } : null,
   returnTerms: { ...o.returnTerms, kind: gqlEnum(o.returnTerms.kind) },
   warranty: { ...o.warranty, kind: gqlEnum(o.warranty.kind), handledBy: gqlEnum(o.warranty.handledBy ?? null) },
   status: gqlEnum(o.status),
@@ -103,8 +101,8 @@ export const resolvers = (service: WishlistService): ModuleResolvers => {
       const o = await lk(ctx).offer(d.savedOfferId);
       return o && o.status !== 'removed' && o.status !== 'draft' ? offerOut(o, () => lk(ctx).product(o.productId)) : null;
     },
-    priceWhenSaved: money(d.item.priceWhenSaved),
-    priceHint: { ...d.item.priceHint, kind: gqlEnum(d.item.priceHint.kind), low: money(d.item.priceHint.low), high: money(d.item.priceHint.high) },
+    priceWhenSaved: d.item.priceWhenSaved ?? null,
+    priceHint: { ...d.item.priceHint, kind: gqlEnum(d.item.priceHint.kind), low: d.item.priceHint.low ?? null, high: d.item.priceHint.high ?? null },
     alerts: d.item.alerts,
     canMoveToCart: d.item.canMoveToCart,
     note: d.item.note ?? null,
@@ -128,9 +126,9 @@ export const resolvers = (service: WishlistService): ModuleResolvers => {
     seller: async () => (a.sellerId ? sellerCard(ctx, a.sellerId) : null),
     kind: gqlEnum(a.kind),
     state: gqlEnum(a.state),
-    targetPrice: money(a.targetPrice),
-    referencePrice: money(a.referencePrice),
-    triggeredPrice: money(a.triggeredPrice),
+    targetPrice: a.targetPrice ?? null,
+    referencePrice: a.referencePrice ?? null,
+    triggeredPrice: a.triggeredPrice ?? null,
   });
 
   return {

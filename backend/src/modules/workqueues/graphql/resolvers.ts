@@ -1,5 +1,4 @@
 import { gqlActor, gqlEnum, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
-import { format as formatMoney } from '../../../kernel/lib/money.js';
 import { toPageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type { DayEndReview, QueueDefinition, QueueSummary, RoutineDay, SavedFilter, StaffRef, WorkItem } from '../../../spec/workqueues.js';
@@ -11,7 +10,6 @@ import type { WorkqueuesService } from '../service.js';
 
 const low = (s: string | null | undefined) => (s ? s.toLowerCase() : undefined);
 const actor = gqlActor;
-const money = (m: common.Money | null | undefined) => (m ? { ...m, formatted: formatMoney(m) } : null);
 const staff = (s: StaffRef | null | undefined) => (s ? { staffId: s.staffId, name: s.name, role: s.role ?? null } : null);
 const subject = (s: WorkItem['subject']) => ({ ...s, type: gqlEnum(s.type) });
 const link = (l: unknown) => {
@@ -28,7 +26,7 @@ export function gqlItem(w: WorkItem) {
     kind: gqlEnum(w.kind),
     subject: subject(w.subject),
     relatedSubjects: w.relatedSubjects.map(subject),
-    amount: money(w.amount),
+    amount: w.amount ?? null,
     lead: staff(w.lead),
     backup: staff(w.backup),
     assignee: staff(w.assignee),

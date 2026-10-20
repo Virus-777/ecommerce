@@ -1,6 +1,7 @@
 /**
  * Row (snake_case) → API type (camelCase) mapping, one place per type.
  */
+import { money as checkedMoney } from '../../kernel/lib/money.js';
 import { stringList } from '../../kernel/lib/text.js';
 import type * as common from '../../spec/common.js';
 import { OFFICIAL_STORE_NAME } from '../../spec/common.js';
@@ -33,7 +34,8 @@ export const OFFICIAL_NAME = OFFICIAL_STORE_NAME;
 export const iso = (d: Date | string | null | undefined): string | null => (d ? (d instanceof Date ? d.toISOString() : new Date(d).toISOString()) : null);
 export const isoReq = (d: Date | string): string => iso(d)!;
 
-export const money = (amount: number, currency: string): common.Money => ({ amount: Number(amount), currency });
+/** Money in integer minor units (the kernel refuses anything else) */
+export const money = (amount: number, currency: string): common.Money => checkedMoney(Number(amount), currency);
 
 /** Rows by key, in their order (Map.groupBy, which the ES2023 lib does not type yet) */
 export function groupBy<T>(rows: readonly T[], key: (row: T) => string): Map<string, T[]> {

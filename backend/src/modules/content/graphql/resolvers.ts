@@ -1,5 +1,4 @@
 import { gqlEnum, type GraphQLContext, type ModuleResolvers, nullOnNotFound, pairs } from '../../../kernel/graphql/index.js';
-import { format as formatMoney } from '../../../kernel/lib/money.js';
 import type * as catalog from '../../../spec/catalog.js';
 import type * as common from '../../../spec/common.js';
 import type { BannerBlock, BrandTile, CategoryTile, ContactChannel, HelpArticle, HelpArticleSummary, HelpCategory, HelpHome, LinkRef, PageBlock, ProductTile, StorePage } from '../../../spec/content.js';
@@ -10,7 +9,6 @@ import type { ResolvedHomepage, ResolvedHomeSection } from '../service/homepage.
 
 const link = (l: LinkRef | null | undefined) => (l ? { label: l.label, url: l.url, kind: gqlEnum(l.kind) } : null);
 const banner = (b: BannerBlock | null | undefined) => (b ? { ...b, theme: gqlEnum(b.theme), images: b.images ?? [], primaryCta: link(b.primaryCta), secondaryCta: link(b.secondaryCta) } : null);
-export const money = (m: common.Money | null | undefined) => (m ? { ...m, formatted: formatMoney(m) } : null);
 
 function mappers(service: ContentService) {
   const categoryOut = (c: catalog.Category): Record<string, unknown> => ({ ...c, children: (c.children ?? []).map(categoryOut), filters: [], attributes: [] });

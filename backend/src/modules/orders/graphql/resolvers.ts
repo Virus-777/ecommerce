@@ -1,7 +1,6 @@
 import { AppError } from '../../../kernel/errors/index.js';
 import { createBatchLoader, gqlActor, gqlDeadline, gqlEnum, type GraphQLContext, lazy, type ModuleResolvers, pageInput } from '../../../kernel/graphql/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
-import { format as formatMoney } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
 import type { AdminOrderDetail, CancellationRequest, OrderDetail, OrderItem, OrderSummary, SellerGroup, SellerOrderDetail } from '../../../spec/orders.js';
 import { SHIPPED_OR_LATER, is } from '../domain/rules.js';
@@ -13,7 +12,6 @@ import type { OrdersService } from '../service.js';
 /* ---------------------------------------------------------------- REST shapes → GraphQL shapes (enums in capitals, Money.formatted) */
 
 const lower = (s: string | null | undefined) => (s ? s.toLowerCase() : undefined);
-const money = (m: common.Money | null | undefined) => (m ? { ...m, formatted: formatMoney(m) } : null);
 const actor = gqlActor;
 const timeline = (list: readonly common.TimelineEvent[]) => list.map((t) => ({ ...t, actor: actor(t.actor) }));
 
@@ -33,12 +31,12 @@ const cancellation = (c: CancellationRequest) => ({
   declineReason: c.declineReason ?? null,
   refundPreview: {
     ...c.refundPreview,
-    lines: c.refundPreview.lines.map((l) => ({ ...l, itemAmount: money(l.itemAmount), discountShare: money(l.discountShare), shippingRefund: money(l.shippingRefund), taxRefund: money(l.taxRefund), refund: money(l.refund) })),
-    itemAmount: money(c.refundPreview.itemAmount),
-    discountShare: money(c.refundPreview.discountShare),
-    shippingRefund: money(c.refundPreview.shippingRefund),
-    taxRefund: money(c.refundPreview.taxRefund),
-    total: money(c.refundPreview.total),
+    lines: c.refundPreview.lines.map((l) => ({ ...l, itemAmount: l.itemAmount ?? null, discountShare: l.discountShare ?? null, shippingRefund: l.shippingRefund ?? null, taxRefund: l.taxRefund ?? null, refund: l.refund ?? null })),
+    itemAmount: c.refundPreview.itemAmount ?? null,
+    discountShare: c.refundPreview.discountShare ?? null,
+    shippingRefund: c.refundPreview.shippingRefund ?? null,
+    taxRefund: c.refundPreview.taxRefund ?? null,
+    total: c.refundPreview.total ?? null,
   },
   refundStatus: gqlEnum(c.refundStatus),
   createdAt: c.createdAt,
@@ -55,23 +53,23 @@ function item(i: OrderItem, extra?: { shippedQuantity: number; cancelledQuantity
     variantLabel: i.variantLabel,
     image: i.image ?? null,
     quantity: i.quantity,
-    unitPrice: money(i.unitPrice),
-    lineSubtotal: money(i.lineSubtotal),
+    unitPrice: i.unitPrice ?? null,
+    lineSubtotal: i.lineSubtotal ?? null,
     state: gqlEnum(i.state),
     stateLabel: i.stateLabel,
     product: { ...i.product, options: Object.entries(i.product.options ?? {}).map(([name, value]) => ({ name, value })) },
-    offerTerms: { ...i.offer, condition: gqlEnum(i.offer.condition), compareAtPrice: money(i.offer.compareAtPrice) },
+    offerTerms: { ...i.offer, condition: gqlEnum(i.offer.condition), compareAtPrice: i.offer.compareAtPrice ?? null },
     returnTerms: { ...i.returnTerms, returnShippingPaidBy: gqlEnum(i.returnTerms.returnShippingPaidBy), policyVersionId: i.returnTerms.policyVersionId ?? null },
     shipmentId: i.shipmentId ?? null,
     deliveredAt: i.deliveredAt ?? null,
     returnWindowEndsAt: i.returnWindowEndsAt ?? null,
     splitFromItemId: i.splitFromItemId ?? null,
     replacementOfItemId: i.replacementOfItemId ?? null,
-    afterSales: { ...i.afterSales, refundStatus: gqlEnum(i.afterSales.refundStatus), refundedAmount: money(i.afterSales.refundedAmount) },
-    discounts: i.discounts.map((d) => ({ ...d, amount: money(d.amount), fundedBy: gqlEnum(d.fundedBy) })),
-    shippingShare: money(i.shippingShare),
-    taxShare: money(i.taxShare),
-    paidAmount: money(i.paidAmount),
+    afterSales: { ...i.afterSales, refundStatus: gqlEnum(i.afterSales.refundStatus), refundedAmount: i.afterSales.refundedAmount ?? null },
+    discounts: i.discounts.map((d) => ({ ...d, amount: d.amount ?? null, fundedBy: gqlEnum(d.fundedBy) })),
+    shippingShare: i.shippingShare ?? null,
+    taxShare: i.taxShare ?? null,
+    paidAmount: i.paidAmount ?? null,
     stateNote: i.stateNote ?? null,
     actions: i.actions.map(gqlEnum),
     shippedQuantity: extra?.shippedQuantity ?? (is(SHIPPED_OR_LATER, i.state) ? i.quantity : 0),
@@ -88,7 +86,7 @@ function group(g: SellerGroup, s: SellerOrderDetail | undefined, cancellations: 
     seller: sellerLabel(g.seller),
     shipsFrom: g.shipsFrom,
     fulfilledBy: gqlEnum(g.fulfilledBy),
-    delivery: { methodName: d.methodName, carrier: d.carrier ?? null, service: d.service ?? null, price: money(d.price), free: d.free, fundedBy: gqlEnum(d.fundedBy), arrivalFrom: d.arrival.from, arrivalTo: d.arrival.to, dispatchBy: d.dispatchBy },
+    delivery: { methodName: d.methodName, carrier: d.carrier ?? null, service: d.service ?? null, price: d.price ?? null, free: d.free, fundedBy: gqlEnum(d.fundedBy), arrivalFrom: d.arrival.from, arrivalTo: d.arrival.to, dispatchBy: d.dispatchBy },
     dispatchDeadline: gqlDeadline(g.dispatchDeadline),
     status: gqlEnum(g.status),
     statusLabel: g.statusLabel,
@@ -96,7 +94,7 @@ function group(g: SellerGroup, s: SellerOrderDetail | undefined, cancellations: 
       const si = s?.items.find((x) => x.itemId === i.id);
       return item(i, si ? { shippedQuantity: si.shippedQuantity, cancelledQuantity: si.cancelledQuantity } : undefined);
     }),
-    totals: { items: money(g.totals.items), discounts: money(g.totals.discounts), shipping: money(g.totals.shipping), tax: money(g.totals.tax), total: money(g.totals.total) },
+    totals: { items: g.totals.items ?? null, discounts: g.totals.discounts ?? null, shipping: g.totals.shipping ?? null, tax: g.totals.tax ?? null, total: g.totals.total ?? null },
     cancellations: cancellations.filter((c) => c.groupId === g.id).map(cancellation),
     estimateLabel: g.estimateLabel,
     returnTermsSummary: g.returnTermsSummary,
@@ -111,12 +109,12 @@ function group(g: SellerGroup, s: SellerOrderDetail | undefined, cancellations: 
     units: s ? s.items.reduce((n, i) => n + (i.cancelledQuantity ? 0 : i.quantity), 0) : 0,
     money: s
       ? {
-          itemSubtotal: money(s.money.itemSubtotal),
-          sellerDiscounts: money(s.money.sellerDiscounts),
-          shippingCharged: money(s.money.shippingCharged),
+          itemSubtotal: s.money.itemSubtotal ?? null,
+          sellerDiscounts: s.money.sellerDiscounts ?? null,
+          shippingCharged: s.money.shippingCharged ?? null,
           shippingLabel: s.money.shippingLabel,
-          platformFeeEstimate: money(s.money.platformFeeEstimate),
-          earningsEstimate: money(s.money.earningsEstimate),
+          platformFeeEstimate: s.money.platformFeeEstimate ?? null,
+          earningsEstimate: s.money.earningsEstimate ?? null,
           earningsNote: s.money.earningsNote,
         }
       : null,
@@ -152,20 +150,20 @@ function order(o: OrderDetail, x: { summary?: OrderSummary; seller?: SellerOrder
     thumbnails: x.summary?.thumbnails ?? [],
     note: x.summary?.note ?? null,
     progress: {
-      payment: { ...pr.payment, state: gqlEnum(pr.payment.state), amountCharged: money(pr.payment.amountCharged), chargedAt: pr.payment.chargedAt ?? null },
+      payment: { ...pr.payment, state: gqlEnum(pr.payment.state), amountCharged: pr.payment.amountCharged ?? null, chargedAt: pr.payment.chargedAt ?? null },
       delivery: { ...pr.delivery, state: gqlEnum(pr.delivery.state) },
       returns: { ...pr.returns, state: gqlEnum(pr.returns.state), note: pr.returns.note ?? null },
     },
     totals: {
       ...t,
-      items: money(t.items),
-      discounts: t.discounts.map((d) => ({ ...d, amount: money(d.amount), fundedBy: gqlEnum(d.fundedBy) })),
-      discountTotal: money(t.discountTotal),
-      shippingTotal: money(t.shippingTotal),
-      tax: money(t.tax),
-      total: money(t.total),
-      refundedSoFar: money(t.refundedSoFar),
-      expectedRefunds: t.expectedRefunds.map((e) => ({ ...e, ref: e.ref ?? null, amount: money(e.amount) })),
+      items: t.items ?? null,
+      discounts: t.discounts.map((d) => ({ ...d, amount: d.amount ?? null, fundedBy: gqlEnum(d.fundedBy) })),
+      discountTotal: t.discountTotal ?? null,
+      shippingTotal: t.shippingTotal ?? null,
+      tax: t.tax ?? null,
+      total: t.total ?? null,
+      refundedSoFar: t.refundedSoFar ?? null,
+      expectedRefunds: t.expectedRefunds.map((e) => ({ ...e, ref: e.ref ?? null, amount: e.amount ?? null })),
     },
     deliveryAddress: o.deliveryAddress,
     addressNote: o.addressNote,
@@ -179,16 +177,16 @@ function order(o: OrderDetail, x: { summary?: OrderSummary; seller?: SellerOrder
     flags: (a?.flags ?? []).map((f) => ({ ...f, kind: gqlEnum(f.kind), tone: gqlEnum(f.tone) })),
     openExceptionIds: x.openExceptionIds ?? [],
     alerts: (a?.alerts ?? []).map((al) => ({ ...al, tone: gqlEnum(al.tone), caseRef: al.caseRef ?? null })),
-    afterSales: (a?.afterSales ?? []).map((s) => ({ ...s, amount: money(s.amount), owner: s.owner ?? null })),
+    afterSales: (a?.afterSales ?? []).map((s) => ({ ...s, amount: s.amount ?? null, owner: s.owner ?? null })),
     moneyBySeller: (a?.moneyBySeller ?? []).map((m) => ({
       ...m,
       seller: sellerLabel(m.seller),
-      items: money(m.items),
-      platformFunded: money(m.platformFunded),
-      sellerFunded: money(m.sellerFunded),
-      customerPaid: money(m.customerPaid),
-      marketplaceFee: money(m.marketplaceFee),
-      sellerEarnings: money(m.sellerEarnings),
+      items: m.items ?? null,
+      platformFunded: m.platformFunded ?? null,
+      sellerFunded: m.sellerFunded ?? null,
+      customerPaid: m.customerPaid ?? null,
+      marketplaceFee: m.marketplaceFee ?? null,
+      sellerEarnings: m.sellerEarnings ?? null,
     })),
     couponFundingNote: a?.couponFundingNote ?? null,
     notes: (a?.notes ?? []).map((n) => ({ ...n, author: actor(n.author) })),

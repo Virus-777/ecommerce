@@ -1,6 +1,4 @@
 import { gqlEnum, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
-import { format as formatMoney } from '../../../kernel/lib/money.js';
-import type { Money } from '../../../spec/common.js';
 import type { KpiValue, MetricDefinition, Series } from '../../../spec/reports.js';
 import { metricSeed } from '../domain/catalogue.js';
 import { display } from '../domain/rules.js';
@@ -9,7 +7,6 @@ import type { ReportsService } from '../service.js';
 
 /* ---------------------------------------------------------------- REST shapes → GraphQL shapes (enums in capitals, Money.formatted) */
 
-const money = (m: Money | null | undefined) => (m ? { ...m, formatted: formatMoney(m) } : null);
 const periodOf = (p: string | null | undefined): Period => (p ? (p.toLowerCase() as Period) : 'last_7_days');
 
 function definition(d: MetricDefinition, area: GraphQLContext['area']) {
@@ -40,7 +37,7 @@ function metricValue(k: KpiValue & { unit: MetricDefinition['unit'] }, defs: Met
     metricKey: k.metricKey,
     label: k.label,
     value: k.value,
-    money: money(k.money),
+    money: k.money ?? null,
     display: k.display,
     unit: gqlEnum(k.unit),
     delta: delta ? { value: delta.value, unit: gqlEnum(delta.unit), direction: gqlEnum(delta.direction), good: delta.good } : null,
@@ -51,7 +48,7 @@ function metricValue(k: KpiValue & { unit: MetricDefinition['unit'] }, defs: Met
 
 function series(s: Series, metricKey: string, currency: string, defs: MetricDefinition[], area: GraphQLContext['area']) {
   const unit = metricSeed(metricKey)?.unit ?? 'money';
-  const points = (s.points as { x: string; y: number; label?: string }[]).map((p) => ({ date: p.x, label: p.label ?? p.x, value: p.y, money: unit === 'money' ? money({ amount: p.y, currency }) : null }));
+  const points = (s.points as { x: string; y: number; label?: string }[]).map((p) => ({ date: p.x, label: p.label ?? p.x, value: p.y, money: unit === 'money' ? { amount: p.y, currency } : null }));
   const sum = points.reduce((n, p) => n + p.value, 0);
   return {
     key: s.key,
@@ -97,7 +94,7 @@ export const resolvers = (service: ReportsService): ModuleResolvers => ({
         basisLabel: d.dateBasis,
         kpis: d.kpis.map((k) => metricValue(k, d.definitions, ctx.area)),
         series: d.series.map((s) => series(s, 'commerce.gross_sales', d.currency, d.definitions, ctx.area)),
-        split: d.split.map((s) => ({ key: s.key, label: s.label, amount: money(s.amount), sharePct: s.sharePct })),
+        split: d.split.map((s) => ({ key: s.key, label: s.label, amount: s.amount ?? null, sharePct: s.sharePct })),
         workToday: null,
         definitions: d.definitions.map((x) => definition(x, ctx.area)),
       };
