@@ -53,6 +53,25 @@ describe('Business Owner view keys (G77)', () => {
     expect(keys).not.toContain(removed);
   });
 
+  it('a module added after the roles were seeded: its keys reach the system roles whose seed covers them', async () => {
+    const BACKUPS = ['backups.view', 'backups.create', 'backups.download', 'backups.restore'];
+    const keysOf = async (role: string) => (await f.table('role_permissions').find({ role_id: await f.roleId(role) })).map((r) => r.permission_key as string);
+    // as if this version adds the backups module to an install whose roles were seeded before it
+    await f.table('permissions').deleteMany({ key: { $in: BACKUPS } });
+    await f.table('role_permissions').deleteMany({ permission_key: { $in: BACKUPS } });
+    await f.svc.core.doSync();
+    expect(await keysOf('business_owner')).toEqual(expect.arrayContaining(BACKUPS));
+    const admin = await keysOf('platform_administrator');
+    expect(admin).toEqual(expect.arrayContaining(['backups.view', 'backups.create']));
+    expect(admin).not.toContain('backups.download');
+    expect(admin).not.toContain('backups.restore');
+    expect((await keysOf('support_agent')).filter((k) => k.startsWith('backups.'))).toEqual([]);
+    // once registered, a key the owner takes off a role is not added back
+    await f.table('role_permissions').deleteMany({ role_id: await f.roleId('platform_administrator'), permission_key: 'backups.create' });
+    await f.svc.core.doSync();
+    expect(await keysOf('platform_administrator')).not.toContain('backups.create');
+  });
+
   it('roles holding a manage or record key of those pages get the matching view key in the seed', () => {
     const seed = (key: string) => SYSTEM_ROLES.find((r) => r.key === key)!.permissions;
     const registry = [...G77_KEYS, 'returns.inspections.record', 'returns.requests.view', 'catalog.products.review', 'catalog.products.manage-official', 'offers.official.manage', 'offers.official.price', 'sellers.applications.review', 'content.pages.manage', 'content.homepage.manage', 'support.cases.view'];

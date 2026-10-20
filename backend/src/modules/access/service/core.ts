@@ -214,6 +214,7 @@ export class Core {
       await tx.lockRegistry();
       // keys this sync registers for the first time (G77: new view keys reach an existing Business Owner role)
       const known = new Set((await tx.listPermissions()).map((p) => p.key));
+      const fresh = permissions.map((p) => p.key).filter((k) => !known.has(k));
       await tx.upsertPermissions(permissions);
       await tx.markPermissionsUnavailable(permissions.map((p) => p.key), now);
       await tx.upsertActions(actions);
@@ -234,6 +235,10 @@ export class Core {
               if (actionKeys.has(key) && !(await tx.limitRowExists(existing.id, key))) rows.push(this.parts.limits.limitRow(existing.id, key, normalizeLimit(v), now, null));
             }
             await tx.insertLimits(rows);
+            // G77: a permission registered for the first time (a module added later, e.g. backups) goes to the system
+            // roles whose seed covers it, as on a new install. Added once, when it first appears: a key the Business
+            // Owner later removes from the role is not added back.
+            if (known.size) await tx.addRolePermissions(existing.id, expandPermissions(seed.permissions, fresh), 'system', now);
           }
           continue;
         }
@@ -271,16 +276,9 @@ export class Core {
         const rows: LimitRow[] = [];
         for (const key of actionKeys) if (!(await tx.limitRowExists(bo.id, key))) rows.push(this.parts.limits.limitRow(bo.id, key, normalizeLimit({ authority: 'permitted' }), now, null));
         await tx.insertLimits(rows);
-        // G77: the Business Owner reads everything (`*.view`). A view key registered after the role was seeded is
-        // added once, when it first appears; a view key the owner later removes from the role is not added back.
-        if (bo.system && !bo.archived_at) {
-          const newViews = expandPermissions(['*.view'], staffKeys.filter((k) => !known.has(k)));
-          await tx.addRolePermissions(bo.id, newViews, 'system', now);
-        }
       }
       // G77: a companion view key registered for the first time goes to every role holding a key under its prefix
       // (e.g. returns.inspections.view to the Returns Manager, who records inspections)
-      const fresh = staffKeys.filter((k) => !known.has(k));
       if (known.size && fresh.some((k) => k in VIEW_COMPANIONS)) {
         const roles = (await tx.listRoles()).filter((r) => !r.archived_at);
         const held = await tx.rolePermissions(roles.map((r) => r.id));
