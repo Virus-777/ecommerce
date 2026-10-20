@@ -126,6 +126,9 @@ const REAUTH_PURPOSES: Record<ReauthRequest['purpose'], true> = {
   'staff-account': true,
   'payout-destination': true,
   approval: true,
+  // backups: downloading the whole database, asking for a restore
+  'backup-download': true,
+  'backup-restore': true,
 };
 export const isReauthPurpose = (v: unknown): v is ReauthRequest['purpose'] => typeof v === 'string' && Object.hasOwn(REAUTH_PURPOSES, v);
 

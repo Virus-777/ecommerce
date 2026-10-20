@@ -68,7 +68,8 @@ export type RouteAuth = AuthKind | 'file-link';
 
 /** File links: the key that signs them and the buckets whose links may be permanent */
 export interface FileLinkAuth {
-  secret: string;
+  /** The signing key, or the key of the module serving a bucket (several modules may serve /files) */
+  secret: string | ((bucket: string) => string | undefined);
   permanentBuckets: ReadonlySet<string>;
 }
 

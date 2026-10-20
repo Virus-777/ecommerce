@@ -95,7 +95,7 @@ export interface ModuleSpecDef {
   readonly optionalDeps: readonly string[];
   readonly publicApi: readonly string[];
   readonly permissions: readonly { readonly key: string; readonly audience: string; readonly desc: string; readonly ownerOnly?: boolean; readonly delegable?: boolean }[];
-  readonly approvalActions: readonly { readonly key: string; readonly desc: string; readonly limit: string; readonly secondReviewer: string; readonly approvers?: string }[];
+  readonly approvalActions: readonly { readonly key: string; readonly desc: string; readonly limit: string; readonly secondReviewer: string; readonly stepUp?: string; readonly approvers?: string }[];
   readonly stateMachines: Readonly<Record<string, StateMachineDef>>;
   readonly events: {
     readonly publishes: Readonly<Record<string, { readonly when: string; readonly payload: () => z.ZodType }>>;

@@ -685,8 +685,8 @@
     },
     "ReauthRequest": {
       "purpose": {
-        "type": "enum(account-closure|email-change|two-step-removal|recovery-codes|business-change|payout-account|seller-closure|role-grant|staff-account|payout-destination|approval)",
-        "desc": "The reauth step-up purpose of the endpoint that will consume the token: account-closure (customers.requestClosure), email-change, two-step-removal and recovery-codes (identity), business-change, payout-account and seller-closure (sellers); for staff, role-grant (access roles and invitations), staff-account (identity staff accounts and invitations), payout-destination (finance) and approval (approving a request above access stepUpAbove). A token works only for that purpose."
+        "type": "enum(account-closure|email-change|two-step-removal|recovery-codes|business-change|payout-account|seller-closure|role-grant|staff-account|payout-destination|approval|backup-download|backup-restore)",
+        "desc": "The reauth step-up purpose of the endpoint that will consume the token: account-closure (customers.requestClosure), email-change, two-step-removal and recovery-codes (identity), business-change, payout-account and seller-closure (sellers); for staff, role-grant (access roles and invitations), staff-account (identity staff accounts and invitations), payout-destination (finance), approval (approving a request above access stepUpAbove, or one whose action always needs it, e.g. a backup restore), backup-download and backup-restore (backups). A token works only for that purpose."
       },
       "password": "string?",
       "code": {

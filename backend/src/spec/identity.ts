@@ -745,15 +745,15 @@ export const LockRequest: z.ZodType<LockRequest> = z.object({
 }).register(common.apiTypes, { id: "identity.LockRequest" });
 
 export interface ReauthRequest {
-  /** The reauth step-up purpose of the endpoint that will consume the token: account-closure (customers.requestClosure), email-change, two-step-removal and recovery-codes (identity), business-change, payout-account and seller-closure (sellers); for staff, role-grant (access roles and invitations), staff-account (identity staff accounts and invitations), payout-destination (finance) and approval (approving a request above access stepUpAbove). A token works only for that purpose. */
-  purpose: "account-closure" | "email-change" | "two-step-removal" | "recovery-codes" | "business-change" | "payout-account" | "seller-closure" | "role-grant" | "staff-account" | "payout-destination" | "approval";
+  /** The reauth step-up purpose of the endpoint that will consume the token: account-closure (customers.requestClosure), email-change, two-step-removal and recovery-codes (identity), business-change, payout-account and seller-closure (sellers); for staff, role-grant (access roles and invitations), staff-account (identity staff accounts and invitations), payout-destination (finance), approval (approving a request above access stepUpAbove, or one whose action always needs it, e.g. a backup restore), backup-download and backup-restore (backups). A token works only for that purpose. */
+  purpose: "account-closure" | "email-change" | "two-step-removal" | "recovery-codes" | "business-change" | "payout-account" | "seller-closure" | "role-grant" | "staff-account" | "payout-destination" | "approval" | "backup-download" | "backup-restore";
   password?: string | null;
   /** Members: a 2-step code instead of the password. Staff always use the password (they have no 2-step) */
   code?: string | null;
 }
 
 export const ReauthRequest: z.ZodType<ReauthRequest> = z.object({
-  purpose: z.enum(["account-closure", "email-change", "two-step-removal", "recovery-codes", "business-change", "payout-account", "seller-closure", "role-grant", "staff-account", "payout-destination", "approval"]).describe("The reauth step-up purpose of the endpoint that will consume the token: account-closure (customers.requestClosure), email-change, two-step-removal and recovery-codes (identity), business-change, payout-account and seller-closure (sellers); for staff, role-grant (access roles and invitations), staff-account (identity staff accounts and invitations), payout-destination (finance) and approval (approving a request above access stepUpAbove). A token works only for that purpose."),
+  purpose: z.enum(["account-closure", "email-change", "two-step-removal", "recovery-codes", "business-change", "payout-account", "seller-closure", "role-grant", "staff-account", "payout-destination", "approval", "backup-download", "backup-restore"]).describe("The reauth step-up purpose of the endpoint that will consume the token: account-closure (customers.requestClosure), email-change, two-step-removal and recovery-codes (identity), business-change, payout-account and seller-closure (sellers); for staff, role-grant (access roles and invitations), staff-account (identity staff accounts and invitations), payout-destination (finance), approval (approving a request above access stepUpAbove, or one whose action always needs it, e.g. a backup restore), backup-download and backup-restore (backups). A token works only for that purpose."),
   password: z.string().nullish(),
   code: z.string().describe("Members: a 2-step code instead of the password. Staff always use the password (they have no 2-step)").nullish(),
 }).register(common.apiTypes, { id: "identity.ReauthRequest" });

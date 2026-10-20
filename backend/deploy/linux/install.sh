@@ -33,12 +33,21 @@ if ! id "$MARKETLY_USER" >/dev/null 2>&1; then
   info "Creating the system user $MARKETLY_USER (no login, no password)"
   useradd --system --home-dir "$DATA_DIR" --no-create-home --shell /usr/sbin/nologin "$MARKETLY_USER"
 fi
-mkdir -p "$RELEASES_DIR" "$MEDIA_DIR" "$BACKUP_DIR" "$TLS_DIR"
+mkdir -p "$RELEASES_DIR" "$MEDIA_DIR" "$BACKUP_DIR" "$TLS_DIR" "$OPS_DIR/requests" "$OPS_DIR/status" "$UPLOAD_DIR"
 # settings, keys and the HTTPS key: readable by the service user only
 chown "$MARKETLY_USER:$MARKETLY_USER" "$ETC_DIR" "$TLS_DIR" "$DATA_DIR" "$MEDIA_DIR"
 chmod 700 "$ETC_DIR" "$TLS_DIR"
 chmod 750 "$DATA_DIR" "$MEDIA_DIR"
-chmod 700 "$BACKUP_DIR"
+# backups: the server lists and downloads the database and uploaded-files files (group marketly, read only); the
+# settings and keys files stay root only (backup.sh: mode 600)
+chown root:"$MARKETLY_USER" "$BACKUP_DIR"
+chmod 750 "$BACKUP_DIR"
+# the backup service (ops.sh, root): the server writes requests and uploaded backups, and reads the status
+chown root:"$MARKETLY_USER" "$OPS_DIR" "$OPS_DIR/status"
+chmod 750 "$OPS_DIR" "$OPS_DIR/status"
+chown "$MARKETLY_USER:$MARKETLY_USER" "$OPS_DIR/requests" "$UPLOAD_DIR"
+chmod 750 "$OPS_DIR/requests"
+chmod 700 "$UPLOAD_DIR"
 # settings unpacked from a backup of another server carry that server's user id: make them this server's
 if [ -f "$TLS_DIR/server.key" ]; then
   chown "$MARKETLY_USER:$MARKETLY_USER" "$TLS_DIR/server.key" "$TLS_DIR/server.crt"
@@ -70,6 +79,10 @@ if [ ! -f "$ENV_FILE" ]; then
 fi
 # "on boot" jobs run once per release
 set_env_value "$ENV_FILE" DEPLOY_ID "$NAME"
+# Admin Center → Backups talks to the backup service through these folders
+set_env_value "$ENV_FILE" BACKUP_DIR "$BACKUP_DIR"
+set_env_value "$ENV_FILE" BACKUP_OPS_DIR "$OPS_DIR"
+set_env_value "$ENV_FILE" BACKUP_UPLOAD_DIR "$UPLOAD_DIR"
 chown "$MARKETLY_USER:$MARKETLY_USER" "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 
@@ -109,10 +122,13 @@ info "Current release: $NAME${old:+ (previous: $(basename "$old"))}"
 sed "s|/usr/local/bin/node|$NODE|g" "$TARGET/deploy/linux/marketly.service" >/etc/systemd/system/marketly.service
 install -m 644 "$TARGET/deploy/linux/marketly-backup.service" /etc/systemd/system/marketly-backup.service
 install -m 644 "$TARGET/deploy/linux/marketly-backup.timer" /etc/systemd/system/marketly-backup.timer
+install -m 644 "$TARGET/deploy/linux/marketly-ops.service" /etc/systemd/system/marketly-ops.service
+install -m 644 "$TARGET/deploy/linux/marketly-ops.path" /etc/systemd/system/marketly-ops.path
 ln -sfn "$CURRENT_LINK/deploy/linux/marketly" /usr/local/bin/marketly
 systemctl daemon-reload
 systemctl enable marketly.service >/dev/null
 systemctl enable --now marketly-backup.timer >/dev/null
+systemctl enable --now marketly-ops.path >/dev/null
 
 # ---------------------------------------------------------------- keep the current, the previous and the newest other release
 keep_current=$(readlink -f "$CURRENT_LINK")

@@ -4,7 +4,7 @@ Who someone is and how they prove it: accounts for customers, seller members and
 
 - **Group:** Platform · **Launch phase:** 1 · **Plan chapters:** 6, 7, 10, 18
 - **Depends on:** nothing · **Optional:** [audit](audit.md), [sellers](sellers.md), [customers](customers.md), [access](access.md)
-- **Required by:** [access](access.md), [customers](customers.md), [notifications](notifications.md), [sellers](sellers.md)
+- **Required by:** [access](access.md), [backups](backups.md), [customers](customers.md), [notifications](notifications.md), [sellers](sellers.md)
 
 ## Owns
 - Accounts in two realms: member (customers and seller members share one account) and staff (invite-only: an invitation link plus a pass code; email and password sign-in, no 2-step)
@@ -484,7 +484,7 @@ Who someone is and how they prove it: accounts for customers, seller members and
 
 | Field | Type |
 |---|---|
-| purpose | `enum(account-closure|email-change|two-step-removal|recovery-codes|business-change|payout-account|seller-closure|role-grant|staff-account|payout-destination|approval)` The reauth step-up purpose of the endpoint that will consume the token: account-closure (customers.requestClosure), email-change, two-step-removal and recovery-codes (identity), business-change, payout-account and seller-closure (sellers); for staff, role-grant (access roles and invitations), staff-account (identity staff accounts and invitations), payout-destination (finance) and approval (approving a request above access stepUpAbove). A token works only for that purpose. |
+| purpose | `enum(account-closure|email-change|two-step-removal|recovery-codes|business-change|payout-account|seller-closure|role-grant|staff-account|payout-destination|approval|backup-download|backup-restore)` The reauth step-up purpose of the endpoint that will consume the token: account-closure (customers.requestClosure), email-change, two-step-removal and recovery-codes (identity), business-change, payout-account and seller-closure (sellers); for staff, role-grant (access roles and invitations), staff-account (identity staff accounts and invitations), payout-destination (finance), approval (approving a request above access stepUpAbove, or one whose action always needs it, e.g. a backup restore), backup-download and backup-restore (backups). A token works only for that purpose. |
 | password | `string?` |
 | code | `string?` Members: a 2-step code instead of the password. Staff always use the password (they have no 2-step) |
 

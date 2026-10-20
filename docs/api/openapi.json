@@ -221,6 +221,10 @@
       "description": "The tamper-evident action history: who did what, in which role, to which record, why, what changed (before and after), which approvals applied and the request id. Every module writes to it through record(); staff read it with filters and authorized exports; retention is a governed setting."
     },
     {
+      "name": "Admin API · Backups",
+      "description": "Backups of the whole system (database, uploaded files, settings and keys) from the Admin Center: the list of backups on the server, a backup now, downloads, uploads and restores with two-person approval. The server's root backup service (deploy/linux ops.sh) does the work; this module asks it through request files and reports what it did."
+    },
+    {
       "name": "Admin API · Cart",
       "description": "One cart across the Official Store and marketplace sellers for customers and guests. Every line is bound to the exact offer the customer chose, lines are grouped into seller packages with delivery estimates and shipping, and every read re-checks price, stock and eligibility so changes are explained per item instead of discarding the cart."
     },
@@ -11102,6 +11106,1077 @@
         "x-screens": [
           "seller/staff",
           "seller/store"
+        ],
+        "x-phase": 1
+      }
+    },
+    "/api/admin/backups/backups": {
+      "get": {
+        "operationId": "backups.getBackups",
+        "tags": [
+          "Admin API · Backups"
+        ],
+        "summary": "Backups on the server, the schedule and what the backup service is doing",
+        "description": "**Permission:** `backups.view`\n\n**Screens:** admin/backups",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/backups.BackupOverview"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "backups",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "backups.view",
+        "x-screens": [
+          "admin/backups"
+        ],
+        "x-phase": 1
+      },
+      "post": {
+        "operationId": "backups.startBackup",
+        "tags": [
+          "Admin API · Backups"
+        ],
+        "summary": "Back up now",
+        "description": "Asks the server's backup service for a backup (database, uploaded files, settings and keys). One operation runs at a time: OPERATION_IN_PROGRESS while another backup or a restore is queued or running.\n\n**Permission:** `backups.create`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/backups",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "note": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/backups.BackupOperation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "OPERATION_IN_PROGRESS: Another backup or restore is waiting or running; details.operationId",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "BACKUPS_UNAVAILABLE: This server has no backup service (a development machine, or BACKUP_OPS_DIR is not set)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "backups",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "backups.create",
+        "x-screens": [
+          "admin/backups"
+        ],
+        "x-audited": true,
+        "x-phase": 1
+      }
+    },
+    "/api/admin/backups/backups/{id}/download-links": {
+      "post": {
+        "operationId": "backups.createBackupDownloadLinks",
+        "tags": [
+          "Admin API · Backups"
+        ],
+        "summary": "Download a backup (database and uploaded files)",
+        "description": "Signed links valid for 15 minutes. The settings and keys file is never offered: it holds APP_SECRET; copy it by USB on the server. Needs the password again (reauthToken, purpose backup-download).\n\n**Permission:** `backups.download`\n\n**Step-up:** single-use re-auth token in the body (purpose `backup-download`)\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/backups",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reauthToken": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reauthToken"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/backups.BackupDownloadLinks"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "BACKUPS_UNAVAILABLE: This server has no backup service (a development machine, or BACKUP_OPS_DIR is not set)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "backups",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "backups.download",
+        "x-screens": [
+          "admin/backups"
+        ],
+        "x-audited": true,
+        "x-phase": 1,
+        "x-step-up": {
+          "kind": "reauth",
+          "purpose": "backup-download"
+        }
+      }
+    },
+    "/api/admin/backups/backups/uploads": {
+      "post": {
+        "operationId": "backups.createBackupUpload",
+        "tags": [
+          "Admin API · Backups"
+        ],
+        "summary": "Start uploading a backup",
+        "description": "Then send the database file (<date>.archive.gz) and, optionally, the uploaded-files file (<date>.media.tar.gz) to the upload's two PUT endpoints.\n\n**Permission:** `backups.restore`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/backups",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "label"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/backups.BackupUpload"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "BACKUPS_UNAVAILABLE: This server has no backup service (a development machine, or BACKUP_OPS_DIR is not set)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "backups",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "backups.restore",
+        "x-screens": [
+          "admin/backups"
+        ],
+        "x-audited": true,
+        "x-phase": 1
+      }
+    },
+    "/api/admin/backups/backups/uploads/{id}/database": {
+      "put": {
+        "operationId": "backups.uploadBackupDatabase",
+        "tags": [
+          "Admin API · Backups"
+        ],
+        "summary": "Send the database file of an uploaded backup",
+        "description": "The raw bytes of <date>.archive.gz (a gzip file), streamed to the server's disk; up to backups.maxUploadGb.\n\n**Permission:** `backups.restore`\n\n**Screens:** admin/backups",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "The raw bytes (any content type)",
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/backups.BackupUpload"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "UPLOAD_TOO_LARGE: The file is larger than backups.maxUploadGb; details.maxBytes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "NOT_A_BACKUP: The uploaded file is not a gzip file made by the backup service",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "BACKUPS_UNAVAILABLE: This server has no backup service (a development machine, or BACKUP_OPS_DIR is not set)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "backups",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "backups.restore",
+        "x-screens": [
+          "admin/backups"
+        ],
+        "x-phase": 1
+      }
+    },
+    "/api/admin/backups/backups/uploads/{id}/files": {
+      "put": {
+        "operationId": "backups.uploadBackupFiles",
+        "tags": [
+          "Admin API · Backups"
+        ],
+        "summary": "Send the uploaded-files file of an uploaded backup",
+        "description": "The raw bytes of <date>.media.tar.gz (a gzip file); up to backups.maxUploadGb.\n\n**Permission:** `backups.restore`\n\n**Screens:** admin/backups",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "The raw bytes (any content type)",
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/backups.BackupUpload"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "UPLOAD_TOO_LARGE: The file is larger than backups.maxUploadGb; details.maxBytes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "NOT_A_BACKUP: The uploaded file is not a gzip file made by the backup service",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "BACKUPS_UNAVAILABLE: This server has no backup service (a development machine, or BACKUP_OPS_DIR is not set)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "backups",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "backups.restore",
+        "x-screens": [
+          "admin/backups"
+        ],
+        "x-phase": 1
+      }
+    },
+    "/api/admin/backups/backups/uploads/{id}": {
+      "delete": {
+        "operationId": "backups.deleteBackupUpload",
+        "tags": [
+          "Admin API · Backups"
+        ],
+        "summary": "Delete an uploaded backup",
+        "description": "**Permission:** `backups.restore`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/backups",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success, no content"
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "OPERATION_IN_PROGRESS: Another backup or restore is waiting or running; details.operationId",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "backups",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "backups.restore",
+        "x-screens": [
+          "admin/backups"
+        ],
+        "x-audited": true,
+        "x-phase": 1
+      }
+    },
+    "/api/admin/backups/backups/restores": {
+      "post": {
+        "operationId": "backups.requestRestore",
+        "tags": [
+          "Admin API · Backups"
+        ],
+        "summary": "Ask to restore a backup",
+        "description": "Replaces the whole database and the uploaded files with the backup; everything done since is lost. Needs the password again (reauthToken, purpose backup-restore), confirm = RESTORE and a reason. Always needs a second staff member's approval (access action backups.restore, who confirms with their password too). After the approval the backup service takes a safety backup, stops the server, restores, and starts it again (a few minutes).\n\n**Permission:** `backups.restore`\n\n**Step-up:** single-use re-auth token in the body (purpose `backup-restore`)\n\n**Approval:** Always a second staff member (Platform Administrator or another Business Owner), who confirms with their password\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/backups, admin/inbox",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "backupId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "A backup on the server"
+                  },
+                  "uploadId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "uuid",
+                    "description": "Or an uploaded backup (state ready)"
+                  },
+                  "confirm": {
+                    "type": "string",
+                    "description": "The word RESTORE"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "reauthToken": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "confirm",
+                  "reason",
+                  "reauthToken"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/backups.BackupOperation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "OPERATION_IN_PROGRESS: Another backup or restore is waiting or running; details.operationId",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "BACKUPS_UNAVAILABLE: This server has no backup service (a development machine, or BACKUP_OPS_DIR is not set)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "backups",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "backups.restore",
+        "x-screens": [
+          "admin/backups",
+          "admin/inbox"
+        ],
+        "x-audited": true,
+        "x-phase": 1,
+        "x-step-up": {
+          "kind": "reauth",
+          "purpose": "backup-restore"
+        }
+      }
+    },
+    "/api/admin/backups/backups/restores/{id}/cancel": {
+      "post": {
+        "operationId": "backups.cancelRestore",
+        "tags": [
+          "Admin API · Backups"
+        ],
+        "summary": "Withdraw a restore that is still waiting for approval",
+        "description": "**Permission:** `backups.restore`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/backups",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/backups.BackupOperation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "backups",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "backups.restore",
+        "x-screens": [
+          "admin/backups"
+        ],
+        "x-audited": true,
+        "x-phase": 1
+      }
+    },
+    "/api/admin/backups/backups/operations/{id}": {
+      "get": {
+        "operationId": "backups.getBackupOperation",
+        "tags": [
+          "Admin API · Backups"
+        ],
+        "summary": "One backup, restore or schedule change",
+        "description": "**Permission:** `backups.view`\n\n**Screens:** admin/backups",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/backups.BackupOperation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "backups",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "backups.view",
+        "x-screens": [
+          "admin/backups"
         ],
         "x-phase": 1
       }
@@ -157837,6 +158912,414 @@
           "change"
         ]
       },
+      "backups.BackupFile": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "sizeBytes"
+        ]
+      },
+      "backups.Backup": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The backup's time stamp, e.g. 2026-10-15_0230 (server time); an uploaded backup ends in -uploaded"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "nightly",
+              "manual",
+              "safety",
+              "uploaded"
+            ],
+            "description": "safety: taken automatically just before a restore"
+          },
+          "database": {
+            "$ref": "#/components/schemas/backups.BackupFile"
+          },
+          "files": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/backups.BackupFile"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The uploaded files (media); missing in a database-only backup"
+          },
+          "hasSettingsAndKeys": {
+            "type": "boolean",
+            "description": "The settings and keys file is on the server. It is never downloadable from the web: copy it by USB"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "requestedBy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Actor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "createdAt",
+          "kind",
+          "database",
+          "hasSettingsAndKeys"
+        ]
+      },
+      "backups.BackupUpload": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "label": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "receiving",
+              "ready",
+              "failed"
+            ]
+          },
+          "database": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/backups.BackupFile"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "files": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/backups.BackupFile"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "uploadedBy": {
+            "$ref": "#/components/schemas/Actor"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "state",
+          "uploadedBy",
+          "createdAt"
+        ]
+      },
+      "backups.BackupOperation": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "backup",
+              "restore",
+              "schedule"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "waiting_approval",
+              "queued",
+              "running",
+              "done",
+              "failed",
+              "rejected",
+              "cancelled"
+            ],
+            "description": "A restore waits for the second approval; the server's backup service then runs it (queued → running → done or failed)"
+          },
+          "backupId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "backup: the backup made; restore: the backup restored"
+          },
+          "uploadId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "restore of an uploaded backup"
+          },
+          "safetyBackupId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "restore: the backup taken just before it"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the backup service reported (the error when it failed)"
+          },
+          "requestedBy": {
+            "$ref": "#/components/schemas/Actor"
+          },
+          "requestedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "finishedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "approval": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApprovalInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "state",
+          "requestedBy",
+          "requestedAt"
+        ]
+      },
+      "backups.BackupSchedule": {
+        "type": "object",
+        "properties": {
+          "time": {
+            "type": "string",
+            "description": "HH:MM in the market time zone (setting backups.time)"
+          },
+          "keepDays": {
+            "type": "integer",
+            "description": "Backups older than this are deleted (setting backups.keepDays)"
+          },
+          "timeZone": {
+            "type": "string"
+          },
+          "nextRunAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "applied": {
+            "type": "boolean",
+            "description": "The server's backup service has this schedule (a change is applied within a minute)"
+          }
+        },
+        "required": [
+          "time",
+          "keepDays",
+          "timeZone",
+          "applied"
+        ]
+      },
+      "backups.BackupOverview": {
+        "type": "object",
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "description": "False where the server has no backup service (development machines): nothing can be backed up or restored here"
+          },
+          "unavailableReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "backups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/backups.Backup"
+            }
+          },
+          "uploads": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/backups.BackupUpload"
+            }
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/backups.BackupSchedule"
+          },
+          "lastBackupAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "running": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/backups.BackupOperation"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The backup or restore the service is working on (one at a time)"
+          },
+          "pendingRestore": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/backups.BackupOperation"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A restore waiting for its second approval"
+          },
+          "recent": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/backups.BackupOperation"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "e.g. no backup in the last 26 hours; backups are on the same disk as the data"
+          }
+        },
+        "required": [
+          "available",
+          "backups",
+          "uploads",
+          "schedule",
+          "recent",
+          "warnings"
+        ]
+      },
+      "backups.DownloadLink": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Signed link (GET), valid for expiresAt"
+          },
+          "fileName": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "type": "integer"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "url",
+          "fileName",
+          "sizeBytes",
+          "expiresAt"
+        ]
+      },
+      "backups.BackupDownloadLinks": {
+        "type": "object",
+        "properties": {
+          "database": {
+            "$ref": "#/components/schemas/backups.DownloadLink"
+          },
+          "files": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/backups.DownloadLink"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "database"
+        ]
+      },
       "cart.CartOwner": {
         "type": "object",
         "properties": {
@@ -175158,9 +176641,11 @@
               "role-grant",
               "staff-account",
               "payout-destination",
-              "approval"
+              "approval",
+              "backup-download",
+              "backup-restore"
             ],
-            "description": "The reauth step-up purpose of the endpoint that will consume the token: account-closure (customers.requestClosure), email-change, two-step-removal and recovery-codes (identity), business-change, payout-account and seller-closure (sellers); for staff, role-grant (access roles and invitations), staff-account (identity staff accounts and invitations), payout-destination (finance) and approval (approving a request above access stepUpAbove). A token works only for that purpose."
+            "description": "The reauth step-up purpose of the endpoint that will consume the token: account-closure (customers.requestClosure), email-change, two-step-removal and recovery-codes (identity), business-change, payout-account and seller-closure (sellers); for staff, role-grant (access roles and invitations), staff-account (identity staff accounts and invitations), payout-destination (finance), approval (approving a request above access stepUpAbove, or one whose action always needs it, e.g. a backup restore), backup-download and backup-restore (backups). A token works only for that purpose."
           },
           "password": {
             "type": [

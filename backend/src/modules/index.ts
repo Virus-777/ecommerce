@@ -7,6 +7,7 @@ export const moduleLoaders: Record<string, () => Promise<{ default: ModuleDefini
   "access": () => import('./access/module.js'),
   "advertising": () => import('./advertising/module.js'),
   "audit": () => import('./audit/module.js'),
+  "backups": () => import('./backups/module.js'),
   "cart": () => import('./cart/module.js'),
   "catalog": () => import('./catalog/module.js'),
   "checkout": () => import('./checkout/module.js'),

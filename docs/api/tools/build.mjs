@@ -65,6 +65,7 @@ const REACT_SCREENS = [
   ['store/news', 'store', 'Help and policies', 'News'],
   ['store/news-post', 'store', 'Help and policies', 'News post'],
   ['admin/news', 'admin', 'Marketing and content', 'News'],
+  ['admin/backups', 'admin', 'Reports and settings', 'Backups'],
 ];
 const SCREENS = loadScreens();
 

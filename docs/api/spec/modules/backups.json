@@ -1,0 +1,202 @@
+{
+  "name": "backups",
+  "title": "Backups",
+  "group": "Platform",
+  "phase": 1,
+  "chapters": [],
+  "summary": "Backups of the whole system (database, uploaded files, settings and keys) from the Admin Center: the list of backups on the server, a backup now, downloads, uploads and restores with two-person approval. The server's root backup service (deploy/linux ops.sh) does the work; this module asks it through request files and reports what it did.",
+  "owns": [
+    "The list of backups on the server (database, uploaded files, settings and keys) and the nightly schedule",
+    "Requests to the server's backup service: back up now, restore, apply the schedule",
+    "Backup downloads (database and uploaded files; never the settings and keys file)",
+    "Uploaded backups to restore from",
+    "Restores: re-authenticated request, typed confirmation, a second staff member's approval (re-authenticated too), a safety backup first"
+  ],
+  "notOwns": [
+    "Making and restoring backups: the root service on the server (deploy/linux/ops.sh, backup.sh, restore.sh)",
+    "Copying backups off the server: staff download them, or copy /var/backups/marketly to a USB disk (deploy/linux/README.md)"
+  ],
+  "dependsOn": ["access", "identity"],
+  "optionalDeps": ["audit", "settings"],
+  "types": {
+    "BackupFile": {
+      "name": "string",
+      "sizeBytes": "int"
+    },
+    "Backup": {
+      "id": { "type": "string", "desc": "The backup's time stamp, e.g. 2026-10-15_0230 (server time); an uploaded backup ends in -uploaded" },
+      "createdAt": "datetime",
+      "kind": { "type": "enum(nightly|manual|safety|uploaded)", "desc": "safety: taken automatically just before a restore" },
+      "database": "BackupFile",
+      "files": { "type": "BackupFile?", "desc": "The uploaded files (media); missing in a database-only backup" },
+      "hasSettingsAndKeys": { "type": "bool", "desc": "The settings and keys file is on the server. It is never downloadable from the web: copy it by USB" },
+      "note": "string?",
+      "requestedBy": "Actor?"
+    },
+    "BackupUpload": {
+      "id": "uuid",
+      "label": "string",
+      "state": "enum(receiving|ready|failed)",
+      "database": "BackupFile?",
+      "files": "BackupFile?",
+      "uploadedBy": "Actor",
+      "createdAt": "datetime",
+      "error": "string?"
+    },
+    "BackupOperation": {
+      "id": "uuid",
+      "kind": "enum(backup|restore|schedule)",
+      "state": { "type": "enum(waiting_approval|queued|running|done|failed|rejected|cancelled)", "desc": "A restore waits for the second approval; the server's backup service then runs it (queued → running → done or failed)" },
+      "backupId": { "type": "string?", "desc": "backup: the backup made; restore: the backup restored" },
+      "uploadId": { "type": "uuid?", "desc": "restore of an uploaded backup" },
+      "safetyBackupId": { "type": "string?", "desc": "restore: the backup taken just before it" },
+      "note": "string?",
+      "reason": "text?",
+      "message": { "type": "string?", "desc": "What the backup service reported (the error when it failed)" },
+      "requestedBy": "Actor",
+      "requestedAt": "datetime",
+      "startedAt": "datetime?",
+      "finishedAt": "datetime?",
+      "approval": "ApprovalInfo?"
+    },
+    "BackupSchedule": {
+      "time": { "type": "string", "desc": "HH:MM in the market time zone (setting backups.time)" },
+      "keepDays": { "type": "int", "desc": "Backups older than this are deleted (setting backups.keepDays)" },
+      "timeZone": "string",
+      "nextRunAt": "datetime?",
+      "applied": { "type": "bool", "desc": "The server's backup service has this schedule (a change is applied within a minute)" }
+    },
+    "BackupOverview": {
+      "available": { "type": "bool", "desc": "False where the server has no backup service (development machines): nothing can be backed up or restored here" },
+      "unavailableReason": "string?",
+      "backups": "Backup[]",
+      "uploads": "BackupUpload[]",
+      "schedule": "BackupSchedule",
+      "lastBackupAt": "datetime?",
+      "running": { "type": "BackupOperation?", "desc": "The backup or restore the service is working on (one at a time)" },
+      "pendingRestore": { "type": "BackupOperation?", "desc": "A restore waiting for its second approval" },
+      "recent": "BackupOperation[]",
+      "warnings": { "type": "string[]", "desc": "e.g. no backup in the last 26 hours; backups are on the same disk as the data" }
+    },
+    "DownloadLink": {
+      "url": { "type": "url", "desc": "Signed link (GET), valid for expiresAt" },
+      "fileName": "string",
+      "sizeBytes": "int",
+      "expiresAt": "datetime"
+    },
+    "BackupDownloadLinks": {
+      "database": "DownloadLink",
+      "files": "DownloadLink?"
+    }
+  },
+  "tables": [
+    {
+      "name": "operations",
+      "desc": "Backups, restores and schedule changes asked of the server's backup service. The service's status file is the truth while it runs; after a restore (which replaces this collection) the module rebuilds its rows from the status files.",
+      "columns": {
+        "id": "uuid pk",
+        "kind": "text (backup|restore|schedule)",
+        "state": "text (waiting_approval|queued|running|done|failed|rejected|cancelled)",
+        "backup_id": "text?",
+        "upload_id": "uuid?",
+        "safety_backup_id": "text?",
+        "note": "text?",
+        "reason": "text?",
+        "message": "text?",
+        "params": "jsonb? (schedule: time, keepDays)",
+        "requested_by": "jsonb",
+        "requested_at": "timestamptz",
+        "approval_request_id": "uuid?",
+        "started_at": "timestamptz?",
+        "finished_at": "timestamptz?",
+        "updated_at": "timestamptz"
+      },
+      "indexes": ["(state, requested_at)", "(requested_at)", "(approval_request_id)"]
+    },
+    {
+      "name": "uploads",
+      "desc": "Backups uploaded through the Admin Center (the files are in BACKUP_UPLOAD_DIR/<id>/)",
+      "columns": {
+        "id": "uuid pk",
+        "label": "text",
+        "state": "text (receiving|ready|failed)",
+        "database_bytes": "bigint?",
+        "files_bytes": "bigint?",
+        "uploaded_by": "jsonb",
+        "error": "text?",
+        "created_at": "timestamptz",
+        "updated_at": "timestamptz"
+      },
+      "indexes": ["(created_at)"]
+    }
+  ],
+  "stateMachines": [
+    {
+      "name": "Backup operation",
+      "field": "BackupOperation.state",
+      "initial": "queued",
+      "transitions": [
+        ["waiting_approval", "approve", "queued"],
+        ["waiting_approval", "reject", "rejected"],
+        ["waiting_approval", "cancel", "cancelled"],
+        ["queued", "start", "running"],
+        ["queued", "fail", "failed"],
+        ["running", "finish", "done"],
+        ["running", "fail", "failed"]
+      ],
+      "notes": "A restore starts in waiting_approval; a backup and a schedule change start queued. start, finish and fail come from the backup service's status file."
+    }
+  ],
+  "endpoints": [
+    { "id": "getBackups", "area": "admin", "method": "GET", "path": "/backups", "summary": "Backups on the server, the schedule and what the backup service is doing", "auth": "staff", "permission": "backups.view", "response": "BackupOverview", "screens": ["admin/backups"] },
+    { "id": "startBackup", "area": "admin", "method": "POST", "path": "/backups", "summary": "Back up now", "desc": "Asks the server's backup service for a backup (database, uploaded files, settings and keys). One operation runs at a time: OPERATION_IN_PROGRESS while another backup or a restore is queued or running.", "auth": "staff", "permission": "backups.create", "body": { "note": "string?" }, "response": "BackupOperation", "status": 202, "errors": ["BACKUPS_UNAVAILABLE", "OPERATION_IN_PROGRESS"], "audited": true, "screens": ["admin/backups"] },
+    { "id": "createBackupDownloadLinks", "area": "admin", "method": "POST", "path": "/backups/{id}/download-links", "summary": "Download a backup (database and uploaded files)", "desc": "Signed links valid for 15 minutes. The settings and keys file is never offered: it holds APP_SECRET; copy it by USB on the server. Needs the password again (reauthToken, purpose backup-download).", "auth": "staff", "permission": "backups.download", "stepUp": { "kind": "reauth", "purpose": "backup-download" }, "params": { "id": "string" }, "body": { "reauthToken": "string" }, "response": "BackupDownloadLinks", "errors": ["BACKUPS_UNAVAILABLE", "NOT_FOUND", "STEP_UP_REQUIRED"], "audited": true, "screens": ["admin/backups"] },
+    { "id": "createBackupUpload", "area": "admin", "method": "POST", "path": "/backups/uploads", "summary": "Start uploading a backup", "desc": "Then send the database file (<date>.archive.gz) and, optionally, the uploaded-files file (<date>.media.tar.gz) to the upload's two PUT endpoints.", "auth": "staff", "permission": "backups.restore", "body": { "label": "string" }, "response": "BackupUpload", "status": 201, "errors": ["BACKUPS_UNAVAILABLE", "VALIDATION_FAILED"], "audited": true, "screens": ["admin/backups"] },
+    { "id": "uploadBackupDatabase", "area": "admin", "method": "PUT", "path": "/backups/uploads/{id}/database", "summary": "Send the database file of an uploaded backup", "desc": "The raw bytes of <date>.archive.gz (a gzip file), streamed to the server's disk; up to backups.maxUploadGb.", "auth": "staff", "permission": "backups.restore", "params": { "id": "uuid" }, "body": "binary", "response": "BackupUpload", "errors": ["BACKUPS_UNAVAILABLE", "NOT_FOUND", "NOT_A_BACKUP", "UPLOAD_TOO_LARGE", "ILLEGAL_TRANSITION"], "screens": ["admin/backups"] },
+    { "id": "uploadBackupFiles", "area": "admin", "method": "PUT", "path": "/backups/uploads/{id}/files", "summary": "Send the uploaded-files file of an uploaded backup", "desc": "The raw bytes of <date>.media.tar.gz (a gzip file); up to backups.maxUploadGb.", "auth": "staff", "permission": "backups.restore", "params": { "id": "uuid" }, "body": "binary", "response": "BackupUpload", "errors": ["BACKUPS_UNAVAILABLE", "NOT_FOUND", "NOT_A_BACKUP", "UPLOAD_TOO_LARGE", "ILLEGAL_TRANSITION"], "screens": ["admin/backups"] },
+    { "id": "deleteBackupUpload", "area": "admin", "method": "DELETE", "path": "/backups/uploads/{id}", "summary": "Delete an uploaded backup", "auth": "staff", "permission": "backups.restore", "params": { "id": "uuid" }, "response": null, "errors": ["NOT_FOUND", "OPERATION_IN_PROGRESS"], "audited": true, "screens": ["admin/backups"] },
+    { "id": "requestRestore", "area": "admin", "method": "POST", "path": "/backups/restores", "summary": "Ask to restore a backup", "desc": "Replaces the whole database and the uploaded files with the backup; everything done since is lost. Needs the password again (reauthToken, purpose backup-restore), confirm = RESTORE and a reason. Always needs a second staff member's approval (access action backups.restore, who confirms with their password too). After the approval the backup service takes a safety backup, stops the server, restores, and starts it again (a few minutes).", "auth": "staff", "permission": "backups.restore", "stepUp": { "kind": "reauth", "purpose": "backup-restore" }, "body": { "backupId": { "type": "string?", "desc": "A backup on the server" }, "uploadId": { "type": "uuid?", "desc": "Or an uploaded backup (state ready)" }, "confirm": { "type": "string", "desc": "The word RESTORE" }, "reason": "text", "reauthToken": "string" }, "response": "BackupOperation", "status": 202, "errors": ["BACKUPS_UNAVAILABLE", "NOT_FOUND", "VALIDATION_FAILED", "OPERATION_IN_PROGRESS", "STEP_UP_REQUIRED"], "audited": true, "approval": "Always a second staff member (Platform Administrator or another Business Owner), who confirms with their password", "screens": ["admin/backups", "admin/inbox"] },
+    { "id": "cancelRestore", "area": "admin", "method": "POST", "path": "/backups/restores/{id}/cancel", "summary": "Withdraw a restore that is still waiting for approval", "auth": "staff", "permission": "backups.restore", "params": { "id": "uuid" }, "response": "BackupOperation", "errors": ["NOT_FOUND", "ILLEGAL_TRANSITION"], "audited": true, "screens": ["admin/backups"] },
+    { "id": "getBackupOperation", "area": "admin", "method": "GET", "path": "/backups/operations/{id}", "summary": "One backup, restore or schedule change", "auth": "staff", "permission": "backups.view", "params": { "id": "uuid" }, "response": "BackupOperation", "errors": ["NOT_FOUND"], "screens": ["admin/backups"] }
+  ],
+  "events": {
+    "publishes": [
+      { "name": "backups.operation.finished", "when": "The backup service finished a backup or restore (done or failed)", "payload": { "operationId": "uuid", "kind": "string", "state": "string", "backupId": "string?", "message": "string?" } }
+    ],
+    "consumes": [
+      { "name": "access.approval.decided", "does": "A restore's approval: approved → the request goes to the backup service; rejected or returned → rejected" },
+      { "name": "settings.setting.changed", "does": "backups.time or backups.keepDays changed → asks the backup service to apply the schedule" }
+    ]
+  },
+  "permissions": [
+    { "key": "backups.view", "audience": "staff", "desc": "See the backups, the schedule and what the backup service is doing. Seeded to the Business Owner and the Platform Administrator" },
+    { "key": "backups.create", "audience": "staff", "desc": "Back up now. Seeded to the Business Owner and the Platform Administrator" },
+    { "key": "backups.download", "audience": "staff", "desc": "Download backups (the whole database and the uploaded files: all customer, seller and staff data). Seeded to the Business Owner only" },
+    { "key": "backups.restore", "audience": "staff", "desc": "Upload backups and ask for a restore (always approved by a second person). Seeded to the Business Owner only" }
+  ],
+  "approvalActions": [
+    { "key": "backups.restore", "desc": "Restore a backup over the whole system", "limit": "none", "secondReviewer": "always", "stepUp": "always", "approvers": "Platform Administrator or a Business Owner other than the requester, who confirms with their password" }
+  ],
+  "jobs": [
+    { "name": "backups.watch-operations", "schedule": "every 1 min", "does": "Reads the backup service's status files: moves operations to running, done or failed, rebuilds rows a restore replaced, and asks for the schedule again when the service hasn't applied it" }
+  ],
+  "settings": [
+    { "key": "time", "type": "time", "default": "02:30", "desc": "When the nightly backup runs (market time)" },
+    { "key": "keepDays", "type": "duration", "default": 14, "desc": "Backups older than this are deleted from the server", "unit": "days", "min": 3, "max": 365, "approval": "business_owner" },
+    { "key": "maxUploadGb", "type": "int", "default": 50, "desc": "Largest backup file that can be uploaded", "unit": "GB", "min": 1, "max": 1000 }
+  ],
+  "errorCodes": {
+    "BACKUPS_UNAVAILABLE": { "status": 503, "meaning": "This server has no backup service (a development machine, or BACKUP_OPS_DIR is not set)" },
+    "OPERATION_IN_PROGRESS": { "status": 409, "meaning": "Another backup or restore is waiting or running; details.operationId" },
+    "NOT_A_BACKUP": { "status": 422, "meaning": "The uploaded file is not a gzip file made by the backup service" },
+    "UPLOAD_TOO_LARGE": { "status": 413, "meaning": "The file is larger than backups.maxUploadGb; details.maxBytes" }
+  },
+  "notes": [
+    "The work is done by the server's root backup service (deploy/linux/ops.sh, run by marketly-ops.path whenever a request file appears). The web process never runs mongodump, never stops the server and can't read the settings and keys file (root only, mode 600): it writes a request JSON to BACKUP_OPS_DIR/requests and reads BACKUP_OPS_DIR/status/<id>.json. ops.sh treats every request as untrusted: ids, times and numbers are checked before use.",
+    "Backups are listed from BACKUP_DIR (/var/backups/marketly, group-readable by the service user): <id>.archive.gz (database), <id>.media.tar.gz (uploaded files), <id>.config.tar.gz (settings and keys, root only) and <id>.manifest.json (kind, note, who asked, sizes).",
+    "Downloads are signed /files links of the bucket backups, served by this module from BACKUP_DIR; only .archive.gz and .media.tar.gz names can be signed.",
+    "A restore: the requester re-authenticates (backup-restore) and types RESTORE; access.requestApproval (backups.restore, secondReviewer always, stepUp always) routes it to a Platform Administrator or another Business Owner, whose approval needs their password. On access.approval.decided (approved) the module writes the restore request; ops.sh checks the files, takes a safety backup, stops the server, restores the database (mongorestore --drop) and the uploaded files, runs migrate and starts the server.",
+    "A restore replaces this module's own collections with the backup's. On boot and every minute the module reads the status files and rebuilds any operation they name that the database no longer has, so the restore and its safety backup stay on the list.",
+    "Without BACKUP_OPS_DIR (development machines) the screen says backups are made by the production server, and every action answers BACKUPS_UNAVAILABLE."
+  ]
+}

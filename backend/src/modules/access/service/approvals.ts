@@ -3,6 +3,7 @@
  * cancelling and reminding, and the views of requests other modules embed.
  */
 import { SYSTEM_ACTOR } from '../../../kernel/auth/index.js';
+import { allSpecs } from '../../../kernel/module-system/loader.js';
 import { AppError, isNotImplemented } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { pageOf, toPageRequest, type PageRequest } from '../../../kernel/lib/pagination.js';
@@ -73,6 +74,9 @@ import type { Members } from './members.js';
 import type { Roles } from './roles.js';
 import type { AwayPeriods } from './away.js';
 
+/** Approval actions whose spec declares stepUp: "always": approving them needs the password again whatever the amount */
+const ALWAYS_STEP_UP = new Set(Object.values(allSpecs).flatMap((s) => s.approvalActions.filter((a) => a.stepUp === 'always').map((a) => a.key)));
+
 export class Approvals {
   constructor(readonly core: Core) {}
 
@@ -103,7 +107,7 @@ export class Approvals {
     const mode = act.second_reviewer as SecondMode;
     const label = act.label;
     const mine = snapshot.requester;
-    const base = { action: act.key, callerLimit: mine?.value ?? null, stepUpRequired: await this.stepUpNeeded(amt) };
+    const base = { action: act.key, callerLimit: mine?.value ?? null, stepUpRequired: ALWAYS_STEP_UP.has(act.key) || (await this.stepUpNeeded(amt)) };
 
     if (principal.kind !== 'staff' || !principal.accountId || !mine || mine.value.authority === 'not_permitted') {
       return { ...base, decision: 'denied', reason: `Your role has no authority to ${label.charAt(0).toLowerCase()}${label.slice(1)}`, requiresSecondReviewer: false, approvalsNeeded: 0, eligibleApproverRoles: [], eligibleApprovers: [] };
@@ -648,10 +652,16 @@ export class Approvals {
    * (single use) and returned, so the caller can give it back if the decision then fails; null when none was needed.
    */
   private async requireStepUp(row: RequestRow, principal: identity.Principal, token: string | null): Promise<string | null> {
-    if (row.amount_minor == null || !row.currency) return null;
-    const above = (await this.core.ctx.settings.get('stepUpAbove')) as common.Money | null;
-    if (!above || above.currency !== row.currency || Number(row.amount_minor) <= above.amount) return null;
-    const refuse = () => new AppError('STEP_UP_REQUIRED', `Approvals above ${amountText('money', { money: above })} need your password again`, { kind: 'reauth', purpose: 'approval' });
+    let refuse: () => AppError;
+    if (ALWAYS_STEP_UP.has(row.action_key)) {
+      // the action declares stepUp always (e.g. a backup restore): approving it always needs the password again
+      refuse = () => new AppError('STEP_UP_REQUIRED', 'Approving this needs your password again', { kind: 'reauth', purpose: 'approval' });
+    } else {
+      if (row.amount_minor == null || !row.currency) return null;
+      const above = (await this.core.ctx.settings.get('stepUpAbove')) as common.Money | null;
+      if (!above || above.currency !== row.currency || Number(row.amount_minor) <= above.amount) return null;
+      refuse = () => new AppError('STEP_UP_REQUIRED', `Approvals above ${amountText('money', { money: above })} need your password again`, { kind: 'reauth', purpose: 'approval' });
+    }
     if (!token) throw refuse();
     const idp = this.core.ctx.use('identity');
     let ok = false;

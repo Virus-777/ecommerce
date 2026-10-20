@@ -41,6 +41,7 @@ export const PAGES: Partial<Record<ScreenId, LazyExoticComponent<ComponentType>>
   'admin/notifications': lazy(() => import('../pages/admin/Notifications')),
   'admin/audit': lazy(() => import('../pages/admin/Audit')),
   'admin/audit-entry': lazy(() => import('../pages/admin/AuditEntry')),
+  'admin/backups': lazy(() => import('../pages/admin/Backups')),
   'ops/queues': lazy(() => import('../pages/ops/Queues')),
   'ops/inventory': lazy(() => import('../pages/ops/Inventory')),
   'ops/receiving': lazy(() => import('../pages/ops/Receiving')),

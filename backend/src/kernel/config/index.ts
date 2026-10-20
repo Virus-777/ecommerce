@@ -72,6 +72,13 @@ const schema = z.object({
   MEDIA_STORAGE: z.enum(['local', 'memory']).optional(),
   MEDIA_STORAGE_DIR: z.string().default('.data/media'),
   /**
+   * Backups (deploy/linux): the backup folder (read), the backup service's request and status folder, and where
+   * uploaded backups go. Without BACKUP_OPS_DIR (development machines) backups are unavailable in the Admin Center.
+   */
+  BACKUP_DIR: z.string().default('/var/backups/marketly'),
+  BACKUP_OPS_DIR: z.string().optional(),
+  BACKUP_UPLOAD_DIR: z.string().optional(),
+  /**
    * How media decodes and resizes images: sharp (real decoding, resizing and encoding; default) or dev (reads file
    * headers only and copies bytes: the default in tests, whose fixtures are header-only images)
    */
@@ -134,6 +141,8 @@ export interface Config {
   apiUrl: string;
   /** File storage for media: the server's disk (local, under dir) or memory (tests); image processing: sharp or dev (tests) */
   media: { storage: 'local' | 'memory'; dir: string; imageProcessor: 'sharp' | 'dev' };
+  /** Backups: null where the server has no backup service (BACKUP_OPS_DIR unset) */
+  backups: { dir: string; opsDir: string; uploadDir: string } | null;
   /** Webhook HMAC secrets per provider; `*` applies to any provider (development and tests only) */
   webhookSecrets: Record<string, string>;
   /** Development and tests: sign and accept dev-key tokens */
@@ -212,6 +221,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       dir: e.MEDIA_STORAGE_DIR,
       imageProcessor: e.MEDIA_IMAGE_PROCESSOR ?? (e.NODE_ENV === 'test' ? 'dev' : 'sharp'),
     },
+    backups: e.BACKUP_OPS_DIR ? { dir: e.BACKUP_DIR, opsDir: e.BACKUP_OPS_DIR, uploadDir: e.BACKUP_UPLOAD_DIR ?? `${e.BACKUP_OPS_DIR.replace(/[\/]+$/, '')}/uploads` } : null,
     webhookSecrets: { ...(devTokens ? { '*': 'dev-webhook-secret' } : {}), ...(e.WEBHOOK_SECRETS ? JSON.parse(e.WEBHOOK_SECRETS) : {}) },
     devTokens,
     devSigning: { file: e.DEV_SIGNING_KEY_FILE },

@@ -106,7 +106,7 @@ export interface ModuleSpec {
     consumes?: { name: string; does: string }[];
   };
   permissions?: { key: string; audience: 'staff' | 'seller'; desc: string; ownerOnly?: boolean; delegable?: boolean }[];
-  approvalActions?: { key: string; desc: string; limit: string; secondReviewer: string; approvers?: string }[];
+  approvalActions?: { key: string; desc: string; limit: string; secondReviewer: string; stepUp?: 'always'; approvers?: string }[];
   jobs?: { name: string; schedule: string; does: string }[];
   settings?: SettingSpec[];
   integrations?: { name: string; purpose: string }[];

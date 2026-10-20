@@ -57,8 +57,12 @@ export function signFileLink(secret: string, link: FileLink): string {
  * Verifies a request URL (path and query, as received) against the signing key. The file it names is
  * the one in the link: callers serve `link`, never their own reading of the URL.
  */
+/**
+ * `secret`: the signing key, or a function giving the key of the module that serves a bucket (undefined: no module
+ * serves it, so no link to it is valid).
+ */
 export function verifyFileLink(
-  secret: string,
+  secret: string | ((bucket: string) => string | undefined),
   url: string,
   now: Date,
   opts: { permanentBuckets: ReadonlySet<string> },
@@ -82,7 +86,9 @@ export function verifyFileLink(
   const exp = q.get('exp') ?? '';
   const ct = q.get('ct') ?? '';
   const cd = q.get('cd') ?? '';
-  const expected = Buffer.from(mac(secret, { bucket, key, exp, ct, cd }));
+  const key_ = typeof secret === 'string' ? secret : secret(bucket);
+  if (!key_) return { ok: false, reason: 'invalid' };
+  const expected = Buffer.from(mac(key_, { bucket, key, exp, ct, cd }));
   const given = Buffer.from(sig);
   if (expected.length !== given.length || !timingSafeEqual(expected, given)) return { ok: false, reason: 'invalid' };
   let expiresAt: Date | null = null;

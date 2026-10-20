@@ -85,6 +85,7 @@ export const ADMIN_NAV: NavEntry[] = [
     { key: 'settings', label: 'Settings', icon: 'settings', id: 'admin/settings' },
     { key: 'notifications', label: 'Notification templates', icon: 'bell-ring', id: 'admin/notifications' },
     { key: 'audit', label: 'Action history', icon: 'history', id: 'admin/audit' },
+    { key: 'backups', label: 'Backups', icon: 'hard-drive', id: 'admin/backups' },
   ] },
 ];
 
