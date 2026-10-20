@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "sideEffects": [
+    "**/*.css"
+  ],
   "description": "Shared code of the Marketly web apps: design stylesheet, UI components, icons, back-office layout, screen catalogue, links between apps, sample data and design tooling.",
   "exports": {
     "./ui": "./src/ui/index.ts",
