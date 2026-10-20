@@ -7,7 +7,7 @@ import { AppError } from '../../../kernel/errors/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type * as common from '../../../spec/common.js';
 import type { MetricDefinition, MetricInput, MetricOwnerChange, MetricSuggestion, ReportDefinition, ReportGroup, ReportQuery, ReportSchedule, SavedView, StaffRef } from '../../../spec/reports.js';
-import { GROUPS, METRICS, REPORTS, SELLER_GROUP, UNASSIGNED_OWNER, groupOf } from '../domain/catalogue.js';
+import { GROUPS, METRICS, REPORTS, SELLER_GROUP, SELLER_PERMISSION, UNASSIGNED_OWNER, groupOf } from '../domain/catalogue.js';
 
 /** An actor stored as JSON text (metric_owner_changes.changed_by) */
 function actorFromText(text: string): common.Actor {
@@ -373,9 +373,14 @@ export class Definitions {
     return r;
   }
 
-  async sellerReport(key: string): Promise<ReportRow> {
+  /**
+   * A seller report. The seller endpoints need reports.seller.view (the middleware checks it); a report with a
+   * permission of its own (Earnings and profit, Profit by product: finance.balances.view) also needs that one.
+   */
+  async sellerReport(key: string, by: Pick<Caller, 'principal' | 'can'>): Promise<ReportRow> {
     const r = await this.core.repo.getReport(key);
     if (!r || !r.active || r.audience !== 'seller') throw notFound('Report');
+    if (r.permission !== SELLER_PERMISSION && !(await this.core.principalCan(by.principal, r.permission, by.can))) throw new AppError('FORBIDDEN', `Opening ${r.title} needs ${r.permission}`, { permission: r.permission });
     return r;
   }
 
@@ -396,8 +401,15 @@ export class Definitions {
     return out;
   }
 
-  async sellerCatalogue(): Promise<ReportDefinition[]> {
-    return (await this.core.repo.listReports({ audience: 'seller', active: true })).filter((r) => r.group_key === SELLER_GROUP).map((r) => this.reportView(r));
+  /** Seller reports the caller may open (a report with its own permission is left out without it) */
+  async sellerCatalogue(by: Pick<Caller, 'principal' | 'can'>): Promise<ReportDefinition[]> {
+    const out: ReportDefinition[] = [];
+    for (const r of await this.core.repo.listReports({ audience: 'seller', active: true })) {
+      if (r.group_key !== SELLER_GROUP) continue;
+      if (r.permission !== SELLER_PERMISSION && !(await this.core.principalCan(by.principal, r.permission, by.can))) continue;
+      out.push(this.reportView(r));
+    }
+    return out;
   }
 
   async reportDefinition(key: string, by: Caller): Promise<{ report: ReportDefinition; definitions: MetricDefinition[] }> {

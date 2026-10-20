@@ -29,6 +29,7 @@ import {
 import type { ReportRow, SalesAgg, SalesFilter } from '../ports.js';
 import { invalid, type ReportsCore, type Settings } from './core.js';
 import type { Definitions } from './definitions.js';
+import { FinancialReports } from './financial.js';
 
 export type ReportScope = { kind: 'platform' } | { kind: 'seller'; sellerId: string };
 export type Period = 'today' | 'last_7_days' | 'last_14_days' | 'last_30_days';
@@ -51,23 +52,23 @@ export interface ResolvedQuery {
   filters: Record<string, unknown>;
 }
 
-interface TableColumn {
+export interface TableColumn {
   key: string;
   label: string;
   unit: string;
   align: 'left' | 'right';
 }
-interface Table {
+export interface Table {
   columns: TableColumn[];
   rows: Record<string, unknown>[];
   totals: Record<string, unknown>;
 }
-interface Callout {
+export interface Callout {
   kind: 'info' | 'warning';
   title: string;
   body: string;
 }
-interface Part {
+export interface Part {
   kpis: KpiValue[];
   series: Series[];
   split?: unknown[];
@@ -89,7 +90,7 @@ const MARKETPLACE_CALLOUT: Callout = {
   body: 'Sales by marketplace sellers belong to the sellers. The company earns the commission and fees on them, shown as Marketplace fee income in Marketplace finance.',
 };
 
-const col = (key: string, label: string, unit = 'text', align: 'left' | 'right' = unit === 'text' ? 'left' : 'right'): TableColumn => ({ key, label, unit, align });
+export const col = (key: string, label: string, unit = 'text', align: 'left' | 'right' = unit === 'text' ? 'left' : 'right'): TableColumn => ({ key, label, unit, align });
 /** commerce.gross_sales → gross_sales (series and column keys) */
 const suffix = (metricKey: string) => metricKey.slice(metricKey.indexOf('.') + 1);
 /** Average hours from a sum of minutes over n replies (0 without replies) */
@@ -131,10 +132,15 @@ export function twinsOf(current: Series[], compared: Series[]): Series[] {
 }
 
 export class Queries {
+  /** The financial statistics reports (seller earnings and profit, platform income, seller money, Official Store P&L) */
+  readonly financial: FinancialReports;
+
   constructor(
     private readonly core: ReportsCore,
     private readonly defs: Definitions,
-  ) {}
+  ) {
+    this.financial = new FinancialReports(core, this);
+  }
 
   /* ---------------------------------------------------------------- query resolution */
 
@@ -225,7 +231,7 @@ export class Queries {
     return new Date(times.length ? Math.max(...times) : this.core.now().getTime()).toISOString();
   }
 
-  private salesFilter(rq: ResolvedQuery, scope: ReportScope, range: DayRange, over: Partial<SalesFilter> = {}): SalesFilter {
+  salesFilter(rq: ResolvedQuery, scope: ReportScope, range: DayRange, over: Partial<SalesFilter> = {}): SalesFilter {
     const { start, end } = instantsOf(range, rq.timeZone);
     const ownerType = scope.kind === 'seller' ? 'seller' : rq.soldBy === 'official' ? 'official' : rq.soldBy === 'marketplace' ? 'seller' : undefined;
     return {
@@ -249,7 +255,7 @@ export class Queries {
     return (await this.core.repo.salesAgg(this.salesFilter(rq, scope, range, over), 'none'))[0] ?? emptyAgg();
   }
 
-  private money(amount: number, currency: string): Money {
+  money(amount: number, currency: string): Money {
     return { amount: Math.round(amount), currency };
   }
 
@@ -268,13 +274,13 @@ export class Queries {
     };
   }
 
-  private series(key: string, label: string, buckets: string[], g: Granularity, values: Map<string, number>): Series {
+  series(key: string, label: string, buckets: string[], g: Granularity, values: Map<string, number>): Series {
     return { key, label, points: buckets.map((b) => ({ x: b, y: values.get(b) ?? 0, label: dayLabel(b, g) })) };
   }
 
   /* ---------------------------------------------------------------- names for tables */
 
-  private async sellerNames(ids: string[]): Promise<Map<string, string>> {
+  async sellerNames(ids: string[]): Promise<Map<string, string>> {
     const out = new Map<string, string>();
     const real = ids.filter((id) => id && id !== OFFICIAL_KEY);
     if (ids.includes(OFFICIAL_KEY)) out.set(OFFICIAL_KEY, 'Official Store');
@@ -283,7 +289,7 @@ export class Queries {
     return out;
   }
 
-  private async productNames(ids: string[]): Promise<Map<string, string>> {
+  async productNames(ids: string[]): Promise<Map<string, string>> {
     const out = new Map<string, string>();
     const catalog = this.core.api('catalog');
     if (!catalog) return out;
@@ -346,12 +352,22 @@ export class Queries {
         return this.companyCostsReport(key, rq, cfg);
       case 'service.complaints':
         return this.complaintsReport(rq, scope);
+      case 'seller.earnings':
+        return this.financial.sellerEarnings(rq, scope);
+      case 'seller.profit_by_product':
+        return this.financial.profitByProduct(rq, scope);
+      case 'finance.platform_income':
+        return this.financial.platformIncome(rq);
+      case 'finance.seller_money':
+        return this.financial.sellerMoney(rq);
+      case 'trading.pnl':
+        return this.financial.tradingPnl(rq);
       default:
         return { kpis: [], series: [], callouts: [{ kind: 'warning', title: 'No figures yet', body: 'This report has no figures in this version.' }], unavailable: [key], models: [] };
     }
   }
 
-  private gross(a: SalesAgg, cfg: Settings) {
+  gross(a: SalesAgg, cfg: Settings) {
     return a.gross + (cfg.taxIncluded ? a.tax : 0);
   }
 
@@ -1591,9 +1607,9 @@ export interface SellerDashboardData {
   definitions: MetricDefinition[];
 }
 
-const emptyAgg = (): SalesAgg => ({ key: null, gross: 0, tax: 0, cancelled: 0, refunded: 0, orders: 0, units: 0, costedSales: 0, cost: 0, buyers: 0, platformDiscount: 0, sellerDiscount: 0 });
-const zeros = (cols: string[]): Record<string, number> & { key: null } => ({ key: null, ...Object.fromEntries(cols.map((c) => [c, 0])) }) as never;
-const humanize = (s: string) => (s.charAt(0).toUpperCase() + s.slice(1)).replace(/_/g, ' ');
+export const emptyAgg = (): SalesAgg => ({ key: null, gross: 0, tax: 0, cancelled: 0, refunded: 0, orders: 0, units: 0, costedSales: 0, cost: 0, buyers: 0, platformDiscount: 0, sellerDiscount: 0, shipping: 0, fee: 0, costedPlatformDiscount: 0 });
+export const zeros = (cols: string[]): Record<string, number> & { key: null } => ({ key: null, ...Object.fromEntries(cols.map((c) => [c, 0])) }) as never;
+export const humanize = (s: string) => (s.charAt(0).toUpperCase() + s.slice(1)).replace(/_/g, ' ');
 
 function itemsLabel(items: { title?: string; quantity?: number }[]): string {
   const units = items.reduce((n, i) => n + (i.quantity ?? 1), 0);

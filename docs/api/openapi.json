@@ -95732,7 +95732,7 @@
           "Seller API · Reports"
         ],
         "summary": "Reports available to sellers",
-        "description": "**Screens:** seller/reports",
+        "description": "Only the reports the caller may open: one with a permission of its own (finance.balances.view for Earnings and profit and Profit by product) is left out without it.\n\n**Screens:** seller/reports",
         "security": [
           {
             "bearer": []
@@ -95798,8 +95798,8 @@
         "tags": [
           "Seller API · Reports"
         ],
-        "summary": "Run a seller report (product sales, order trend, returns by reason, service performance)",
-        "description": "Always scoped to the caller's seller; sellerId, soldBy and other sellers' data are never accepted. Figures by order date, market time zone, stating how each metric is calculated.\n\n**Permission:** `reports.seller.view`\n\n**Screens:** seller/reports, seller/dashboard",
+        "summary": "Run a seller report (product sales, order trend, returns by reason, service performance, earnings and profit, profit by product)",
+        "description": "Always scoped to the caller's seller; sellerId, soldBy and other sellers' data are never accepted. Figures by order date, market time zone, stating how each metric is calculated. A report with a permission of its own (seller.earnings and seller.profit_by_product: finance.balances.view) is FORBIDDEN without it.\n\n**Permission:** `reports.seller.view`\n\n**Screens:** seller/reports, seller/dashboard",
         "security": [
           {
             "bearer": []

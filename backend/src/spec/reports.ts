@@ -1606,6 +1606,7 @@ export const endpoints = defineEndpoints({
     auth: "seller",
     scope: "own-seller",
     summary: "Reports available to sellers",
+    desc: "Only the reports the caller may open: one with a permission of its own (finance.balances.view for Earnings and profit and Profit by product) is left out without it.",
     response: () => z.array(ReportDefinition),
     status: 200,
     screens: ["seller/reports"],
@@ -1618,8 +1619,8 @@ export const endpoints = defineEndpoints({
     auth: "seller",
     permission: "reports.seller.view",
     scope: "own-seller",
-    summary: "Run a seller report (product sales, order trend, returns by reason, service performance)",
-    desc: "Always scoped to the caller's seller; sellerId, soldBy and other sellers' data are never accepted. Figures by order date, market time zone, stating how each metric is calculated.",
+    summary: "Run a seller report (product sales, order trend, returns by reason, service performance, earnings and profit, profit by product)",
+    desc: "Always scoped to the caller's seller; sellerId, soldBy and other sellers' data are never accepted. Figures by order date, market time zone, stating how each metric is calculated. A report with a permission of its own (seller.earnings and seller.profit_by_product: finance.balances.view) is FORBIDDEN without it.",
     params: () =>
       z.object({
         key: z.string(),
@@ -1627,7 +1628,7 @@ export const endpoints = defineEndpoints({
     body: () => ReportQuery,
     response: () => ReportResult,
     status: 200,
-    errors: ["VALIDATION_FAILED","RANGE_TOO_LARGE"],
+    errors: ["FORBIDDEN","VALIDATION_FAILED","RANGE_TOO_LARGE"],
     screens: ["seller/reports","seller/dashboard"],
     phase: 1,
   },

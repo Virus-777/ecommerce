@@ -52,7 +52,7 @@ describe('report library', () => {
   it('sellers get the seller reports only', async () => {
     const r = await h.call('GET', '/api/seller/reports/catalogue', h.tokens.seller(newId()));
     expect(r.status).toBe(200);
-    expect(r.body.map((x: any) => x.key).sort()).toEqual(['seller.order_trend', 'seller.product_sales', 'seller.returns_by_reason', 'seller.service_performance']);
+    expect(r.body.map((x: any) => x.key).sort()).toEqual(['seller.earnings', 'seller.order_trend', 'seller.product_sales', 'seller.profit_by_product', 'seller.returns_by_reason', 'seller.service_performance']);
   });
 });
 

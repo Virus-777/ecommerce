@@ -154,6 +154,7 @@ export async function harness() {
       catalog: {
         getProduct: async (id) => (products.has(id) ? ({ id, title: products.get(id)!.title } as never) : null),
         getProducts: async (ids) => ids.filter((id) => products.has(id)).map((id) => ({ product: { id, title: products.get(id)!.title, images: products.get(id)!.imageUrl ? [{ id: newId(), url: products.get(id)!.imageUrl, alt: products.get(id)!.title }] : [] } }) as never),
+        getCategoryPaths: async (ids) => Object.fromEntries(ids.map((id) => [id, { categoryId: id, names: ['Home', `Category ${id.slice(0, 4)}`], ids: [newId(), id] }])),
       },
       inventory: {
         getUnitCost: async (stockItemId) => (unitCosts.has(stockItemId) ? usd(unitCosts.get(stockItemId)!) : null),

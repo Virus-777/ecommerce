@@ -12,9 +12,9 @@ export const sellerRoutes = (service: ReportsService) =>
     /** GET /dashboard: Today at this seller: work tiles, dispatch deadlines, sales, payouts, performance, announcements */
     getSellerDashboard: async (i) => service.getSellerDashboard(i.sellerId, 'last_14_days', { canViewFinance: await i.can('finance.balances.view'), canViewServiceFees: await i.can('fulfillment-service.fees.view') }),
     /** GET /catalogue: Reports available to sellers */
-    getSellerCatalogue: async () => service.defs.sellerCatalogue(),
+    getSellerCatalogue: async (i) => service.defs.sellerCatalogue({ principal: i.principal, can: i.can }),
     /** POST /reports/{key}/query: Run a seller report (product sales, order trend, returns by reason, service performance) */
-    runSellerReport: async (i) => service.runSellerReport(i.params.key, i.body, i.sellerId),
+    runSellerReport: async (i) => service.runSellerReport(i.params.key, i.body, i.sellerId, { principal: i.principal, can: i.can }),
     /** POST /exports: Export a seller report as CSV */
     createSellerExport: async (i) => service.exports.request({ ...i.body, sellerId: i.sellerId }, { principal: { ...i.principal, sellerId: i.sellerId }, actor: i.actor, requestId: i.requestId, can: i.can }, 'seller'),
     /** GET /exports: My seller exports */

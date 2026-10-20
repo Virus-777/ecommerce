@@ -46,6 +46,30 @@ export interface SalesAgg {
   buyers: number;
   platformDiscount: number;
   sellerDiscount: number;
+  /** Shipping the customers paid (shipping_minor) */
+  shipping: number;
+  /** Marketplace fees net of fee refunds (fee_minor; rows without a booked fee count 0) */
+  fee: number;
+  /** Platform-funded discounts on the rows with a known cost (a seller's item sales include them) */
+  costedPlatformDiscount: number;
+}
+
+/** One seller offer's sales, refunds, fees and costs in a range (Profit by product) */
+export interface OfferProfitAgg {
+  offerId: string;
+  productId: string;
+  units: number;
+  /** item_minor + discount_platform_minor: what the seller's items sold for */
+  itemSales: number;
+  refunds: number;
+  fee: number;
+  cost: number;
+  /** The same over the rows with a known cost */
+  costedItemSales: number;
+  costedRefunds: number;
+  costedFee: number;
+  rows: number;
+  costedRows: number;
 }
 
 export interface DailyFilter {

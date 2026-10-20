@@ -56,8 +56,8 @@ export class ReportsService implements ReportsPublicApi {
     return this.queries.run(report, rq, { kind: 'platform' });
   }
 
-  async runSellerReport(key: string, query: ReportQuery | null | undefined, sellerId: string): Promise<ReportResult> {
-    const report = await this.defs.sellerReport(key);
+  async runSellerReport(key: string, query: ReportQuery | null | undefined, sellerId: string, by: Pick<Caller, 'principal' | 'can'>): Promise<ReportResult> {
+    const report = await this.defs.sellerReport(key, by);
     const rq = await this.queries.resolve(query, { seller: true });
     return this.queries.run(report, rq, { kind: 'seller', sellerId } satisfies ReportScope);
   }

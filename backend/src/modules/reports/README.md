@@ -34,7 +34,7 @@ Business reporting with stated meanings: metric definitions with a named owner a
 |---|---|---|---|---|
 | GET | `/api/seller/reports/dashboard` | Today at this seller: work tiles, dispatch deadlines, sales, payouts, performance, announcements | seller | `SellerDashboard` |
 | GET | `/api/seller/reports/catalogue` | Reports available to sellers | seller | `ReportDefinition[]` |
-| POST | `/api/seller/reports/reports/{key}/query` | Run a seller report (product sales, order trend, returns by reason, service performance) | seller<br>`reports.seller.view` | `ReportQuery` → `ReportResult` |
+| POST | `/api/seller/reports/reports/{key}/query` | Run a seller report (product sales, order trend, returns by reason, service performance, earnings and profit, profit by product) | seller<br>`reports.seller.view` | `ReportQuery` → `ReportResult` |
 | POST | `/api/seller/reports/exports` | Export a seller report as CSV _(audited, phase 2)_ | seller<br>`reports.seller.export` | `ExportInput` → `ExportJob` |
 | GET | `/api/seller/reports/exports` | My seller exports _(phase 2)_ | seller<br>`reports.seller.export` | Page<ExportJob> |
 | GET | `/api/seller/reports/exports/{id}` | Seller export status and link (requester only) _(phase 2)_ | seller<br>`reports.seller.export` | `ExportJob` |
