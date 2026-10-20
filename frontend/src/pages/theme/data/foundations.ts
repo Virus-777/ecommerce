@@ -68,6 +68,13 @@ export const SWATCH_GROUPS: SwatchGroup[] = [
     swatches: [
       { token: '--chart-1', hex: '#0F8A73 · #25A587', use: 'Official Store series' },
       { token: '--chart-2', hex: '#C77F14 · #BD7C1C', use: 'Marketplace sellers series' },
+      { token: '--chart-3', hex: '#3B6FD6 · #5B8DEB', use: 'Third series' },
+      { token: '--chart-4', hex: '#C2477F · #D1609A', use: 'Fourth series' },
+      { token: '--chart-5', hex: '#7A5BD0 · #9580E6', use: 'Fifth series' },
+      { token: '--chart-6', hex: '#D0503C · #E0644E', use: 'Sixth series (more fold into Other)' },
+      { token: '--chart-compare', hex: '#7F8D88 · #6F7F79', use: 'Comparison period, dashed' },
+      { token: '--chart-positive', hex: '#2F6BCF · #5B8DEB', use: 'Waterfall plus steps' },
+      { token: '--chart-negative', hex: '#C8472F · #E0644E', use: 'Waterfall minus steps' },
     ],
   },
 ];

@@ -120,9 +120,10 @@ describe('company trading and marketplace income stay apart', () => {
     expect(list.body.items).toHaveLength(1);
     const tr = await k.call('GET', `${ADMIN}/trading?from=${today()}&to=${today()}`, k.staff);
     expect(tr.status).toBe(200);
-    expect(tr.body).toMatchObject({ productSales: USD(9_000), buyingCost: USD(5_000), grossMargin: USD(4_000), discounts: USD(500), returnsCost: USD(4_000), netMargin: USD(4_000 - 500 - 4_000) });
+    // inventory is off here: the kettles have no cost of goods (uncosted), and the buying cost booked is stock bought, not taken off the margin
+    expect(tr.body).toMatchObject({ productSales: USD(9_000), costOfGoodsSold: USD(0), uncostedSales: USD(9_000), stockBought: USD(5_000), buyingCost: USD(0), grossMargin: USD(9_000), discounts: USD(500), returnsCost: USD(4_000), netMargin: USD(9_000 - 500 - 4_000) });
     expect(tr.body.target.salesTarget.amount).toBeGreaterThan(0);
-    expect(tr.body.daily).toEqual([{ date: today(), sales: USD(9_000), margin: USD(4_000) }]);
+    expect(tr.body.daily).toEqual([{ date: today(), sales: USD(9_000), margin: USD(9_000) }]);
   });
 
   it('counts only fees and ad charges as marketplace income, never seller sales', async () => {

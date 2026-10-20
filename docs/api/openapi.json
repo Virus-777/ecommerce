@@ -36665,8 +36665,8 @@
         "tags": [
           "Admin API · Finance"
         ],
-        "summary": "Company trading: product sales, buying cost, discounts, shipping, returns and margin",
-        "description": "**Permission:** `finance.trading.view`\n\n**Screens:** admin/official, admin/reports",
+        "summary": "Company trading: product sales, cost of goods sold, stock bought, discounts, shipping, returns and margin",
+        "description": "The margin uses the cost of goods sold (booked when an order is accepted), never the stock bought: a goods receipt raises stockBought and leaves the margin alone.\n\n**Permission:** `finance.trading.view`\n\n**Screens:** admin/official, admin/reports",
         "security": [
           {
             "bearer": []
@@ -71323,6 +71323,387 @@
         "x-phase": 1
       }
     },
+    "/api/seller/offers/offers/{id}/costs": {
+      "get": {
+        "operationId": "offers.listOfferCosts",
+        "tags": [
+          "Seller API · Offers"
+        ],
+        "summary": "Unit cost history of one own offer, newest first",
+        "description": "Newest effective_from first (ties: newest saved first). Any member who may see the offer may read it. Another seller's offer is NOT_FOUND.\n\n**Screens:** seller/offer",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from the previous response. Used by the Android app's infinite scroll.",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Opaque cursor from the previous response. Used by the Android app's infinite scroll."
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "1-based page number. Used by the website's numbered pages.",
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "1-based page number. Used by the website's numbered pages."
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Items per batch, 1–100, default 24",
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "Items per batch, 1–100, default 24"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/offers.OfferCost"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Pass as ?cursor= for the next batch (app). Null at the end."
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "totalPages": {
+                      "type": "integer"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "offers",
+        "x-area": "seller",
+        "x-auth": "seller",
+        "x-screens": [
+          "seller/offer"
+        ],
+        "x-phase": 1
+      }
+    },
+    "/api/seller/offers/offers/{id}/cost": {
+      "put": {
+        "operationId": "offers.setOfferCost",
+        "tags": [
+          "Seller API · Offers"
+        ],
+        "summary": "Set the unit cost of one own offer from a day on",
+        "description": "Adds a cost row (rows are never edited; a later row for the same day wins). unitCost ≥ 0 in the offer's currency; effectiveFrom defaults to today (market day), at most 400 days back (so old sales get a cost) and at most 1 day ahead. Publishes offers.offer.cost_changed.\n\n**Permission:** `offers.costs.manage`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `offers.offer.cost_changed`\n\n**Screens:** seller/offer, seller/products",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "unitCost": {
+                    "$ref": "#/components/schemas/Money"
+                  },
+                  "effectiveFrom": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date",
+                    "description": "Default today (market day)"
+                  },
+                  "note": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "unitCost"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/offers.OfferCost"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "offers",
+        "x-area": "seller",
+        "x-auth": "seller",
+        "x-permission": "offers.costs.manage",
+        "x-screens": [
+          "seller/offer",
+          "seller/products"
+        ],
+        "x-events": [
+          "offers.offer.cost_changed"
+        ],
+        "x-audited": true,
+        "x-phase": 1
+      }
+    },
+    "/api/seller/offers/costs": {
+      "post": {
+        "operationId": "offers.setOfferCosts",
+        "tags": [
+          "Seller API · Offers"
+        ],
+        "summary": "Set the unit cost of several own offers (1 to 500)",
+        "description": "Same rules as PUT /offers/{id}/cost for each item; each item is saved or refused on its own (errors lists the refused ones with NOT_FOUND or VALIDATION_FAILED). One offers.offer.cost_changed per saved row. An empty or longer list is VALIDATION_FAILED.\n\n**Permission:** `offers.costs.manage`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `offers.offer.cost_changed`\n\n**Screens:** seller/products, seller/bulk-update",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/offers.OfferCostItem"
+                    }
+                  }
+                },
+                "required": [
+                  "items"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "saved": {
+                      "type": "integer"
+                    },
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/offers.OfferCostError"
+                      }
+                    }
+                  },
+                  "required": [
+                    "saved",
+                    "errors"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "offers",
+        "x-area": "seller",
+        "x-auth": "seller",
+        "x-permission": "offers.costs.manage",
+        "x-screens": [
+          "seller/products",
+          "seller/bulk-update"
+        ],
+        "x-events": [
+          "offers.offer.cost_changed"
+        ],
+        "x-audited": true,
+        "x-phase": 1
+      }
+    },
     "/api/seller/offers/offers/exports": {
       "post": {
         "operationId": "offers.exportOwnOffers",
@@ -71525,7 +71906,7 @@
           "Seller API · Offers"
         ],
         "summary": "Download a CSV template prefilled with this seller's SKUs, prices and quantities",
-        "description": "Columns: seller_sku, price, quantity. Leaving a column out keeps the current value.\n\n**Permission:** `offers.bulk.update`\n\n**Screens:** seller/bulk-update\n\n**Launch phase:** 2",
+        "description": "Columns: seller_sku, price, quantity, unit_cost (the unit cost in force today, empty when none is set). Leaving a column out, or a cell empty, keeps the current value.\n\n**Permission:** `offers.bulk.update`\n\n**Screens:** seller/bulk-update\n\n**Launch phase:** 2",
         "security": [
           {
             "bearer": []
@@ -72064,7 +72445,7 @@
           "Seller API · Offers"
         ],
         "summary": "Apply the valid rows",
-        "description": "Prices are changed here; quantities go to inventory as adjustments with reason 'Bulk update', the job id and the caller's name. Error rows are skipped.\n\n**Permission:** `offers.bulk.update`\n\n**Publishes:** `offers.bulk_update.applied`, `offers.offer.price_changed`\n\n**Screens:** seller/bulk-update\n\n**Launch phase:** 2",
+        "description": "Prices are changed here; quantities go to inventory as adjustments with reason 'Bulk update', the job id and the caller's name; unit costs are saved effective today (offers.offer.cost_changed per row). Rows that change a unit cost need offers.costs.manage as well (FORBIDDEN, nothing applied). Error rows are skipped.\n\n**Permission:** `offers.bulk.update`\n\n**Publishes:** `offers.bulk_update.applied`, `offers.offer.price_changed`, `offers.offer.cost_changed`\n\n**Screens:** seller/bulk-update\n\n**Launch phase:** 2",
         "security": [
           {
             "bearer": []
@@ -72170,7 +72551,8 @@
         ],
         "x-events": [
           "offers.bulk_update.applied",
-          "offers.offer.price_changed"
+          "offers.offer.price_changed",
+          "offers.offer.cost_changed"
         ],
         "x-phase": 2
       }
@@ -95858,7 +96240,7 @@
           "Seller API · Reports"
         ],
         "summary": "Reports available to sellers",
-        "description": "**Screens:** seller/reports",
+        "description": "Only the reports the caller may open: one with a permission of its own (finance.balances.view for Earnings and profit and Profit by product) is left out without it.\n\n**Screens:** seller/reports",
         "security": [
           {
             "bearer": []
@@ -95924,8 +96306,8 @@
         "tags": [
           "Seller API · Reports"
         ],
-        "summary": "Run a seller report (product sales, order trend, returns by reason, service performance)",
-        "description": "Always scoped to the caller's seller; sellerId, soldBy and other sellers' data are never accepted. Figures by order date, market time zone, stating how each metric is calculated.\n\n**Permission:** `reports.seller.view`\n\n**Screens:** seller/reports, seller/dashboard",
+        "summary": "Run a seller report (product sales, order trend, returns by reason, service performance, earnings and profit, profit by product)",
+        "description": "Always scoped to the caller's seller; sellerId, soldBy and other sellers' data are never accepted. Figures by order date, market time zone, stating how each metric is calculated. A report with a permission of its own (seller.earnings and seller.profit_by_product: finance.balances.view) is FORBIDDEN without it.\n\n**Permission:** `reports.seller.view`\n\n**Screens:** seller/reports, seller/dashboard",
         "security": [
           {
             "bearer": []
@@ -173384,7 +173766,8 @@
             "$ref": "#/components/schemas/Money"
           },
           "margin": {
-            "$ref": "#/components/schemas/Money"
+            "$ref": "#/components/schemas/Money",
+            "description": "Sales less the cost of goods sold of the day"
           }
         },
         "required": [
@@ -173518,19 +173901,35 @@
           },
           "costBasis": {
             "type": "string",
-            "description": "e.g. weighted average buying cost at receipt"
+            "description": "How costOfGoodsSold is valued, e.g. weighted average buying cost when the order was accepted"
           },
           "productSales": {
-            "$ref": "#/components/schemas/Money"
+            "$ref": "#/components/schemas/Money",
+            "description": "Official Store item sales before discounts, less cancellations, by booking day"
+          },
+          "costOfGoodsSold": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Unit cost (inventory weighted average buying cost) × quantity of the items sold, booked when the order is accepted and reversed in proportion on cancellation. Items with no unit cost add nothing: see uncostedSales"
+          },
+          "uncostedSales": {
+            "$ref": "#/components/schemas/Money",
+            "description": "The part of productSales whose items had no unit cost when sold (inventory off or no cost recorded): counted in the margin with no cost"
+          },
+          "stockBought": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Buying cost of goods received from suppliers and other buying costs booked (purchasing receipts). Stock bought, not the cost of what was sold: never taken off the margin"
           },
           "buyingCost": {
-            "$ref": "#/components/schemas/Money"
+            "$ref": "#/components/schemas/Money",
+            "description": "Deprecated: equals costOfGoodsSold (until 2026-10-21 it was the stock bought). Read costOfGoodsSold or stockBought"
           },
           "grossMargin": {
-            "$ref": "#/components/schemas/Money"
+            "$ref": "#/components/schemas/Money",
+            "description": "productSales − costOfGoodsSold"
           },
           "grossMarginPct": {
-            "type": "number"
+            "type": "number",
+            "description": "grossMargin as % of productSales"
           },
           "discounts": {
             "$ref": "#/components/schemas/Money",
@@ -173549,7 +173948,8 @@
             "$ref": "#/components/schemas/Money"
           },
           "netMargin": {
-            "$ref": "#/components/schemas/Money"
+            "$ref": "#/components/schemas/Money",
+            "description": "grossMargin − discounts − shippingExpense − returnsCost − writeOffs − chargebackLosses + supplier credits"
           },
           "returnsPctOfSales": {
             "type": "number"
@@ -173589,6 +173989,9 @@
           "range",
           "costBasis",
           "productSales",
+          "costOfGoodsSold",
+          "uncostedSales",
+          "stockBought",
           "buyingCost",
           "grossMargin",
           "grossMarginPct",
@@ -183802,6 +184205,25 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "unitCost": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Seller views only (Seller Center offer detail and the offer write responses): the seller's unit cost in force today (offer_costs), null when none is set. Never filled for customers or staff: a seller's costs are private"
+          },
+          "unitCostFrom": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "description": "Seller views only: the market day unitCost took effect"
           }
         },
         "required": [
@@ -183831,6 +184253,129 @@
           "termsVersion",
           "createdAt",
           "updatedAt"
+        ]
+      },
+      "offers.OfferCost": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "offerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "productId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "unitCost": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "effectiveFrom": {
+            "type": "string",
+            "format": "date",
+            "description": "Market day the cost starts. It applies to sales from that day until the next later cost of the offer"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "e.g. 'new supplier'"
+          },
+          "setBy": {
+            "$ref": "#/components/schemas/offers.OfferCostSetter"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "offerId",
+          "productId",
+          "unitCost",
+          "effectiveFrom",
+          "setBy",
+          "createdAt"
+        ]
+      },
+      "offers.OfferCostSetter": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The seller member's account"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "offers.OfferCostItem": {
+        "type": "object",
+        "properties": {
+          "offerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "unitCost": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Zero or more, in the offer's currency"
+          },
+          "effectiveFrom": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "description": "Default today (market day); at most 400 days back and 1 day ahead"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "offerId",
+          "unitCost"
+        ]
+      },
+      "offers.OfferCostError": {
+        "type": "object",
+        "properties": {
+          "offerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "NOT_FOUND",
+              "VALIDATION_FAILED"
+            ],
+            "description": "NOT_FOUND: not one of this seller's offers; VALIDATION_FAILED: see message"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "offerId",
+          "code",
+          "message"
         ]
       },
       "offers.CompareAtPrice": {
@@ -185576,6 +186121,17 @@
               ]
             },
             "description": "Missing product content shown under the name (e.g. 'Missing images and identifiers'); empty when complete"
+          },
+          "unitCost": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The seller's unit cost in force today (the products list column); null when none is set. Private to the seller"
           }
         },
         "required": [
@@ -186101,6 +186657,10 @@
           "stockChanges": {
             "type": "integer"
           },
+          "costChanges": {
+            "type": "integer",
+            "description": "Seller files: rows that set a new unit cost (unit_cost column)"
+          },
           "pendingApproval": {
             "type": "integer"
           },
@@ -186118,6 +186678,7 @@
           "unchanged",
           "priceChanges",
           "stockChanges",
+          "costChanges",
           "pendingApproval",
           "applied",
           "skipped"
@@ -186177,6 +186738,28 @@
               "null"
             ]
           },
+          "unitCostFrom": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Seller files: the unit cost in force when the file was read"
+          },
+          "unitCostTo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Seller files: the unit cost the row sets, effective today (null when the row leaves the cost as it is)"
+          },
           "result": {
             "type": "string",
             "enum": [
@@ -186230,7 +186813,8 @@
               "price_change_too_large",
               "offer_removed",
               "not_a_number",
-              "duplicate_row"
+              "duplicate_row",
+              "unit_cost_invalid"
             ],
             "description": "Stable code"
           },
@@ -198248,8 +198832,12 @@
               "last_30_days",
               "last_90_days",
               "month_to_date",
+              "quarter_to_date",
+              "year_to_date",
+              "last_12_months",
               "custom"
-            ]
+            ],
+            "description": "Days ending today in market time; quarter_to_date from the first day of the calendar quarter, year_to_date from 1 January, last_12_months from the day after the same date last year (at most maxRangeDays)"
           },
           "range": {
             "anyOf": [
@@ -198327,7 +198915,8 @@
               "day",
               "week",
               "month"
-            ]
+            ],
+            "description": "Series buckets (weeks start on Monday). Default: day up to 31 days, week up to 92, month beyond"
           },
           "compare": {
             "type": [
@@ -198336,8 +198925,10 @@
             ],
             "enum": [
               "none",
-              "previous_period"
-            ]
+              "previous_period",
+              "same_period_last_year"
+            ],
+            "description": "previous_period: the same number of days just before the range; same_period_last_year: the same calendar dates one year earlier (29 February becomes 28 February). Gives KPI deltas, meta.compareRange and a <key>:compare twin of every series"
           },
           "filters": {
             "description": "Report-specific filters from FilterSpec"
@@ -198390,7 +198981,8 @@
         "type": "object",
         "properties": {
           "key": {
-            "type": "string"
+            "type": "string",
+            "description": "With a comparison, every series has a twin keyed <key>:compare"
           },
           "label": {
             "type": "string"
@@ -198398,7 +198990,7 @@
           "points": {
             "type": "array",
             "items": {},
-            "description": "{ x: date, y: number }"
+            "description": "{ x: date (first day of the bucket), y: number, label } . On a <key>:compare twin x and label are the current period's bucket at the same position (so both draw on one axis), y is the comparison period's value (null when the comparison has no bucket there) and compareX is the comparison bucket's own first day"
           }
         },
         "required": [
@@ -198411,7 +199003,7 @@
         "type": "object",
         "properties": {
           "meta": {
-            "description": "{ reportKey, title, range, dateBasis, currency, timeZone, taxIncluded, freshAsOf, mayStillChange, definitionsVersion, compareRange?, scope: platform|seller }"
+            "description": "{ reportKey, title, range, dateBasis, dateBasisLabel, currency, timeZone, taxIncluded, freshAsOf, mayStillChange, definitionsVersion, compare?: previous_period|same_period_last_year, compareRange? (the dates the :compare twins hold), granularity, scope: platform|seller }"
           },
           "kpis": {
             "type": "array",

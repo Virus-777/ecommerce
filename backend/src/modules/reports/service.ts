@@ -56,8 +56,8 @@ export class ReportsService implements ReportsPublicApi {
     return this.queries.run(report, rq, { kind: 'platform' });
   }
 
-  async runSellerReport(key: string, query: ReportQuery | null | undefined, sellerId: string): Promise<ReportResult> {
-    const report = await this.defs.sellerReport(key);
+  async runSellerReport(key: string, query: ReportQuery | null | undefined, sellerId: string, by: Pick<Caller, 'principal' | 'can'>): Promise<ReportResult> {
+    const report = await this.defs.sellerReport(key, by);
     const rq = await this.queries.resolve(query, { seller: true });
     return this.queries.run(report, rq, { kind: 'seller', sellerId } satisfies ReportScope);
   }
@@ -119,6 +119,11 @@ export class ReportsService implements ReportsPublicApi {
   }
 
   /* ---------------------------------------------------------------- events consumed */
+
+  /** offers.offer.cost_changed: re-cost the seller's rows of that offer from the day the cost starts */
+  async onCostChangedFromOffers(event: EventPayload<'offers.offer.cost_changed'>, env?: Partial<Env>): Promise<void> {
+    return this.readModels.onOfferCostChanged(event, this.env(env));
+  }
 
   /** orders.order.placed: fact_order_items rows with placement date; fact_customers */
   async onOrderPlacedFromOrders(event: EventPayload<'orders.order.placed'>, env?: Partial<Env>): Promise<void> {
@@ -275,6 +280,11 @@ export class ReportsService implements ReportsPublicApi {
   /** Job reports.pull-daily (daily 02:30 market time): Pull figures that have no event: search.zeroResultStats (unavailable searches), finance fee income per seller and day (finance.marketplaceIncomeByDay), advertising displays/clicks/dismissals and attributed purchases (advertising.dailyPerformance), inventory unit costs for Official Store items */
   async pullDaily(): Promise<void> {
     return this.readModels.pullDaily();
+  }
+
+  /** Job reports.pull-finance-recent (every 15 min): today and yesterday into the finance facts, and the item fees changed since the last run */
+  async pullFinanceRecent(): Promise<void> {
+    return this.readModels.pullFinanceRecent();
   }
 
   /**

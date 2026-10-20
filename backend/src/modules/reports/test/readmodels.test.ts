@@ -351,7 +351,7 @@ describe('read model health', () => {
   it('lists every read model with rows and state; rebuilds run in the check-lag job; one rebuild at a time', async () => {
     const list = await h.call('GET', '/api/admin/reports/read-models', h.tokens.staff());
     expect(list.status).toBe(200);
-    expect(list.body.map((m: any) => m.key)).toEqual(['order_items', 'refunds', 'returns', 'marketplace_finance', 'service', 'marketly_fulfillment', 'discovery', 'search_misses', 'customers', 'campaigns']);
+    expect(list.body.map((m: any) => m.key)).toEqual(['order_items', 'refunds', 'returns', 'marketplace_finance', 'company_finance', 'seller_balances', 'service', 'marketly_fulfillment', 'discovery', 'search_misses', 'customers', 'campaigns']);
     const items = list.body.find((m: any) => m.key === 'order_items');
     expect(items.rows).toBeGreaterThan(0);
     expect(items.state).toBe('live');

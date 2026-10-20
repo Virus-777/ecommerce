@@ -1,7 +1,7 @@
 /**
- * Bulk price (and seller quantity) files: template, upload and parse into a preview, apply the ready
- * rows (seller quantities through inventory; Official Store rows above the caller's limit become
- * approval requests), correction report, expiry. Nothing changes until apply.
+ * Bulk price (and seller quantity and unit cost) files: template, upload and parse into a preview, apply the ready
+ * rows (seller quantities through inventory, seller unit costs effective the day they are applied; Official Store
+ * rows above the caller's limit become approval requests), correction report, expiry. Nothing changes until apply.
  */
 import { AppError, isAppError } from '../../../kernel/errors/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
@@ -11,8 +11,9 @@ import type { BulkRowError, BulkUpdateJob, BulkUpdateTotals, FileLink, StockCue 
 import { changePct, formatMoney, parseCsv, parsePrice, toCsv } from '../domain/rules.js';
 import { bulkUpdateJobMachine } from '../domain/state-machines.js';
 import { actorFromText, actorText, bulkJob, bulkReasonOf, bulkRow, EMPTY_TOTALS, isoReq, money, totalsOf } from '../mappers.js';
-import type { BulkJobRec, BulkRowRec, OfferRec } from '../ports.js';
+import type { BulkJobRec, BulkRowRec, CostRec, OfferRec } from '../ports.js';
 import { invalidField, notFound, Part, SYSTEM, type By } from './core.js';
+import type { CurrentCost } from './costs.js';
 
 type Owner = { ownerType: 'seller'; sellerId: string } | { ownerType: 'official'; sellerId: null };
 
@@ -46,8 +47,13 @@ export class BulkPart extends Part {
 
   async template(sellerId: string, by: By): Promise<FileLink> {
     const rows = await this.repo.allOffers({ ownerType: 'seller', sellerId, excludeStatuses: ['removed'] }, 10_000);
-    const stock = await this.parts.views.stock(rows, sellerId);
-    const csv = toCsv([['seller_sku', 'price', 'quantity'], ...rows.map((r) => [r.seller_sku, (r.price_amount / 100).toFixed(2), stock.get(r.id)?.available ?? 0])]);
+    const [stock, costs] = await Promise.all([this.parts.views.stock(rows, sellerId), this.parts.costs.current(rows.map((r) => r.id))]);
+    // unit_cost: the cost in force today, empty when none is set (an empty cell keeps the cost as it is)
+    const cost = (id: string) => {
+      const c = costs.get(id);
+      return c ? (c.unitCost.amount / 100).toFixed(2) : '';
+    };
+    const csv = toCsv([['seller_sku', 'price', 'quantity', 'unit_cost'], ...rows.map((r) => [r.seller_sku, (r.price_amount / 100).toFixed(2), stock.get(r.id)?.available ?? 0, cost(r.id)])]);
     return (await this.fileLink({ ownerType: 'seller', sellerId }, `offers-${this.core.today()}.csv`, csv, 'export', by)).link;
   }
 
@@ -107,9 +113,12 @@ export class BulkPart extends Part {
     const skuCol = header.findIndex((h) => h === 'seller_sku' || h === 'sku');
     const priceCol = header.indexOf('price');
     const qtyCol = header.indexOf('quantity');
+    const costCol = header.indexOf('unit_cost');
     if (skuCol < 0) return fail(`The first row must name the columns: ${owner.ownerType === 'seller' ? 'seller_sku, price, quantity' : 'sku, price'}`);
     if (owner.ownerType === 'official' && qtyCol >= 0) return fail('Quantities are not accepted in Official Store price files; company stock changes go through inventory adjustments');
-    if (priceCol < 0 && qtyCol < 0) return fail('The file needs a price or a quantity column');
+    // unit costs are the seller's own (the Official Store's buying cost comes from inventory)
+    if (owner.ownerType === 'official' && costCol >= 0) return fail('Unit costs are not accepted in Official Store price files');
+    if (priceCol < 0 && qtyCol < 0 && costCol < 0) return fail('The file needs a price, a quantity or a unit_cost column');
     const max = Number(await this.core.setting('bulkMaxRows')) || 5000;
     const data = table.slice(1);
     if (data.length > max) return fail(`The file has ${data.length} rows; the limit is ${max}`);
@@ -118,10 +127,11 @@ export class BulkPart extends Part {
     const bySku = new Map(offers.map((o) => [o.seller_sku.toLowerCase(), o]));
     // stock and categories only of the offers the file names (not of every offer the owner has)
     const named = [...new Set(data.flatMap((cells) => bySku.get((cells[skuCol] ?? '').trim().toLowerCase()) ?? []))];
-    const [stock, products, minSetting] = await Promise.all([
+    const [stock, products, minSetting, costs] = await Promise.all([
       owner.ownerType === 'seller' ? this.parts.views.stock(named.filter((o) => o.status !== 'removed'), owner.sellerId) : new Map<string, StockCue>(),
       this.core.products(named.map((o) => o.product_id)),
       this.core.setting('minimumPriceByCategory'),
+      costCol >= 0 ? this.parts.costs.current(named.map((o) => o.id)) : new Map<string, CurrentCost>(),
     ]);
     const mins = (minSetting ?? {}) as Record<string, number>;
     const seen = new Set<string>();
@@ -132,7 +142,22 @@ export class BulkPart extends Part {
       const offer = bySku.get(sku.toLowerCase());
       const rawPrice = priceCol >= 0 ? (cells[priceCol] ?? '').trim() : '';
       const rawQty = qtyCol >= 0 ? (cells[qtyCol] ?? '').trim() : '';
-      const row: BulkRowRec = { job_id: job.id, row_no: i + 2, seller_sku: sku, offer_id: offer?.id ?? null, price_from: offer ? Number(offer.price_amount) : null, price_to: null, qty_from: offer ? (stock.get(offer.id)?.available ?? null) : null, qty_to: null, result: 'ready', error_code: null, error_message: null };
+      const rawCost = costCol >= 0 ? (cells[costCol] ?? '').trim() : '';
+      const row: BulkRowRec = {
+        job_id: job.id,
+        row_no: i + 2,
+        seller_sku: sku,
+        offer_id: offer?.id ?? null,
+        price_from: offer ? Number(offer.price_amount) : null,
+        price_to: null,
+        qty_from: offer ? (stock.get(offer.id)?.available ?? null) : null,
+        qty_to: null,
+        cost_from: offer ? (costs.get(offer.id)?.unitCost.amount ?? null) : null,
+        cost_to: null,
+        result: 'ready',
+        error_code: null,
+        error_message: null,
+      };
       const error = (code: BulkRowError['code'], message: string) => {
         row.result = 'error';
         row.error_code = code;
@@ -141,7 +166,7 @@ export class BulkPart extends Part {
       if (!sku || !offer) error('unknown_sku', sku ? `SKU ${sku} is not one of your offers. Check the spelling or create the offer first.` : 'The SKU is empty.');
       else if (seen.has(sku.toLowerCase())) error('duplicate_row', `SKU ${sku} appears more than once; keep one row per SKU.`);
       else if (offer.status === 'removed') error('offer_removed', `The offer for ${sku} was removed; it cannot be updated.`);
-      else if (!rawPrice && !rawQty) error('price_missing', 'Enter a price, a quantity or both.');
+      else if (!rawPrice && !rawQty && !rawCost) error('price_missing', costCol >= 0 ? 'Enter a price, a quantity or a unit cost.' : 'Enter a price, a quantity or both.');
       else {
         if (rawPrice) {
           const p = parsePrice(rawPrice);
@@ -156,17 +181,26 @@ export class BulkPart extends Part {
           else if (Number(rawQty) < 0) error('negative_quantity', 'Quantity cannot be negative; enter 0 for out of stock.');
           else row.qty_to = Number(rawQty);
         }
+        if (row.result === 'ready' && rawCost) {
+          const c = parsePrice(rawCost);
+          if (rawCost.startsWith('-')) error('unit_cost_invalid', 'The unit cost cannot be negative; enter 0 for an item that costs you nothing.');
+          else if (c === null) error('not_a_number', `Unit cost "${rawCost}" is not a number, e.g. 12.50.`);
+          else row.cost_to = c;
+        }
       }
       if (sku) seen.add(sku.toLowerCase());
       if (row.result === 'ready') {
         const priceChange = row.price_to !== null && row.price_to !== row.price_from;
         const stockChange = row.qty_to !== null && row.qty_to !== row.qty_from;
-        if (!priceChange && !stockChange) row.result = 'unchanged';
+        const costChange = row.cost_to !== null && row.cost_to !== row.cost_from;
+        if (!priceChange && !stockChange && !costChange) row.result = 'unchanged';
         else {
           if (priceChange) totals.priceChanges++;
           if (stockChange) totals.stockChanges++;
+          if (costChange) totals.costChanges++;
           if (!priceChange) row.price_to = null;
           if (!stockChange) row.qty_to = null;
+          if (!costChange) row.cost_to = null;
         }
       }
       totals[row.result === 'error' ? 'errors' : row.result === 'unchanged' ? 'unchanged' : 'ready']++;
@@ -198,6 +232,10 @@ export class BulkPart extends Part {
         });
       }
     }
+    // unit costs need their own permission: updating prices and stock does not let a member set costs
+    if (ready.some((r) => r.cost_to != null) && !(by.principal && (await this.ctx.can(by.principal, 'offers.costs.manage')))) {
+      throw new AppError('FORBIDDEN', 'This file changes unit costs, which needs the permission to manage unit costs. Remove the unit_cost column or ask the account owner.');
+    }
     const started = await this.repo.transaction(async (tx) => {
       const locked = (await tx.get('bulk_update_jobs', job.id, { forUpdate: true }))!;
       const state = bulkUpdateJobMachine.next(locked.state as never, 'apply');
@@ -208,6 +246,7 @@ export class BulkPart extends Part {
     totals.skipped = 0;
     totals.pendingApproval = 0;
     const qtyRows: { row: BulkRowRec; stockItemId: string; newAvailable: number }[] = [];
+    const costRows: CostRec[] = [];
     try {
       for (const r of ready) {
         const offer = offers.get(r.offer_id!);
@@ -233,6 +272,8 @@ export class BulkPart extends Part {
             continue;
           }
         }
+        // effective the day the file is applied; saved together after the loop
+        if (r.cost_to != null && owner.ownerType === 'seller') costRows.push(this.parts.costs.bulkRow(offer, r.cost_to, by));
         if (r.qty_to !== null) qtyRows.push({ row: r, stockItemId: offer.stock_item_id, newAvailable: r.qty_to });
         if (r.qty_to === null || r.price_to !== null) {
           await this.repo.updateBulkRow(job.id, r.row_no, { result });
@@ -240,6 +281,7 @@ export class BulkPart extends Part {
           else if (r.qty_to === null) totals.applied++;
         }
       }
+      await this.parts.costs.save(costRows, by);
       if (qtyRows.length && owner.ownerType === 'seller') {
         const res = await this.ctx.use('inventory').applyBulkQuantities(owner.sellerId, qtyRows.map((q) => ({ stockItemId: q.stockItemId, newAvailable: q.newAvailable })), job.id, by.actor);
         // the first answer per stock item

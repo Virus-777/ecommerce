@@ -78,7 +78,7 @@ describe('salesAgg', () => {
 
   it('totals: distinct orders and buyers, units, costed sales and cost', async () => {
     expect(await repo.salesAgg(range, 'none')).toEqual([
-      { key: null, gross: 8500, tax: 240, cancelled: 0, refunded: 0, orders: 3, units: 5, costedSales: 4000, cost: 2500, buyers: 2, platformDiscount: 100, sellerDiscount: 50 },
+      { key: null, gross: 8500, tax: 240, cancelled: 0, refunded: 0, orders: 3, units: 5, costedSales: 4000, cost: 2500, buyers: 2, platformDiscount: 100, sellerDiscount: 50, shipping: 0, fee: 0, costedPlatformDiscount: 0 },
     ]);
   });
 
@@ -102,7 +102,7 @@ describe('salesAgg', () => {
     expect((await repo.salesAgg(f, 'seller_id')).map((r) => [r.key, r.gross])).toEqual([[a, 300], [b, 200], [null, 700]]);
     expect((await repo.salesAgg(f, 'owner_type')).map((r) => [r.key, r.gross])).toEqual([['official', 700], ['seller', 500]]);
     expect(await repo.salesAgg({ ...f, categoryId: newId() }, 'none')).toEqual([
-      { key: null, gross: 0, tax: 0, cancelled: 0, refunded: 0, orders: 0, units: 0, costedSales: 0, cost: 0, buyers: 0, platformDiscount: 0, sellerDiscount: 0 },
+      { key: null, gross: 0, tax: 0, cancelled: 0, refunded: 0, orders: 0, units: 0, costedSales: 0, cost: 0, buyers: 0, platformDiscount: 0, sellerDiscount: 0, shipping: 0, fee: 0, costedPlatformDiscount: 0 },
     ]);
     expect(await repo.salesAgg({ ...f, categoryId: newId() }, 'seller_id')).toEqual([]);
   });

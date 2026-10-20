@@ -126,7 +126,7 @@ the existing shape `{ key, label, amount?: Money, sharePct?, ... }`. A waterfall
    orders of the period, refunds on them so far); ad spend, service fees, labels, adjustments and paid out **by
    charge date** (fact_marketplace_finance_daily). A callout says so. Net earnings = item sales + shipping
    charged − refunds − fees − ad spend − service fees − labels ± adjustments. Profit = net earnings − product
-   cost of the sales that have a cost; margin = profit ÷ item sales of costed sales.
+   cost of the sales that have a cost; margin = profit ÷ item sales (Profit by product: ÷ the item sales that have a cost).
    Test: for a closed period where every order is delivered, net earnings equal the seller's ledger entries for
    those orders and charges (payouts excluded).
    Breakdowns: `waterfall` (item sales → … → net earnings → product cost → profit), `fees_by_type`.
@@ -151,8 +151,16 @@ the existing shape `{ key, label, amount?: Money, sharePct?, ... }`. A waterfall
 5. `trading.pnl` — "Official Store profit and loss", staff, `reports.trading.view`. Series/KPIs:
    `trading.official_sales`, `trading.buying_cost`, `trading.gross_margin`, `trading.discounts`,
    `trading.shipping_expense`, `trading.returns_cost`, `trading.write_offs`, `trading.chargeback_losses`,
-   `trading.net_margin`, `trading.net_margin_pct`. Breakdown `waterfall`. Table per period. Same figures as
-   `GET /api/admin/finance/trading` for the same range (test).
+   `trading.net_margin`, `trading.net_margin_pct`, `trading.stock_bought`. Breakdown `waterfall`. Table per period.
+   Changed 2026-10-21: sales, `trading.buying_cost` (now labelled "Cost of goods sold") and gross margin come from
+   the order facts exactly as `trading.margin` (test); finance's trading `buying_cost` entries are booked when stock
+   is received from a supplier, so they show as `trading.stock_bought` and are not taken off the margin. The other
+   lines are finance's trading lines by booking day, the same as `GET /api/admin/finance/trading` (test); discounts
+   are shown but not taken off again (sales are after discounts). `platform.official_net_margin` is this net margin.
+   Also 2026-10-21: `GET /api/admin/finance/trading` tells the same story. finance books a `cost_of_goods` trading
+   entry with each Official Store sale (inventory unit cost × quantity, reversed in proportion on cancellation);
+   its grossMargin = productSales − costOfGoodsSold, `stockBought` holds the goods receipts, `uncostedSales` the
+   sales with no cost, and `buyingCost` is deprecated (= costOfGoodsSold). `trading.pnl` ignores `cost_of_goods`.
 
 `seller.order_trend` and `seller.product_sales` are unchanged apart from the comparison twins.
 

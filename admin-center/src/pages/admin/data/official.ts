@@ -5,6 +5,7 @@ import type { components } from '@marketly/web-shared/api';
 
 export type OfficialRow = components['schemas']['offers.OfficialOfferRow'];
 export type PriceChange = components['schemas']['offers.PriceChange'];
+export type TradingSummary = components['schemas']['finance.TradingSummary'];
 export type OfferStatusKey = OfficialRow['offer']['status'];
 
 export const STATUS_LABEL: Record<OfferStatusKey, string> = {
@@ -25,20 +26,23 @@ export const STATUS_FILTERS: Array<{ value: string; label: string; query: { stat
   { value: 'low', label: 'Low stock', query: { stockState: 'low_stock' } },
 ];
 
-export type Period = '7' | '14' | '30';
-
-/** The calendar range (Pacific dates) of the last `days` days, today included. */
-export function periodRange(days: number, now = new Date()): { from: string; to: string } {
-  const day = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-  return { from: day(new Date(now.getTime() - (days - 1) * 86_400_000)), to: day(now) };
-}
-
 /** The price-change limit (percent) of the staff member's roles: null = no limit, 0 = not permitted. */
 export function priceLimitPct(limits: Array<{ action: { key: string }; value: { authority: string; limitNumber?: number | null } }> | undefined): number | null {
   const mine = (limits ?? []).filter((l) => l.action.key === 'offers.prices.change' && l.value.authority === 'permitted');
   if (!mine.length) return 0;
   if (mine.some((l) => l.value.limitNumber == null)) return null;
   return Math.max(...mine.map((l) => l.value.limitNumber ?? 0));
+}
+
+/**
+ * The warning shown when part of company sales had no unit cost when sold. The backend counts those sales in the gross
+ * margin with no cost (grossMargin = productSales − costOfGoodsSold), so the margin reads higher than it is; the
+ * Financial statistics Official Store P&L leaves them out of the margin instead and warns the same way.
+ */
+export function uncostedNote(t: TradingSummary | undefined, money: (m: { amount: number; currency: string }) => string): string | undefined {
+  if (!t || t.uncostedSales.amount <= 0) return undefined;
+  const share = t.productSales.amount > 0 ? ` (${((t.uncostedSales.amount / t.productSales.amount) * 100).toFixed(1)}% of company sales)` : '';
+  return `${money(t.uncostedSales)}${share} had no unit cost when sold. It counts in the gross margin with no cost, so the margin shows higher than it is.`;
 }
 
 /** "Price change to $129.00 waiting for approval" / "$129.00 from Oct 12". */

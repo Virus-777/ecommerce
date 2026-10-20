@@ -16,6 +16,7 @@ How one seller (or the Official Store) sells one variant in one condition: price
 - Comparable totals per delivery location for the purchase box and the all-offers page
 - Seller and Official Store bulk price and quantity file updates with preview and correction report
 - Frozen offer snapshots for order items (seller, condition, price, terms accepted at purchase)
+- Seller unit costs per offer with history (offer_costs, doc 09 §3.1): private to the seller, read by reports for product cost and profit
 
 **Not here:**
 - Shared product content (title, specs, included items, variants): catalog
@@ -53,6 +54,9 @@ How one seller (or the Official Store) sells one variant in one condition: price
 | POST | `/api/seller/offers/offers/{id}/end` | End an offer permanently (Removed, reason ended_by_seller) | seller<br>`offers.offers.manage` | `{ reason: text? }` → `SellerOfferDetail` |
 | DELETE | `/api/seller/offers/offers/{id}` | Delete a draft offer that was never published | seller<br>`offers.offers.manage` | 204 No content |
 | POST | `/api/seller/offers/price-changes` | Change prices of selected offers (up to 100) | seller<br>`offers.prices.manage` | `{ items: SellerPriceItem[], confirmLargeChange: bool? }` → `{ results: PriceChangeResult[] }` |
+| GET | `/api/seller/offers/offers/{id}/costs` | Unit cost history of one own offer, newest first | seller | Page<OfferCost> |
+| PUT | `/api/seller/offers/offers/{id}/cost` | Set the unit cost of one own offer from a day on _(audited)_ | seller<br>`offers.costs.manage` | `{ unitCost: Money, effectiveFrom: date?, note: text? }` → `OfferCost` |
+| POST | `/api/seller/offers/costs` | Set the unit cost of several own offers (1 to 500) _(audited)_ | seller<br>`offers.costs.manage` | `{ items: OfferCostItem[] }` → `{ saved: int, errors: OfferCostError[] }` |
 | POST | `/api/seller/offers/offers/exports` | Export own offers (selected rows or the current filters) as CSV _(audited)_ | seller<br>`offers.offers.export` | `{ offerIds: uuid[]?, filters: json?, format: enum(csv|xlsx)? }` → `reports.ExportJob` |
 | GET | `/api/seller/offers/offers/exports/{id}` | Offer export status and download link (requesting member only) | seller<br>`offers.offers.export` | `reports.ExportJob` |
 | GET | `/api/seller/offers/bulk-updates/template` | Download a CSV template prefilled with this seller's SKUs, prices and quantities _(phase 2)_ | seller<br>`offers.bulk.update` | `FileLink` |
@@ -130,6 +134,45 @@ How one seller (or the Official Store) sells one variant in one condition: price
 | publishedAt | `datetime?` |
 | createdAt | `datetime` |
 | updatedAt | `datetime` |
+| unitCost | `Money?` Seller views only (Seller Center offer detail and the offer write responses): the seller's unit cost in force today (offer_costs), null when none is set. Never filled for customers or staff: a seller's costs are private |
+| unitCostFrom | `date?` Seller views only: the market day unitCost took effect |
+
+### OfferCost
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| offerId | `uuid` |
+| productId | `uuid` |
+| unitCost | `Money` |
+| effectiveFrom | `date` Market day the cost starts. It applies to sales from that day until the next later cost of the offer |
+| note | `text?` e.g. 'new supplier' |
+| setBy | `OfferCostSetter` |
+| createdAt | `datetime` |
+
+### OfferCostSetter
+
+| Field | Type |
+|---|---|
+| id | `uuid?` The seller member's account |
+| name | `string` |
+
+### OfferCostItem
+
+| Field | Type |
+|---|---|
+| offerId | `uuid` |
+| unitCost | `Money` Zero or more, in the offer's currency |
+| effectiveFrom | `date?` Default today (market day); at most 400 days back and 1 day ahead |
+| note | `text?` |
+
+### OfferCostError
+
+| Field | Type |
+|---|---|
+| offerId | `uuid` |
+| code | `enum(NOT_FOUND|VALIDATION_FAILED)` NOT_FOUND: not one of this seller's offers; VALIDATION_FAILED: see message |
+| message | `string` |
 
 ### CompareAtPrice
 
@@ -524,6 +567,7 @@ How one seller (or the Official Store) sells one variant in one condition: price
 | reviewNote | `text?` Reviewer reason when changes were requested on the seller's own product |
 | stock | `StockCue` |
 | contentGaps | `enum(images|identifiers)[]` Missing product content shown under the name (e.g. 'Missing images and identifiers'); empty when complete |
+| unitCost | `Money?` The seller's unit cost in force today (the products list column); null when none is set. Private to the seller |
 
 ### SellerOfferDetail
 
@@ -644,6 +688,7 @@ How one seller (or the Official Store) sells one variant in one condition: price
 | unchanged | `int` |
 | priceChanges | `int` |
 | stockChanges | `int` |
+| costChanges | `int` Seller files: rows that set a new unit cost (unit_cost column) |
 | pendingApproval | `int` |
 | applied | `int` |
 | skipped | `int` |
@@ -660,6 +705,8 @@ How one seller (or the Official Store) sells one variant in one condition: price
 | priceTo | `Money?` |
 | quantityFrom | `int?` |
 | quantityTo | `int?` |
+| unitCostFrom | `Money?` Seller files: the unit cost in force when the file was read |
+| unitCostTo | `Money?` Seller files: the unit cost the row sets, effective today (null when the row leaves the cost as it is) |
 | result | `enum(ready|error|unchanged|applied|skipped|pending_approval)` |
 | error | `BulkRowError?` |
 | changePct | `number?` Signed price change in percent when the row changes the price |
@@ -669,7 +716,7 @@ How one seller (or the Official Store) sells one variant in one condition: price
 
 | Field | Type |
 |---|---|
-| code | `enum(unknown_sku|negative_quantity|price_below_minimum|price_missing|price_change_too_large|offer_removed|not_a_number|duplicate_row)` Stable code |
+| code | `enum(unknown_sku|negative_quantity|price_below_minimum|price_missing|price_change_too_large|offer_removed|not_a_number|duplicate_row|unit_cost_invalid)` Stable code |
 | message | `string` What is wrong and how to fix it, e.g. 'Price $2.40 is below the $5.00 minimum for Cables and adapters. Did you mean $24.00?' |
 
 ### FileLink
@@ -1081,11 +1128,31 @@ Indexes: `(seller_id, uploaded_at)`, `(state, expires_at)`
 | price_to | bigint? |
 | qty_from | int? |
 | qty_to | int? |
+| cost_from | bigint? (unit cost in force when the file was read; seller files) |
+| cost_to | bigint? (unit cost the row sets, effective on the day it is applied) |
 | result | text |
 | error_code | text? |
 | error_message | text? |
 
 Indexes: `pk (job_id, row_no)`, `(job_id, result, row_no)`
+
+**offer_costs**: The seller's unit cost per offer (doc 09 §3.1): one row per cost the seller sets, never edited. The cost for a market day is the row with the latest effective_from on or before it (ties: the latest created_at). Private to the seller: no staff view shows it
+
+| Column | Type |
+|---|---|
+| id | uuid pk |
+| offer_id | uuid → offers |
+| seller_id | uuid |
+| product_id | uuid |
+| unit_cost_minor | bigint (≥ 0, minor units) |
+| currency | text (the offer's currency) |
+| effective_from | date (market day the cost starts; at most 400 days back, 1 day ahead) |
+| note | text? |
+| set_by_id | uuid? (seller member account) |
+| set_by_name | text (name shown in the history) |
+| created_at | timestamptz |
+
+Indexes: `(offer_id, effective_from desc, created_at desc)`, `(seller_id, created_at desc)`
 
 ## Events
 
@@ -1101,6 +1168,7 @@ Indexes: `pk (job_id, row_no)`, `(job_id, result, row_no)`
 | `offers.featured.changed` | The featured offer for a variant and zone changes | `{ productId: uuid, variantId: uuid, conditionGroup: string, zoneKey: string, fromOfferId: uuid?, toOfferId: uuid? }` | search |
 | `offers.featured_rule.published` | A new featured-offer rule version is published | `{ version: int, effectiveFrom: datetime }` | - |
 | `offers.bulk_update.applied` | A bulk file is applied | `{ jobId: uuid, ownerType: string, sellerId: uuid?, applied: int, skipped: int, pendingApproval: int }` | - |
+| `offers.offer.cost_changed` | A seller saves a unit cost for an offer (PUT /offers/{id}/cost, POST /costs, a bulk file's unit_cost column): once per saved row, after the commit | `{ offerId: uuid, sellerId: uuid, productId: uuid, unitCost: Money, effectiveFrom: date }` | reports |
 
 | Consumes | From | Does |
 |---|---|---|
@@ -1152,6 +1220,7 @@ Indexes: `pk (job_id, row_no)`, `(job_id, result, row_no)`
 | getOffers | `(offerIds: uuid[]) => map<Offer | null>`<br>Batch read by id in any status (draft, removed and ineligible included), with sellerId (null for the Official Store: callers that need a seller id use OFFICIAL_STORE_ID) and title. Unknown ids map to null. Replaces per-line getOffer loops in cart revalidation, promotions evaluation and advertising checks. catalog.refresh-counts fills offer_index prices it does not have yet. | cart, promotions, advertising, catalog |
 | countActiveOffersByProfile | `(shippingProfileId: uuid) => int`<br>Offers that still use a shipping profile: every status except removed (drafts and paused offers count, because they can be published again). One count query on (shipping_profile_id, status); shipping refuses to delete or deactivate a profile in use (PROFILE_IN_USE) without paging through listOffersAdmin. | shipping |
 | exportRows | `(dataset: string, filters: json, principal: identity.Principal, cursor?: string) => { rows: json[], nextCursor?: string }`<br>Export rows for reports datasets offers.admin.offers and offers.seller.offers (seller rows scoped to the principal's seller) | reports |
+| unitCostsAt | `(items: { offerId: uuid, at: datetime }[]) => (Money | null)[]`<br>The seller's unit cost in force for each offer at each time, in the same order as items: the offer_costs row with the latest effective_from on or before the market day of `at` (ties: the latest created_at). null when the offer has no cost for that day (or is unknown). Batched: one database query per call, however many items. Costs are private to the seller: callers use them only for the seller's own figures (reports: product cost and profit), never in staff views. | reports |
 
 ## Permissions
 
@@ -1160,6 +1229,7 @@ Indexes: `pk (job_id, row_no)`, `(job_id, result, row_no)`
 | `offers.offers.manage` | seller | Create, edit, publish, pause and end own offers |
 | `offers.offers.export` | seller | Export own offer lists |
 | `offers.prices.manage` | seller | Change own offer prices |
+| `offers.costs.manage` | seller | Set own offers' unit costs (private to the seller; used for profit figures) |
 | `offers.bulk.update` | seller | Upload and apply bulk price and quantity files |
 | `offers.offers.view` | staff | View all offers, featured decisions and the featured rule |
 | `offers.offers.remove` | staff | Remove, hold, release and reinstate offers (reason required) |

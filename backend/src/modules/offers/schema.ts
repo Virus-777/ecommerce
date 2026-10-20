@@ -235,6 +235,8 @@ const bulk_update_rows = new Schema(
     price_to: { type: Number, default: null, validate: integer },
     qty_from: { type: Number, default: null, validate: integer },
     qty_to: { type: Number, default: null, validate: integer },
+    cost_from: { type: Number, default: null, validate: integer }, // unit cost in force when the file was read; seller files
+    cost_to: { type: Number, default: null, validate: integer }, // unit cost the row sets, effective on the day it is applied
     result: { type: String, required: true },
     error_code: { type: String, default: null },
     error_message: { type: String, default: null },
@@ -245,6 +247,28 @@ const bulk_update_rows = new Schema(
 );
 bulk_update_rows.index({"job_id":1,"row_no":1}, {"name":"bulk_update_rows_job_id_row_no_a435ac","unique":true});
 bulk_update_rows.index({"job_id":1,"result":1,"row_no":1}, {"name":"bulk_update_rows_job_id_result_row_no_3d30e0"});
+
+/** The seller's unit cost per offer (doc 09 §3.1): one row per cost the seller sets, never edited. The cost for a market day is the row with the latest effective_from on or before it (ties: the latest created_at). Private to the seller: no staff view shows it */
+const offer_costs = new Schema(
+  {
+    _id: { type: String, required: true }, // id
+    offer_id: { type: String, required: true },
+    seller_id: { type: String, required: true },
+    product_id: { type: String, required: true },
+    unit_cost_minor: { type: Number, required: true, validate: integer }, // ≥ 0, minor units
+    currency: { type: String, required: true }, // the offer's currency
+    effective_from: { type: String, required: true, match: DATE }, // market day the cost starts; at most 400 days back, 1 day ahead
+    note: { type: String, default: null },
+    set_by_id: { type: String, default: null }, // seller member account
+    set_by_name: { type: String, required: true }, // name shown in the history
+    created_at: { type: Date, required: true },
+    /** lock-by-write counter (kernel/mongo/table.ts) */
+    _lock: Number,
+  },
+  collectionOptions("offers.offer_costs"),
+);
+offer_costs.index({"offer_id":1,"effective_from":-1,"created_at":-1}, {"name":"offer_costs_offer_id_effective_from_created_at_574d95"});
+offer_costs.index({"seller_id":1,"created_at":-1}, {"name":"offer_costs_seller_id_created_at_0d3517"});
 
 /** Table name → schema */
 export const schemas = {
@@ -257,4 +281,5 @@ export const schemas = {
   featured_rules: featured_rules,
   bulk_update_jobs: bulk_update_jobs,
   bulk_update_rows: bulk_update_rows,
+  offer_costs: offer_costs,
 };

@@ -33,7 +33,7 @@ export const SELLER_NAV: NavEntry[] = [
   { key: 'finance', label: 'Finance', icon: 'wallet', id: 'seller/finance' },
   { key: 'marketing', label: 'Marketing and ads', icon: 'megaphone', id: 'seller/marketing' },
   { key: 'customers', label: 'Customers', icon: 'message-square', id: 'seller/customers', count: 5 },
-  { key: 'reports', label: 'Reports', icon: 'chart-column', id: 'seller/reports' },
+  { key: 'reports', label: 'Statistics', icon: 'chart-column', id: 'seller/reports' },
   { key: 'performance', label: 'Account health', icon: 'gauge', id: 'seller/performance' },
   { key: 'store', label: 'Store and settings', icon: 'store', id: 'seller/store' },
   { key: 'notifications', label: 'Notifications', icon: 'bell', id: 'seller/notifications', count: 4 },
@@ -64,6 +64,7 @@ export const ADMIN_NAV: NavEntry[] = [
   ] },
   { grp: 'Finance', items: [
     { key: 'finance', label: 'Payments and fees', icon: 'landmark', id: 'admin/finance' },
+    { key: 'finance-statistics', label: 'Financial statistics', icon: 'chart-line', id: 'admin/finance-statistics' },
     { key: 'payouts', label: 'Payouts', icon: 'wallet', id: 'admin/payouts', count: 2, hot: true },
   ] },
   { grp: 'Customers and service', items: [

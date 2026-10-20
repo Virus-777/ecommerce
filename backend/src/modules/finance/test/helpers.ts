@@ -40,6 +40,8 @@ export interface FakeItem {
   refunded?: boolean;
   /** seller SKU on the order's offer snapshot */
   sku?: string;
+  /** the stock item (inventory.getUnitCost); a new id when left out */
+  stockItemId?: string;
 }
 
 export interface FakeGroup {
@@ -100,6 +102,7 @@ function orderDetail(o: FakeOrder): any {
         product: { productId: newId(), variantId: newId(), productVersion: 1, title: i.title, options: {}, takenAt: new Date().toISOString() },
         title: i.title,
         variantLabel: '',
+        stockItemId: i.stockItemId,
         quantity: i.quantity,
         unitPrice: USD(i.price),
         lineSubtotal: USD(sub),
@@ -242,7 +245,7 @@ export async function boot(o: { modules?: string[]; apiStubs?: NonNullable<Param
     },
     sellerToken: (sellerId, o = {}) => callers.seller({ sellerId, ...o }),
     order(sellerId, items, o = {}) {
-      const ord: FakeOrder = { id: newId(), ref: o.ref ?? `MK-261009-${refCounter++}`, groups: [{ id: newId(), sellerId, platformShipping: o.platformShipping, items: items.map((i) => ({ ...i, id: newId() })) }] };
+      const ord: FakeOrder = { id: newId(), ref: o.ref ?? `MK-261009-${refCounter++}`, groups: [{ id: newId(), sellerId, platformShipping: o.platformShipping, items: items.map((i) => ({ ...i, id: newId(), stockItemId: i.stockItemId ?? newId() })) }] };
       orders.set(ord.id, ord);
       return ord;
     },
@@ -255,7 +258,7 @@ export async function boot(o: { modules?: string[]; apiStubs?: NonNullable<Param
         contactEmail: 'ana@example.com',
         total: detail.totals.total,
         groups: ord.groups.map((g, i) => ({ groupId: g.id, ownerType: g.sellerId ? 'seller' : 'official', sellerId: g.sellerId, fulfilledBy: g.sellerId ? 'seller' : 'official_warehouse', dispatchBy: clock.now().toISOString(), itemIds: g.items.map((x) => x.id), total: detail.groups[i].totals.total })),
-        items: ord.groups.flatMap((g) => g.items.map((x) => ({ orderItemId: x.id, offerId: newId(), stockItemId: newId(), quantity: x.quantity }))),
+        items: ord.groups.flatMap((g) => g.items.map((x) => ({ orderItemId: x.id, offerId: newId(), stockItemId: x.stockItemId!, quantity: x.quantity }))),
         acceptedAt: clock.now().toISOString(),
       });
     },

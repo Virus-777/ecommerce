@@ -18,7 +18,7 @@ import { schemas } from './schema.js';
  */
 export default defineModule({
   spec,
-  version: '2.0.0',
+  version: '2.1.0',
   schemas,
   mongoMigrations,
   register(ctx) {

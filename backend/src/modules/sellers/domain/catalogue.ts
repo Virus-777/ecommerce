@@ -89,6 +89,8 @@ export const ROLE_TEMPLATES: Record<Exclude<SellerRoleTemplate['key'], 'owner' |
     'catalog.products.submit',
     'offers.offers.manage',
     'offers.prices.manage',
+    // unit costs for profit figures (doc 09 §3.1): the roles that manage prices
+    'offers.costs.manage',
     'offers.bulk.update',
     'offers.offers.export',
     'inventory.stock.adjust',

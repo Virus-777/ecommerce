@@ -66,6 +66,8 @@ export interface DailyTypeSum {
   sellerId: string;
   type: string;
   amount: number;
+  /** Entries summed */
+  count: number;
 }
 
 /* ---------------------------------------------------------------- payout provider */

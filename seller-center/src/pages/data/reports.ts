@@ -7,17 +7,10 @@ import type { MoneyValue } from '@marketly/web-shared/lib/format';
 // the metric service.return_rate (on seller.product_sales, with its comparison).
 // API: POST /api/seller/reports/reports/{key}/query (docs/api/modules/reports.md, Seller API).
 
-export type Period = '7d' | '30d' | '90d';
 export type ReportQuery = components['schemas']['reports.ReportQuery'];
 export type ReportResult = components['schemas']['reports.ReportResult'];
 export type Kpi = components['schemas']['reports.KpiValue'];
 export type PerformanceMetric = components['schemas']['sellers.PerformanceMetric'];
-
-export const PERIODS: Array<{ label: string; value: Period; preset: NonNullable<ReportQuery['preset']>; days: number }> = [
-  { label: '7 days', value: '7d', preset: 'last_7_days', days: 7 },
-  { label: '30 days', value: '30d', preset: 'last_30_days', days: 30 },
-  { label: '90 days', value: '90d', preset: 'last_90_days', days: 90 },
-];
 
 /** Seller report keys (GET /api/seller/reports/catalogue). */
 export const REPORT = {

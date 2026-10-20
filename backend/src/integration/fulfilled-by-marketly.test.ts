@@ -145,7 +145,7 @@ describe('Fulfilled by Marketly, end to end', () => {
 
     // with fulfillment-service running, the products_inventory template grants (sellers domain/seed.ts) were applied at start
     const grants = await (app.kernel.boot.apis.get('sellers') as { core: { repo: { find(t: string, w: object): Promise<{ applied_at: Date | null }[]> } } }).core.repo.find('template_grants', {});
-    expect(grants.length).toBe(2);
+    expect(grants.length).toBe(3); // the two Fulfilled by Marketly keys and offers.costs.manage
     expect(grants.every((g) => g.applied_at !== null)).toBe(true);
   });
 

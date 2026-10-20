@@ -14,7 +14,7 @@ import { CATEGORIES, flattenCategories, rowFromOffer, rowFromProduct, type Categ
 // Design: pages/seller/seller-products.html · views "rows-selected" (rows ticked, bulk bar) and
 // "add-product" (the Add a product dialog). Data: GET offers/offers (+ counts for the tabs), own products
 // without an offer from GET catalog/products (page 1), categories from the GraphQL category tree,
-// GET settings/current (large price change %).
+// GET settings/current (large price change %). The Unit cost column is SellerOfferRow.unitCost (private).
 // Bulk actions: POST offers/price-changes, POST inventory/adjustments/batch (reason bulk_update),
 // POST offers/offers/bulk-pause, POST offers/offers/{id}/resume, POST offers/offers/exports.
 // Own never-listed products: POST catalog/products/{id}/withdraw, DELETE catalog/products/{id}.
@@ -481,6 +481,9 @@ export default function Products() {
                       <th className="r" scope="col">
                         Price
                       </th>
+                      <th className="r nowrap" scope="col">
+                        Unit cost
+                      </th>
                       <th className="r" scope="col">
                         Stock
                       </th>
@@ -519,6 +522,9 @@ export default function Products() {
                         </td>
                         <td className="r">
                           <span className="num">{r.price ? formatMoney(r.price) : '—'}</span>
+                        </td>
+                        <td className="r">
+                          {r.unitCost ? <span className="num">{formatMoney(r.unitCost)}</span> : <span className="xs muted">{r.offerId ? 'Not set' : '—'}</span>}
                         </td>
                         <td className="r">
                           <StockCell r={r} />
@@ -585,6 +591,7 @@ export default function Products() {
                     <span className="xs muted">{[r.variant, r.sku, r.condition].filter(Boolean).join(' · ')}</span>
                     <span className="row gap-2">
                       <b className="num small">{r.price ? formatMoney(r.price) : '—'}</b>
+                      {r.unitCost && <span className="xs muted">Cost {formatMoney(r.unitCost)}</span>}
                       {r.stock !== null && <span className="xs muted">Stock {r.stock}</span>}
                     </span>
                   </div>

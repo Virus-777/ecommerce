@@ -145,6 +145,26 @@ export class FinanceService implements FinancePublicApi {
     return this.reports.companyCostsByDay(range);
   }
 
+  /** Seller ledger per seller, market day and entry type (reports finance facts) */
+  ledgerDailyTotals(range: { from: string; to: string; sellerId?: string }) {
+    return this.reports.ledgerDailyTotals(range);
+  }
+
+  /** Official Store trading, platform costs and marketplace discount funding per market day (reports finance facts) */
+  companyDailyTotals(range: { from: string; to: string }) {
+    return this.reports.companyDailyTotals(range);
+  }
+
+  /** Fee charges changed since an instant, keyset-paged (reports: fee per order item) */
+  itemFeesChangedSince(input: { since: string; after?: string; limit: number }) {
+    return this.reports.itemFeesChangedSince(input);
+  }
+
+  /** End-of-day seller balances per market day, rebuilt from the ledger (reports: seller money trends) */
+  sellerBalancesByDay(range: { from: string; to: string }) {
+    return this.reports.sellerBalancesByDay(range);
+  }
+
   /** One seller's balances, ledger, payouts, statements, holds, amounts owed and adjustments (seller Finance page, admin seller 360) */
   getSellerAccount(sellerId: string): Promise<SellerFinanceDetail> {
     this.ledger.requireSeller(sellerId);

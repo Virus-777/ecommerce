@@ -92,7 +92,7 @@ export const SELLER_NAV_DEMO: Array<{ label: string; icon: IconName; id: ScreenI
   { label: 'Finance', icon: 'wallet', id: 'seller/finance' },
   { label: 'Marketing and ads', icon: 'megaphone', id: 'seller/marketing' },
   { label: 'Customers', icon: 'message-square', id: 'seller/customers', count: 5 },
-  { label: 'Reports', icon: 'chart-column', id: 'seller/reports' },
+  { label: 'Statistics', icon: 'chart-column', id: 'seller/reports' },
   { label: 'Account health', icon: 'gauge', id: 'seller/performance' },
   { label: 'Store and settings', icon: 'store', id: 'seller/store' },
   { label: 'Notifications', icon: 'bell', id: 'seller/notifications', count: 4 },

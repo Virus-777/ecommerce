@@ -45,13 +45,35 @@ export function presetRange(preset: Exclude<Preset, 'custom'>, today: string): D
       return { from: addDays(today, -89), to: today };
     case 'month_to_date':
       return { from: `${today.slice(0, 8)}01`, to: today };
+    case 'quarter_to_date': {
+      // quarters start in January, April, July and October
+      const month = Number(today.slice(5, 7));
+      const first = month - ((month - 1) % 3);
+      return { from: `${today.slice(0, 5)}${String(first).padStart(2, '0')}-01`, to: today };
+    }
+    case 'year_to_date':
+      return { from: `${today.slice(0, 4)}-01-01`, to: today };
+    case 'last_12_months':
+      return { from: addDays(sameDayLastYear(today), 1), to: today };
   }
+}
+
+/** The same calendar date one year earlier; 29 February becomes 28 February */
+export function sameDayLastYear(day: string): string {
+  const year = String(Number(day.slice(0, 4)) - 1).padStart(4, '0');
+  const monthDay = day.slice(5) === '02-29' ? '02-28' : day.slice(5);
+  return `${year}-${monthDay}`;
 }
 
 /** The previous period of the same length, just before the range */
 export function previousRange(r: DayRange): DayRange {
   const n = daysBetween(r.from, r.to);
   return { from: addDays(r.from, -n), to: addDays(r.from, -1) };
+}
+
+/** The same calendar dates one year earlier (compare=same_period_last_year) */
+export function lastYearRange(r: DayRange): DayRange {
+  return { from: sameDayLastYear(r.from), to: sameDayLastYear(r.to) };
 }
 
 /** UTC instants of a market-day range: [start of `from`, start of the day after `to`) */

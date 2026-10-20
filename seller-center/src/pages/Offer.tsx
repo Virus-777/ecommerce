@@ -12,6 +12,8 @@ import { useSellerSession } from '@/app/session';
 import SELLER_PRODUCT_DETAIL from '@marketly/web-shared/api/graphql/seller/SellerProductDetail.graphql?raw';
 import { CONDITIONS, CONDITION_LABEL, FormSkeleton, LoadError, conditionLabel, iconFor, inputAmount, optionsLabel, toMinor, useDebounced, useSellerSettings, type Condition, type Money } from './data/catalog-parts';
 import { SELLER_PRODUCT, offerHref, type SellerProduct } from './data/products';
+import { COST_PERMISSION, MAX_COST_DAYS_BACK, costEarliest, costToday, parseCost, type OfferCost } from './data/costs';
+import { fmtDay, fmtTime } from './data/finance';
 
 // Design: pages/seller/seller-offer.html (New condition) · view "used-condition" = the same form with a
 // used condition: missing-items alert, required condition notes, seller warranties.
@@ -21,7 +23,8 @@ import { SELLER_PRODUCT, offerHref, type SellerProduct } from './data/products';
 // finance/fee-schedule for a new one (no offer to preview yet); POST offers/offers/preview (delivery, price
 // context, return baseline); GET settings/current (default low-stock alert, handling range, large-change %).
 // Writes: POST offers/offers, PATCH offers/offers/{id}, POST …/{id}/publish,
-// PATCH inventory/stock-items/{id} (low-stock alert).
+// PATCH inventory/stock-items/{id} (low-stock alert). Unit cost (private, for profit in Statistics): PUT
+// offers/offers/{id}/cost after the offer is saved, history from GET offers/offers/{id}/costs.
 
 type View = 'used-condition';
 type Detail = components['schemas']['offers.SellerOfferDetail'];
@@ -61,6 +64,10 @@ interface Form {
   profileId: string;
   ret: ReturnKey;
   warranty: string;
+  /** Unit cost (what one unit costs the seller), the day it applies from and a note; saved apart from the offer. */
+  cost: string;
+  costFrom: string;
+  costNote: string;
 }
 type Errors = Partial<Record<keyof Form | 'form', string>>;
 
@@ -77,13 +84,16 @@ function validate(f: Form, editing: boolean): Errors {
   if (isUsed(f.condition) && !f.notes.trim()) e.notes = 'Describe the condition, including anything missing from the box.';
   if (f.notes.length > NOTES_MAX) e.notes = `Keep the notes to ${NOTES_MAX} characters.`;
   if (!f.profileId) e.profileId = 'Choose a shipping profile.';
+  if (f.cost.trim() && parseCost(f.cost) === null) e.cost = 'Enter what one unit costs you, like 42.50, or leave it empty.';
+  if (f.costFrom && (f.costFrom < costEarliest() || f.costFrom > costToday())) e.costFrom = `Choose a day from the last ${MAX_COST_DAYS_BACK} days.`;
+  if (f.costNote.length > 200) e.costNote = 'Keep the note to 200 characters.';
   return e;
 }
 
 /** Field errors from the API (VALIDATION_FAILED and the offer error codes). */
 function apiErrors(err: unknown): Errors {
   if (!(err instanceof ApiError)) return { form: errorMessage(err) };
-  const map: Record<string, keyof Form> = { price: 'price', 'price.amount': 'price', compareAt: 'was', 'compareAt.amount': 'was', sellerSku: 'sku', conditionNotes: 'notes', missingItems: 'notes', quantity: 'qty', lowStockThreshold: 'low', shippingProfileId: 'profileId', variantId: 'variantId', returnTerms: 'ret', 'returnTerms.windowDays': 'ret', warranty: 'warranty' };
+  const map: Record<string, keyof Form> = { price: 'price', 'price.amount': 'price', compareAt: 'was', 'compareAt.amount': 'was', sellerSku: 'sku', conditionNotes: 'notes', missingItems: 'notes', quantity: 'qty', lowStockThreshold: 'low', shippingProfileId: 'profileId', variantId: 'variantId', returnTerms: 'ret', 'returnTerms.windowDays': 'ret', warranty: 'warranty', unitCost: 'cost', 'unitCost.amount': 'cost', 'unitCost.currency': 'cost', effectiveFrom: 'costFrom', note: 'costNote' };
   const out: Errors = {};
   Object.entries(err.fieldErrors).forEach(([k, v]) => {
     const f = map[k];
@@ -214,6 +224,9 @@ function OfferForm({ product, detail, profiles, fees, rules }: { product: Seller
         profileId: o.shippingProfileId,
         ret: o.returnTerms.kind === 'baseline' ? 'base' : o.returnTerms.freeReturnShipping ? 'extfree' : 'ext',
         warranty: wk || (used ? WARRANTY_USED[0].key : WARRANTY_NEW[0].key),
+        cost: inputAmount(o.unitCost),
+        costFrom: costToday(),
+        costNote: '',
       };
     }
     const used = view === 'used-condition';
@@ -232,12 +245,16 @@ function OfferForm({ product, detail, profiles, fees, rules }: { product: Seller
       profileId: (activeProfiles.find((p) => p.isDefault) ?? activeProfiles[0])?.id ?? '',
       ret: 'base',
       warranty: used ? WARRANTY_USED[0].key : WARRANTY_NEW[0].key,
+      cost: '',
+      costFrom: costToday(),
+      costNote: '',
     };
   });
   const [attempted, setAttempted] = useState(false);
   const [server, setServer] = useState<Errors>({});
   const [result, setResult] = useState<'' | 'draft' | 'published' | 'saved'>('');
   const [confirmLarge, setConfirmLarge] = useState<null | { publish: boolean }>(null);
+  const [costWarning, setCostWarning] = useState('');
 
   const used = isUsed(f.condition);
   const errors: Errors = { ...(attempted ? validate(f, editing) : {}), ...server };
@@ -327,11 +344,31 @@ function OfferForm({ product, detail, profiles, fees, rules }: { product: Seller
     : rule
       ? `${rule.includeShipping ? 'Fee includes shipping.' : 'Shipping is not included in the fee.'} Fee rules ${rule.version}, seller agreement ${rule.agreementVersion}. Earnings show as pending until delivery and the hold period end.`
       : 'Fee rules couldn’t be loaded. Final fees by category are in your seller agreement.';
+  // per-unit profit in the preview: earnings after the fee, less the unit cost typed in the form
+  const earnedPerUnit = rateBps === null ? null : ep && ep.price.amount === priceMinor ? ep.earnings.amount : priceMinor - fee;
+  const costPerUnit = parseCost(f.cost);
+  const profitPerUnit = earnedPerUnit === null || costPerUnit === null ? null : earnedPerUnit - costPerUnit;
   const handlingDays = [...new Set([...Array.from({ length: Math.max(0, rules.handling.max - rules.handling.min + 1) }, (_, i) => rules.handling.min + i), Number(f.dispatch)])].sort((a, b) => a - b);
 
   const profile = activeProfiles.find((p) => p.id === f.profileId);
   const freeOver = profile?.freeShippingThreshold ?? profile?.methods.find((m) => m.enabled && m.freeOver)?.freeOver ?? null;
   const profileHint = profile ? [freeOver ? `Free ${profile.freeShippingMethodCode ?? 'shipping'} over ${formatMoney(freeOver)}` : profile.methods.filter((m) => m.enabled).map((m) => m.name).join(' and ')].filter(Boolean).join('') : '';
+
+  // Unit cost: its own endpoint (PUT offers/offers/{id}/cost) after the offer is saved. Each write adds a history
+  // row, so it is written only when the amount or its start day changed. A refused cost doesn't undo the offer.
+  const canCost = can(COST_PERMISSION);
+  const costMinor = parseCost(f.cost);
+  const costChanged = canCost && costMinor !== null && (costMinor !== (o?.unitCost?.amount ?? null) || f.costFrom !== costToday());
+  const saveCost = async (offerId: string): Promise<unknown> => {
+    if (!costChanged) return null;
+    try {
+      const note = f.costNote.trim();
+      await call(api.PUT('/api/seller/offers/offers/{id}/cost', { params: { path: { id: offerId } }, body: { unitCost: { amount: costMinor!, currency }, effectiveFrom: f.costFrom, ...(note ? { note } : {}) } }));
+      return null;
+    } catch (err) {
+      return err;
+    }
+  };
 
   const save = useMutation({
     mutationFn: async ({ publish, confirm }: { publish: boolean; confirm?: boolean }) => {
@@ -362,7 +399,7 @@ function OfferForm({ product, detail, profiles, fees, rules }: { product: Seller
             },
           }),
         );
-        return { d: created, published: publish && purchasable };
+        return { d: created, published: publish && purchasable, costError: await saveCost(created.offer.id) };
       }
       // Only what changed: an unchanged price or was-price is left out, so it doesn't add price history.
       const sameReturns = JSON.stringify(returnInput(f.ret)) === JSON.stringify(o.returnTerms.kind === 'baseline' ? { kind: 'baseline' } : { kind: 'extended', windowDays: o.returnTerms.windowDays, freeReturnShipping: o.returnTerms.freeReturnShipping });
@@ -390,17 +427,29 @@ function OfferForm({ product, detail, profiles, fees, rules }: { product: Seller
         d = await call(api.POST('/api/seller/offers/offers/{id}/publish', { params: { path: { id: o.id } } }));
         published = true;
       }
-      return { d, published };
+      return { d, published, costError: await saveCost(o.id) };
     },
-    onSuccess: ({ d, published }, { publish }) => {
+    onSuccess: ({ d, published, costError }, { publish }) => {
       setConfirmLarge(null);
+      const costMessage = costError ? errorMessage(costError) : '';
+      setCostWarning(costMessage);
+      if (costError) {
+        const { form: _form, ...fields } = apiErrors(costError);
+        setServer(fields);
+      }
+      if (costChanged && !costError) {
+        void qc.invalidateQueries({ queryKey: ['reports'] });
+        // the saved cost is now the offer's; a later save must not add the same row again
+        setF((s) => ({ ...s, costFrom: costToday(), costNote: '' }));
+      }
       const state = published ? 'published' : editing && !(publish && isDraft) ? 'saved' : 'draft';
       setResult(state);
       announce(state === 'published' ? 'Offer published' : state === 'saved' ? 'Offer saved' : 'Draft saved');
       void qc.invalidateQueries({ queryKey: ['offers'] });
       void qc.invalidateQueries({ queryKey: ['inventory'] });
       void qc.invalidateQueries({ queryKey: ['catalog', 'seller-product'] });
-      if (!editing) navigate(offerHref(d.offer.id) + (isUsed(d.offer.condition) ? '&view=used-condition' : ''), { replace: true, state: { saved: state } });
+      void qc.invalidateQueries({ queryKey: ['offer-costs', d.offer.id] });
+      if (!editing) navigate(offerHref(d.offer.id) + (isUsed(d.offer.condition) ? '&view=used-condition' : ''), { replace: true, state: { saved: state, costError: costMessage } });
       window.scrollTo({ top: 0, behavior: 'smooth' });
     },
     onError: (err, { publish }) => {
@@ -429,6 +478,13 @@ function OfferForm({ product, detail, profiles, fees, rules }: { product: Seller
   const otherOffers = Math.max(0, pr.offerCount - (o && o.status === 'active' ? 1 : 0));
   const priceHint = [lowestNew ? `Lowest New offer today: ${formatMoney(lowestNew)}` : null, official ? `Official Store ${formatMoney(official)}` : null].filter(Boolean).join(' · ') || 'Set the price customers pay for one unit.';
   const savedFlag = (location.state as { saved?: string } | null)?.saved;
+  const shownCostWarning = costWarning || (result ? '' : ((location.state as { costError?: string } | null)?.costError ?? ''));
+  const costDirty = canCost && f.cost.trim() !== inputAmount(o?.unitCost);
+  const history = useQuery({
+    queryKey: ['offer-costs', o?.id],
+    queryFn: () => call(api.GET('/api/seller/offers/offers/{id}/costs', { params: { path: { id: o!.id } } })),
+    enabled: !!o,
+  });
   const shownResult = result || (savedFlag === 'published' || savedFlag === 'draft' ? savedFlag : '');
   const variationLabel = optionsLabel(variant?.options) || 'Standard';
 
@@ -459,6 +515,11 @@ function OfferForm({ product, detail, profiles, fees, rules }: { product: Seller
       {o?.statusReason && (status === 'ineligible' || status === 'removed' || status === 'paused') && (
         <Alert tone={status === 'paused' ? 'info' : 'danger'} title={status === 'paused' ? 'This offer is hidden' : status === 'removed' ? 'This offer was removed' : 'This offer is not shown to customers'}>
           {[o.statusReason.text, o.statusReason.affectedActivity && `Affects: ${o.statusReason.affectedActivity}.`, o.statusReason.appealRoute].filter(Boolean).join(' ')}
+        </Alert>
+      )}
+      {shownCostWarning && (
+        <Alert tone="warning" title="The offer was saved, but its unit cost wasn’t">
+          {shownCostWarning}
         </Alert>
       )}
       {detail?.fulfillmentNote && <Alert tone="info">{detail.fulfillmentNote}</Alert>}
@@ -573,6 +634,30 @@ function OfferForm({ product, detail, profiles, fees, rules }: { product: Seller
               <Field label="Price" hint={priceHint} error={errors.price}>
                 <TextInput id="of-price" prefix="$" inputMode="decimal" value={f.price} error={!!errors.price} disabled={!canPrice} onChange={(e) => set('price', e.target.value)} onBlur={() => priceMinor > 0 && set('price', (priceMinor / 100).toFixed(2))} />
               </Field>
+              <Field
+                label="Unit cost"
+                optional
+                hint={
+                  !canCost
+                    ? 'Set by members who manage costs.'
+                    : o?.unitCost && o.unitCostFrom
+                      ? `What one unit costs you, since ${fmtDay(o.unitCostFrom, { year: true })}. Private; used for profit in Statistics.`
+                      : 'What one unit costs you. Private; used for profit in Statistics.'
+                }
+                error={errors.cost}
+              >
+                <TextInput id="of-cost" prefix="$" inputMode="decimal" value={f.cost} error={!!errors.cost} disabled={!canCost} onChange={(e) => set('cost', e.target.value)} onBlur={() => costMinor !== null && set('cost', (costMinor / 100).toFixed(2))} />
+              </Field>
+              {costDirty && f.cost.trim() !== '' && (
+                <>
+                  <Field label="Cost applies from" hint={`Sales from this day on use the new cost; up to ${MAX_COST_DAYS_BACK} days back.`} error={errors.costFrom}>
+                    <TextInput id="of-cost-from" type="date" value={f.costFrom} min={costEarliest()} max={costToday()} error={!!errors.costFrom} onChange={(e) => set('costFrom', e.target.value)} />
+                  </Field>
+                  <Field label="Cost note" optional hint="For example “new supplier”. Only your team sees it." error={errors.costNote}>
+                    <TextInput id="of-cost-note" value={f.costNote} maxLength={200} error={!!errors.costNote} onChange={(e) => set('costNote', e.target.value)} />
+                  </Field>
+                </>
+              )}
               <Field label="Quantity available" hint={editing ? <>Change stock in <Link to={href('seller/inventory')} className="link-inline">Inventory</Link>, with a reason.</> : 'Customers cannot buy more than this.'} error={errors.qty}>
                 <TextInput id="of-qty" type="number" min={0} value={f.qty} error={!!errors.qty} disabled={editing} onChange={(e) => set('qty', e.target.value)} />
               </Field>
@@ -586,6 +671,7 @@ function OfferForm({ product, detail, profiles, fees, rules }: { product: Seller
                 <TextInput id="of-was" prefix="$" inputMode="decimal" value={f.was} error={!!errors.was} disabled={!canPrice} onChange={(e) => set('was', e.target.value)} onBlur={() => wasMinor && set('was', (wasMinor / 100).toFixed(2))} />
               </Field>
             </div>
+            {o && <CostHistory costs={history.data?.items} loading={history.isLoading} error={history.error} onRetry={() => void history.refetch()} />}
           </Card>
 
           <Card title="Delivery" titleAs="h3">
@@ -674,6 +760,12 @@ function OfferForm({ product, detail, profiles, fees, rules }: { product: Seller
             <SummaryRow k={`Platform fee${ratePct ? ` (${ratePct})` : ''}`} v={rateBps === null ? '—' : `−${money(fee)}`} />
             <div className="divider" />
             <SummaryRow className="total" k="Your earnings" v={rateBps === null ? '—' : ep && ep.price.amount === priceMinor ? formatMoney(ep.earnings) : money(priceMinor - fee)} />
+            {profitPerUnit !== null && (
+              <>
+                <SummaryRow k="Unit cost" v={`−${money(costPerUnit!)}`} />
+                <SummaryRow k="Profit per unit" v={`${profitPerUnit < 0 ? '−' : ''}${money(Math.abs(profitPerUnit))}${priceMinor > 0 ? ` (${((profitPerUnit / priceMinor) * 100).toFixed(1)}%)` : ''}`} />
+              </>
+            )}
             <Badge tone="outline">Example</Badge>
             <p className="xs muted row gap-1 nowrap top">
               <Icon name="info" className="ic-sm" />
@@ -721,5 +813,33 @@ function OfferForm({ product, detail, profiles, fees, rules }: { product: Seller
         </aside>
       </div>
     </SellerLayout>
+  );
+}
+
+/** The offer's unit costs, newest first (GET offers/offers/{id}/costs): amount, from which day, note and who set it. */
+function CostHistory({ costs, loading, error, onRetry }: { costs?: OfferCost[]; loading: boolean; error: unknown; onRetry: () => void }) {
+  if (error) return <LoadError error={error} title="We couldn’t load the cost history" onRetry={onRetry} />;
+  if (loading) return <span className="sk sk-line" />;
+  if (!costs?.length) return <p className="xs muted">No unit cost yet. Statistics show profit for sales with a cost.</p>;
+  // newest first; a cost may start tomorrow, so the one in force is the first that has started
+  const current = costs.findIndex((c) => c.effectiveFrom <= costToday());
+  return (
+    <div className="stack gap-1">
+      <span className="label">Cost history</span>
+      <ul className="stack gap-1" style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+        {costs.slice(0, 10).map((c, i) => (
+          <li key={c.id} className="row gap-2 small" style={{ flexWrap: 'wrap' }}>
+            <span className="num strong">{formatMoney(c.unitCost)}</span>
+            <span className="muted">from {fmtDay(c.effectiveFrom, { year: true })}</span>
+            {i === current && <Badge tone="success">Current</Badge>}
+            {c.note && <span className="sub">“{c.note}”</span>}
+            <span className="xs muted">
+              {c.setBy.name} · {fmtTime(c.createdAt, { year: true })}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {costs.length > 10 && <span className="xs muted">The 10 most recent of {costs.length} costs.</span>}
+    </div>
   );
 }

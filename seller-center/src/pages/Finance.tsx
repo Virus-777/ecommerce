@@ -10,6 +10,7 @@ import { useIsPhone } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, announce, Badge, Button, Card, Dialog, EmptyState, Field, Icon, KeyValue, PageHeader, Pager, SegmentedControl, Select, Stat, StatusBadge, SummaryRow, TableWrap, TextInput, type IconName } from '@marketly/web-shared/ui';
 import { useSellerSession } from '@/app/session';
+import { MoneyInOut } from './statistics/MoneyInOut';
 import { amt, download, fmtDay, fmtPeriod, fmtTime, isoDaysAgo, LEDGER_ICON, PAYOUT_STATUS, refHref, signed, signedMoney, waitForExport, type Balances, type Destination, type TxFilter } from './data/finance';
 
 // Design: pages/seller/seller-finance.html (no views). Balances, holds and the next payout come from
@@ -19,7 +20,8 @@ import { amt, download, fmtDay, fmtPeriod, fmtTime, isoDaysAgo, LEDGER_ICON, PAY
 // dev-reauth.payout-account instead) and calls POST sellers/payout-account/change; the
 // new account is verified with two test deposits (POST finance/payout-destination/confirm-deposits) and
 // reviewed by Marketly Finance. The SellerFinanceOverview screen query fails on the running server
-// (Money.formatted, BACKEND-REQUESTS G13), so the screen reads REST.
+// (Money.formatted, BACKEND-REQUESTS G13), so the screen reads REST. "Money in and out" charts net earnings and
+// payouts for a period (report seller.earnings, docs/09 §4.2) when the member may also run seller reports.
 
 const FILTERS: Array<{ label: string; value: TxFilter }> = [
   { label: 'All', value: 'all' },
@@ -308,6 +310,7 @@ export default function Finance() {
           ),
         )}
       </div>
+      {can('reports.seller.view') && <MoneyInOut />}
       <div className="sb-main">
         <div className="stack gap-5">
           <Card

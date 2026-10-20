@@ -51,7 +51,7 @@ describe('template grants (seeded on boot from domain/seed.ts): the two keys rea
 
   it('wait while fulfillment-service is off, then are applied once to the open products_inventory members who lack them', async () => {
     const repo = kit.svc.core.repo;
-    const pending = await repo.find('template_grants', { template: 'products_inventory' });
+    const pending = await repo.find('template_grants', { template: 'products_inventory', permission: FS_KEYS });
     expect(pending.map((g) => [g.permission, g.applied_at]).sort()).toEqual([
       ['fulfillment-service.fees.view', null],
       ['fulfillment-service.inbound.manage', null],
@@ -86,12 +86,44 @@ describe('template grants (seeded on boot from domain/seed.ts): the two keys rea
       const changed = kit.events.slice(seen).filter((e) => e.name === 'sellers.member.permissions_changed');
       expect(changed.map((e) => (e.payload as { memberId: string }).memberId).sort()).toEqual([before, before, invited, invited, withFees].sort());
       expect(changed.every((e) => e.actor?.kind === 'system')).toBe(true);
-      expect((await repo.find('template_grants', { template: 'products_inventory' })).every((g) => g.applied_at !== null)).toBe(true);
+      expect((await repo.find('template_grants', { template: 'products_inventory', permission: FS_KEYS })).every((g) => g.applied_at !== null)).toBe(true);
 
       // once: a key the owner takes away later stays away on the next start
       await repo.update('members', before, { permissions: ['catalog.products.submit', 'inventory.stock.adjust'] as never });
       expect(await kit.svc.members.applyTemplateGrants()).toBe(0);
       expect(await perms(before)).toEqual(['catalog.products.submit', 'inventory.stock.adjust']);
+    } finally {
+      kit.svc.members.allSellerKeys = keys;
+    }
+  });
+});
+
+describe('template grant offers.costs.manage (unit costs, doc 09 §3.1)', () => {
+  it('is in the products_inventory template and reaches its existing open members once, not other roles', async () => {
+    expect(ROLE_TEMPLATES.products_inventory).toEqual(expect.arrayContaining(['offers.prices.manage', 'offers.costs.manage']));
+    const repo = kit.svc.core.repo;
+    const s = await approvedSeller(kit);
+    const at = kit.clock.now();
+    const member = async (role: string, permissions: string[]) =>
+      (await repo.insert('members', { id: newId(), seller_id: s.sellerId, account_id: null, name: 'Cole Member', email: `${newId()}@example.com`, role, permissions: permissions as never, is_owner: false, status: 'active', invitation_id: null, invited_by: null, invited_at: at, invite_expires_at: null, joined_at: at, last_active_at: null, removed_at: null })).id;
+    const products = await member('products_inventory', ['offers.prices.manage']);
+    const shipping = await member('shipping', ['orders.fulfillment.view']);
+    const perms = async (id: string) => ((await repo.get('members', id))!.permissions as string[]).slice().sort();
+    const grant = async () => (await repo.find('template_grants', { template: 'products_inventory', permission: 'offers.costs.manage' }))[0];
+    // offers is off in this app: the grant waits for a start where it runs
+    expect((await grant())?.applied_at).toBeNull();
+
+    const keys = kit.svc.members.allSellerKeys;
+    kit.svc.members.allSellerKeys = () => [...keys(), 'offers.costs.manage'];
+    try {
+      await kit.svc.members.applyTemplateGrants();
+      expect(await perms(products)).toEqual(['offers.costs.manage', 'offers.prices.manage']);
+      expect(await perms(shipping)).toEqual(['orders.fulfillment.view']);
+      expect((await grant())?.applied_at).not.toBeNull();
+      // once: taken away later, it stays away
+      await repo.update('members', products, { permissions: ['offers.prices.manage'] as never });
+      await kit.svc.members.applyTemplateGrants();
+      expect(await perms(products)).toEqual(['offers.prices.manage']);
     } finally {
       kit.svc.members.allSellerKeys = keys;
     }

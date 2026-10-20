@@ -149,14 +149,15 @@ export class ReportsPart extends Part {
 
   /**
    * Official Store trading costs per market day and kind (reports: Purchasing cost, Discounts and shipping expense,
-   * Returns cost). trading_entries keeps return losses as kind 'return'; the API calls them return_loss.
+   * Returns cost). trading_entries keeps return losses as kind 'return'; the API calls them return_loss. The cost of
+   * goods sold (cost_of_goods) is no booked cost: reports takes it from its own order facts.
    */
   async companyCostsByDay(range: common.DateRange): Promise<DailyCompanyCost[]> {
     const r = this.range(range.from, range.to);
     const tz = this.core.tz();
     const out = new Map<string, DailyCompanyCost>();
     for (const row of await this.tradingRows(r.from, r.to)) {
-      if (row.kind === 'sale') continue;
+      if (row.kind === 'sale' || row.kind === 'cost_of_goods') continue;
       const kind = (row.kind === 'return' ? 'return_loss' : row.kind) as DailyCompanyCost['kind'];
       const date = marketDate(row.at, tz);
       const key = `${date}|${kind}|${row.currency}`;
@@ -168,6 +169,98 @@ export class ReportsPart extends Part {
     return [...out.values()].sort((a, b) => a.date.localeCompare(b.date) || a.kind.localeCompare(b.kind));
   }
 
+  /* ---------------------------------------------------------------- daily totals for the reports finance facts (docs/09 §3.2) */
+
+  /** Seller ledger entries summed per seller, market day and entry type, amounts signed as in the ledger */
+  async ledgerDailyTotals(q: { from: string; to: string; sellerId?: string }): Promise<{ sellerId: string; day: string; type: string; amount: common.Money; count: number }[]> {
+    const r = this.range(q.from, q.to);
+    if (q.sellerId && !isUuid(q.sellerId)) return [];
+    const rows = await this.repo.dailyTypeSums(r.from, r.to, this.core.tz(), Object.keys(TYPE_LABELS), q.sellerId);
+    return rows.map((x) => ({ sellerId: x.sellerId, day: x.day, type: x.type, amount: this.money(x.amount), count: x.count }));
+  }
+
+  /**
+   * Company money per market day: Official Store trading by kind (as stored in trading_entries), platform costs by
+   * kind, and coupon discount funding by funder on marketplace seller items only (funding on Official Store items
+   * is part of the trading discount already, so counting it here too would count it twice in the company result).
+   */
+  async companyDailyTotals(q: { from: string; to: string }): Promise<{ day: string; source: 'trading' | 'platform_cost' | 'discount_funding'; kind: string; amount: common.Money }[]> {
+    const r = this.range(q.from, q.to);
+    const tz = this.core.tz();
+    const [trading, costs, funding] = await Promise.all([
+      this.repo.dailyKindSums('trading_entries', 'kind', r.from, r.to, tz),
+      this.repo.dailyKindSums('platform_costs', 'kind', r.from, r.to, tz),
+      this.repo.dailyKindSums('discount_funding', 'funded_by', r.from, r.to, tz, { marketplaceOnly: true }),
+    ]);
+    const of = (source: 'trading' | 'platform_cost' | 'discount_funding') => (x: { day: string; kind: string; amount: number }) => ({ day: x.day, source, kind: x.kind, amount: this.money(x.amount) });
+    return [...trading.map(of('trading')), ...costs.map(of('platform_cost')), ...funding.map(of('discount_funding'))];
+  }
+
+  /** Fee charges changed at or after `since`, keyset-paged by (changed_at, id); the cursor is "<changed_at ISO>|<id>" */
+  async itemFeesChangedSince(q: { since: string; after?: string; limit: number }): Promise<{ orderItemId: string; sellerId: string; fee: common.Money; refundedFee: common.Money; changedAt: string; cursor: string }[]> {
+    const since = new Date(q.since);
+    if (Number.isNaN(since.getTime())) throw invalid([{ path: 'since', message: 'A date and time' }]);
+    let after: { at: Date; id: string } | undefined;
+    if (q.after) {
+      const [at, id] = q.after.split('|');
+      const d = new Date(at ?? '');
+      if (!id || Number.isNaN(d.getTime())) throw invalid([{ path: 'after', message: 'A cursor from an earlier page' }]);
+      after = { at: d, id };
+    }
+    const limit = Math.min(1000, Math.max(1, Math.floor(q.limit) || 1));
+    const rows = await this.repo.feeChargesChangedSince(since, after, limit);
+    return rows.map((c) => {
+      const changedAt = (c.changed_at ?? c.created_at).toISOString();
+      return { orderItemId: c.order_item_id, sellerId: c.seller_id, fee: this.money(c.fee), refundedFee: this.money(c.refunded_fee), changedAt, cursor: `${changedAt}|${c.id}` };
+    });
+  }
+
+  /**
+   * End-of-day balances per seller and market day (today: as of now), rebuilt from today's balances walking back
+   * one day at a time: a day's ledger entries come off the bucket they were posted to, and the lots that left
+   * pending that day (moveLot moves their net from pending to available without a ledger entry) go back to pending.
+   * held and the total are exact; the pending/available split is exact for lots that left pending after
+   * left_pending_at was kept (2026-10-21), and uses available_at for older ones. Days after today are left out;
+   * sellers with nothing in any bucket that day too. owed is a negative available balance as a positive amount.
+   */
+  async sellerBalancesByDay(q: { from: string; to: string }): Promise<{ day: string; sellerId: string; pending: common.Money; available: common.Money; held: common.Money; owed: common.Money }[]> {
+    this.range(q.from, q.to);
+    const tz = this.core.tz();
+    const today = this.core.today();
+    const to = q.to > today ? today : q.to;
+    if (q.from > to) return [];
+    const after = dayStart(addDays(q.from, 1), tz); // what happened after the end of the first day
+    const [accounts, entries, moved] = await Promise.all([this.repo.find('seller_accounts', {}), this.repo.bucketSumsSince(after, tz, Object.keys(TYPE_LABELS)), this.repo.lotsLeftPendingSince(after, tz)]);
+    const changes = new Map<string, { pending: number; available: number; held: number; moved: number }>(); // "<seller>|<day>"
+    const changeOf = (sellerId: string, day: string) => {
+      const key = `${sellerId}|${day}`;
+      let v = changes.get(key);
+      if (!v) changes.set(key, (v = { pending: 0, available: 0, held: 0, moved: 0 }));
+      return v;
+    };
+    for (const e of entries) {
+      const v = changeOf(e.sellerId, e.day);
+      if (e.bucket === 'pending') v.pending += e.amount;
+      else if (e.bucket === 'held') v.held += e.amount;
+      else v.available += e.amount;
+    }
+    for (const m of moved) changeOf(m.sellerId, m.day).moved += m.amount;
+    const out: { day: string; sellerId: string; pending: common.Money; available: common.Money; held: common.Money; owed: common.Money }[] = [];
+    for (const a of accounts) {
+      let { pending, available, held } = a;
+      for (let day = today; day >= q.from; day = addDays(day, -1)) {
+        if (day <= to && (pending || available || held)) out.push({ day, sellerId: a.seller_id, pending: this.money(pending), available: this.money(available), held: this.money(held), owed: this.money(Math.max(0, -available)) });
+        // the end of the day before: undo this day's entries and moves
+        const v = changes.get(`${a.seller_id}|${day}`);
+        if (!v) continue;
+        pending += v.moved - v.pending;
+        available -= v.moved + v.available;
+        held -= v.held;
+      }
+    }
+    return out.sort((x, y) => x.day.localeCompare(y.day) || x.sellerId.localeCompare(y.sellerId));
+  }
+
   /** Credits of ad charges (charge_credit on an ad campaign) in a range */
   async adCredits(from: Date, to: Date, sellerId?: string) {
     return this.repo.findInRange('ledger_entries', 'at', from, to, { type: 'charge_credit', ref_kind: 'ad_campaign', ...(sellerId ? { seller_id: sellerId } : {}) });
@@ -175,17 +268,28 @@ export class ReportsPart extends Part {
 
   /* ---------------------------------------------------------------- company trading */
 
+  /**
+   * The Official Store trading of a range, by booking day. The margin takes off the cost of goods sold (cost_of_goods,
+   * booked with each sale and reversed with cancellations), never buying_cost: purchasing books that when goods are
+   * received from a supplier, so it is stock bought (stockBought) and a goods receipt leaves the margin alone.
+   * A sale is costed when a cost_of_goods row sits beside it (same ref_kind, ref_id and order_item_id); the others
+   * are uncostedSales and count in the margin with no cost. A placeholder still waiting for its cost (ref_kind
+   * cost_pending) pairs with nothing, so its sale shows as uncosted until LedgerPart.fillPendingCosts fills it.
+   */
   async trading(q: { from: string; to: string }): Promise<TradingSummary> {
     const r = this.range(q.from, q.to);
     const tz = this.core.tz();
     const rows = await this.tradingRows(r.from, r.to); // Official Store trading only (marketplace facts have their own tables)
     const totals = (list: TradingRec[]) => {
       const s = (k: string) => list.filter((t) => t.kind === k).reduce((x, t) => x + t.amount, 0);
+      const pair = (t: TradingRec) => `${t.ref_kind}|${t.ref_id}|${t.order_item_id}`;
+      const costed = new Set(list.filter((t) => t.kind === 'cost_of_goods').map(pair));
+      const uncosted = list.filter((t) => t.kind === 'sale' && !costed.has(pair(t))).reduce((x, t) => x + t.amount, 0);
       const sales = s('sale');
-      const buying = s('buying_cost');
-      const gross = sales - buying;
+      const cogs = s('cost_of_goods');
+      const gross = sales - cogs;
       const net = gross - s('discount') - s('shipping_expense') - s('return') - s('write_off') - s('chargeback_loss') + s('supplier_credit');
-      return { sales, buying, gross, discounts: s('discount'), shipping: s('shipping_expense'), returns: s('return'), writeOffs: s('write_off'), chargebacks: s('chargeback_loss'), net };
+      return { sales, cogs, uncosted, stockBought: s('buying_cost'), gross, discounts: s('discount'), shipping: s('shipping_expense'), returns: s('return'), writeOffs: s('write_off'), chargebacks: s('chargeback_loss'), net };
     };
     const t = totals(rows);
     const priorFrom = addDays(q.from, -r.days);
@@ -198,7 +302,7 @@ export class ReportsPart extends Part {
       if (row.kind === 'sale') {
         d.sales += row.amount;
         d.margin += row.amount;
-      } else if (row.kind === 'buying_cost') d.margin -= row.amount;
+      } else if (row.kind === 'cost_of_goods') d.margin -= row.amount;
     }
     // targets prorated by days of each month in the range (whole store)
     let target = 0;
@@ -222,9 +326,12 @@ export class ReportsPart extends Part {
     const marginTarget = marginWeight ? round2(marginWeighted / marginWeight) : null;
     return {
       range: { from: q.from, to: q.to },
-      costBasis: 'weighted average buying cost at receipt',
+      costBasis: 'weighted average buying cost when the order was accepted',
       productSales: this.money(t.sales),
-      buyingCost: this.money(t.buying),
+      costOfGoodsSold: this.money(t.cogs),
+      uncostedSales: this.money(t.uncosted),
+      stockBought: this.money(t.stockBought),
+      buyingCost: this.money(t.cogs), // deprecated: the old name of costOfGoodsSold
       grossMargin: this.money(t.gross),
       grossMarginPct: grossPct,
       discounts: this.money(t.discounts),

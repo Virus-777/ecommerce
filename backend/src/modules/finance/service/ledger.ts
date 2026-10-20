@@ -101,6 +101,99 @@ export class LedgerPart extends Part {
     await tx.insertIfAbsent('discount_funding', { ...row, id: factId(key), currency: row.currency ?? this.core.currency() });
   }
 
+  /**
+   * The cost of goods sold of an Official Store item (positive) or its reversal on a cancellation (negative). Written
+   * even when the amount is 0, unlike the facts above: a sale with a cost_of_goods row beside it (same ref_kind,
+   * ref_id and order_item_id) counts as costed in the trading summary, one without as uncosted.
+   */
+  async costOfGoods(tx: FinanceRepository, key: string, row: Omit<TradingRec, 'id' | 'currency' | 'kind'> & { currency?: string }) {
+    await tx.insertIfAbsent('trading_entries', { ...row, kind: 'cost_of_goods', id: factId(key), currency: row.currency ?? this.core.currency() });
+  }
+
+  /**
+   * Unit cost × quantity of Official Store items: inventory's weighted average buying cost now (the cost of what
+   * leaves the stock), the same unit cost reports puts on its order facts. A soft dependency: items inventory cannot
+   * cost (off, no cost recorded, another currency) are left out and their sales count as uncosted.
+   */
+  async costsOf(items: Item[]): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    for (const item of items) {
+      const unit = await this.core.optional('inventory', (inv) => inv.getUnitCost(item.stockItemId));
+      if (unit && unit.currency === item.lineSubtotal.currency) out.set(item.id, unit.amount * item.quantity);
+    }
+    return out;
+  }
+
+  /** The sale and cost of goods booked for an Official Store line, or for the line it was split from */
+  async bookedSale(itemId: string, order?: orders.OrderDetail | null): Promise<{ sale: TradingRec; cost: TradingRec | undefined } | undefined> {
+    if (!isUuid(itemId)) return undefined;
+    const sale = await this.repo.get('trading_entries', factId(`sale:${itemId}`));
+    if (sale) return { sale, cost: await this.repo.get('trading_entries', factId(`cost_of_goods:${itemId}`)) };
+    const item = order ? this.itemsOf(order).find((i) => i.id === itemId) : undefined;
+    if (item?.splitFromItemId) return this.bookedSale(item.splitFromItemId, order);
+    return undefined;
+  }
+
+  /**
+   * The cost of goods to take back for a cancelled item amount: the booked cost in proportion to the part of the
+   * booked sale cancelled (the line subtotal of the units cancelled), never more than the cost itself
+   */
+  costReversal(cost: number, itemAmount: number, saleAmount: number): number {
+    return Math.min(cost, prorate(cost, itemAmount, saleAmount));
+  }
+
+  /**
+   * Fills the cost of goods of the Official Store sales booked before cost_of_goods existed: the data migration
+   * 2026-10-21-cost-of-goods-pending left a placeholder for each (kind cost_of_goods, ref_kind cost_pending, amount 0).
+   * The cost needs orders and inventory through their public APIs, which a data migration cannot call, so this runs
+   * after boot. Per placeholder: with a unit cost the row becomes the line's cost_of_goods (unit cost now × the
+   * quantity sold) and the cancellations already booked on the line, or on lines split from it, get their reversal;
+   * without one the placeholder is removed and the sale stays uncosted. An order finance cannot read keeps its
+   * placeholders for the next start; nothing is done while inventory is off. Safe to run twice. Returns rows filled.
+   */
+  async fillPendingCosts(): Promise<number> {
+    if (!this.ctx.tryUse('inventory')) return 0;
+    const pending = await this.repo.find('trading_entries', { kind: 'cost_of_goods', ref_kind: 'cost_pending' });
+    let filled = 0;
+    for (const [orderId, placeholders] of groupBy(pending, (r) => r.order_id ?? '')) {
+      const order = orderId ? await this.order(orderId) : null;
+      if (!order) continue;
+      const items = this.itemsOf(order);
+      // the first line of a split chain (cancellations name the line they cancelled, which may be split off another)
+      const rootOf = (itemId: string | null) => {
+        let id = itemId;
+        for (let depth = 0; depth < 100; depth++) {
+          const parent = items.find((i) => i.id === id)?.splitFromItemId;
+          if (!parent) break;
+          id = parent;
+        }
+        return id;
+      };
+      const sales = await this.repo.find('trading_entries', { order_id: orderId, kind: 'sale' });
+      for (const p of placeholders) {
+        const sale = sales.find((s) => s.ref_kind === 'order_item' && s.order_item_id === p.order_item_id);
+        const item = items.find((i) => i.id === p.order_item_id);
+        // the quantity sold, from the booked sale: the line may have been split since (it then holds fewer units)
+        const quantity = sale && item && item.unitPrice.amount > 0 ? Math.round(sale.amount / item.unitPrice.amount) : 0;
+        const [cost] = item && quantity ? [...(await this.costsOf([{ ...item, quantity }])).values()] : [];
+        if (cost === undefined) {
+          await this.repo.removeWhere('trading_entries', { id: p.id, ref_kind: 'cost_pending' });
+          continue;
+        }
+        const cancels = sales.filter((s) => s.ref_kind === 'cancellation' && s.ref_id && rootOf(s.order_item_id) === p.order_item_id);
+        await this.repo.transaction(async (tx) => {
+          await tx.update('trading_entries', p.id, { amount: cost, ref_kind: 'order_item', ref_id: p.order_item_id });
+          for (const c of cancels) {
+            const base = { at: c.at, order_id: orderId, order_item_id: c.order_item_id, variant_id: null, ref_kind: 'cancellation', ref_id: c.ref_id };
+            await this.costOfGoods(tx, `cancel_cost_of_goods:${c.ref_id}:${c.order_item_id}`, { ...base, amount: -this.costReversal(cost, -c.amount, sale!.amount) });
+          }
+        });
+        filled++;
+      }
+    }
+    return filled;
+  }
+
   /** A movement of the store credit liability */
   async liability(tx: FinanceRepository, key: string, row: Omit<LiabilityRec, 'id' | 'at'>) {
     if (!row.amount) return;
@@ -117,10 +210,14 @@ export class LedgerPart extends Part {
     for (const g of e.groups) {
       const groupItems = g.itemIds.map((id) => items.find((i) => i.id === id)).filter((i): i is Item => Boolean(i));
       if (g.ownerType === 'official' || !g.sellerId) {
+        // read before the transaction: it may only touch finance's own collections
+        const costs = await this.costsOf(groupItems);
         await this.repo.transaction(async (tx) => {
           for (const item of groupItems) {
             const base = { at, order_id: order.id, order_item_id: item.id, variant_id: item.product?.variantId ?? null, ref_kind: 'order_item', ref_id: item.id };
             await this.trading(tx, `sale:${item.id}`, { ...base, kind: 'sale', amount: item.lineSubtotal.amount });
+            const cost = costs.get(item.id);
+            if (cost !== undefined) await this.costOfGoods(tx, `cost_of_goods:${item.id}`, { ...base, amount: cost });
             const disc = (item.discounts ?? []).reduce((s, d) => s + d.amount.amount, 0);
             await this.trading(tx, `discount:${item.id}`, { ...base, kind: 'discount', amount: disc });
             // shipping charged to the customer recovers part of the company's shipping expense
@@ -149,10 +246,10 @@ export class LedgerPart extends Part {
         // category fee rates apply to the product category at purchase (the order item's snapshot)
         const calc = calculate(rule, { categoryId: item.categoryId ?? null, itemPrice: item.lineSubtotal.amount, sellerDiscount: split.seller, platformDiscount: split.platform, shippingCharged: item.shippingShare.amount + shipPaid }, cur);
         const lotId = detId(`lot:${item.id}`);
-        await tx.insertIfAbsent('earnings_lots', { id: lotId, seller_id: sellerId, order_id: order.id, order_item_id: item.id, state: 'pending', gross: item.lineSubtotal.amount, fee: calc.fee.amount, net: 0, delivered_at: null, available_at: null, payout_id: null });
+        await tx.insertIfAbsent('earnings_lots', { id: lotId, seller_id: sellerId, order_id: order.id, order_item_id: item.id, state: 'pending', gross: item.lineSubtotal.amount, fee: calc.fee.amount, net: 0, delivered_at: null, available_at: null, payout_id: null, left_pending_at: null });
         const lot = (await tx.findOne('earnings_lots', { order_item_id: item.id }))!;
         if (lot.id !== lotId || lot.seller_id !== sellerId) continue;
-        await tx.insertIfAbsent('fee_charges', { id: detId(`fee:${item.id}`), order_item_id: item.id, seller_id: sellerId, rule_set_id: ruleRow.id, basis_amount: calc.feeBasis.amount, rate_bps: calc.rateBps, fee: calc.fee.amount, refunded_fee: 0, status: 'charged', created_at: at });
+        await tx.insertIfAbsent('fee_charges', { id: detId(`fee:${item.id}`), order_item_id: item.id, seller_id: sellerId, rule_set_id: ruleRow.id, basis_amount: calc.feeBasis.amount, rate_bps: calc.rateBps, fee: calc.fee.amount, refunded_fee: 0, status: 'charged', created_at: at, changed_at: at });
         const ref = { kind: 'order' as const, id: order.id, label: order.ref };
         const what = `${item.title}${item.variantLabel ? ` (${item.variantLabel})` : ''} × ${item.quantity}`;
         const entries: NewEntry[] = [
@@ -178,9 +275,14 @@ export class LedgerPart extends Part {
   async onItemCancelled(e: EventPayload<'orders.item.cancelled'>) {
     const at = this.now();
     if (e.ownerType === 'official' || !e.sellerId) {
+      // the cost of goods comes back in proportion; none when the line had no cost, or its cost waits for
+      // fillPendingCosts (that one reverses the cancellations it finds)
+      const booked = (await this.bookedSale(e.itemId)) ?? (await this.bookedSale(e.itemId, await this.order(e.orderId)));
+      const cost = booked?.cost?.ref_kind === 'order_item' ? booked.cost.amount : null;
       await this.repo.transaction(async (tx) => {
         const base = { at, order_id: e.orderId, order_item_id: e.itemId, variant_id: null, ref_kind: 'cancellation', ref_id: e.cancellationId };
         await this.trading(tx, `cancel_sale:${e.cancellationId}:${e.itemId}`, { ...base, kind: 'sale', amount: -e.refund.itemAmount.amount });
+        if (cost !== null) await this.costOfGoods(tx, `cancel_cost_of_goods:${e.cancellationId}:${e.itemId}`, { ...base, amount: -this.costReversal(cost, e.refund.itemAmount.amount, booked!.sale.amount) });
         await this.trading(tx, `cancel_discount:${e.cancellationId}:${e.itemId}`, { ...base, kind: 'discount', amount: -e.refund.discountShare.amount });
         await this.trading(tx, `cancel_shipping:${e.cancellationId}:${e.itemId}`, { ...base, kind: 'shipping_expense', amount: e.refund.shippingRefund.amount });
       });
@@ -216,7 +318,7 @@ export class LedgerPart extends Part {
       }
       const posted = await this.core.post(tx, l.seller_id, entries, out);
       if (!posted.length) return;
-      if (charge && feeBack) await tx.update('fee_charges', charge.id, { refunded_fee: charge.refunded_fee + feeBack, status: charge.refunded_fee + feeBack >= charge.fee ? 'reversed' : charge.status });
+      if (charge && feeBack) await tx.update('fee_charges', charge.id, { refunded_fee: charge.refunded_fee + feeBack, status: charge.refunded_fee + feeBack >= charge.fee ? 'reversed' : charge.status, changed_at: this.now() });
       const fresh = (await tx.get('earnings_lots', l.id))!;
       const gross = Math.max(0, fresh.gross - itemAmount);
       await tx.update('earnings_lots', l.id, { gross, fee: fresh.fee - feeBack });
@@ -418,7 +520,7 @@ export class LedgerPart extends Part {
         if (!posted.length) return;
         // the customer's return shipping pays for the label Marketly bought (booked from returns.label.created)
         if (returnShipping) await this.platformCost(tx, `return_shipping:${e.refundId}:${item.orderItemId}`, { at: new Date(e.sentAt), kind: 'label', amount: -returnShipping, order_id: e.orderId, order_item_id: item.orderItemId, ref_kind: 'refund', ref_id: e.refundId });
-        if (charge && feeBack) await tx.update('fee_charges', charge.id, { refunded_fee: charge.refunded_fee + feeBack, status: charge.refunded_fee + feeBack >= charge.fee ? 'reversed' : charge.status });
+        if (charge && feeBack) await tx.update('fee_charges', charge.id, { refunded_fee: charge.refunded_fee + feeBack, status: charge.refunded_fee + feeBack >= charge.fee ? 'reversed' : charge.status, changed_at: this.now() });
         const fresh = (await tx.get('earnings_lots', l.id))!;
         const gross = Math.max(0, fresh.gross - itemAmount);
         await tx.update('earnings_lots', l.id, { gross, fee: fresh.fee - feeBack });

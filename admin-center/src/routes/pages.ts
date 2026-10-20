@@ -19,6 +19,7 @@ export const PAGES: Partial<Record<ScreenId, LazyExoticComponent<ComponentType>>
   'admin/seller': lazy(() => import('../pages/admin/Seller')),
   'admin/shipping': lazy(() => import('../pages/admin/Shipping')),
   'admin/finance': lazy(() => import('../pages/admin/Finance')),
+  'admin/finance-statistics': lazy(() => import('../pages/admin/FinanceStatistics')),
   'admin/payouts': lazy(() => import('../pages/admin/Payouts')),
   'admin/customers': lazy(() => import('../pages/admin/Customers')),
   'admin/cases': lazy(() => import('../pages/admin/Cases')),

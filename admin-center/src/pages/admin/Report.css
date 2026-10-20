@@ -12,7 +12,6 @@
 /* KPI tiles: the definitions link sits under the value. */
 .rpd-kpi { display: flex; flex-direction: column; gap: var(--sp-1); }
 
-.rpd-chart-head { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); align-items: center; justify-content: space-between; }
 .rpd-seg { max-width: 100%; overflow-x: auto; }
 .rpd-seg .seg { flex-wrap: nowrap; }
 .rpd-seg .seg button { white-space: nowrap; }

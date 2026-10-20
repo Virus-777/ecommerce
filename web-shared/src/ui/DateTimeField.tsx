@@ -1,7 +1,8 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { DayPicker } from 'react-day-picker';
 import 'react-day-picker/style.css';
 import { cx } from '../lib/cx';
+import { usePopoverPosition } from '../lib/hooks';
 import { Button } from './Button';
 import { Icon } from './Icon';
 
@@ -38,9 +39,6 @@ const startOfToday = () => {
   return new Date(n.getFullYear(), n.getMonth(), n.getDate());
 };
 
-const POP_GAP = 6;
-const EDGE = 8;
-
 interface DateTimeFieldProps {
   id: string;
   /** "" or "YYYY-MM-DDTHH:mm" */
@@ -64,7 +62,6 @@ export function DateTimeField({ id, value, onChange, after, step = 15, placehold
   const min = parse(after);
   const [open, setOpen] = useState(false);
   const [month, setMonth] = useState<Date>(() => sel?.date ?? startOfToday());
-  const [pos, setPos] = useState<CSSProperties>({ visibility: 'hidden' });
   const wrap = useRef<HTMLDivElement>(null);
   const group = useRef<HTMLSpanElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -88,7 +85,6 @@ export function DateTimeField({ id, value, onChange, after, step = 15, placehold
 
   const show = () => {
     setMonth(sel?.date ?? (min && min.date > startOfToday() ? min.date : startOfToday()));
-    setPos({ visibility: 'hidden' });
     setOpen(true);
   };
   const close = (refocus = true) => {
@@ -100,27 +96,7 @@ export function DateTimeField({ id, value, onChange, after, step = 15, placehold
   const pickTime = (minutes: number) => !tooEarly(day, minutes) && onChange(toValue(day, minutes));
 
   // place the panel under the field (above it when there is no room), inside the viewport
-  useLayoutEffect(() => {
-    if (!open) return;
-    const place = () => {
-      const r = group.current?.getBoundingClientRect();
-      const p = pop.current;
-      if (!r || !p) return;
-      const w = Math.min(p.offsetWidth, window.innerWidth - 2 * EDGE);
-      const h = p.offsetHeight;
-      const below = r.bottom + POP_GAP;
-      const top = below + h > window.innerHeight - EDGE && r.top - POP_GAP - h >= EDGE ? r.top - POP_GAP - h : Math.max(EDGE, Math.min(below, window.innerHeight - EDGE - h));
-      const left = Math.max(EDGE, Math.min(r.right - w, window.innerWidth - EDGE - w));
-      setPos({ top, left });
-    };
-    place();
-    window.addEventListener('resize', place);
-    window.addEventListener('scroll', place, true);
-    return () => {
-      window.removeEventListener('resize', place);
-      window.removeEventListener('scroll', place, true);
-    };
-  }, [open]);
+  const pos = usePopoverPosition(open, group, pop);
 
   // a press outside the field and its panel closes the panel
   useEffect(() => {

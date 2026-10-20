@@ -7094,8 +7094,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Company trading: product sales, buying cost, discounts, shipping, returns and margin
-         * @description **Permission:** `finance.trading.view`
+         * Company trading: product sales, cost of goods sold, stock bought, discounts, shipping, returns and margin
+         * @description The margin uses the cost of goods sold (booked when an order is accepted), never the stock bought: a goods receipt raises stockBought and leaves the margin alone.
+         *
+         *     **Permission:** `finance.trading.view`
          *
          *     **Screens:** admin/official, admin/reports
          */
@@ -13635,6 +13637,84 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/seller/offers/offers/{id}/costs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Unit cost history of one own offer, newest first
+         * @description Newest effective_from first (ties: newest saved first). Any member who may see the offer may read it. Another seller's offer is NOT_FOUND.
+         *
+         *     **Screens:** seller/offer
+         */
+        get: operations["offers.listOfferCosts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/seller/offers/offers/{id}/cost": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set the unit cost of one own offer from a day on
+         * @description Adds a cost row (rows are never edited; a later row for the same day wins). unitCost ≥ 0 in the offer's currency; effectiveFrom defaults to today (market day), at most 400 days back (so old sales get a cost) and at most 1 day ahead. Publishes offers.offer.cost_changed.
+         *
+         *     **Permission:** `offers.costs.manage`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Publishes:** `offers.offer.cost_changed`
+         *
+         *     **Screens:** seller/offer, seller/products
+         */
+        put: operations["offers.setOfferCost"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/seller/offers/costs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set the unit cost of several own offers (1 to 500)
+         * @description Same rules as PUT /offers/{id}/cost for each item; each item is saved or refused on its own (errors lists the refused ones with NOT_FOUND or VALIDATION_FAILED). One offers.offer.cost_changed per saved row. An empty or longer list is VALIDATION_FAILED.
+         *
+         *     **Permission:** `offers.costs.manage`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Publishes:** `offers.offer.cost_changed`
+         *
+         *     **Screens:** seller/products, seller/bulk-update
+         */
+        post: operations["offers.setOfferCosts"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/seller/offers/offers/exports": {
         parameters: {
             query?: never;
@@ -13692,7 +13772,7 @@ export interface paths {
         };
         /**
          * Download a CSV template prefilled with this seller's SKUs, prices and quantities
-         * @description Columns: seller_sku, price, quantity. Leaving a column out keeps the current value.
+         * @description Columns: seller_sku, price, quantity, unit_cost (the unit cost in force today, empty when none is set). Leaving a column out, or a cell empty, keeps the current value.
          *
          *     **Permission:** `offers.bulk.update`
          *
@@ -13802,11 +13882,11 @@ export interface paths {
         put?: never;
         /**
          * Apply the valid rows
-         * @description Prices are changed here; quantities go to inventory as adjustments with reason 'Bulk update', the job id and the caller's name. Error rows are skipped.
+         * @description Prices are changed here; quantities go to inventory as adjustments with reason 'Bulk update', the job id and the caller's name; unit costs are saved effective today (offers.offer.cost_changed per row). Rows that change a unit cost need offers.costs.manage as well (FORBIDDEN, nothing applied). Error rows are skipped.
          *
          *     **Permission:** `offers.bulk.update`
          *
-         *     **Publishes:** `offers.bulk_update.applied`, `offers.offer.price_changed`
+         *     **Publishes:** `offers.bulk_update.applied`, `offers.offer.price_changed`, `offers.offer.cost_changed`
          *
          *     **Screens:** seller/bulk-update
          *
@@ -18378,7 +18458,9 @@ export interface paths {
         };
         /**
          * Reports available to sellers
-         * @description **Screens:** seller/reports
+         * @description Only the reports the caller may open: one with a permission of its own (finance.balances.view for Earnings and profit and Profit by product) is left out without it.
+         *
+         *     **Screens:** seller/reports
          */
         get: operations["reports.getSellerCatalogue"];
         put?: never;
@@ -18399,8 +18481,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Run a seller report (product sales, order trend, returns by reason, service performance)
-         * @description Always scoped to the caller's seller; sellerId, soldBy and other sellers' data are never accepted. Figures by order date, market time zone, stating how each metric is calculated.
+         * Run a seller report (product sales, order trend, returns by reason, service performance, earnings and profit, profit by product)
+         * @description Always scoped to the caller's seller; sellerId, soldBy and other sellers' data are never accepted. Figures by order date, market time zone, stating how each metric is calculated. A report with a permission of its own (seller.earnings and seller.profit_by_product: finance.balances.view) is FORBIDDEN without it.
          *
          *     **Permission:** `reports.seller.view`
          *
@@ -34686,6 +34768,7 @@ export interface components {
             /** Format: date */
             date: string;
             sales: components["schemas"]["Money"];
+            /** @description Sales less the cost of goods sold of the day */
             margin: components["schemas"]["Money"];
         };
         "finance.TradingTarget": {
@@ -34725,11 +34808,21 @@ export interface components {
         };
         "finance.TradingSummary": {
             range: components["schemas"]["DateRange"];
-            /** @description e.g. weighted average buying cost at receipt */
+            /** @description How costOfGoodsSold is valued, e.g. weighted average buying cost when the order was accepted */
             costBasis: string;
+            /** @description Official Store item sales before discounts, less cancellations, by booking day */
             productSales: components["schemas"]["Money"];
+            /** @description Unit cost (inventory weighted average buying cost) × quantity of the items sold, booked when the order is accepted and reversed in proportion on cancellation. Items with no unit cost add nothing: see uncostedSales */
+            costOfGoodsSold: components["schemas"]["Money"];
+            /** @description The part of productSales whose items had no unit cost when sold (inventory off or no cost recorded): counted in the margin with no cost */
+            uncostedSales: components["schemas"]["Money"];
+            /** @description Buying cost of goods received from suppliers and other buying costs booked (purchasing receipts). Stock bought, not the cost of what was sold: never taken off the margin */
+            stockBought: components["schemas"]["Money"];
+            /** @description Deprecated: equals costOfGoodsSold (until 2026-10-21 it was the stock bought). Read costOfGoodsSold or stockBought */
             buyingCost: components["schemas"]["Money"];
+            /** @description productSales − costOfGoodsSold */
             grossMargin: components["schemas"]["Money"];
+            /** @description grossMargin as % of productSales */
             grossMarginPct: number;
             /** @description Company-funded discounts on Official Store items */
             discounts: components["schemas"]["Money"];
@@ -34737,6 +34830,7 @@ export interface components {
             returnsCost: components["schemas"]["Money"];
             writeOffs: components["schemas"]["Money"];
             chargebackLosses: components["schemas"]["Money"];
+            /** @description grossMargin − discounts − shippingExpense − returnsCost − writeOffs − chargebackLosses + supplier credits */
             netMargin: components["schemas"]["Money"];
             returnsPctOfSales: number;
             /** @description Change of returnsPctOfSales vs the prior period of the same length, in percentage points (negative = fewer returns) */
@@ -37580,6 +37674,62 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
+            /** @description Seller views only (Seller Center offer detail and the offer write responses): the seller's unit cost in force today (offer_costs), null when none is set. Never filled for customers or staff: a seller's costs are private */
+            unitCost?: components["schemas"]["Money"] | null;
+            /**
+             * Format: date
+             * @description Seller views only: the market day unitCost took effect
+             */
+            unitCostFrom?: string | null;
+        };
+        "offers.OfferCost": {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            offerId: string;
+            /** Format: uuid */
+            productId: string;
+            unitCost: components["schemas"]["Money"];
+            /**
+             * Format: date
+             * @description Market day the cost starts. It applies to sales from that day until the next later cost of the offer
+             */
+            effectiveFrom: string;
+            /** @description e.g. 'new supplier' */
+            note?: string | null;
+            setBy: components["schemas"]["offers.OfferCostSetter"];
+            /** Format: date-time */
+            createdAt: string;
+        };
+        "offers.OfferCostSetter": {
+            /**
+             * Format: uuid
+             * @description The seller member's account
+             */
+            id?: string | null;
+            name: string;
+        };
+        "offers.OfferCostItem": {
+            /** Format: uuid */
+            offerId: string;
+            /** @description Zero or more, in the offer's currency */
+            unitCost: components["schemas"]["Money"];
+            /**
+             * Format: date
+             * @description Default today (market day); at most 400 days back and 1 day ahead
+             */
+            effectiveFrom?: string | null;
+            note?: string | null;
+        };
+        "offers.OfferCostError": {
+            /** Format: uuid */
+            offerId: string;
+            /**
+             * @description NOT_FOUND: not one of this seller's offers; VALIDATION_FAILED: see message
+             * @enum {string}
+             */
+            code: "NOT_FOUND" | "VALIDATION_FAILED";
+            message: string;
         };
         "offers.CompareAtPrice": {
             amount: components["schemas"]["Money"];
@@ -38035,6 +38185,8 @@ export interface components {
             stock: components["schemas"]["offers.StockCue"];
             /** @description Missing product content shown under the name (e.g. 'Missing images and identifiers'); empty when complete */
             contentGaps: ("images" | "identifiers")[];
+            /** @description The seller's unit cost in force today (the products list column); null when none is set. Private to the seller */
+            unitCost?: components["schemas"]["Money"] | null;
         };
         "offers.SellerOfferDetail": {
             offer: components["schemas"]["offers.Offer"];
@@ -38164,6 +38316,8 @@ export interface components {
             unchanged: number;
             priceChanges: number;
             stockChanges: number;
+            /** @description Seller files: rows that set a new unit cost (unit_cost column) */
+            costChanges: number;
             pendingApproval: number;
             applied: number;
             skipped: number;
@@ -38178,6 +38332,10 @@ export interface components {
             priceTo?: components["schemas"]["Money"] | null;
             quantityFrom?: number | null;
             quantityTo?: number | null;
+            /** @description Seller files: the unit cost in force when the file was read */
+            unitCostFrom?: components["schemas"]["Money"] | null;
+            /** @description Seller files: the unit cost the row sets, effective today (null when the row leaves the cost as it is) */
+            unitCostTo?: components["schemas"]["Money"] | null;
             /** @enum {string} */
             result: "ready" | "error" | "unchanged" | "applied" | "skipped" | "pending_approval";
             error?: components["schemas"]["offers.BulkRowError"] | null;
@@ -38191,7 +38349,7 @@ export interface components {
              * @description Stable code
              * @enum {string}
              */
-            code: "unknown_sku" | "negative_quantity" | "price_below_minimum" | "price_missing" | "price_change_too_large" | "offer_removed" | "not_a_number" | "duplicate_row";
+            code: "unknown_sku" | "negative_quantity" | "price_below_minimum" | "price_missing" | "price_change_too_large" | "offer_removed" | "not_a_number" | "duplicate_row" | "unit_cost_invalid";
             /** @description What is wrong and how to fix it, e.g. 'Price $2.40 is below the $5.00 minimum for Cables and adapters. Did you mean $24.00?' */
             message: string;
         };
@@ -41266,8 +41424,11 @@ export interface components {
             reports: components["schemas"]["reports.ReportDefinition"][];
         };
         "reports.ReportQuery": {
-            /** @enum {string|null} */
-            preset?: "today" | "last_7_days" | "last_14_days" | "last_30_days" | "last_90_days" | "month_to_date" | "custom" | null;
+            /**
+             * @description Days ending today in market time; quarter_to_date from the first day of the calendar quarter, year_to_date from 1 January, last_12_months from the day after the same date last year (at most maxRangeDays)
+             * @enum {string|null}
+             */
+            preset?: "today" | "last_7_days" | "last_14_days" | "last_30_days" | "last_90_days" | "month_to_date" | "quarter_to_date" | "year_to_date" | "last_12_months" | "custom" | null;
             range?: components["schemas"]["DateRange"] | null;
             /** @enum {string|null} */
             dateBasis?: "placement" | "payment" | "shipment" | "completion" | null;
@@ -41282,10 +41443,16 @@ export interface components {
             /** @description USD only at launch */
             currency?: string | null;
             timeZone?: string | null;
-            /** @enum {string|null} */
+            /**
+             * @description Series buckets (weeks start on Monday). Default: day up to 31 days, week up to 92, month beyond
+             * @enum {string|null}
+             */
             granularity?: "day" | "week" | "month" | null;
-            /** @enum {string|null} */
-            compare?: "none" | "previous_period" | null;
+            /**
+             * @description previous_period: the same number of days just before the range; same_period_last_year: the same calendar dates one year earlier (29 February becomes 28 February). Gives KPI deltas, meta.compareRange and a <key>:compare twin of every series
+             * @enum {string|null}
+             */
+            compare?: "none" | "previous_period" | "same_period_last_year" | null;
             /** @description Report-specific filters from FilterSpec */
             filters?: unknown;
         };
@@ -41300,13 +41467,14 @@ export interface components {
             note?: string | null;
         };
         "reports.Series": {
+            /** @description With a comparison, every series has a twin keyed <key>:compare */
             key: string;
             label: string;
-            /** @description { x: date, y: number } */
+            /** @description { x: date (first day of the bucket), y: number, label } . On a <key>:compare twin x and label are the current period's bucket at the same position (so both draw on one axis), y is the comparison period's value (null when the comparison has no bucket there) and compareX is the comparison bucket's own first day */
             points: unknown[];
         };
         "reports.ReportResult": {
-            /** @description { reportKey, title, range, dateBasis, currency, timeZone, taxIncluded, freshAsOf, mayStillChange, definitionsVersion, compareRange?, scope: platform|seller } */
+            /** @description { reportKey, title, range, dateBasis, dateBasisLabel, currency, timeZone, taxIncluded, freshAsOf, mayStillChange, definitionsVersion, compare?: previous_period|same_period_last_year, compareRange? (the dates the :compare twins hold), granularity, scope: platform|seller } */
             meta: unknown;
             kpis: components["schemas"]["reports.KpiValue"][];
             series: components["schemas"]["reports.Series"][];
@@ -90622,6 +90790,213 @@ export interface operations {
             };
             /** @description LARGE_PRICE_CHANGE_UNCONFIRMED: Price changes above the large-change threshold need confirmLargeChange. details.offers */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "offers.listOfferCosts": {
+        parameters: {
+            query?: {
+                /** @description Opaque cursor from the previous response. Used by the Android app's infinite scroll. */
+                cursor?: string | null;
+                /** @description 1-based page number. Used by the website's numbered pages. */
+                page?: number | null;
+                /** @description Items per batch, 1–100, default 24 */
+                limit?: number | null;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["offers.OfferCost"][];
+                        /** @description Pass as ?cursor= for the next batch (app). Null at the end. */
+                        nextCursor: string | null;
+                        page?: number;
+                        totalPages?: number;
+                        total?: number;
+                    };
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "offers.setOfferCost": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    unitCost: components["schemas"]["Money"];
+                    /**
+                     * Format: date
+                     * @description Default today (market day)
+                     */
+                    effectiveFrom?: string | null;
+                    note?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["offers.OfferCost"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "offers.setOfferCosts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    items: components["schemas"]["offers.OfferCostItem"][];
+                };
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        saved: number;
+                        errors: components["schemas"]["offers.OfferCostError"][];
+                    };
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

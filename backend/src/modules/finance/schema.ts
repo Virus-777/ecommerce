@@ -74,6 +74,7 @@ const earnings_lots = new Schema(
     delivered_at: { type: Date, default: null },
     available_at: { type: Date, default: null },
     payout_id: { type: String, default: null },
+    left_pending_at: { type: Date, default: null }, // when the lot left pending: made available or reversed; null while pending and on lots that left before 2026-10-21
     /** lock-by-write counter (kernel/mongo/table.ts) */
     _lock: Number,
   },
@@ -84,6 +85,7 @@ earnings_lots.index({"state":1,"available_at":1}, {"name":"earnings_lots_state_a
 earnings_lots.index({"seller_id":1,"state":1}, {"name":"earnings_lots_seller_id_state_e600c9"});
 earnings_lots.index({"payout_id":1}, {"name":"earnings_lots_payout_id_6e27aa"});
 earnings_lots.index({"order_id":1}, {"name":"earnings_lots_order_id_4c5e85"});
+earnings_lots.index({"left_pending_at":1}, {"name":"earnings_lots_left_pending_at_a5dac6"});
 
 const fee_rule_sets = new Schema(
   {
@@ -134,12 +136,14 @@ const fee_charges = new Schema(
     refunded_fee: { type: Number, required: true, validate: integer },
     status: { type: String, required: true, enum: ["charged","kept_disputed","reversed"] },
     created_at: { type: Date, required: true },
+    changed_at: { type: Date, default: null }, // last change of fee, refunded fee or status; reports pulls the fees changed since its last run. Older rows get created_at from a data migrati
     /** lock-by-write counter (kernel/mongo/table.ts) */
     _lock: Number,
   },
   collectionOptions("finance.fee_charges"),
 );
 fee_charges.index({"order_item_id":1}, {"name":"fee_charges_order_item_id_77c58a","unique":true});
+fee_charges.index({"changed_at":1,"_id":1}, {"name":"fee_charges_changed_at__id_7508f6"});
 
 /** Funding split from returns.refund.approved, applied when payments.refund.sent arrives */
 const refund_allocations = new Schema(
@@ -395,12 +399,12 @@ const statements = new Schema(
 statements.index({"ref":1}, {"name":"statements_ref_8cef23","unique":true});
 statements.index({"seller_id":1,"period_to":-1}, {"name":"statements_seller_id_period_to_caf887"});
 
-/** Company trading facts for the Official Store (never part of seller payouts). Marketplace (platform) facts live in captures, discount_funding, platform_costs and store_credit_liability, never here */
+/** Company trading facts for the Official Store (never part of seller payouts). cost_of_goods is the unit cost × quantity of an item sold, booked with its sale (ref_kind order_item) and reversed with a cancellation (ref_kind cancellation); ref_kind cost_pending marks a sale booked before cost_of_goods existed whose cost is still to be filled. buying_cost is stock bought (goods received), never the cost of what was sold. Marketplace (platform) facts live in captures, discount_funding, platform_costs and store_credit_liability, never here */
 const trading_entries = new Schema(
   {
     _id: { type: String, required: true }, // id
     at: { type: Date, required: true },
-    kind: { type: String, required: true, enum: ["sale","buying_cost","discount","shipping_expense","return","write_off","chargeback_loss","supplier_credit"] },
+    kind: { type: String, required: true, enum: ["sale","cost_of_goods","buying_cost","discount","shipping_expense","return","write_off","chargeback_loss","supplier_credit"] },
     amount: { type: Number, required: true, validate: integer },
     currency: { type: String, required: true },
     order_id: { type: String, default: null },

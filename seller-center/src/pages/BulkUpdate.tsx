@@ -14,7 +14,8 @@ import { LoadError, SkeletonRows, fmtFull, fmtWhen, openDownload, useSellerSetti
 // Design: pages/seller/seller-bulk-update.html (step 3, preview of an uploaded CSV) · view "applied" = step 4
 // done, correction report and upload history. Data: offers bulk updates — GET …/template (prefilled CSV),
 // media upload (purpose bulk_file) + POST …/bulk-updates (parse and validate), GET …/{id} and …/{id}/rows
-// (preview), POST …/{id}/apply, GET …/{id}/correction-report, GET …/bulk-updates (history).
+// (preview), POST …/{id}/apply, GET …/{id}/correction-report, GET …/bulk-updates (history). The optional
+// unit_cost column saves a unit cost from today (docs/09 §3.1); the preview shows it when the file has one.
 // ?job=<id> opens one upload; without it the latest preview (or, on ?view=applied, the latest applied file).
 
 type View = 'applied';
@@ -49,6 +50,13 @@ function PriceCell({ r }: { r: Row }) {
     );
   const v = r.priceTo ?? r.priceFrom;
   return <span className={cx('num', !r.priceTo || r.priceTo.amount === r.priceFrom?.amount ? 'muted' : '')}>{formatMoney(v!)}</span>;
+}
+
+/** unit_cost column: the cost in force when the file was read → the cost the row sets (from today). */
+function CostCell({ r }: { r: Row }) {
+  if (!r.unitCostTo) return r.unitCostFrom ? <span className="num muted">{formatMoney(r.unitCostFrom)}</span> : <span className="xs muted">No value</span>;
+  if (r.unitCostFrom && r.unitCostFrom.amount !== r.unitCostTo.amount) return <Change from={r.unitCostFrom} to={r.unitCostTo} money />;
+  return <span className="num">{formatMoney(r.unitCostTo)}</span>;
 }
 
 function QtyCell({ r }: { r: Row }) {
@@ -228,6 +236,8 @@ export default function BulkUpdate() {
   const pick = () => input.current?.click();
   const t = j?.totals;
   const shown = rows.data?.items ?? [];
+  // the unit cost column only when the file has one (older templates have no unit_cost)
+  const withCost = shown.some((r) => r.unitCostTo || r.unitCostFrom);
   const shownTotal = rows.data?.total ?? shown.length;
   const reportRows = applied ? (errorRows.data?.items ?? []) : [];
   const busy = upload.isPending || j?.state === 'uploaded';
@@ -262,7 +272,10 @@ export default function BulkUpdate() {
             <Icon name="file-down" />
             <span className="strong">1. Download the template</span>
           </span>
-          <p className="small sub">Prefilled with your {counts.data ? `${counts.data.all} ` : ''}SKUs, current prices and quantities. Columns: seller_sku, price, quantity.</p>
+          <p className="small sub">Prefilled with your {counts.data ? `${counts.data.all} ` : ''}SKUs, current prices, quantities and unit costs. Columns: seller_sku, price, quantity and unit_cost.</p>
+          <p className="xs muted">
+            <span className="mono">unit_cost</span> is optional: what one unit costs you, in dollars (like 42.50). A value saves a new cost from today, used for profit in Statistics; an empty cell keeps the current cost. Changing costs needs the permission to manage costs.
+          </p>
           <div className="row gap-2">
             <Button variant="secondary" size="sm" icon="download" onClick={() => template.mutate()} disabled={template.isPending}>
               {template.isPending ? 'Preparing…' : 'Download template'}
@@ -505,6 +518,7 @@ export default function BulkUpdate() {
                       <th scope="col">Product</th>
                       <th scope="col">Price</th>
                       <th scope="col">Quantity</th>
+                      {withCost && <th scope="col">Unit cost</th>}
                       <th scope="col">Result</th>
                     </tr>
                   </thead>
@@ -527,6 +541,11 @@ export default function BulkUpdate() {
                         <td>
                           <QtyCell r={r} />
                         </td>
+                        {withCost && (
+                          <td>
+                            <CostCell r={r} />
+                          </td>
+                        )}
                         <td>
                           {r.error ? (
                             <span className="error-text wrap items-start u-maxw-36ch">

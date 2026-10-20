@@ -1,0 +1,12 @@
+/* admin/finance-statistics (designed in React, no design file). Mobile-first; tokens from marketly.css. */
+
+/* The tabs sit on the page like the report library's, scrolling sideways on phones. */
+.fst-tabs { min-width: 0; }
+
+.fst-intro { margin: 0; max-width: 72ch; }
+
+/* Period control, seller filter and Export on one line when there is room; stacked on phones. */
+.fst-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--sp-3); min-width: 0; }
+.fst-controls > .period-control { flex: 1 1 auto; }
+.fst-controls .field { margin: 0; min-width: 0; max-width: 100%; }
+.fst-export { margin-inline-start: auto; }

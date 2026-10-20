@@ -491,7 +491,7 @@ export class HoldsPart extends Part {
       { actor: SYSTEM },
     );
     const lots = await this.repo.find('earnings_lots', { order_id: e.orderId, seller_id: e.sellerId });
-    if (lots.length) await this.repo.updateWhere('fee_charges', { order_item_id: lots.map((l) => l.order_item_id), status: 'charged' }, { status: 'kept_disputed' });
+    if (lots.length) await this.repo.updateWhere('fee_charges', { order_item_id: lots.map((l) => l.order_item_id), status: 'charged' }, { status: 'kept_disputed', changed_at: this.now() });
   }
 
   async onChargebackDecided(e: EventPayload<'payments.chargeback.decided'>) {
@@ -505,7 +505,7 @@ export class HoldsPart extends Part {
     const itemIds = lots.map((l) => l.order_item_id);
     if (e.outcome === 'won') {
       if (hold?.status === 'active') await this.apply(hold.id, 'release', hold.amount - hold.released_amount, 'Payment dispute won', by);
-      if (itemIds.length) await this.repo.updateWhere('fee_charges', { order_item_id: itemIds, status: 'kept_disputed' }, { status: 'charged' });
+      if (itemIds.length) await this.repo.updateWhere('fee_charges', { order_item_id: itemIds, status: 'kept_disputed' }, { status: 'charged', changed_at: this.now() });
       return;
     }
     if (hold?.status === 'active') await this.apply(hold.id, 'apply', e.amount.amount, 'Payment dispute lost', by);
@@ -524,11 +524,11 @@ export class HoldsPart extends Part {
           if (!c || c.fee - c.refunded_fee <= 0) continue;
           const back = c.fee - c.refunded_fee;
           const posted = await this.core.post(tx, l.seller_id, [{ key: `chargeback_fee:${e.disputeId}:${l.order_item_id}`, type: 'fee_refund', amount: back, bucket: l.state === 'pending' ? 'pending' : 'available', ref: { kind: 'chargeback', id: e.disputeId }, description: 'Fee returned on a lost payment dispute', lotId: l.id }], out);
-          if (posted.length) await tx.update('fee_charges', c.id, { refunded_fee: c.fee, status: 'reversed' });
+          if (posted.length) await tx.update('fee_charges', c.id, { refunded_fee: c.fee, status: 'reversed', changed_at: this.now() });
         }
       });
       this.core.flush(out);
-    } else if (itemIds.length) await this.repo.updateWhere('fee_charges', { order_item_id: itemIds, status: 'kept_disputed' }, { status: 'charged' });
+    } else if (itemIds.length) await this.repo.updateWhere('fee_charges', { order_item_id: itemIds, status: 'kept_disputed' }, { status: 'charged', changed_at: this.now() });
   }
 
   async onCaseDecided(e: EventPayload<'support.case.decided'>) {

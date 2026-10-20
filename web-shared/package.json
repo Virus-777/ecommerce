@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "sideEffects": [
+    "**/*.css"
+  ],
   "description": "Shared code of the Marketly web apps: design stylesheet, UI components, icons, back-office layout, screen catalogue, links between apps, sample data and design tooling.",
   "exports": {
     "./ui": "./src/ui/index.ts",
@@ -21,13 +24,14 @@
     "gen:icons": "node tools/gen-icons.mjs",
     "design:extract": "node tools/extract-design.mjs",
     "gen:api": "node tools/gen-api.mjs",
-    "test": "node --test tools/live.test.mjs tools/phone.test.mjs"
+    "test": "node --test tools/live.test.mjs tools/phone.test.mjs tools/period.test.mjs tools/format.test.mjs tools/axes.test.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.104.2",
     "lucide-react": "^1.55.0",
     "openapi-fetch": "^0.17.0",
-    "react-day-picker": "10.0.2"
+    "react-day-picker": "10.0.2",
+    "recharts": "3.10.1"
   },
   "peerDependencies": {
     "react": "^19.3.0",

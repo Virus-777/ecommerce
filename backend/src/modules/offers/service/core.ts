@@ -20,6 +20,7 @@ import { OFFICIAL_NAME, SERVICE_INELIGIBLE, isoReq, money, offerTitle, ownFulfil
 import type { BulkFileReader, EligibilityRec, OfferRec } from '../ports.js';
 import { DuplicateKeyError, type OffersRepository } from '../repository.js';
 import type { BulkPart } from './bulk.js';
+import type { CostsPart } from './costs.js';
 import type { EnforcementPart } from './enforcement.js';
 import type { FeaturedPart } from './featured.js';
 import type { ManagePart } from './manage.js';
@@ -48,6 +49,7 @@ export interface Parts {
   enforcement: EnforcementPart;
   views: ViewsPart;
   bulk: BulkPart;
+  costs: CostsPart;
 }
 
 type OwnEvent = keyof EventMap & `offers.${string}`;

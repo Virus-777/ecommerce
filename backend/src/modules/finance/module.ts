@@ -11,6 +11,7 @@ import { FinanceRepository } from './repository.js';
 import { createDevPayoutProvider } from './providers/payouts.js';
 import { FinanceService } from './service.js';
 import { schemas } from './schema.js';
+import { mongoMigrations } from './migrations.js';
 
 /**
  * Finance: Seller money and company money kept apart: the seller ledger (proceeds, pending, available, held, negative and amounts owed), fee rules, holds, adjustments, payout runs and payouts, statements, payout-destination verification, daily reconciliation checks, and company trading margins separate from marketplace fee income.
@@ -20,8 +21,9 @@ import { schemas } from './schema.js';
  */
 export default defineModule({
   spec,
-  version: '2.0.0',
+  version: '2.1.0',
   schemas,
+  mongoMigrations,
   register(ctx) {
     // payout provider: the deterministic development provider until a real one is wired in its place
     const provider = createDevPayoutProvider(ctx.clock);
@@ -36,6 +38,9 @@ export default defineModule({
       await service.core.ensureRules();
       await service.reports.registerDatasets();
     });
+    // the cost of goods of Official Store sales booked before cost_of_goods existed (migrations.ts); in the background,
+    // so a long first fill never holds up the start
+    ctx.afterBoot(() => void service.ledger.fillPendingCosts().catch((err) => ctx.log.warn({ err }, 'finance: cost of goods not filled; retried at the next start')));
     // the Commission and fees and the Payouts and holds sections of the settings page (G76)
     ctx.afterBoot(() => service.registerSettingsSections());
 
