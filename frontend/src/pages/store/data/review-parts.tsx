@@ -1,12 +1,13 @@
 // Blocks shared by the product sub-pages (All offers, Product reviews, Questions and answers) and
 // the product page: keyword matching and highlighting, product photos, the product summary card
 // and phone action bar, a review card, and the load-error alert.
+import { LoadError as SharedLoadError } from '@marketly/web-shared/ui';
 import { Fragment, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { dollars, formatMoney } from '@marketly/web-shared/lib/format';
-import { ApiError, errorMessage } from '@marketly/web-shared/api';
-import { Alert, Avatar, Badge, Button, Icon, Price, Stars, Stars5, type IconName, type Tone } from '@marketly/web-shared/ui';
+import { ApiError } from '@marketly/web-shared/api';
+import { Avatar, Badge, Button, Icon, Price, Stars, Stars5, type IconName, type Tone } from '@marketly/web-shared/ui';
 import {
   fmtDate, productCrumbs, productHref, useCartButton, useCatalogProduct, useCategories, usePurchaseBox, useRatingSummary,
   type CatalogProduct, type MediaRef, type PurchaseBox, type RatingSummary,
@@ -170,18 +171,7 @@ export function SummaryActionBar({ box, title }: { box?: PurchaseBox; title?: st
 
 /** A failed read: the server's message and Try again. */
 export function LoadError({ error, onRetry, title = 'We couldn’t load this page' }: { error: unknown; onRetry: () => void; title?: ReactNode }) {
-  return (
-    <div className="stack gap-3">
-      <Alert tone="danger" title={title}>
-        {errorMessage(error)}
-      </Alert>
-      <div>
-        <Button variant="secondary" size="sm" icon="refresh-cw" onClick={onRetry}>
-          Try again
-        </Button>
-      </div>
-    </div>
-  );
+  return <SharedLoadError error={error} onRetry={onRetry} title={title} />;
 }
 
 /** Skeleton of a list of text rows (reviews, questions). */

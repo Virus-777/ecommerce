@@ -1,3 +1,4 @@
+import { LoadError as SellerLoadError } from '@/pages/data/home';
 import { useEffect, useRef, useState } from 'react';
 import { keepPreviousData, useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
@@ -79,14 +80,7 @@ function SkeletonRows({ rows = 3 }: { rows?: number }) {
 }
 
 function LoadError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
-  return (
-    <Alert tone="danger" title="We couldn't load your orders">
-      {errorMessage(error)}{' '}
-      <Button variant="secondary" size="sm" onClick={onRetry}>
-        Try again
-      </Button>
-    </Alert>
-  );
+  return <SellerLoadError error={error} onRetry={onRetry} title="We couldn’t load your orders" />;
 }
 
 interface Done {

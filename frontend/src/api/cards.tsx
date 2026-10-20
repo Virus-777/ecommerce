@@ -1,10 +1,11 @@
+import { LoadError as SharedLoadError } from '@marketly/web-shared/ui';
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { dollars } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Button, Icon, Img, LazyLoad, Pager, ProductCard, announce, type CardProduct, type IconName } from '@marketly/web-shared/ui';
+import { Icon, Img, LazyLoad, Pager, ProductCard, announce, type CardProduct, type IconName } from '@marketly/web-shared/ui';
 import { useSession } from '@/app/session';
 import { useAdTracking } from './ad-events';
 import type { MediaRef } from './catalog';
@@ -175,14 +176,7 @@ export function SkLines({ n = 2, className }: { n?: number; className?: string }
 
 /** A failed read: the server's message and a Try again button (API.md rule 4). */
 export function LoadError({ error, onRetry, title = 'We couldn’t load this' }: { error: unknown; onRetry: () => void; title?: ReactNode }) {
-  return (
-    <Alert tone="danger" title={title}>
-      {errorMessage(error)}{' '}
-      <Button variant="secondary" size="sm" icon="refresh-cw" onClick={onRetry}>
-        Try again
-      </Button>
-    </Alert>
-  );
+  return <SharedLoadError error={error} onRetry={onRetry} title={title} />;
 }
 
 /** Phone lazy-load row: loads the next cursor page when it scrolls into view (design .lazy-load). */

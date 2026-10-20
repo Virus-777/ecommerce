@@ -1,3 +1,4 @@
+import { LoadError as SellerLoadError } from '@/pages/data/home';
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import { Link } from 'react-router';
@@ -85,14 +86,7 @@ const BALANCES: BalanceCard[] = [
 ];
 
 function LoadError({ title, error, retry }: { title: string; error: unknown; retry: () => void }) {
-  return (
-    <Alert tone="danger" title={title}>
-      {errorMessage(error)}{' '}
-      <Button variant="ghost" size="sm" onClick={retry}>
-        Try again
-      </Button>
-    </Alert>
-  );
+  return <SellerLoadError error={error} onRetry={retry} title={title} />;
 }
 
 const skeletonRows = (n: number, cols: number) =>

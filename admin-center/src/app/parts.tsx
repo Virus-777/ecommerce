@@ -1,8 +1,7 @@
 // Shared parts of the Admin and Operations Center screens: Pacific-time date formatting, deadline labels,
 // the load-error alert, skeletons and links built from the API's screen ids.
-import { ApiError, errorMessage } from '@marketly/web-shared/api';
+import { LoadError as SharedLoadError, SkeletonLines, isForbidden } from '@marketly/web-shared/ui';
 import { href, SCREEN_BY_ID, type ScreenId } from '@marketly/web-shared/routes';
-import { Alert, Button } from '@marketly/web-shared/ui';
 
 /** Pacific-time dates and deadline labels: the same helpers in all three apps */
 export { TZ, date, dateTime, dayKey, deadlineLabel, deadlineTone, longDate, monthYear, shortDate, time, weekdayDate, type DeadlineTone } from '@marketly/web-shared/lib/dates';
@@ -94,43 +93,15 @@ function linkTo(id: ScreenId, state?: string | null, params?: Record<string, str
 }
 
 /** True when the API refused the read because the staff member's roles lack the permission (403 FORBIDDEN). */
-export const isForbidden = (e: unknown): boolean => e instanceof ApiError && (e.status === 403 || e.code === 'FORBIDDEN') && e.code !== 'STEP_UP_REQUIRED';
+export { isForbidden };
 
 /**
  * A failed read: the error and a Try again button (API.md rule 4). A permission refusal is not an error to
  * retry: it says the role doesn't include this, and who can change that.
  */
-export function LoadError({ error, onRetry, title = 'We couldn’t load this' }: { error: unknown; onRetry: () => void; title?: string }) {
-  if (isForbidden(error)) {
-    return (
-      <Alert tone="info" title="Not available for your role">
-        Your roles don’t include access to this. A Platform Administrator can change your roles in Staff and permissions.
-      </Alert>
-    );
-  }
-  return (
-    <Alert tone="danger" title={title}>
-      {errorMessage(error)}{' '}
-      <Button variant="secondary" size="sm" onClick={onRetry}>
-        Try again
-      </Button>
-    </Alert>
-  );
-}
+export const LoadError = (p: { error: unknown; onRetry: () => void; title?: string }) => (
+  <SharedLoadError {...p} forbiddenHint="Your roles don’t include access to this. A Platform Administrator can change your roles in Staff and permissions." />
+);
 
-/** Skeleton lines for a card body while it loads. */
-export function SkeletonLines({ rows = 3 }: { rows?: number }) {
-  return (
-    <div className="sk-list" aria-hidden="true">
-      {Array.from({ length: rows }, (_, i) => (
-        <div key={i} className="sk-row">
-          <span className="sk-lines">
-            <span className="sk sk-line" />
-            <span className="sk sk-line short" />
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
+export { SkeletonLines };
 

@@ -2,12 +2,13 @@
 // ProductNew, Offer, Inventory, BulkUpdate): load/skeleton states, labels for API enums, money input
 // helpers, dates, CSV and export downloads, the seller-visible settings.
 export { useDebounced, useInView } from '@marketly/web-shared/lib/hooks';
+import { LoadError as SellerLoadError } from '@/pages/data/home';
 import { waitForExport as waitForJob } from '@marketly/web-shared/lib/exports';
 import { parseCents, CONDITION_LABEL, type Condition } from '@marketly/web-shared/lib/format';
 import { shortDate } from '@marketly/web-shared/lib/dates';
 import { useQuery } from '@tanstack/react-query';
-import { call, errorMessage, useApi, type components } from '@marketly/web-shared/api';
-import { Alert, Button, type IconName } from '@marketly/web-shared/ui';
+import { call, useApi, type components } from '@marketly/web-shared/api';
+import { type IconName } from '@marketly/web-shared/ui';
 
 export type Money = components['schemas']['Money'];
 export type ExportJob = components['schemas']['reports.ExportJob'];
@@ -35,14 +36,7 @@ export function useSellerSettings() {
 
 /** A failed read: the error and a Try again button (API.md rule 4). */
 export function LoadError({ error, onRetry, title = 'We couldn’t load this' }: { error: unknown; onRetry: () => void; title?: string }) {
-  return (
-    <Alert tone="danger" title={title}>
-      {errorMessage(error)}{' '}
-      <Button variant="secondary" size="sm" onClick={onRetry}>
-        Try again
-      </Button>
-    </Alert>
-  );
+  return <SellerLoadError error={error} onRetry={onRetry} title={title} />;
 }
 
 /** Skeleton rows for a list card while it loads. */

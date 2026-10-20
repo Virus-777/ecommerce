@@ -1,9 +1,8 @@
 // Shared parts of the Seller Center home screens (Setup, Dashboard, Performance, Notifications, Help):
 // Pacific-time date formatting, deadline labels, the load-error alert, skeletons, links built from the
 // API's screen ids, and the icon names the API may send.
-import { errorMessage } from '@marketly/web-shared/api';
+import { LoadError as SharedLoadError, SkeletonLines } from '@marketly/web-shared/ui';
 import { href, SCREEN_BY_ID, type ScreenId } from '@marketly/web-shared/routes';
-import { Alert, Button } from '@marketly/web-shared/ui';
 
 /** Pacific-time dates and deadline labels: the same helpers in all three apps */
 export { TZ, date, dateTime, dayKey, deadlineLabel, deadlineTone, longDate, monthYear, shortDate, time, weekdayDate, type DeadlineTone } from '@marketly/web-shared/lib/dates';
@@ -38,29 +37,8 @@ export function screenHref(screen?: string | null, state?: string | null, params
 }
 
 /** A failed read: the error and a Try again button (API.md rule 4). */
-export function LoadError({ error, onRetry, title = 'We couldn’t load this' }: { error: unknown; onRetry: () => void; title?: string }) {
-  return (
-    <Alert tone="danger" title={title}>
-      {errorMessage(error)}{' '}
-      <Button variant="secondary" size="sm" onClick={onRetry}>
-        Try again
-      </Button>
-    </Alert>
-  );
-}
+export const LoadError = (p: { error: unknown; onRetry: () => void; title?: string }) => (
+  <SharedLoadError {...p} forbiddenHint="Your permissions don’t include this. The store owner can change them in Staff." />
+);
 
-/** Skeleton lines for a card body while it loads. */
-export function SkeletonLines({ rows = 3 }: { rows?: number }) {
-  return (
-    <div className="sk-list" aria-hidden="true">
-      {Array.from({ length: rows }, (_, i) => (
-        <div key={i} className="sk-row">
-          <span className="sk-lines">
-            <span className="sk sk-line" />
-            <span className="sk sk-line short" />
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
+export { SkeletonLines };

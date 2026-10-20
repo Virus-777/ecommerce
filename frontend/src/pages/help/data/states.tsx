@@ -1,24 +1,11 @@
-import { errorMessage } from '@marketly/web-shared/api';
-import { Alert, Button, type IconName } from '@marketly/web-shared/ui';
+import { LoadError as SharedLoadError } from '@marketly/web-shared/ui';
+import { type IconName } from '@marketly/web-shared/ui';
 
 // Loading and error states shared by the help, policy and seller-entry screens (web-shared/docs/API.md, rule 4).
 
 /** A failed read: the server's message and a Try again button. */
 export function LoadError({ error, retry, title = 'We couldn’t load this' }: { error: unknown; retry?: () => void; title?: string }) {
-  return (
-    <Alert tone="danger" title={title}>
-      <span className="stack gap-2">
-        <span>{errorMessage(error)}</span>
-        {retry && (
-          <span>
-            <Button variant="secondary" size="sm" icon="refresh-cw" onClick={retry}>
-              Try again
-            </Button>
-          </span>
-        )}
-      </span>
-    </Alert>
-  );
+  return <SharedLoadError error={error} onRetry={retry} title={title} />;
 }
 
 /** Skeleton lines (e.g. a paragraph or a list while loading). */

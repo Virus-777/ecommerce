@@ -14,5 +14,6 @@ export { Field, TextInput, Select, Textarea, Checkbox, Radio, Switch, OptionCard
 export { Dialog, Drawer } from './Overlays';
 export { ImageCropper, type CropWording, type ProcessedImage } from './ImageCropper';
 export { DateTimeField } from './DateTimeField';
+export { LoadError, SkeletonLines, isForbidden } from './Loading';
 export { LineChart, BarChart, Legend, SplitBar } from './Charts';
 export { announce } from './announce';

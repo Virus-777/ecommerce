@@ -1,3 +1,4 @@
+import { LoadError as SharedLoadError } from '@marketly/web-shared/ui';
 import { humanize } from '@marketly/web-shared/lib/format';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
@@ -98,14 +99,7 @@ function trustRow(r: TrustReport): ReportRow {
 }
 
 function ListError({ error, retry, what }: { error: unknown; retry: () => void; what: string }) {
-  return (
-    <Alert tone="danger" title={`We couldn't load ${what}`}>
-      {errorMessage(error)}{' '}
-      <Button variant="ghost" size="sm" onClick={retry}>
-        Try again
-      </Button>
-    </Alert>
-  );
+  return <SharedLoadError error={error} onRetry={retry} title={`We couldn’t load ${what}`} />;
 }
 
 const cardSkeleton = (

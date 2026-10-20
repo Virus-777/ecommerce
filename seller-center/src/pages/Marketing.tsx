@@ -1,3 +1,4 @@
+import { LoadError as SellerLoadError } from '@/pages/data/home';
 import { useEffect, useState } from 'react';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
@@ -48,14 +49,7 @@ const money = formatMoney;
 const sk = <span className="sk sk-line" aria-hidden="true" />;
 
 function LoadError({ error, retry, title }: { error: unknown; retry: () => void; title: string }) {
-  return (
-    <Alert tone="danger" title={title}>
-      {errorMessage(error)}{' '}
-      <Button variant="secondary" size="sm" onClick={retry}>
-        Try again
-      </Button>
-    </Alert>
-  );
+  return <SellerLoadError error={error} onRetry={retry} title={title} />;
 }
 
 /* ================================================================== discounts */

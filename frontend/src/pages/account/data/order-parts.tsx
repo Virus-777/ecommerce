@@ -1,22 +1,15 @@
 // Small building blocks shared by the account order and return screens: loading skeletons, the
 // load-error alert, the not-found card, the API seller line and the phone "load more" trigger.
 export { useInView } from '@marketly/web-shared/lib/hooks';
+import { LoadError as SharedLoadError } from '@marketly/web-shared/ui';
 import { type ReactNode } from 'react';
 import { Link } from 'react-router';
-import { errorMessage } from '@marketly/web-shared/api';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Button, EmptyState, SellerBadge } from '@marketly/web-shared/ui';
+import { Button, EmptyState, SellerBadge } from '@marketly/web-shared/ui';
 
 /** A failed read: the error and a Try again button (API.md rule 4). */
 export function LoadError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
-  return (
-    <Alert tone="danger" title="We couldn't load this">
-      {errorMessage(error)}{' '}
-      <Button variant="secondary" size="sm" onClick={onRetry}>
-        Try again
-      </Button>
-    </Alert>
-  );
+  return <SharedLoadError error={error} onRetry={onRetry} />;
 }
 
 /** Skeleton rows for a list card while it loads. */
