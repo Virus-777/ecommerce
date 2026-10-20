@@ -48,9 +48,21 @@ const FALLBACK: Partial<Record<string, ScreenId>> = {
   'seller/help-article': 'seller/help',
 };
 
+/**
+ * The Customers tab for a review, feedback or question notice (link kind). Seller Center has no list of product
+ * reviews yet, so a new product review opens the Feedback tab, the closest one.
+ */
+const CUSTOMER_VIEWS: Record<string, string> = { question: 'product-questions', feedback: 'feedback', review: 'feedback' };
+
 /** Where a notice opens: the Notifications page rows and the live toasts (app/session.tsx) use the same link. */
 export function noticeHref(n: Notice): string | undefined {
   const l = n.link;
+  // A refund on an order without a return or case links the order list with the order's MK- reference (the event
+  // names no seller order group); the order detail opens by that reference.
+  if (l.screen === 'seller/orders' && l.kind === 'order' && l.ref) return href('seller/order', '', { ref: l.ref });
+  if (l.screen === 'seller/customers' && CUSTOMER_VIEWS[l.kind]) return href('seller/customers', CUSTOMER_VIEWS[l.kind]);
+  // An announcement may open a help article: the link's id is the article slug.
+  if (l.screen === 'seller/help-article' && l.id) return href('seller/help-article', '', { slug: l.id });
   // Statement routes also take the statement id, so a statement notice without a ref opens the statement.
   const ref = l.ref ?? (l.screen === 'seller/statement' ? l.id : null);
   return screenHref(l.screen, null, ref ? { ref } : undefined) ?? (FALLBACK[l.screen] ? href(FALLBACK[l.screen]!) : undefined);
@@ -70,6 +82,11 @@ const LIVE_KEYS: Record<string, string[]> = {
   offer: ['offers'],
   fulfillment: ['inventory'],
   review_report: ['reviews'],
+  // live topics (2026-10-20): new reviews, feedback and questions; refunds Marketly approved (return, case or order)
+  review: ['reviews'],
+  feedback: ['reviews'],
+  question: ['reviews'],
+  refund: ['returns', 'orders', 'support'],
   payout: ['finance'],
   statement: ['finance'],
   hold: ['finance'],

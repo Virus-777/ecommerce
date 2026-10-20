@@ -4,6 +4,7 @@
 // GET/PUT notifications/my-preferences, GET/POST access/approval-requests/{id}[/approve|/reject].
 import type { QueryKey } from '@tanstack/react-query';
 import type { components } from '@marketly/web-shared/api';
+import { href } from '@marketly/web-shared/routes';
 import { dayKey, screenHref } from '@/app/parts';
 
 export type Notice = components['schemas']['notifications.Notice'];
@@ -32,16 +33,32 @@ export function routeText(n: Notice): string | undefined {
 export function noticeHref(n: Notice): string | undefined {
   const l = n.link;
   if (l.url) return l.url;
+  // Returns and refunds open the return in the queue's drawer, which takes the RT- reference.
+  if (l.screen === 'admin/returns' && l.kind === 'return' && l.ref) return href('admin/returns', 'exception-review', undefined, { rt: l.ref });
+  // Official Store reviews, feedback and questions (link kind review / feedback / question) open admin/official as
+  // the API says: the Admin Center has no Official Store reviews screen yet, so the record itself isn't selected.
   const key = l.ref ?? l.id;
   return screenHref(l.screen, undefined, { ref: key, id: l.id, key, slug: key }) ?? screenHref(l.screen);
 }
 
+/** Query families of the Official Store notices (staff.official_store.<event>) and seller support requests. */
+const LIVE_KEYS: Record<string, string[]> = {
+  'staff.official_store.order_new': ['orders'],
+  'staff.official_store.return_requested': ['returns'],
+  'staff.official_store.refund_approved': ['returns', 'orders'],
+  'staff.official_store.review_new': ['reviews'],
+  'staff.official_store.feedback_new': ['reviews'],
+  'staff.official_store.question_asked': ['reviews'],
+  'staff.seller.support_request': ['support'],
+};
+
 /**
  * Queries a live notice may change besides ['notifications'] (app/session.tsx): a notice that asks for action is
- * usually a new work queue item; approval notices change "approvals to decide" (access/me).
+ * usually a new work queue item; approval notices change "approvals to decide" (access/me); the Official Store and
+ * seller support notices change their lists (LIVE_KEYS).
  */
 export function liveQueryKeys(n: Notice): QueryKey[] {
-  const keys: QueryKey[] = [];
+  const keys: QueryKey[] = (LIVE_KEYS[n.topicKey] ?? []).map((k) => [k]);
   if (n.actionRequired) keys.push(['workqueues']);
   if (n.topicKey.split('.')[1] === 'approval') keys.push(['access']);
   return keys;
