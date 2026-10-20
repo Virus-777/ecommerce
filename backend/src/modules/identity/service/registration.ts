@@ -2,6 +2,7 @@
  * Registration: app sessions for the store and Seller Center apps, customer sign-up and the email or phone codes
  * that confirm it (and later email and phone changes).
  */
+import { maskEmail, maskPhone } from '../../../kernel/lib/mask.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type {
@@ -15,7 +16,7 @@ import type {
 import { hashPassword, randomToken, safeEqual, sixDigitCode, tokenHash } from '../domain/crypto.js';
 import { normalizeEmail } from '../domain/policy.js';
 import { accountStatusMachine } from '../domain/state-machines.js';
-import { isE164, maskEmail, maskPhone } from '../domain/text.js';
+import { isE164 } from '../domain/text.js';
 import * as map from '../mappers.js';
 import type { AccountRow, Audience, ChallengeRow, GuestSessionRow } from '../ports.js';
 import { type Core, type Caller, type WithCookie, MIN, DAY, issue } from './core.js';

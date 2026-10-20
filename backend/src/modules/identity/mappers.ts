@@ -1,4 +1,5 @@
 /** Rows (snake_case) → API types (camelCase), one place per type. */
+import { maskEmail, maskPhone } from '../../kernel/lib/mask.js';
 import type { Actor } from '../../spec/common.js';
 import type {
   AccountSummary,
@@ -11,7 +12,7 @@ import type {
   VerificationChallenge,
 } from '../../spec/identity.js';
 import { lockInForce } from './domain/policy.js';
-import { maskEmail, maskPhone, securityLabel } from './domain/text.js';
+import { securityLabel } from './domain/text.js';
 import type { AccountRow, ChallengeRow, DeviceWithSessions, InvitationRow, SecurityEventRow, SellerAccessRow, TwoStepMethodRow } from './ports.js';
 
 export const iso = (d: Date) => d.toISOString();

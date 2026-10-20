@@ -2,12 +2,12 @@
  * Visitor sessions and order links: the guest orders a visitor session may see, and the emailed links that grant
  * them.
  */
+import { maskEmail } from '../../../kernel/lib/mask.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type { GuestSession, OrderLinkRedemption } from '../../../spec/identity.js';
 import { randomToken, tokenHash } from '../domain/crypto.js';
 import { normalizeEmail } from '../domain/policy.js';
-import { maskEmail } from '../domain/text.js';
 import * as map from '../mappers.js';
 import type { GuestSessionRow } from '../ports.js';
 import type { IdentityRepository } from '../repository.js';

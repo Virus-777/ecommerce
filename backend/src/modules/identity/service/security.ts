@@ -2,6 +2,7 @@
  * Account security: the signed-in person's security page (password, email change, 2-step methods and recovery
  * codes, devices, activity), step-up and re-authentication tokens, and the staff view of an account's security.
  */
+import { maskPhone } from '../../../kernel/lib/mask.js';
 import type { Principal as KernelPrincipal } from '../../../kernel/auth/index.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
@@ -38,7 +39,7 @@ import {
   verifyTotp,
 } from '../domain/crypto.js';
 import { failuresInWindow, lockInForce, normalizeEmail } from '../domain/policy.js';
-import { isE164, maskPhone } from '../domain/text.js';
+import { isE164 } from '../domain/text.js';
 import * as map from '../mappers.js';
 import type {
   AccountRow,

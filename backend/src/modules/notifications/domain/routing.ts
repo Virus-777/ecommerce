@@ -21,6 +21,7 @@
  * notice: no new order, dispatch reminder, overdue dispatch or cancellation request (fulfillment-service tells
  * the seller with its seller.fulfillment.* topics through notify).
  */
+import { maskEmail } from '../../../kernel/lib/mask.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
 import type { EventName, EventPayload } from '../../../kernel/events/index.js';
 import { OFFICIAL_STORE_ID, OFFICIAL_STORE_NAME, type Money } from '../../../spec/common.js';
@@ -1537,7 +1538,3 @@ function shipToText(s: { name: string; code?: string; address?: { name?: string 
   return street ? `${s.name}, ${street}` : s.name;
 }
 
-function maskEmail(email: string) {
-  const [user = '', domain = ''] = email.split('@');
-  return `${user.slice(0, 2)}***@${domain}`;
-}

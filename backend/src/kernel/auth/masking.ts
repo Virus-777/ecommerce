@@ -16,6 +16,13 @@ export function maskValue(value: unknown, mask: string): unknown {
   return null;
 }
 
+/** maskValue for a text field, e.g. a contact email shown to staff without the permission */
+export function maskText(value: string, mask: 'email' | 'phone' | 'name'): string;
+export function maskText(value: string | null | undefined, mask: 'email' | 'phone' | 'name'): string | null;
+export function maskText(value: string | null | undefined, mask: 'email' | 'phone' | 'name'): string | null {
+  return maskValue(value, mask) as string | null;
+}
+
 function applyAt(node: unknown, path: readonly string[], fn: (v: unknown) => unknown): unknown {
   if (node == null || typeof node !== 'object') return node;
   const [head, ...rest] = path;

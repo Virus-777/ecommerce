@@ -2,6 +2,7 @@
  * Password reset: reset links (asked for, sent by staff or another module), checking and completing them, and the
  * password policy.
  */
+import { maskEmail } from '../../../kernel/lib/mask.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type * as common from '../../../spec/common.js';
@@ -9,7 +10,6 @@ import type { CompleteResetRequest, PasswordPolicy, PasswordResetStatus } from '
 import { hashPassword, randomToken, tokenHash } from '../domain/crypto.js';
 import { normalizeEmail, type Realm } from '../domain/policy.js';
 import { accountStatusMachine } from '../domain/state-machines.js';
-import { maskEmail } from '../domain/text.js';
 import * as map from '../mappers.js';
 import type { AccountRow } from '../ports.js';
 import type { IdentityRepository } from '../repository.js';

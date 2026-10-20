@@ -3,13 +3,14 @@
  * (datasets orders.admin.orders and orders.seller.orders, rows from exportRows with contact masking),
  * receipts, invoices, credit notes and packing slips rendered from the frozen order.
  */
+import { maskText } from '../../../kernel/auth/masking.js';
 import { AppError, isNotImplemented } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import type * as identity from '../../../spec/identity.js';
 import type * as reports from '../../../spec/reports.js';
 import type { DocumentLink, InternalNote, SavedFilter } from '../../../spec/orders.js';
 import { renderPdf, type PdfLine } from '../../../kernel/lib/pdf.js';
-import { buyerName, fmt, maskEmail, maskPhone, shortDate, variantLabelOf } from '../domain/rules.js';
+import { buyerName, fmt, shortDate, variantLabelOf } from '../domain/rules.js';
 import type { DocumentRec, GroupRec } from '../ports.js';
 import { invalid, notFound, unavailable, type Agg, type By, type Core } from './core.js';
 import type { AdminListQuery, Reads, SellerListQuery } from './reads.js';
@@ -207,8 +208,8 @@ export class Admin {
             ref: row.ref,
             placedAt: row.placedAt,
             customerName: row.customerName,
-            customerEmail: contact ? agg.order.contact_email : maskEmail(agg.order.contact_email),
-            customerPhone: contact ? agg.order.contact_phone : maskPhone(agg.order.contact_phone),
+            customerEmail: contact ? agg.order.contact_email : maskText(agg.order.contact_email, 'email'),
+            customerPhone: contact ? agg.order.contact_phone : maskText(agg.order.contact_phone, 'phone'),
             city: row.customerCity,
             guest: row.guest,
             sellers: row.sellers.map((s) => s.name).join(', '),

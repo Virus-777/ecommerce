@@ -2,6 +2,7 @@
  * Builds the API shapes from the stored order (frozen snapshots, item states, projections). Documents and
  * order pages read only these copies. One place per type; every area picks what it may show.
  */
+import { maskText } from '../../../kernel/auth/masking.js';
 import { durationText } from '../../../kernel/lib/dates.js';
 import { allocate, money } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
@@ -56,8 +57,6 @@ import {
   fmt,
   is,
   isMarketlyService,
-  maskEmail,
-  maskPhone,
   monthDay,
   plural,
   shortDate,
@@ -1003,10 +1002,10 @@ export class Views {
       'admin',
       cfg,
     );
-    const email = o.canViewContact ? agg.order.contact_email : maskEmail(agg.order.contact_email);
-    const phone = o.canViewContact ? agg.order.contact_phone : maskPhone(agg.order.contact_phone);
+    const email = o.canViewContact ? agg.order.contact_email : maskText(agg.order.contact_email, 'email');
+    const phone = o.canViewContact ? agg.order.contact_phone : maskText(agg.order.contact_phone, 'phone');
     order.contact = { ...order.contact, email, phone };
-    if (!o.canViewContact) order.deliveryAddress = { ...order.deliveryAddress, phone: maskPhone(order.deliveryAddress.phone) };
+    if (!o.canViewContact) order.deliveryAddress = { ...order.deliveryAddress, phone: maskText(order.deliveryAddress.phone, 'phone') };
     const captures = agg.facts.captures ?? [];
     return {
       order,

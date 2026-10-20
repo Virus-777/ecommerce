@@ -390,8 +390,3 @@ export const dayStart = (ymd: string, timeZone: string, end = false) => {
   return end ? endOfMarketDay(start, timeZone) : start;
 };
 
-export const maskEmail = (email: string) => {
-  const [user = '', domain = ''] = email.split('@');
-  return `${user.slice(0, 1)}***@${domain}`;
-};
-export const maskPhone = (phone: string | null | undefined) => (phone ? `***${phone.slice(-2)}` : null);
