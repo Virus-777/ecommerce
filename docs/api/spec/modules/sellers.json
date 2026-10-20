@@ -296,7 +296,7 @@
       "submittedAt": "datetime", "decidedAt": "datetime?", "expiresAt": "datetime?"
     },
     "FeaturedCollection": { "id": "uuid", "title": "string", "image": "MediaRef?", "offerIds": "uuid[]", "offerCount": "int", "position": "int", "visible": "bool" },
-    "ContactOptions": { "orderMessages": { "type": "bool", "desc": "Always on for buyers with an order" }, "productQuestions": "bool", "showPhone": "bool", "phone": "string?", "replyTarget": "enum(within_12h|within_24h)" },
+    "ContactOptions": { "orderMessages": { "type": "bool", "desc": "Always on for buyers with an order" }, "productQuestions": "bool", "showPhone": "bool", "phone": { "type": "string?", "desc": "The first of phones" }, "phones": { "type": "string[]?", "desc": "Up to 3 numbers customers can call or text, in display order; at least one while showPhone is on. When sent it replaces the list (phone alone sets a one-number list)" }, "replyTarget": "enum(within_12h|within_24h)" },
     "StoreProfile": {
       "sellerId": "uuid", "slug": "string", "storeName": "string", "logo": "MediaRef?", "banner": "MediaRef?",
       "introduction": "text?", "location": "string?", "contactOptions": "ContactOptions", "warranty": "text?",
@@ -496,7 +496,7 @@
     "StorefrontClaim": { "kind": "enum(brand_affiliation|authorized_retailer|certification|award|other)", "text": "string" },
     "StorefrontShipping": { "shipsFrom": "string?", "shipsTo": { "type": "string", "desc": "Coverage label" }, "dispatch": { "type": "string", "desc": "e.g. Ships in 1 business day" }, "carriers": "string[]", "cutoff": { "type": "string?", "desc": "Same-day cutoff HH:MM, market time" } },
     "StorefrontReturns": { "window": { "type": "string", "desc": "e.g. 30 days" }, "returnShipping": "string", "warranty": "text?" },
-    "StorefrontContact": { "canMessage": "bool", "productQuestions": "bool", "replyTarget": "enum(within_12h|within_24h)", "phone": "string?" },
+    "StorefrontContact": { "canMessage": "bool", "productQuestions": "bool", "replyTarget": "enum(within_12h|within_24h)", "phone": { "type": "string?", "desc": "The first of phones" }, "phones": { "type": "string[]", "desc": "Every number the seller shows, in order (empty when it shows none)" } },
     "StorefrontCategory": { "categoryId": "uuid", "name": "string", "offerCount": "int" },
     "StorefrontCollection": { "id": "uuid", "title": "string", "image": "MediaRef?", "offerIds": "uuid[]", "offerCount": "int", "position": "int", "visible": "bool", "itemCount": "int" },
     "FeedbackSummary": { "positivePct": "number?", "ratingCount": "int?" },

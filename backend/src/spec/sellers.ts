@@ -1133,7 +1133,10 @@ export interface ContactOptions {
   orderMessages: boolean;
   productQuestions: boolean;
   showPhone: boolean;
+  /** The first of phones */
   phone?: string | null;
+  /** Up to 3 numbers customers can call or text, in display order; at least one while showPhone is on. When sent it replaces the list (phone alone sets a one-number list) */
+  phones?: string[] | null;
   replyTarget: "within_12h" | "within_24h";
 }
 
@@ -1141,7 +1144,8 @@ export const ContactOptions: z.ZodType<ContactOptions> = z.object({
   orderMessages: z.boolean().describe("Always on for buyers with an order"),
   productQuestions: z.boolean(),
   showPhone: z.boolean(),
-  phone: z.string().nullish(),
+  phone: z.string().describe("The first of phones").nullish(),
+  phones: z.array(z.string()).describe("Up to 3 numbers customers can call or text, in display order; at least one while showPhone is on. When sent it replaces the list (phone alone sets a one-number list)").nullish(),
   replyTarget: z.enum(["within_12h", "within_24h"]),
 }).register(common.apiTypes, { id: "sellers.ContactOptions" });
 
@@ -2327,14 +2331,18 @@ export interface StorefrontContact {
   canMessage: boolean;
   productQuestions: boolean;
   replyTarget: "within_12h" | "within_24h";
+  /** The first of phones */
   phone?: string | null;
+  /** Every number the seller shows, in order (empty when it shows none) */
+  phones: string[];
 }
 
 export const StorefrontContact: z.ZodType<StorefrontContact> = z.object({
   canMessage: z.boolean(),
   productQuestions: z.boolean(),
   replyTarget: z.enum(["within_12h", "within_24h"]),
-  phone: z.string().nullish(),
+  phone: z.string().describe("The first of phones").nullish(),
+  phones: z.array(z.string()).describe("Every number the seller shows, in order (empty when it shows none)"),
 }).register(common.apiTypes, { id: "sellers.StorefrontContact" });
 
 export interface StorefrontCategory {

@@ -677,7 +677,8 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | orderMessages | `bool` Always on for buyers with an order |
 | productQuestions | `bool` |
 | showPhone | `bool` |
-| phone | `string?` |
+| phone | `string?` The first of phones |
+| phones | `string[]?` Up to 3 numbers customers can call or text, in display order; at least one while showPhone is on. When sent it replaces the list (phone alone sets a one-number list) |
 | replyTarget | `enum(within_12h|within_24h)` |
 
 ### StoreProfile
@@ -1282,7 +1283,8 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | canMessage | `bool` |
 | productQuestions | `bool` |
 | replyTarget | `enum(within_12h|within_24h)` |
-| phone | `string?` |
+| phone | `string?` The first of phones |
+| phones | `string[]` Every number the seller shows, in order (empty when it shows none) |
 
 ### StorefrontCategory
 
@@ -2376,8 +2378,10 @@ type SellerStorefrontContact {
   productQuestions: Boolean!
   "e.g. within_24h"
   replyTarget: String!
-  "Only when the seller chose to show it"
+  "Only when the seller chose to show it; the first of phones"
   phone: String
+  "Every number the seller shows, in order (empty when it shows none)"
+  phones: [String!]!
 }
 
 "A seller-curated featured collection on the storefront"

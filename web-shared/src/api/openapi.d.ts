@@ -44059,7 +44059,10 @@ export interface components {
             orderMessages: boolean;
             productQuestions: boolean;
             showPhone: boolean;
+            /** @description The first of phones */
             phone?: string | null;
+            /** @description Up to 3 numbers customers can call or text, in display order; at least one while showPhone is on. When sent it replaces the list (phone alone sets a one-number list) */
+            phones?: string[] | null;
             /** @enum {string} */
             replyTarget: "within_12h" | "within_24h";
         };
@@ -44658,7 +44661,10 @@ export interface components {
             productQuestions: boolean;
             /** @enum {string} */
             replyTarget: "within_12h" | "within_24h";
+            /** @description The first of phones */
             phone?: string | null;
+            /** @description Every number the seller shows, in order (empty when it shows none) */
+            phones: string[];
         };
         "sellers.StorefrontCategory": {
             /** Format: uuid */

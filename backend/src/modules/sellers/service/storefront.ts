@@ -8,7 +8,7 @@ import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type { ChangeRequest, CollectionInput, ContactOptions, FeaturedCollection, ProfileCategory, PublicClaim, SellerSummary, StoreProfile, StoreProfileInput, Storefront, StorefrontClaim } from '../../../spec/sellers.js';
-import { isWholeAccount, locationOf, normalizeScope, sameStoreName, type StoredVerification } from '../domain/rules.js';
+import { isPhoneNumber, isWholeAccount, locationOf, normalizeScope, phoneList, sameStoreName, type StoredVerification } from '../domain/rules.js';
 import { changeRequestMachine, publicClaimMachine } from '../domain/state-machines.js';
 import * as map from '../mappers.js';
 import type { ChangeRequestRec, ClaimRec, ProfileRec, SellerRec } from '../ports.js';
@@ -16,7 +16,8 @@ import type { SellersRepository } from '../repository.js';
 import { invalid, notFound, Part, type By } from './core.js';
 
 const TAGLINE_MAX = 80;
-const DEFAULT_CONTACT: ContactOptions = { orderMessages: true, productQuestions: true, showPhone: false, phone: null, replyTarget: 'within_24h' };
+const DEFAULT_CONTACT: ContactOptions = { orderMessages: true, productQuestions: true, showPhone: false, phone: null, phones: [], replyTarget: 'within_24h' };
+const PHONES_MAX = 3;
 const PUBLIC = ['approved', 'restricted', 'suspended'];
 
 const IMPACT: Record<string, string> = {
@@ -59,7 +60,9 @@ export class StorefrontPart extends Part {
   }
 
   private contactOf(p: ProfileRec): ContactOptions {
-    return { ...DEFAULT_CONTACT, ...((p.contact_options ?? {}) as Partial<ContactOptions>) };
+    const c = { ...DEFAULT_CONTACT, ...((p.contact_options ?? {}) as Partial<ContactOptions>) };
+    const phones = phoneList(c);
+    return { ...c, phones, phone: phones[0] ?? null };
   }
 
   async storeProfile(s: SellerRec): Promise<StoreProfile> {
@@ -119,7 +122,13 @@ export class StorefrontPart extends Part {
     const max = await this.core.setting('introMaxChars');
     const issues: { path: string; message: string }[] = [];
     if (input.introduction && input.introduction.length > max) issues.push({ path: 'introduction', message: `At most ${max} characters` });
-    if (input.contactOptions?.showPhone && !input.contactOptions.phone?.trim()) issues.push({ path: 'contactOptions.phone', message: 'Add the phone number to show' });
+    const phones = input.contactOptions ? phoneList(input.contactOptions) : [];
+    const phonesPath = input.contactOptions?.phones ? 'contactOptions.phones' : 'contactOptions.phone';
+    if (input.contactOptions?.showPhone && !phones.length) issues.push({ path: phonesPath, message: 'Add the phone number to show' });
+    if (phones.length > PHONES_MAX) issues.push({ path: phonesPath, message: `At most ${PHONES_MAX} phone numbers` });
+    phones.forEach((n, i) => {
+      if (!isPhoneNumber(n)) issues.push({ path: input.contactOptions?.phones ? `${phonesPath}.${i}` : phonesPath, message: 'Enter a phone number with 7 to 15 digits' });
+    });
     if (input.storeName !== undefined && input.storeName !== null && !input.storeName.trim()) issues.push({ path: 'storeName', message: 'The store name cannot be empty' });
     if (typeof input.tagline === 'string' && input.tagline.trim().length > TAGLINE_MAX) issues.push({ path: 'tagline', message: `At most ${TAGLINE_MAX} characters` });
     if (issues.length) throw invalid(issues);
@@ -172,7 +181,7 @@ export class StorefrontPart extends Part {
     set('location', input.location);
     set('warranty', input.warranty);
     if (input.contactOptions) {
-      next.contact_options = { ...input.contactOptions, orderMessages: true, phone: input.contactOptions.phone?.trim() || null } as never;
+      next.contact_options = { ...input.contactOptions, orderMessages: true, phones, phone: phones[0] ?? null } as never;
       fields.push('contactOptions');
     }
     if (tagline === '' && before.tagline) {
@@ -606,6 +615,7 @@ export class StorefrontPart extends Part {
     const p = await this.profileOf(s.id);
     const [card] = await this.cards([s]);
     const contact = this.contactOf(p);
+    const phones = contact.showPhone ? (contact.phones ?? []) : [];
     const fb = await this.core.optional('reviews', 'rating', unavailable, (r) => r.getSellerFeedbackSummary(s.id));
     const replies = await this.core.optional('messaging', 'replies', unavailable, (m) => m.sellerResponseStats(s.id, { from: this.core.today(new Date(this.now().getTime() - 90 * 86_400_000)), to: this.core.today() }));
     const dispatch = (await this.parts.performance.dispatchPct([s.id])).get(s.id) ?? fb?.onTimeDispatchPct ?? null;
@@ -635,7 +645,7 @@ export class StorefrontPart extends Part {
         ? { shipsFrom: shippingSummary.shipsFrom, shipsTo: shippingSummary.coverageLabel, dispatch: shippingSummary.dispatchLabel, carriers: shippingSummary.carriers, cutoff: shippingSummary.sameDayCutoff }
         : null,
       returns: returns ? { window: `${returns.windowDays} days`, returnShipping: returns.summary, warranty: p.warranty } : null,
-      contact: { canMessage: contact.orderMessages, productQuestions: contact.productQuestions, replyTarget: contact.replyTarget, ...(contact.showPhone && contact.phone ? { phone: contact.phone } : {}) },
+      contact: { canMessage: contact.orderMessages, productQuestions: contact.productQuestions, replyTarget: contact.replyTarget, ...(phones.length ? { phone: phones[0] } : {}), phones },
       categories: (categories ?? []).map((c) => ({ categoryId: c.categoryId, name: c.name, offerCount: c.count })),
       collections: await this.visibleCollections(s, unavailable),
       promotion: promo ?? null,

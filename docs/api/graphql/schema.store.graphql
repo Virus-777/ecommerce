@@ -4707,8 +4707,10 @@ type SellerStorefrontContact {
   productQuestions: Boolean!
   "e.g. within_24h"
   replyTarget: String!
-  "Only when the seller chose to show it"
+  "Only when the seller chose to show it; the first of phones"
   phone: String
+  "Every number the seller shows, in order (empty when it shows none)"
+  phones: [String!]!
 }
 
 "A seller-curated featured collection on the storefront"
