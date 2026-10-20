@@ -161,7 +161,7 @@ export class Core {
 
   /** Publishes what a transaction collected (after the commit) */
   flush(batch: Batch) {
-    for (const e of batch.events) this.publish(e.name, e.payload as never, batch.by);
+    for (const e of batch.events.splice(0)) this.publish(e.name, e.payload as never, batch.by);
   }
 
   async audit(entry: Omit<audit.RecordInput, 'actor' | 'module' | 'requestId'>, by: By) {

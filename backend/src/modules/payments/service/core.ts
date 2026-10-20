@@ -220,7 +220,7 @@ export class Core {
 
   /** Publishes what a transaction collected (after the commit) */
   flush(batch: Batch, by: { actor?: common.Actor; requestId?: string } = {}) {
-    for (const e of batch.events) this.publish(e.name, e.payload as never, by);
+    for (const e of batch.events.splice(0)) this.publish(e.name, e.payload as never, by);
   }
 
   async audit(entry: Omit<audit.RecordInput, 'actor' | 'module' | 'requestId'>, by: By) {

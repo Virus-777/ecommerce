@@ -165,7 +165,7 @@ export class Core {
    */
   async flush(batch: Batch) {
     const recipients = new Map<string, Promise<Recipient>>();
-    for (const e of batch.events) {
+    for (const e of batch.events.splice(0)) {
       let payload = e.payload as Record<string, unknown>;
       if (TO_CUSTOMER.has(e.name) && typeof payload.orderId === 'string' && !('contactEmail' in payload)) {
         const orderId = payload.orderId;
