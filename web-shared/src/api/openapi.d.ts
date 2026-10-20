@@ -787,7 +787,7 @@ export interface paths {
         put?: never;
         /**
          * Record displays, clicks and dismissals (batched)
-         * @description Each event carries the signed impression token from the decision. A dismissal applies the campaign's suppression rule immediately for the visitor. Duplicate events for the same token and kind are ignored. Clicks start the attribution period.
+         * @description Each event carries the signed impression token from the decision. A dismissal applies the campaign's suppression rule immediately for the visitor. Duplicate events for the same token and kind are ignored, and so are displays of a campaign that is no longer live. Clicks start the attribution period. A click on a seller's CPC campaign is billed only after the same impression's display was recorded (displays in a batch count first), and at most once per visitor (visitor or session key, and the signed-in customer) per campaign per market day; other clicks are recorded for reports, unbilled.
          *
          *     **Screens:** ads/opening, ads/popup, ads/formats, store/home
          */
@@ -839,7 +839,9 @@ export interface paths {
         put?: never;
         /**
          * Create an ad campaign draft
-         * @description **Permission:** `advertising.campaigns.manage`
+         * @description A campaign for a seller made by staff is unbilled (budget.billing none, VALIDATION_FAILED otherwise): a seller is billed only for ads it requests itself (seller ad requests are its consent).
+         *
+         *     **Permission:** `advertising.campaigns.manage`
          *
          *     **Audited:** recorded in the action history.
          *
@@ -977,7 +979,7 @@ export interface paths {
         put?: never;
         /**
          * Approve one review step (the campaign is approved when all steps are)
-         * @description The step is chosen from the caller's access roles (access.rolesOf), not from the request: Advertising (placement, schedule, limits) or Content/Marketing (creative, claims, links). The same person cannot approve two required steps.
+         * @description A billed seller request is approved only while paid seller ads are on (PAID_ADS_DISABLED) and the seller may advertise (sellers.canSell, FORBIDDEN). The step is chosen from the caller's access roles (access.rolesOf), not from the request: Advertising (placement, schedule, limits) or Content/Marketing (creative, claims, links). The same person cannot approve two required steps, and the person who created the campaign approves none (SAME_REVIEWER).
          *
          *     **Permission:** `advertising.campaigns.review`
          *
@@ -4725,7 +4727,9 @@ export interface paths {
         put?: never;
         /**
          * Restore an earlier layout (creates a new version; nothing is overwritten)
-         * @description **Permission:** `content.homepage.publish`
+         * @description With content.reviewRequired.section on, publish restores straight to live only a version that was live before; any other version is restored as a draft to send for review (ILLEGAL_TRANSITION, reason review_required).
+         *
+         *     **Permission:** `content.homepage.publish`
          *
          *     **Audited:** recorded in the action history.
          *
@@ -4857,7 +4861,9 @@ export interface paths {
         put?: never;
         /**
          * Approve or request changes
-         * @description **Permission:** `content.pages.publish`
+         * @description Approving needs someone who did not create, edit, submit or restore the page since it last went live (SAME_REVIEWER).
+         *
+         *     **Permission:** `content.pages.publish`
          *
          *     **Audited:** recorded in the action history.
          *
@@ -5207,7 +5213,7 @@ export interface paths {
         put?: never;
         /**
          * Submit, approve, request changes, schedule, publish, unpublish or remove an article
-         * @description One action endpoint for the Content publication state machine on articles. remove needs kind and reason; schedule needs publishAt; requestChanges needs reason. A live article (published or unpublished) edited with PATCH keeps its status while the new draft is reviewed: submit, approve and requestChanges then act on HelpArticleAdmin.draftReview (in_review → approved or changes_requested; submit again after changes_requested), and publish puts the approved draft live (draftReview becomes null). A published article is not scheduled (it would be offline until then): publish its draft, or unpublish it first.
+         * @description One action endpoint for the Content publication state machine on articles. approve needs someone who did not create, edit, submit or restore the article since it last went live (SAME_REVIEWER). remove needs kind and reason; schedule needs publishAt; requestChanges needs reason. A live article (published or unpublished) edited with PATCH keeps its status while the new draft is reviewed: submit, approve and requestChanges then act on HelpArticleAdmin.draftReview (in_review → approved or changes_requested; submit again after changes_requested), and publish puts the approved draft live (draftReview becomes null). A published article is not scheduled (it would be offline until then): publish its draft, or unpublish it first.
          *
          *     **Permission:** `content.help.manage`
          *
@@ -5365,7 +5371,7 @@ export interface paths {
         put?: never;
         /**
          * Submit, approve, request changes, schedule, publish, unpublish or remove a post
-         * @description The Content publication state machine, as for help articles. With content.reviewRequired.news on (default), someone other than the draft's writer approves before it is scheduled or published (SAME_REVIEWER). Approving, scheduling, publishing and unpublishing need content.news.publish; remove needs content.pages.remove, a kind and a reason; requestChanges needs a reason (it also sends back an approved draft). discardDraft drops a live post's unpublished draft; the live post stays as it is.
+         * @description The Content publication state machine, as for help articles. With content.reviewRequired.news on (default), someone who did not create, edit, submit or restore the post since it last went live approves (a restored post without a draft is checked against its live version) before it is scheduled or published (SAME_REVIEWER). Approving, scheduling, publishing and unpublishing need content.news.publish; remove needs content.pages.remove, a kind and a reason; requestChanges needs a reason (it also sends back an approved draft). discardDraft drops a live post's unpublished draft; the live post stays as it is.
          *
          *     **Permission:** `content.news.manage`
          *
@@ -9646,7 +9652,7 @@ export interface paths {
         put?: never;
         /**
          * Disable a staff account (offboarding)
-         * @description Revokes sessions. access consumes identity.account.disabled to end role assignments and flag lead/backup gaps.
+         * @description Revokes sessions and cancels the pending staff invitations the person sent. access consumes identity.account.disabled to end role assignments, cancel the approval requests the person made and flag lead/backup gaps. A Business Owner can be disabled only by another Business Owner (FORBIDDEN), and never the last active one (LAST_BUSINESS_OWNER): access.disableCheck decides.
          *
          *     **Permission:** `identity.staff-accounts.manage`
          *
@@ -16423,7 +16429,7 @@ export interface paths {
         get: operations["promotions.listFlashItems"];
         /**
          * Set flash sale offers, deal prices, deal stock and purchase limits
-         * @description Deal stock cannot exceed the offer's available stock at the time of saving (inventory check). Raising deal stock on a live sale restocks sold-out items.
+         * @description Deal stock cannot exceed the offer's available stock at the time of saving (inventory check). Platform and shared sales: any change to an approved or scheduled sale reopens it to draft for a new Finance confirmation; a live or paused sale can only change within what Finance confirmed (deal price no lower, deal stock and purchase limit no higher, no new offers; removing offers is allowed), else ILLEGAL_TRANSITION with details.items. Raising deal stock on a live sale restocks sold-out items, up to the confirmed deal stock.
          *
          *     **Permission:** `promotions.campaigns.manage`
          *
@@ -16452,7 +16458,7 @@ export interface paths {
         put?: never;
         /**
          * Send to Finance for funding confirmation
-         * @description Runs validation (period, scope not empty, funding consistent with seller consent) and builds the funding review checks. Edits lock until Finance decides.
+         * @description Runs validation (period, scope not empty, funding consistent with seller consent, a budget for platform and shared funding so every platform cost passes the approval limit) and builds the funding review checks. Edits lock until Finance decides.
          *
          *     **Permission:** `promotions.campaigns.manage`
          *
@@ -16504,7 +16510,7 @@ export interface paths {
         put?: never;
         /**
          * Finance confirms funding
-         * @description A budget above the Marketing limit or above the confirming Finance member's limit raises an approval request (access); the campaign stays in review until it is decided. Separation of duties (G65a): the person who created the campaign or sent it to Finance can't confirm its funding (SAME_REVIEWER).
+         * @description A budget above the Marketing limit or above the confirming Finance member's limit raises an approval request (access); the campaign stays in review until it is decided. Separation of duties (G65a): the person who created the campaign or sent it to Finance can't confirm its funding (SAME_REVIEWER), and an approval of the budget request decided by that person in the Approvals Inbox is ignored: the campaign stays in review and the request is closed, so another Finance member confirms again. Platform and shared funding without a budget is refused (VALIDATION_FAILED). Confirming saves the flash items' deal price, deal stock and purchase limit as approved.
          *
          *     **Permission:** `promotions.funding.confirm`
          *
@@ -18238,7 +18244,7 @@ export interface paths {
         put?: never;
         /**
          * Request a return for selected items and quantities
-         * @description Re-checks eligibility, splits by seller and returns one ReturnDetail per seller. Official Store returns inside the window may be approved automatically (setting). An exchange must be for another variant of the same product, sold by the same seller (offers.listOwnOffersForProduct) at the same price as the original unit; otherwise EXCHANGE_NOT_ALLOWED (different-price exchanges are phase 4).
+         * @description Re-checks eligibility, splits by seller and returns one ReturnDetail per seller. One return per unit: units on an open return, or on a rejected one (the customer asks Marketly to review it instead), cannot be returned again (RETURN_NOT_ELIGIBLE, return_open). Official Store returns inside the window may be approved automatically (setting). An exchange must be for another variant of the same product, sold by the same seller (offers.listOwnOffersForProduct) at the same price as the original unit; otherwise EXCHANGE_NOT_ALLOWED (different-price exchanges are phase 4).
          *
          *     **Idempotent:** send an Idempotency-Key.
          *
@@ -18766,7 +18772,7 @@ export interface paths {
         put?: never;
         /**
          * Confirm the refund (full or partial) or ship a replacement or exchange
-         * @description Partial refunds need deductions with reasons. Capped at the remaining refundable amount. The refund is approved by the seller and handed to payments; the customer sees Processing, then Sent. Replacements and exchanges allocate stock through inventory.allocateForOrder (exchanges: same product, same seller, same price, else EXCHANGE_NOT_ALLOWED).
+         * @description A replacement covers every returned item, each from its own stock (all or nothing; the return completes once all are shipped, and cancelling one cancels the others not shipped); an exchange is for a single-item return. kind decline closes it without a refund after a failed inspection. Partial refunds need deductions with reasons. Capped at the remaining refundable amount. The refund is approved by the seller and handed to payments; the customer sees Processing, then Sent. Replacements and exchanges allocate stock through inventory.allocateForOrder (exchanges: same product, same seller, same price, else EXCHANGE_NOT_ALLOWED).
          *
          *     **Permission:** `returns.refunds.issue`
          *
@@ -19256,7 +19262,7 @@ export interface paths {
         put?: never;
         /**
          * Decide the remedy for an Official Store or platform-handled return
-         * @description Refunds: Staff refunds all take one decision path (approval action returns.refunds.approve, access): within the caller's refund limit the refund is approved in the same call and handed to payments, and above access stepUpAbove that needs reauthToken (STEP_UP_REQUIRED otherwise, nothing saved); above the limit, or when the caller has no refund authority (e.g. warehouse staff), it is saved under review with an access approval request routed to the refund approvers (Finance Inbox), and the refund request in the response carries `approval` (FORMAT.md, Approval responses). Once that request is approved the refund is approved and handed to payments. Replacements and exchanges allocate stock (inventory.allocateForOrder, no expiry) and create a replacement shipment. Exchanges: same product, same seller, same price, else EXCHANGE_NOT_ALLOWED.
+         * @description A replacement covers every returned item, each from its own stock; kind decline closes the return without a refund after a failed inspection (inspection photos required). Refunds: Staff refunds all take one decision path (approval action returns.refunds.approve, access): within the caller's refund limit the refund is approved in the same call and handed to payments, and above access stepUpAbove that needs reauthToken (STEP_UP_REQUIRED otherwise, nothing saved); above the limit, or when the caller has no refund authority (e.g. warehouse staff), it is saved under review with an access approval request routed to the refund approvers (Finance Inbox), and the refund request in the response carries `approval` (FORMAT.md, Approval responses). Once that request is approved the refund is approved and handed to payments. Replacements and exchanges allocate stock (inventory.allocateForOrder, no expiry) and create a replacement shipment. Exchanges: same product, same seller, same price, else EXCHANGE_NOT_ALLOWED.
          *
          *     **Permission:** `returns.requests.manage`
          *
@@ -19436,7 +19442,7 @@ export interface paths {
         put?: never;
         /**
          * Change a declined refund and resubmit
-         * @description The resubmission takes the same decision path as a new staff refund: within the reviser's refund limit approved now (reauthToken in the body above stepUpAbove, else STEP_UP_REQUIRED and nothing changes); otherwise under review with an access approval request for Finance (`approval` in the response).
+         * @description A declined request had been waiting for someone else's approval, so the resubmission always goes back under review with an access approval request for the refund approvers (`approval` in the response), filed in the reviser's name: the reviser becomes its proposer and cannot approve it, also within their own refund limit and also after that request lapses (POST /refunds/{id}/approve answers SELF_APPROVAL_NOT_ALLOWED). reauthToken is not used.
          *
          *     **Permission:** `returns.requests.manage`
          *
@@ -19786,7 +19792,7 @@ export interface paths {
         put?: never;
         /**
          * Report a review, feedback, question, answer or seller response
-         * @description The reporter's name is never shown to the author. The outcome appears under Reports you made.
+         * @description The reporter's name is never shown to the author. The outcome appears under Reports you made. A reason in hideOnReportReasons hides the content while it is reviewed, unless a moderator kept it within reportCooldownDays (then it is queued only); a seller's report (sellerReport) never hides content by itself.
          *
          *     **Publishes:** `reviews.report.created`
          *
@@ -19894,7 +19900,9 @@ export interface paths {
         put?: never;
         /**
          * Write a product review (or save a draft)
-         * @description **Publishes:** `reviews.review.published`
+         * @description The seller's own team (sellers.getMemberAccess) cannot review its products (REVIEW_NOT_ELIGIBLE). A returned or refunded item can be reviewed, but not as a verified purchase. After moderation removed the customer's earlier review of the product (since deleted) for proven_fake, payment_for_review or conflict_of_interest, no new one is accepted (REVIEW_NOT_ELIGIBLE); after any other removal the new one is held for a moderator.
+         *
+         *     **Publishes:** `reviews.review.published`
          *
          *     **Screens:** account/review
          */
@@ -19920,7 +19928,7 @@ export interface paths {
         put?: never;
         /**
          * Leave seller feedback for a delivered package (or save a draft)
-         * @description draft: true stores it unpublished (status draft) so the review page can save both parts together; submit later with PATCH /me/feedback/{id} and draft: false.
+         * @description draft: true stores it unpublished (status draft) so the review page can save both parts together; submit later with PATCH /me/feedback/{id} and draft: false. The seller's own team cannot leave it feedback (REVIEW_NOT_ELIGIBLE). Feedback on a package that all went back (returned or refunded) is shown but left out of the seller score.
          *
          *     **Publishes:** `reviews.feedback.published`
          *
@@ -21794,7 +21802,7 @@ export interface paths {
         put?: never;
         /**
          * Invite a staff member
-         * @description Owner only. identity.inviteSellerMember sends a link valid for invitationValidDays. Owner-only and non-delegable permissions are refused (NOT_DELEGABLE).
+         * @description Owner only. identity.inviteSellerMember sends a link valid for identity invitationTtlDays. Owner-only and non-delegable permissions are refused (NOT_DELEGABLE).
          *
          *     **Permission:** `sellers.staff.manage`
          *
@@ -22246,7 +22254,7 @@ export interface paths {
         put?: never;
         /**
          * Owner asks to close the seller account
-         * @description New sales stop at once; the account closes after open orders, returns, cases and the final payout are settled.
+         * @description Refused with SELLER_HAS_OPEN_OBLIGATIONS while orders are not shipped, returns or cases are open, or money is pending or held; details.obligations lists them. Otherwise new sales stop at once and finance issues the final statement.
          *
          *     **Permission:** `sellers.account.close`
          *
@@ -22554,7 +22562,7 @@ export interface paths {
         put?: never;
         /**
          * Close a seller account
-         * @description New sales stop; open obligations stay accessible until settled; finance issues the final statement. A closure for another reason than the seller's request always needs a second reviewer: the closure is kept in pending_changes with an access approval request and the call answers 200 with the SellerAccount unchanged, its pendingChange and approval (FORMAT.md, Approval responses); access.approval.decided (approved) applies it, so the caller does not send it again. It never answers APPROVAL_REQUIRED.
+         * @description New sales stop; open obligations stay accessible until settled; finance issues the final statement. Refused with SELLER_HAS_OPEN_OBLIGATIONS while orders are not shipped; ship or cancel them first. Every staff closure needs a second reviewer, whatever the reason, and open returns, cases or money are listed in the approval's details.openObligations: the closure is kept in pending_changes with an access approval request and the call answers 200 with the SellerAccount unchanged, its pendingChange and approval (FORMAT.md, Approval responses); access.approval.decided (approved) applies it, so the caller does not send it again. It never answers APPROVAL_REQUIRED.
          *
          *     **Permission:** `sellers.accounts.close`
          *
@@ -23144,7 +23152,9 @@ export interface paths {
         put?: never;
         /**
          * Invite a business to apply (invite-only launch)
-         * @description **Permission:** `sellers.invitations.manage`
+         * @description Returns the invitation code once, for the inviter to hand over (no email is sent from an offline server; no-store). The code works for identity invitationTtlDays, like every invitation. The code is also emailed through sellers.invitation.sent.
+         *
+         *     **Permission:** `sellers.invitations.manage`
          *
          *     **Audited:** recorded in the action history.
          *
@@ -23946,7 +23956,7 @@ export interface paths {
         put?: never;
         /**
          * Record a shipment for some or all items of one of the seller's orders
-         * @description Checks that the items belong to the seller's group and are unshipped (orders.canShipItems) and the tracking format. Fewer than ordered makes a partial shipment; the rest keeps its deadline. The buyer gets the carrier, tracking and contents.
+         * @description Checks that the items belong to the seller's group and are unshipped (orders.canShipItems, counting the units in the group's other packages orders has not shipped yet) and the tracking format. Records of one group are taken one at a time. Fewer than ordered makes a partial shipment; the rest keeps its deadline. Recording the same package again (same carrier, tracking number and items) answers with that package instead of making a second one. The buyer gets the carrier, tracking and contents.
          *
          *     **Permission:** `shipping.seller-shipments.manage`
          *
@@ -37041,7 +37051,7 @@ export interface components {
         "offers.CompareAtPrice": {
             amount: components["schemas"]["Money"];
             /**
-             * @description lowest_30_days: this offer's lowest price in the 30 days before the sale; list_price: manufacturer list price on file
+             * @description lowest_30_days: this offer's lowest price in the 30 days before the sale; list_price: the manufacturer list price catalog staff set on the variant (a list price in seller-entered specs, e.g. MSRP, is not evidence)
              * @enum {string}
              */
             basis: "lowest_30_days" | "list_price";
@@ -37114,7 +37124,7 @@ export interface components {
              * @description fulfillment_service_suspended: the seller's Fulfilled by Marketly enrollment is suspended or offboarding, so the offer stops selling (it never switches to seller shipping); restored when the enrollment is reinstated or the SKU leaves the service
              * @enum {string}
              */
-            code: "awaiting_launch_review" | "seller_restricted" | "seller_suspended" | "seller_closed" | "product_hidden" | "product_suspended" | "product_merged" | "staff_hold" | "removed_by_staff" | "ended_by_seller" | "enforcement" | "fulfillment_service_suspended";
+            code: "awaiting_launch_review" | "seller_restricted" | "seller_suspended" | "seller_closed" | "product_hidden" | "product_suspended" | "product_merged" | "staff_hold" | "removed_by_staff" | "ended_by_seller" | "enforcement" | "fulfillment_service_suspended" | "brand_not_authorized";
             text: string;
             /** @description For restrictions: what is stopped, e.g. 'Refurbished offers and new listings' */
             affectedActivity?: string | null;
@@ -37954,6 +37964,8 @@ export interface components {
              * @enum {string}
              */
             fundedBy: "customer" | "seller" | "company" | "platform";
+            /** @description Part of the shipping price Marketly pays through a Marketly-funded free-shipping or shipping discount. Finance credits it to the seller as shipping charged, and takes it back when the whole package is cancelled before dispatch */
+            platformFunded?: components["schemas"]["Money"] | null;
             arrival: components["schemas"]["DateRange"];
             /** Format: date-time */
             dispatchBy: string;
@@ -41536,8 +41548,11 @@ export interface components {
             regradeCondition?: string | null;
         };
         "returns.RemedyInput": {
-            /** @enum {string} */
-            kind: "full_refund" | "partial_refund" | "replacement" | "exchange" | "store_credit";
+            /**
+             * @description decline: no refund after a failed inspection (empty_package, wrong_item_returned, damaged_by_customer or not_matching_request, with inspection photos); explanation required; the return closes as rejected (reasonCode failed_inspection) and the customer can ask Marketly to review it
+             * @enum {string}
+             */
+            kind: "full_refund" | "partial_refund" | "replacement" | "exchange" | "store_credit" | "decline";
             /** @description Required for partial refunds; each with a reason shown to the customer */
             deductions?: components["schemas"]["returns.RefundDeduction"][] | null;
             /** @description Partial amount; capped at maxRefundable */
@@ -41545,7 +41560,7 @@ export interface components {
             explanation?: string | null;
             /** Format: uuid */
             exchangeVariantId?: string | null;
-            /** @description Staff only (admin remedy and revise; sellers leave it out): re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password). Needed when the refund is within the caller's refund limit and above access stepUpAbove (it is approved in the same call), otherwise STEP_UP_REQUIRED and nothing is saved */
+            /** @description Staff only (admin remedy; sellers and revise leave it out): re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password). Needed when the refund is within the caller's refund limit and above access stepUpAbove (it is approved in the same call), otherwise STEP_UP_REQUIRED and nothing is saved */
             reauthToken?: string | null;
         };
         "returns.ExceptionInput": {
@@ -44225,6 +44240,11 @@ export interface components {
             state: "sent" | "applied" | "expired" | "revoked";
             /** Format: uuid */
             applicationId?: string | null;
+        };
+        "sellers.SellerInvitationSent": {
+            invitation: components["schemas"]["sellers.SellerInvitation"];
+            /** @description SENSITIVE: the invitation code the business enters when it applies (also emailed where email works). Only its hash is stored; it is never in a log or the audit trail */
+            code: string;
         };
         "settings.DayHours": {
             /** @enum {string} */
@@ -50844,7 +50864,8 @@ export interface operations {
             };
             /**
              * @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.
-             *     SAME_REVIEWER: The same person cannot approve two required review steps.
+             *     SAME_REVIEWER: The same person cannot approve two required review steps, and the campaign creator approves none.
+             *     PAID_ADS_DISABLED: Paid seller advertising is not enabled yet.
              */
             409: {
                 headers: {
@@ -57087,6 +57108,8 @@ export interface operations {
             /**
              * @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.
              *     BRAND_NOT_ACTIVE: The product's brand is under review or blocked; decide the brand first
+             *     SAME_REVIEWER: The person who created, edited or submitted an Official Store product cannot approve it.
+             *     BRAND_NOT_AUTHORIZED: The brand does not let this seller sell it (blocked, official_only or not on the authorized list): approving the submission or the offer is refused
              */
             409: {
                 headers: {
@@ -59622,7 +59645,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     ORDERING_RESTRICTED: The account cannot place orders now (suspended, closed or restricted). details.reason.
+             */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -61930,7 +61956,7 @@ export interface operations {
             };
             /**
              * @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.
-             *     SAME_REVIEWER: The author cannot approve their own article, news post or homepage draft.
+             *     SAME_REVIEWER: Whoever created, edited, submitted or restored an article, news post, page or homepage draft since it last went live cannot approve it.
              */
             409: {
                 headers: {
@@ -62183,6 +62209,15 @@ export interface operations {
             };
             /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -62661,7 +62696,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event. */
+            /**
+             * @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.
+             *     SAME_REVIEWER: Whoever created, edited, submitted or restored an article, news post, page or homepage draft since it last went live cannot approve it.
+             */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -63775,7 +63813,7 @@ export interface operations {
             };
             /**
              * @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.
-             *     SAME_REVIEWER: The author cannot approve their own article, news post or homepage draft.
+             *     SAME_REVIEWER: Whoever created, edited, submitted or restored an article, news post, page or homepage draft since it last went live cannot approve it.
              */
             409: {
                 headers: {
@@ -64320,7 +64358,7 @@ export interface operations {
             };
             /**
              * @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.
-             *     SAME_REVIEWER: The author cannot approve their own article, news post or homepage draft.
+             *     SAME_REVIEWER: Whoever created, edited, submitted or restored an article, news post, page or homepage draft since it last went live cannot approve it.
              */
             409: {
                 headers: {
@@ -77200,7 +77238,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event. */
+            /**
+             * @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.
+             *     LAST_BUSINESS_OWNER: At least one active Business Owner must remain: the last one cannot be disabled (access.disableCheck).
+             */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -88102,7 +88143,8 @@ export interface operations {
                 };
             };
             /**
-             * @description PRODUCT_NOT_PURCHASABLE: The product is not approved and Active. Save as draft with publishOnApproval, or wait for review.
+             * @description BRAND_NOT_AUTHORIZED: The product's brand does not let this seller sell it: blocked, official_only (Official Store only) or authorized_list without this seller
+             *     PRODUCT_NOT_PURCHASABLE: The product is not approved and Active. Save as draft with publishOnApproval, or wait for review.
              *     DUPLICATE_OFFER: This seller already has a New offer for this variant, or the seller SKU is in use. details.offerId
              *     SELLER_RESTRICTED: A restriction covers this activity. details.reason, details.affectedActivity, details.appealRoute
              */
@@ -88526,7 +88568,8 @@ export interface operations {
                 };
             };
             /**
-             * @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.
+             * @description BRAND_NOT_AUTHORIZED: The product's brand does not let this seller sell it: blocked, official_only (Official Store only) or authorized_list without this seller
+             *     ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.
              *     PRODUCT_NOT_PURCHASABLE: The product is not approved and Active. Save as draft with publishOnApproval, or wait for review.
              *     SELLER_RESTRICTED: A restriction covers this activity. details.reason, details.affectedActivity, details.appealRoute
              */
@@ -88736,7 +88779,8 @@ export interface operations {
                 };
             };
             /**
-             * @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.
+             * @description BRAND_NOT_AUTHORIZED: The product's brand does not let this seller sell it: blocked, official_only (Official Store only) or authorized_list without this seller
+             *     ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.
              *     SELLER_RESTRICTED: A restriction covers this activity. details.reason, details.affectedActivity, details.appealRoute
              */
             409: {
@@ -90037,7 +90081,8 @@ export interface operations {
                 };
             };
             /**
-             * @description PRODUCT_NOT_PURCHASABLE: The product is not approved and Active. Save as draft with publishOnApproval, or wait for review.
+             * @description BRAND_NOT_AUTHORIZED: The product's brand does not let this seller sell it: blocked, official_only (Official Store only) or authorized_list without this seller
+             *     PRODUCT_NOT_PURCHASABLE: The product is not approved and Active. Save as draft with publishOnApproval, or wait for review.
              *     DUPLICATE_OFFER: This seller already has a New offer for this variant, or the seller SKU is in use. details.offerId
              */
             409: {
@@ -90188,7 +90233,8 @@ export interface operations {
                 };
             };
             /**
-             * @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.
+             * @description BRAND_NOT_AUTHORIZED: The product's brand does not let this seller sell it: blocked, official_only (Official Store only) or authorized_list without this seller
+             *     ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.
              *     PRODUCT_NOT_PURCHASABLE: The product is not approved and Active. Save as draft with publishOnApproval, or wait for review.
              */
             409: {
@@ -90336,7 +90382,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event. */
+            /**
+             * @description BRAND_NOT_AUTHORIZED: The product's brand does not let this seller sell it: blocked, official_only (Official Store only) or authorized_list without this seller
+             *     ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.
+             */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -98412,7 +98461,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description CAMPAIGN_LOCKED: Edits are locked while Finance reviews the funding. */
+            /**
+             * @description CAMPAIGN_LOCKED: Edits are locked while Finance reviews the funding.
+             *     ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.
+             */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -108465,7 +108517,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     REVIEWS_RESTRICTED: The account is suspended, closed or under a reviews restriction: no new or edited reviews, questions, answers, votes or seller feedback (customers.canWriteReviews).
+             */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -108529,7 +108584,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     REVIEWS_RESTRICTED: The account is suspended, closed or under a reviews restriction: no new or edited reviews, questions, answers, votes or seller feedback (customers.canWriteReviews).
+             */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -108654,7 +108712,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     REVIEWS_RESTRICTED: The account is suspended, closed or under a reviews restriction: no new or edited reviews, questions, answers, votes or seller feedback (customers.canWriteReviews).
+             */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -108731,7 +108792,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     REVIEWS_RESTRICTED: The account is suspended, closed or under a reviews restriction: no new or edited reviews, questions, answers, votes or seller feedback (customers.canWriteReviews).
+             */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -109148,7 +109212,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     REVIEWS_RESTRICTED: The account is suspended, closed or under a reviews restriction: no new or edited reviews, questions, answers, votes or seller feedback (customers.canWriteReviews).
+             */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -109278,7 +109345,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     REVIEWS_RESTRICTED: The account is suspended, closed or under a reviews restriction: no new or edited reviews, questions, answers, votes or seller feedback (customers.canWriteReviews).
+             */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -109466,7 +109536,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     REVIEWS_RESTRICTED: The account is suspended, closed or under a reviews restriction: no new or edited reviews, questions, answers, votes or seller feedback (customers.canWriteReviews).
+             */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -109593,7 +109666,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     REVIEWS_RESTRICTED: The account is suspended, closed or under a reviews restriction: no new or edited reviews, questions, answers, votes or seller feedback (customers.canWriteReviews).
+             */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -116186,7 +116262,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event. */
+            /**
+             * @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.
+             *     SELLER_HAS_OPEN_OBLIGATIONS: Orders, returns, cases or money are still open; details.obligations lists them
+             */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -117035,7 +117114,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event. */
+            /**
+             * @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.
+             *     SELLER_HAS_OPEN_OBLIGATIONS: Orders, returns, cases or money are still open; details.obligations lists them
+             */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -118771,7 +118853,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["sellers.SellerInvitation"];
+                    "application/json": components["schemas"]["sellers.SellerInvitationSent"];
                 };
             };
             /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
