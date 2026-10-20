@@ -27,6 +27,8 @@ export interface Authorities {
   customerIdOf(accountId: string): Promise<string | null>;
   /** Admin requests: whether the staff session is live (and record the activity); null when identity can't answer */
   touchStaffSession(sessionId: string): Promise<{ live: boolean; reason?: string } | null>;
+  /** Open event streams: the same answer, without recording activity (a stream is not the person working); null when identity can't answer */
+  staffSessionState(sessionId: string): Promise<{ live: boolean; reason?: string } | null>;
   /** The oldest Android version code still served (settings apps.android.*); null when settings can't answer */
   androidMinimum(): Promise<{ minVersionCode: number; updateUrl: string | null } | null>;
 }
@@ -60,6 +62,7 @@ export function moduleAuthorities(lookup: Lookup): Authorities {
       }),
     customerIdOf: (accountId) => ask(null, async () => (await lookup('customers')?.getCustomerByUserId(accountId))?.id),
     touchStaffSession: (sessionId) => ask(null, () => lookup('identity')?.touchStaffSession(sessionId)),
+    staffSessionState: (sessionId) => ask(null, () => lookup('identity')?.staffSessionState(sessionId)),
     // version gating is not authorization: any failure means "don't gate", never a refused request
     androidMinimum: async () => {
       const settings = lookup('settings');
