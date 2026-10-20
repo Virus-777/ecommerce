@@ -55,6 +55,16 @@
   /* ---- Color: data visualisation (validated: CVD + contrast) ---- */
   --chart-1: #0F8A73;   /* Official store / primary series */
   --chart-2: #C77F14;   /* Marketplace sellers / second series */
+  /* Series 3-6, comparison, gain and loss. Checked with the dataviz palette validator against --surface (#FFFFFF):
+     adjacent CVD dE >= 10.6, normal-vision dE >= 17.9, every mark >= 3:1. Slots are given out in order and never
+     cycled (a 7th series folds into "Other"). Dark values below: same hues stepped for the dark surface. */
+  --chart-3: #3B6FD6;   /* blue */
+  --chart-4: #C2477F;   /* magenta */
+  --chart-5: #7A5BD0;   /* violet */
+  --chart-6: #D0503C;   /* red */
+  --chart-compare: #7F8D88;  /* comparison period, drawn dashed (3.46:1) */
+  --chart-positive: #2F6BCF; /* waterfall "plus" steps: blue and red, not green and red, so colour-blind readers can tell them apart */
+  --chart-negative: #C8472F; /* waterfall "minus" steps */
   --chart-grid: #E3E9E6;
   --chart-axis: var(--text-3);
 
@@ -236,6 +246,13 @@
     --focus: var(--info);
     --chart-1: #25A587;
     --chart-2: #BD7C1C;
+    --chart-3: #5B8DEB;
+    --chart-4: #D1609A;
+    --chart-5: #9580E6;
+    --chart-6: #E0644E;
+    --chart-compare: #6F7F79;
+    --chart-positive: #5B8DEB;
+    --chart-negative: #E0644E;
     --chart-grid: #26332E;
     --chart-axis: var(--text-3);
     --img-1: #1B2B27;  --img-2: #1D2230;  --img-3: #2C241D;
@@ -285,6 +302,13 @@
   --focus: var(--info);
   --chart-1: #25A587;
   --chart-2: #BD7C1C;
+  --chart-3: #5B8DEB;
+  --chart-4: #D1609A;
+  --chart-5: #9580E6;
+  --chart-6: #E0644E;
+  --chart-compare: #6F7F79;
+  --chart-positive: #5B8DEB;
+  --chart-negative: #E0644E;
   --chart-grid: #26332E;
   --chart-axis: var(--text-3);
   --img-1: #1B2B27;  --img-2: #1D2230;  --img-3: #2C241D;
