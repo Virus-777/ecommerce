@@ -1,0 +1,93 @@
+# Backend exports used only by tests
+
+These are used by test files (or src/testing) and by nothing else. Some are deliberate test hooks (for example a
+function that exposes a derived code to tests); others are leftovers whose production caller was removed. Worth a look
+one by one. (87)
+
+- [src/app.ts:38](../../backend/src/app.ts#L38) `BuildOptions` (type) — used by `modules/cart/test/helpers.ts`, `modules/customers/test/helpers.ts`, `modules/identity/test/helpers.ts`
+- [src/app.ts:89](../../backend/src/app.ts#L89) `withStubs` — used by `app.test.ts`
+- [src/kernel/auth/app-proof.ts:24](../../backend/src/kernel/auth/app-proof.ts#L24) `isLocalNetworkAddress` — used by `kernel/auth/app-proof.test.ts`
+- [src/kernel/auth/authorities.ts:11](../../backend/src/kernel/auth/authorities.ts#L11) `Revocations` (type) — used by `kernel/auth/revocation.test.ts`
+- [src/kernel/auth/chain.ts:44](../../backend/src/kernel/auth/chain.ts#L44) `AuthKernel` (type) — used by `kernel/auth/chain-cache.test.ts`
+- [src/kernel/auth/setup.ts:52](../../backend/src/kernel/auth/setup.ts#L52) `keyRing` — used by `tools/lib/keys.test.ts`
+- [src/kernel/auth/tokens.ts:66](../../backend/src/kernel/auth/tokens.ts#L66) `verifyAccessToken` — used by `tools/lib/keys.test.ts`
+- [src/kernel/config/index.ts:152](../../backend/src/kernel/config/index.ts#L152) `isLoopbackHost` — used by `kernel/config/config.test.ts`
+- [src/kernel/graphql/index.ts:70](../../backend/src/kernel/graphql/index.ts#L70) `LIMITS` — used by `kernel/graphql/graphql.test.ts`
+- [src/kernel/graphql/index.ts:316](../../backend/src/kernel/graphql/index.ts#L316) `GraphQLKernelOptions` (type) — used by `kernel/graphql/graphql.test.ts`
+- [src/kernel/graphql/shapes.ts:11](../../backend/src/kernel/graphql/shapes.ts#L11) `ACTOR_KIND` — used by `kernel/graphql/graphql.test.ts`
+- [src/kernel/http/admin-app.ts:45](../../backend/src/kernel/http/admin-app.ts#L45) `ADMIN_APP_CSP` — used by `kernel/http/admin-app.test.ts`
+- [src/kernel/http/admin-app.ts:60](../../backend/src/kernel/http/admin-app.ts#L60) `fileUnder` — used by `kernel/http/admin-app.test.ts`
+- [src/kernel/http/index.ts:74](../../backend/src/kernel/http/index.ts#L74) `notImplemented` — used by `kernel/http/http.test.ts`
+- [src/kernel/http/redirect.ts:13](../../backend/src/kernel/http/redirect.ts#L13) `redirectOrigin` — used by `kernel/http/https.test.ts`
+- [src/kernel/http/redirect.ts:21](../../backend/src/kernel/http/redirect.ts#L21) `redirectLocation` — used by `kernel/http/https.test.ts`
+- [src/kernel/http/register.ts:51](../../backend/src/kernel/http/register.ts#L51) `routeUrlOf` — used by `testing/module-suite.ts`
+- [src/kernel/jobs/index.ts:27](../../backend/src/kernel/jobs/index.ts#L27) `parseSchedule` — used by `kernel/jobs/mongo-jobs.test.ts`, `kernel/lib/lib.test.ts`
+- [src/kernel/jobs/index.ts:155](../../backend/src/kernel/jobs/index.ts#L155) `InProcessScheduler` — used by `kernel/jobs/jobs.test.ts`
+- [src/kernel/lib/clock.ts:11](../../backend/src/kernel/lib/clock.ts#L11) `fixedClock` — used by `integration/foundation.test.ts`, `kernel/auth/chain-cache.test.ts`, `modules/access/test/bootstrap.test.ts`
+- [src/kernel/lib/money.ts:38](../../backend/src/kernel/lib/money.ts#L38) `multiply` — used by `kernel/lib/lib.test.ts`
+- [src/kernel/mongo/filters.ts:28](../../backend/src/kernel/mongo/filters.ts#L28) `likePattern` — used by `kernel/mongo/mongo.test.ts`
+- [src/kernel/mongo/index.ts:61](../../backend/src/kernel/mongo/index.ts#L61) `mongoStore` — used by `kernel/mongo/mongo.test.ts`, `testing/mongo.ts`
+- [src/kernel/mongo/index.ts:118](../../backend/src/kernel/mongo/index.ts#L118) `EMBEDDED_REPLICA_SET` — used by `kernel/mongo/embedded.test.ts`
+- [src/modules/access/migrations.ts:10](../../backend/src/modules/access/migrations.ts#L10) `staffViewKeys` — used by `modules/access/test/view-keys.test.ts`
+- [src/modules/access/migrations.ts:25](../../backend/src/modules/access/migrations.ts#L25) `businessOwnerViewKeys` — used by `modules/access/test/view-keys.test.ts`
+- [src/modules/access/migrations.ts:54](../../backend/src/modules/access/migrations.ts#L54) `staffWorkUploads` — used by `modules/access/test/staff-uploads.test.ts`
+- [src/modules/access/migrations.ts:76](../../backend/src/modules/access/migrations.ts#L76) `platformAdminAccountActions` — used by `modules/access/test/staff-uploads.test.ts`
+- [src/modules/advertising/service/settings-section.ts:15](../../backend/src/modules/advertising/service/settings-section.ts#L15) `advertisingSettingsSection` — used by `modules/advertising/test/settings-section.test.ts`
+- [src/modules/audit/graphql/resolvers.ts:13](../../backend/src/modules/audit/graphql/resolvers.ts#L13) `toGraphQL` — used by `modules/audit/test/reads.test.ts`
+- [src/modules/checkout/service/placement.ts:39](../../backend/src/modules/checkout/service/placement.ts#L39) `stableUuid` — used by `modules/checkout/test/domain.test.ts`
+- [src/modules/content/service/tiles.ts:14](../../backend/src/modules/content/service/tiles.ts#L14) `ResolvedProduct` (type) — used by `modules/content/test/product-images.test.ts`
+- [src/modules/customers/domain/zip.ts:80](../../backend/src/modules/customers/domain/zip.ts#L80) `unzip` — used by `modules/customers/test/data-requests.test.ts`, `modules/customers/test/export-hooks.test.ts`
+- [src/modules/finance/service/settings-section.ts:19](../../backend/src/modules/finance/service/settings-section.ts#L19) `scheduleText` — used by `modules/finance/test/wave3.test.ts`
+- [src/modules/finance/service/settings-section.ts:30](../../backend/src/modules/finance/service/settings-section.ts#L30) `feesSection` — used by `modules/finance/test/wave3.test.ts`
+- [src/modules/finance/service/settings-section.ts:72](../../backend/src/modules/finance/service/settings-section.ts#L72) `payoutsSection` — used by `modules/finance/test/wave3.test.ts`
+- [src/modules/identity/domain/crypto.ts:83](../../backend/src/modules/identity/domain/crypto.ts#L83) `base32Decode` — used by `modules/identity/test/helpers.ts`
+- [src/modules/identity/domain/crypto.ts:115](../../backend/src/modules/identity/domain/crypto.ts#L115) `totpCode` — used by `modules/identity/test/helpers.ts`
+- [src/modules/identity/migrations.ts:18](../../backend/src/modules/identity/migrations.ts#L18) `staffWithoutTwoStep` — used by `modules/identity/test/admin.test.ts`
+- [src/modules/media/domain/image-spec.ts:17](../../backend/src/modules/media/domain/image-spec.ts#L17) `DEFAULT_PRODUCT_IMAGE` — used by `modules/media/test/product-images.test.ts`
+- [src/modules/media/domain/image-spec.ts:38](../../backend/src/modules/media/domain/image-spec.ts#L38) `productImageSettingIssues` — used by `modules/media/test/product-images.test.ts`
+- [src/modules/media/providers/processing/dev.ts:17](../../backend/src/modules/media/providers/processing/dev.ts#L17) `DevProcessor` (type) — used by `modules/media/test/helpers.ts`
+- [src/modules/media/providers/scanner.ts:20](../../backend/src/modules/media/providers/scanner.ts#L20) `EICAR` — used by `modules/media/test/uploads.test.ts`
+- [src/modules/media/providers/storage/memory.ts:27](../../backend/src/modules/media/providers/storage/memory.ts#L27) `MemoryStorage` (type) — used by `modules/media/test/helpers.ts`
+- [src/modules/messaging/domain/rules.ts:120](../../backend/src/modules/messaging/domain/rules.ts#L120) `duration` — used by `modules/messaging/test/domain.test.ts`
+- [src/modules/notifications/app/core.ts:22](../../backend/src/modules/notifications/app/core.ts#L22) `LANGUAGE` — used by `modules/notifications/test/pass4.test.ts`
+- [src/modules/notifications/domain/catalog.ts:14](../../backend/src/modules/notifications/domain/catalog.ts#L14) `Tone` (type) — used by `modules/notifications/test/pass4.test.ts`
+- [src/modules/notifications/domain/catalog.ts:15](../../backend/src/modules/notifications/domain/catalog.ts#L15) `SenderFamily` (type) — used by `modules/notifications/test/pass4.test.ts`
+- [src/modules/notifications/domain/catalog.ts:24](../../backend/src/modules/notifications/domain/catalog.ts#L24) `SellerGroupDef` (type) — used by `modules/notifications/test/pass4.test.ts`
+- [src/modules/notifications/domain/catalog.ts:61](../../backend/src/modules/notifications/domain/catalog.ts#L61) `ROLE_NAMES` — used by `modules/notifications/test/pass4.test.ts`
+- [src/modules/notifications/domain/catalog.ts:91](../../backend/src/modules/notifications/domain/catalog.ts#L91) `STANDARD_VARIABLES` — used by `modules/notifications/test/pass4.test.ts`
+- [src/modules/notifications/domain/catalog.ts:257](../../backend/src/modules/notifications/domain/catalog.ts#L257) `DefaultTemplate` (type) — used by `modules/notifications/test/pass4.test.ts`
+- [src/modules/notifications/domain/templates.ts:32](../../backend/src/modules/notifications/domain/templates.ts#L32) `PREHEADER_MAX` — used by `modules/notifications/test/catalog.test.ts`
+- [src/modules/notifications/domain/templates.ts:33](../../backend/src/modules/notifications/domain/templates.ts#L33) `PUSH_BODY_MAX` — used by `modules/notifications/test/catalog.test.ts`
+- [src/modules/notifications/providers/dev-outbox.ts:70](../../backend/src/modules/notifications/providers/dev-outbox.ts#L70) `linksIn` — used by `modules/notifications/test/dev-outbox.test.ts`
+- [src/modules/offers/domain/rules.ts:281](../../backend/src/modules/offers/domain/rules.ts#L281) `RankInput` (type) — used by `modules/offers/test/wave2.test.ts`
+- [src/modules/offers/migrations.ts:24](../../backend/src/modules/offers/migrations.ts#L24) `featuredRuleOfficialTie` — used by `modules/offers/test/wave2.test.ts`
+- [src/modules/payments/ports.ts:47](../../backend/src/modules/payments/ports.ts#L47) `CallRec` (type) — used by `modules/payments/test/intents.test.ts`
+- [src/modules/payments/ports.ts:70](../../backend/src/modules/payments/ports.ts#L70) `DisputeLogRec` (type) — used by `modules/payments/test/intents.test.ts`
+- [src/modules/promotions/domain/evaluate.ts:71](../../backend/src/modules/promotions/domain/evaluate.ts#L71) `EvalInput` (type) — used by `modules/promotions/test/domain.test.ts`
+- [src/modules/reports/domain/files.ts:40](../../backend/src/modules/reports/domain/files.ts#L40) `cellText` — used by `modules/reports/test/domain.test.ts`
+- [src/modules/reports/domain/files.ts:58](../../backend/src/modules/reports/domain/files.ts#L58) `toCsv` — used by `modules/reports/test/domain.test.ts`
+- [src/modules/reports/domain/files.ts:67](../../backend/src/modules/reports/domain/files.ts#L67) `toJsonl` — used by `modules/reports/test/domain.test.ts`
+- [src/modules/reports/domain/files.ts:144](../../backend/src/modules/reports/domain/files.ts#L144) `toXlsx` — used by `modules/reports/test/domain.test.ts`
+- [src/modules/returns/service/settings-section.ts:33](../../backend/src/modules/returns/service/settings-section.ts#L33) `returnsSettingsSection` — used by `modules/returns/test/settings-section.test.ts`
+- [src/modules/search/engine-select.ts:19](../../backend/src/modules/search/engine-select.ts#L19) `openSearchTesting` — used by `modules/search/test/helpers.ts`
+- [src/modules/search/providers/opensearch/document.ts:8](../../backend/src/modules/search/providers/opensearch/document.ts#L8) `cutoffText` — used by `modules/search/test/opensearch-query.test.ts`
+- [src/modules/search/providers/opensearch/document.ts:15](../../backend/src/modules/search/providers/opensearch/document.ts#L15) `cardOrder` — used by `modules/search/test/opensearch-query.test.ts`
+- [src/modules/search/providers/opensearch/query.ts:42](../../backend/src/modules/search/providers/opensearch/query.ts#L42) `textQuery` — used by `modules/search/test/opensearch-query.test.ts`
+- [src/modules/search/providers/opensearch/query.ts:48](../../backend/src/modules/search/providers/opensearch/query.ts#L48) `textMatch` — used by `modules/search/test/opensearch-query.test.ts`
+- [src/modules/search/providers/opensearch/query.ts:61](../../backend/src/modules/search/providers/opensearch/query.ts#L61) `offerConds` — used by `modules/search/test/opensearch-query.test.ts`
+- [src/modules/search/providers/opensearch/query.ts:111](../../backend/src/modules/search/providers/opensearch/query.ts#L111) `where` — used by `modules/search/test/opensearch-query.test.ts`
+- [src/modules/search/providers/opensearch/query.ts:144](../../backend/src/modules/search/providers/opensearch/query.ts#L144) `scoredQuery` — used by `modules/search/test/opensearch-query.test.ts`
+- [src/modules/search/providers/opensearch/query.ts:181](../../backend/src/modules/search/providers/opensearch/query.ts#L181) `priceStreams` — used by `modules/search/test/opensearch-query.test.ts`
+- [src/modules/search/providers/opensearch/scripts.ts:8](../../backend/src/modules/search/providers/opensearch/scripts.ts#L8) `DocValues` (type) — used by `modules/search/test/opensearch-fake/fake.ts`
+- [src/modules/search/providers/opensearch/scripts.ts:60](../../backend/src/modules/search/providers/opensearch/scripts.ts#L60) `SCRIPT_TWINS` — used by `modules/search/test/opensearch-fake/fake.ts`, `modules/search/test/opensearch-query.test.ts`
+- [src/modules/sellers/service/settings-section.ts:15](../../backend/src/modules/sellers/service/settings-section.ts#L15) `sellersSettingsSection` — used by `modules/sellers/test/settings-section.test.ts`
+- [src/modules/settings/domain/catalogue.ts:181](../../backend/src/modules/settings/domain/catalogue.ts#L181) `inferValueType` — used by `modules/settings/test/domain.test.ts`
+- [src/modules/settings/domain/catalogue.ts:190](../../backend/src/modules/settings/domain/catalogue.ts#L190) `humanize` — used by `modules/settings/test/domain.test.ts`
+- [src/modules/settings/domain/catalogue.ts:200](../../backend/src/modules/settings/domain/catalogue.ts#L200) `inferUnit` — used by `modules/settings/test/domain.test.ts`
+- [src/modules/settings/domain/flags.ts:38](../../backend/src/modules/settings/domain/flags.ts#L38) `bucketOf` — used by `modules/settings/test/domain.test.ts`
+- [src/modules/shipping/service/settings-section.ts:14](../../backend/src/modules/shipping/service/settings-section.ts#L14) `clockText` — used by `modules/shipping/test/settings-section.test.ts`
+- [src/modules/shipping/service/settings-section.ts:21](../../backend/src/modules/shipping/service/settings-section.ts#L21) `shippingSettingsSection` — used by `modules/shipping/test/settings-section.test.ts`
+- [src/modules/support/service/settings-section.ts:22](../../backend/src/modules/support/service/settings-section.ts#L22) `supportSettingsSection` — used by `modules/support/test/settings-section.test.ts`
+- [src/modules/wishlist/alerts.ts:39](../../backend/src/modules/wishlist/alerts.ts#L39) `concerns` — used by `modules/wishlist/test/rules.test.ts`
+- [src/modules/workqueues/domain/intake.ts:911](../../backend/src/modules/workqueues/domain/intake.ts#L911) `resolvesOnByKind` — used by `modules/workqueues/test/intake.test.ts`
+- [src/modules/workqueues/domain/rules.ts:112](../../backend/src/modules/workqueues/domain/rules.ts#L112) `conditionApplies` — used by `modules/workqueues/test/rules.test.ts`
