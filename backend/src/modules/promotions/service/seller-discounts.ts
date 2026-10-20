@@ -34,7 +34,7 @@ export class SellerDiscountsPart extends Part {
     return cards;
   }
 
-  async toInput(sellerId: string, input: SellerDiscountInput, cards: Map<string, OfferCard>): Promise<CampaignInput> {
+  async toInput(input: SellerDiscountInput, cards: Map<string, OfferCard>): Promise<CampaignInput> {
     const section = input.kind === 'markdown' ? 'clearance' : 'coupons';
     return {
       name: input.name,
@@ -114,7 +114,7 @@ export class SellerDiscountsPart extends Part {
 
   async create(sellerId: string, input: SellerDiscountInput, by: By): Promise<SellerDiscount> {
     const cards = await this.ownOffers(sellerId, input.offerIds);
-    const row = await this.parts.campaigns.create(await this.toInput(sellerId, input, cards), by, { ownerKind: 'seller', sellerId });
+    const row = await this.parts.campaigns.create(await this.toInput(input, cards), by, { ownerKind: 'seller', sellerId });
     const view = await this.view(row);
     await this.core.audit({ action: 'promotions.discount.create', actionLabel: 'Created a seller discount', category: 'other', target: { type: 'campaign', id: row.id, ref: row.ref, label: row.name, sellerId }, after: view.campaign, visibleToSeller: true }, by);
     return view;
@@ -124,7 +124,7 @@ export class SellerDiscountsPart extends Part {
     const { row, model } = await this.own(sellerId, id);
     if (model.status !== 'draft' && model.status !== 'scheduled') throw new AppError('ILLEGAL_TRANSITION', model.status === 'live' || model.status === 'paused' ? 'Live discounts can only be ended' : `A ${model.status} discount can't be edited`, { from: model.status, event: 'edit' });
     const cards = await this.ownOffers(sellerId, input.offerIds);
-    const next = await this.toInput(sellerId, input, cards);
+    const next = await this.toInput(input, cards);
     let version = row.version;
     if (model.status === 'scheduled') {
       await this.parts.campaigns.transition(id, 'reopen', by, { reason: 'Edited by the seller' });

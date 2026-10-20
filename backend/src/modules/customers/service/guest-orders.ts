@@ -10,7 +10,6 @@ import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import { secretFor } from '../../../kernel/lib/secrets.js';
 import type * as common from '../../../spec/common.js';
 import type { GuestBuyerRow, GuestOrderAccess } from '../../../spec/customers.js';
-import type * as identity from '../../../spec/identity.js';
 import { normalizeEmail } from '../domain/rules.js';
 import * as map from '../mappers.js';
 import type { CustomersRepository } from '../repository.js';

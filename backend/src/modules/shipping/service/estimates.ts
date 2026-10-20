@@ -292,7 +292,7 @@ export class Estimates {
     return { shippable: true, reason: null, message: null, zone: served };
   }
 
-  transitFor(w: World, method: MethodRec, zone: ZoneRec | null) {
+  transitFor(method: MethodRec, zone: ZoneRec | null) {
     const t = zone?.transit_by_method?.[method.code];
     return t && Number.isFinite(t.min) ? { min: t.min, max: Math.max(t.min, t.max) } : { min: method.transit_min, max: Math.max(method.transit_min, method.transit_max) };
   }
@@ -365,7 +365,7 @@ export class Estimates {
       const carrierCodes = [...new Set(services.map((s) => w.carrierOfService.get(s.id)!.code))];
       const serviceIds = services.map((s) => s.id);
       const methodNotices = ownerNotices.filter((n) => this.noticeApplies(n, { dest: o.dest, zoneIds, carrierCodes, serviceIds }));
-      const transit = this.transitFor(w, method, o.zone);
+      const transit = this.transitFor(method, o.zone);
       const pickup = this.carrierRules(methodNotices, 'noPickup');
       const delivery = this.carrierRules(methodNotices, 'noDelivery');
       let { leaves, range } = arrivalRange(plan.date, transit, pickup, delivery);

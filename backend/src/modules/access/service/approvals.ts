@@ -39,7 +39,7 @@ import {
   type SecondMode,
   type Snapshot,
 } from '../domain/limits.js';
-import { BUSINESS_OWNER, defaultEligibleRoleKeys } from '../domain/seed.js';
+import { BUSINESS_OWNER } from '../domain/seed.js';
 import {
   approvalRequestMachine,
   awayPeriodMachine,

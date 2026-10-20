@@ -13,7 +13,7 @@ import type {
 } from '../../spec/identity.js';
 import { normalizeEmail } from './domain/policy.js';
 import * as map from './mappers.js';
-import { Core, type IdentityServiceDeps, MIN, DAY, BATCH, UNVERIFIED_ACCOUNT_DAYS, seconds } from './service/core.js';
+import { Core, type IdentityServiceDeps, MIN, DAY, BATCH, UNVERIFIED_ACCOUNT_DAYS } from './service/core.js';
 import { Registration } from './service/registration.js';
 import { Authentication } from './service/authentication.js';
 import { Sessions } from './service/sessions.js';

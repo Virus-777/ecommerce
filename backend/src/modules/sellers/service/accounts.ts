@@ -3,7 +3,7 @@
  * payout account and readiness, agreements, closure, the Verified label and the admin seller views.
  */
 import type { Principal } from '../../../kernel/auth/index.js';
-import { AppError, isAppError, isNotImplemented } from '../../../kernel/errors/index.js';
+import { AppError, isNotImplemented } from '../../../kernel/errors/index.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import { pageOf, toPageRequest, type PageRequest } from '../../../kernel/lib/pagination.js';
@@ -35,9 +35,9 @@ import { AGREEMENT_KEYS, type AgreementKey } from '../domain/catalogue.js';
 import { addDays, holderMatches, locationOf, payoutLabel, payoutProblems, type StoredPayout, type StoredPayoutDetails, type StoredVerification } from '../domain/rules.js';
 import { launchReadinessReviewMachine, payoutReadinessMachine, sellerAccountStatusMachine, verifiedSellerLabelMachine } from '../domain/state-machines.js';
 import * as map from '../mappers.js';
-import type { ApplicationRec, SellerListFilter, SellerRec } from '../ports.js';
+import type { SellerListFilter, SellerRec } from '../ports.js';
 import type { SellersRepository } from '../repository.js';
-import { invalid, notFound, Part, SYSTEM, type By } from './core.js';
+import { invalid, notFound, Part, type By } from './core.js';
 
 const SELLING = ['approved', 'restricted', 'suspended'];
 const DATASET = 'sellers.admin.accounts';
@@ -712,7 +712,7 @@ export class AccountsPart extends Part {
   }
 
   /** Grant the Verified label for `validDays` (read with labelValidDays() before the transaction) */
-  async grantLabel(tx: SellersRepository, s: SellerRec, by: By, validDays: number, reason?: string): Promise<SellerRec> {
+  async grantLabel(tx: SellersRepository, s: SellerRec, validDays: number, reason?: string): Promise<SellerRec> {
     const { checked } = await this.labelChecks(s, tx);
     const now = this.now();
     return tx.update('sellers', s.id, {
@@ -732,7 +732,7 @@ export class AccountsPart extends Part {
       const { blocking } = await this.labelChecks(s);
       if (blocking.length) throw new AppError('CHECKS_UNRESOLVED', 'These checks must pass before the label is granted', { checks: blocking });
       const days = await this.labelValidDays();
-      after = await this.repo.transaction((tx) => this.grantLabel(tx, s, by, days));
+      after = await this.repo.transaction((tx) => this.grantLabel(tx, s, days));
     } else {
       after = await this.repo.update('sellers', s.id, {
         verification_state: this.core.step(verifiedSellerLabelMachine, s.verification_state, 'revoke'),

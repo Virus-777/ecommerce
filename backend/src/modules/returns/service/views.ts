@@ -621,7 +621,6 @@ export class Views {
   /* ---------------------------------------------------------------- refund requests */
 
   async refundRequest(rr: RefundRec, area: 'seller' | 'admin' = 'admin', agg?: Agg): Promise<RefundRequest> {
-    const x = rr.deductions;
     const approval = rr.approval_request_id ? ((await this.core.soft('access', 'approval info', (a) => a.approvalInfo(rr.approval_request_id!))) ?? { required: true, reason: 'Above the approver limit', approvalRequestId: rr.approval_request_id, approvers: ['Finance'] }) : null;
     let impact: EarningsImpact | null = null;
     if (rr.owner_type === 'seller' && agg) impact = await this.earningsImpact(agg, rr);

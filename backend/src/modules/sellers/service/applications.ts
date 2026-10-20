@@ -39,7 +39,6 @@ import { PROGRAM } from '../domain/catalogue.js';
 import {
   addDays,
   completedSteps,
-  DATA_STEPS,
   deadline,
   holderMatches,
   missingFields,
@@ -263,7 +262,7 @@ export class ApplicationsPart extends Part {
     return this.codeFor(invitationId);
   }
 
-  async startApplication(accountId: string, body: ApplicationAccountInput, by: By): Promise<SellerApplication> {
+  async startApplication(accountId: string, body: ApplicationAccountInput, _by: By): Promise<SellerApplication> {
     const issues: { path: string; message: string }[] = [];
     if (!body.contactName.trim()) issues.push({ path: 'contactName', message: 'Enter your name' });
     if (!body.storeName.trim()) issues.push({ path: 'storeName', message: 'Enter a store name' });
@@ -341,7 +340,7 @@ export class ApplicationsPart extends Part {
     return { owners, issues };
   }
 
-  async updateApplication(accountId: string, id: string, body: UpdateBody, by: By): Promise<SellerApplication> {
+  async updateApplication(accountId: string, id: string, body: UpdateBody, _by: By): Promise<SellerApplication> {
     const a = await this.own(accountId, id);
     if (!EDITABLE.includes(a.state)) throw this.illegal(a, 'update');
     const given: string[] = [];
@@ -410,7 +409,7 @@ export class ApplicationsPart extends Part {
     return this.view(after);
   }
 
-  async addApplicationDocument(accountId: string, id: string, body: { mediaId: string; kind: ApplicationDocument['kind']; ownerId?: string | null; infoRequestItemId?: string | null }, by: By): Promise<ApplicationDocument> {
+  async addApplicationDocument(accountId: string, id: string, body: { mediaId: string; kind: ApplicationDocument['kind']; ownerId?: string | null; infoRequestItemId?: string | null }, _by: By): Promise<ApplicationDocument> {
     const a = await this.own(accountId, id);
     if (!EDITABLE.includes(a.state)) throw this.illegal(a, 'addDocument', 'Documents can be added to a draft or for an open information request');
     const sec = this.sections(a);
@@ -464,7 +463,7 @@ export class ApplicationsPart extends Part {
     return map.document(doc, refs);
   }
 
-  async removeApplicationDocument(accountId: string, id: string, documentId: string, by: By) {
+  async removeApplicationDocument(accountId: string, id: string, documentId: string, _by: By) {
     const a = await this.own(accountId, id);
     const d = isUuid(documentId) ? await this.repo.get('application_documents', documentId) : undefined;
     if (!d || d.application_id !== a.id) throw notFound('Document');
@@ -1013,6 +1012,7 @@ export class ApplicationsPart extends Part {
     const c = await this.checkOf(a.id, checkId);
     await this.repo.update('verification_checks', c.id, { result: 'pending', summary: 'Running the check again', source: 'automated', provider: null, provider_ref: null, accepted_note: null, checked_by: null, checked_at: null });
     await this.runChecks({ applicationId: a.id, checkId: c.id });
+    await this.core.audit({ action: 'sellers.check.rerun', actionLabel: 'Ran a verification check again', category: 'other', target: this.appTarget(a), before: { kind: c.kind, result: c.result }, after: { kind: c.kind, result: 'pending' } }, by);
     return map.check((await this.repo.get('verification_checks', c.id))!);
   }
 
@@ -1118,7 +1118,7 @@ export class ApplicationsPart extends Part {
       const strict = this.latestChecks(await tx.find('verification_checks', { application_id: a.id })).every((c) => !['identity', 'business_registration', 'payout_account', 'return_address'].includes(c.kind) || c.result === 'passed');
       let granted = false;
       if (!labelBlocking.length && strict) {
-        seller = await this.parts.accounts.grantLabel(tx, seller, by, labelDays);
+        seller = await this.parts.accounts.grantLabel(tx, seller, labelDays);
         granted = true;
       }
       const sec = this.sections(a);

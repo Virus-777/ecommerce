@@ -119,7 +119,7 @@ export class WishlistService implements WishlistPublicApi {
     return l;
   }
 
-  private async listView(customerId: string, l: ListRow): Promise<WishlistList> {
+  private async listView(l: ListRow): Promise<WishlistList> {
     return this.views.list(l, await this.repo.countItems(l.id));
   }
 
@@ -149,7 +149,7 @@ export class WishlistService implements WishlistPublicApi {
     const name = this.listName(body.name);
     const l = await this.ownList(customerId, listId);
     const row = await this.repo.updateList(l.id, { name, updated_at: this.now() });
-    return this.listView(customerId, row);
+    return this.listView(row);
   }
 
   /** Deleting a named list deletes its items (and their alerts); the default list stays */
@@ -174,9 +174,9 @@ export class WishlistService implements WishlistPublicApi {
   async shareList(customerId: string, listId: string, body: { enabled: boolean }): Promise<WishlistList> {
     const l = await this.ownList(customerId, listId);
     const want = Boolean(body.enabled);
-    if (want === Boolean(l.share_token)) return this.listView(customerId, l);
+    if (want === Boolean(l.share_token)) return this.listView(l);
     const row = await this.repo.updateList(l.id, { share_token: want ? newShareId() : null, updated_at: this.now() });
-    return this.listView(customerId, row);
+    return this.listView(row);
   }
 
   /** Read-only public view: names, pictures, current price and stock; no notes, price history, alerts or customer data */
@@ -256,7 +256,7 @@ export class WishlistService implements WishlistPublicApi {
     return this.isSaved(customerId, list);
   }
 
-  private async itemView(customerId: string, row: ItemRow, lk?: Lookups): Promise<SavedItem> {
+  private async itemView(row: ItemRow, lk?: Lookups): Promise<SavedItem> {
     const [d] = await this.views.items([row], await this.repo.alertsOfItems([row.id]), { lookups: lk });
     return d!.item;
   }
@@ -321,7 +321,7 @@ export class WishlistService implements WishlistPublicApi {
     const existing = await this.repo.findItem(list.id, product.id, variantId);
     if (existing) {
       if (kinds.length) await this.setItemAlerts(customerId, existing, { priceDrop: body.priceDropAlert ? true : undefined, backInStock: body.backInStockAlert ? true : undefined });
-      return this.itemView(customerId, existing, lk);
+      return this.itemView(existing, lk);
     }
     await this.checkAlertRoom(customerId, kinds.length);
     const maxItems = await this.ctx.settings.get('maxItemsPerList');
@@ -353,7 +353,7 @@ export class WishlistService implements WishlistPublicApi {
       return { row, created: true };
     });
     if (created) this.ctx.events.publish('wishlist.item.saved', { customerId, productId: product.id, variantId }, by);
-    return this.itemView(customerId, row, lk);
+    return this.itemView(row, lk);
   }
 
   async removeItem(customerId: string, id: string, by: By): Promise<void> {
@@ -373,7 +373,7 @@ export class WishlistService implements WishlistPublicApi {
   async moveItem(customerId: string, id: string, body: { listId: string }): Promise<SavedItem> {
     const item = await this.ownItem(customerId, id);
     const target = await this.ownList(customerId, body.listId);
-    if (target.id === item.list_id) return this.itemView(customerId, item);
+    if (target.id === item.list_id) return this.itemView(item);
     const maxItems = await this.ctx.settings.get('maxItemsPerList');
     const now = this.now();
     const row = await this.repo.transaction(async (tx) => {
@@ -398,7 +398,7 @@ export class WishlistService implements WishlistPublicApi {
       await tx.updateList(locked.list_id, { updated_at: now });
       return moved;
     });
-    return this.itemView(customerId, row);
+    return this.itemView(row);
   }
 
   /** Turns an item's alerts on (armed at the price shown now) or off (removed) */
@@ -438,7 +438,7 @@ export class WishlistService implements WishlistPublicApi {
   async updateItemAlerts(customerId: string, id: string, body: AlertToggle): Promise<SavedItem> {
     const item = await this.ownItem(customerId, id);
     await this.setItemAlerts(customerId, item, { priceDrop: body.priceDrop, backInStock: body.backInStock });
-    return this.itemView(customerId, item);
+    return this.itemView(item);
   }
 
   /**
@@ -490,7 +490,7 @@ export class WishlistService implements WishlistPublicApi {
     const after = await cart.getCartView({ kind: 'customer', customerId });
     let saved: SavedItem | null = null;
     if (body.removeFromList) await this.removeItem(customerId, item.id, by);
-    else saved = await this.itemView(customerId, item, lk);
+    else saved = await this.itemView(item, lk);
     return { cartLineId: line.id, cartItemCount: after?.itemCount ?? line.quantity, item: saved };
   }
 

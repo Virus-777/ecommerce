@@ -219,7 +219,7 @@ export class DayEnd {
     return false;
   }
 
-  async check(v: Viewer, id: string, itemKey: string, note: string | null | undefined, by: By): Promise<DayEndReview> {
+  async check(v: Viewer, id: string, itemKey: string, note: string | null | undefined, _by: By): Promise<DayEndReview> {
     const existing = await this.repo.getReview(id);
     if (!existing) throw new AppError('NOT_FOUND', 'Day-end review not found');
     const items = (existing.items ?? []) as unknown as DayEndItem[];

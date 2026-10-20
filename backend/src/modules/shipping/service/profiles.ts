@@ -616,7 +616,7 @@ export class Profiles {
         carriers: [...carrierNames].sort(),
         methods: methods.map((m) => {
           const def = w.methods.find((x) => x.id === m.methodId || x.code === m.methodCode);
-          return { name: m.name, transit: def ? this.estimates.transitFor(w, def, null) : { min: 3, max: 6 }, priceLabel: priceLabel(m, p.free_method_code === m.methodCode ? threshold : null) };
+          return { name: m.name, transit: def ? this.estimates.transitFor(def, null) : { min: 3, max: 6 }, priceLabel: priceLabel(m, p.free_method_code === m.methodCode ? threshold : null) };
         }),
         freeShippingThreshold: threshold,
         freeShippingLabel: threshold ? `Free ${w.methods.find((m) => m.code === (p.free_method_code ?? 'standard'))?.name ?? 'Standard'} shipping on orders over ${formatShort(threshold)} from this seller` : null,

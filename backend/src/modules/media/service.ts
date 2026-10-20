@@ -40,7 +40,6 @@ import {
   productTargets,
   recropMessage,
   resolveSpec,
-  sameSpec,
   toSetting,
   widthTargets,
   type ProcessingSpec,

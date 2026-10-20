@@ -2,7 +2,6 @@ import type { GraphQLContext, ModuleResolvers } from '../../../kernel/graphql/in
 import { isUuid } from '../../../kernel/lib/ids.js';
 import type * as common from '../../../spec/common.js';
 import type { Answer, Author, ProductReview, Question, SellerFeedback, SellerFeedbackSummary, SellerResponse } from '../../../spec/reviews.js';
-import { isOfficial } from '../domain/rules.js';
 import type { ReviewsService } from '../service.js';
 
 /* ---------------------------------------------------------------- REST shapes → GraphQL shapes (enums in capitals) */

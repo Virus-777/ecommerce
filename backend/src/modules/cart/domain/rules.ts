@@ -3,7 +3,7 @@
  * notices already stored, line state, quantity limits, package keys and customer-facing sentences.
  */
 import type { Json } from '../../../kernel/lib/json.js';
-import { format as formatMoney, money, type Money } from '../../../kernel/lib/money.js';
+import { format as formatMoney, money } from '../../../kernel/lib/money.js';
 import type { CartItem, CartNotice, CartPackage } from '../../../spec/cart.js';
 import type * as offers from '../../../spec/offers.js';
 import type { NoticeRow } from '../ports.js';

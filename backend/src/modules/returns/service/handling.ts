@@ -145,7 +145,7 @@ export class Handling {
 
   /* ---------------------------------------------------------------- evidence */
 
-  async addEvidence(id: string, body: { kind: ReturnEvidence['kind']; mediaIds: string[]; note?: string | null }, by: By, agg: Agg, party: 'seller' | 'staff'): Promise<ReturnEvidence> {
+  async addEvidence(_id: string, body: { kind: ReturnEvidence['kind']; mediaIds: string[]; note?: string | null }, by: By, agg: Agg, party: 'seller' | 'staff'): Promise<ReturnEvidence> {
     if (!body.mediaIds.length && !body.note?.trim()) throw invalidField('mediaIds', 'Add a file or a note');
     const r = agg.ret;
     const evidenceId = newId();

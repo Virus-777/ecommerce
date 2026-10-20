@@ -16,7 +16,6 @@ import type {
   OverviewTile,
   ProfileInput,
 } from '../../../spec/customers.js';
-import type * as identity from '../../../spec/identity.js';
 import { cleanPhone, displayName, normalizeEmail } from '../domain/rules.js';
 import { customerAccountStatusMachine } from '../domain/state-machines.js';
 import * as map from '../mappers.js';

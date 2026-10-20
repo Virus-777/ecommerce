@@ -10,7 +10,7 @@ import { randomToken, tokenHash } from '../domain/crypto.js';
 import { lockInForce } from '../domain/policy.js';
 import * as map from '../mappers.js';
 import type { SessionRow } from '../ports.js';
-import { type Core, type Caller, type WithCookie, KIND_OF, MIN, DAY, REVOCATION_OVERLAP_MS, seconds } from './core.js';
+import { type Core, type Caller, type WithCookie, KIND_OF, MIN, DAY, REVOCATION_OVERLAP_MS } from './core.js';
 import type { Authentication } from './authentication.js';
 
 export class Sessions {

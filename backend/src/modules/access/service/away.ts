@@ -8,7 +8,6 @@ import { AppError } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
-import type * as identity from '../../../spec/identity.js';
 import type {
   AwayInput,
   AwayPeriod,
@@ -21,7 +20,7 @@ import { loadDirectory, loadStaffDirectory, type Directory, type StaffDirectory 
 import type { Issue } from '../domain/limits.js';
 import { awayPeriodMachine } from '../domain/state-machines.js';
 import type { AwayRow, RoleRow } from '../ports.js';
-import { type Core, type Caller, DELEGATIONS, FINAL, iso, uniq, by, roleRef, validation, notFound } from './core.js';
+import { type Core, type Caller, DELEGATIONS, FINAL, iso, uniq, roleRef, validation, notFound } from './core.js';
 import type { Approvals } from './approvals.js';
 import type { Members } from './members.js';
 

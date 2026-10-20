@@ -277,7 +277,7 @@ export class Queries {
       case 'commerce.sales':
         return this.salesReport(rq, scope, cfg, true);
       case 'commerce.refunds':
-        return this.refundsReport(rq, scope, cfg);
+        return this.refundsReport(rq, scope);
       case 'trading.margin':
         return this.marginReport(rq, cfg);
       case 'marketplace.fees':
@@ -304,7 +304,7 @@ export class Queries {
       case 'marketplace.discount_funding':
         return this.discountFundingReport(rq, scope, cfg);
       case 'marketplace.owed_to_sellers':
-        return this.sellerBalancesReport(rq, scope, cfg);
+        return this.sellerBalancesReport(rq, scope);
       case 'marketplace.payouts':
         return this.payoutsReport(rq, scope);
       case 'discovery.stockouts':
@@ -506,7 +506,7 @@ export class Queries {
     return out;
   }
 
-  private async refundsReport(rq: ResolvedQuery, scope: ReportScope, cfg: Settings): Promise<Part> {
+  private async refundsReport(rq: ResolvedQuery, scope: ReportScope): Promise<Part> {
     const c = rq.currency;
     const f = this.salesFilter(rq, scope, rq.range);
     const rf = (range: DayRange) => {
@@ -886,7 +886,7 @@ export class Queries {
   }
 
   /** Seller balances now (finance.sellerBalanceTotals, getSellerBalances) for the sellers active in the range */
-  private async sellerBalancesReport(rq: ResolvedQuery, scope: ReportScope, cfg: Settings): Promise<Part> {
+  private async sellerBalancesReport(rq: ResolvedQuery, scope: ReportScope): Promise<Part> {
     const c = rq.currency;
     const finance = this.core.api('finance');
     if (!finance || !this.core.running('finance')) return { kpis: [], series: [], callouts: [], unavailable: ['marketplace.seller_balances', 'marketplace.amounts_owed'], models: [] };
@@ -991,7 +991,7 @@ export class Queries {
   private async serviceFocusReport(key: string, rq: ResolvedQuery, scope: ReportScope): Promise<Part> {
     const c = rq.currency;
     const sellerId = this.sellerOf(rq, scope);
-    const { f, total, prev, byBucket, bySeller } = await this.serviceSums(rq, sellerId, true);
+    const { total, prev, byBucket, bySeller } = await this.serviceSums(rq, sellerId, true);
     const buckets = bucketsOf(rq.range, rq.granularity);
     const names = await this.sellerNames(bySeller.map((s) => s.key!));
     const onTime = (t: Record<string, number | null>) => pct(t.dispatched_on_time!, t.dispatched!);

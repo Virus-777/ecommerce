@@ -101,7 +101,7 @@ export function pngHeader(width: number, height: number): Buffer {
 export const onePagePdf = () =>
   Buffer.from('%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Count 1 >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R >> endobj\n%%EOF\n', 'latin1');
 
-export function flows(app: FastifyInstance, clock: { now(): Date; advance(ms: number): void }): Flows {
+export function flows(app: FastifyInstance, _clock: { now(): Date; advance(ms: number): void }): Flows {
   const seen: EventEnvelope[] = [];
   for (const name of ['identity.invitation.created', 'identity.verification.code_issued', 'identity.user.registered']) {
     app.kernel.events.subscribe('flows', name, (e) => void seen.push(e));
