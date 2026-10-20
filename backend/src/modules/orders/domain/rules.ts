@@ -150,13 +150,6 @@ export const SHIPMENT_STATUS_LABEL: Record<string, string> = {
   cancelled: 'Shipment cancelled',
 };
 
-/** Seller-area tabs → group statuses (seller_groups.status) */
-export const SELLER_TAB_STATUSES: Record<string, GroupStatus[]> = {
-  new: ['new'],
-  preparing: ['preparing', 'delayed', 'partly_shipped'],
-  shipped: ['shipped', 'partly_delivered'],
-  completed: ['delivered', 'partly_cancelled', 'cancelled'],
-};
 /** Groups still waiting for something to ship */
 export const OPEN_GROUP: readonly GroupStatus[] = ['new', 'preparing', 'delayed', 'partly_shipped'];
 
@@ -213,9 +206,6 @@ export function displayStatus(lifecycle: Lifecycle, items: readonly StatusItem[]
 }
 
 /* ------------------------------------------------------------------ money */
-
-/** Integer amount of a Money-like json value */
-export const amountOf = (m: { amount?: number } | null | undefined) => m?.amount ?? 0;
 
 /** Sum of a line's discount allocations */
 export const discountSum = (discounts: readonly DiscountAllocation[]) => discounts.reduce((s, d) => s + d.amount.amount, 0);

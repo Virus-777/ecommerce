@@ -32,11 +32,6 @@ export function conditionGroup(c: string): ConditionGroup {
 /** Used and refurbished offers must describe their condition */
 export const needsConditionNotes = (c: string) => c !== 'new';
 
-/** Statuses customers can buy from (out of stock shows but cannot be bought) */
-export const SELLING: readonly OfferStatus[] = ['active'];
-/** Statuses that are listed on the store (all-offers page) */
-export const LISTED: readonly OfferStatus[] = ['active', 'out_of_stock', 'ineligible'];
-
 /* ------------------------------------------------------------------ wording */
 
 export function dispatchLabel(businessDays: number): string {

@@ -5,8 +5,6 @@ import type { BoxType, Dimensions, Weight } from '../../../spec/warehouse.js';
 export const BIN_KINDS = ['pick', 'bulk', 'returns', 'quarantine', 'packing', 'dock'] as const;
 /** Bins stock items are stored in (assignments, put-away of sellable units) */
 export const STORAGE_KINDS: readonly string[] = ['pick', 'bulk'];
-/** Fulfillment statuses still worked on in the warehouse */
-export const ACTIVE_STATUSES = ['awaiting_pick', 'picking', 'picked', 'packing', 'on_hold'] as const;
 /** Not packed yet (at risk and late counts) */
 export const UNPACKED_STATUSES: readonly string[] = ['awaiting_pick', 'picking', 'picked', 'packing', 'on_hold'];
 /** A wave is complete when each of its orders is in one of these */
@@ -93,11 +91,6 @@ export function itemMatches(code: string, item: { sku: string; stockItemId: stri
   if (c === normalizeCode(item.sku)) return true;
   if (c === item.stockItemId.toUpperCase()) return true;
   return (item.extraCodes ?? []).some((x) => x && normalizeCode(x) === c);
-}
-
-export function binMatches(code: string, bin: { code: string; barcode: string }): boolean {
-  const c = normalizeCode(code);
-  return Boolean(c) && (c === normalizeCode(bin.code) || c === normalizeCode(bin.barcode));
 }
 
 export const looksLikeReturnRef = (code: string) => /^RT-/i.test(code.trim());

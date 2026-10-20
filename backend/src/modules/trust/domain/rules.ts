@@ -10,7 +10,6 @@ import type { MyReport, Recommendation, RiskFactor, TrustReport, TrustSubject } 
 
 export type ReportType = TrustReport['type'];
 export type ReportStatus = TrustReport['status'];
-export type Source = TrustReport['source'];
 export type Action = Recommendation['action'];
 export type OwnerTeam = Recommendation['ownerTeam'];
 export type SubjectType = TrustSubject['type'];
@@ -276,7 +275,6 @@ export const ACTIONS: Record<Action, ActionDef> = {
   },
 };
 
-export const ACTION_KEYS = Object.keys(ACTIONS) as Action[];
 export const isAction = (a: unknown): a is Action => typeof a === 'string' && a in ACTIONS;
 export const isTeam = (t: unknown): t is OwnerTeam => typeof t === 'string' && (OWNER_TEAMS as readonly string[]).includes(t);
 

@@ -19,9 +19,6 @@ export const DAY = 24 * HOUR;
 export const ACCEPTED: readonly IntentStatus[] = ['authorized', 'partially_captured', 'captured'];
 export const PENDING: readonly IntentStatus[] = ['created', 'authorizing', 'requires_action', 'pending_check'];
 export const ENDED: readonly IntentStatus[] = ['failed', 'voided', 'expired'];
-/** Refund statuses that reserve part of the refundable amount until sent or cancelled */
-export const RESERVING: readonly RefundStatus[] = ['requested', 'processing', 'failed'];
-
 export const is = <T extends string>(list: readonly T[], v: string): v is T => (list as readonly string[]).includes(v);
 
 export const STATUS_LABEL: Record<IntentStatus, string> = {

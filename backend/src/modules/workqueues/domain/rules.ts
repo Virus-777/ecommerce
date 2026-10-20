@@ -201,9 +201,6 @@ export function addDays(date: string, days: number): string {
   return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
 }
 
-/** A date as YYYY-MM-DD, from a date column (text) or a Date */
-export const dateText = (v: unknown): string => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10));
-
 export const isHhMm = (s: unknown): s is string => typeof s === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(s);
 
 /** Lower-case slug for derived queue keys */

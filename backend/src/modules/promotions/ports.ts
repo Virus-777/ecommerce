@@ -11,15 +11,10 @@ export type TargetRec = Db['campaign_targets'];
 export type EligibleRec = Db['eligible_offers'];
 export type FundingReviewRec = Db['funding_reviews'];
 export type ParticipationRec = Db['participations'];
-export type ParticipationOfferRec = Db['participation_offers'];
 export type FlashItemRec = Db['flash_items'];
 export type CodeRec = Db['coupon_codes'];
-export type ClipRec = Db['coupon_clips'];
-export type EvaluationRec = Db['evaluations'];
 export type RedemptionRec = Db['redemptions'];
 export type RedemptionLineRec = Db['redemption_lines'];
-export type UsageRec = Db['usage_counters'];
-export type ReminderRec = Db['event_reminders'];
 export type LogRec = Db['campaign_log'];
 export type ResultRec = Db['campaign_results_daily'];
 

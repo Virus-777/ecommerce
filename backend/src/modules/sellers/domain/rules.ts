@@ -165,8 +165,6 @@ export const validTaxId = (type: 'ein' | 'ssn', s: string) => taxIdDigits(s).len
 
 export const isPoBox = (a: common.Address | null | undefined) => Boolean(a && /\bp\.?\s*o\.?\s*box\b|\bpost office box\b/i.test(`${a.line1} ${a.line2 ?? ''}`));
 
-export const addressKey = (a: common.Address | null | undefined) => (a ? `${a.line1}|${a.postalCode}`.toLowerCase().replace(/\s+/g, ' ').trim() : '');
-
 export function slugify(name: string): string {
   const s = name
     .normalize('NFKD')
@@ -282,4 +280,3 @@ export function restrictionBlocks(
 
 export const pct = (num: number, den: number) => (den > 0 ? Math.round((num / den) * 1000) / 10 : 0);
 
-export const actorLabel = (a: common.Actor | null | undefined) => a?.name ?? (a?.kind === 'system' ? 'Marketly' : a?.kind === 'staff' ? 'Marketly staff' : 'Seller');

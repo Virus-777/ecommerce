@@ -230,7 +230,6 @@ src/modules/<module>/
   providers/             Provider adapters behind ports (storage, scanning, search engine …), with a dev adapter
   http/<area>.ts         One typed handler per spec endpoint of that area (store, seller, admin, public, webhooks); request and response schemas are generated in src/spec
   graphql/               This module's schema fragment + resolvers (read-only; fields it owns, incl. fields on other modules' types)
-  permissions.ts         Permission keys this module declares
   <module>.test.ts       The contract suite: boots the module with its dependencies on the in-memory MongoDB
   test/                  Behaviour tests (helpers.ts boots the module for them)
 ```

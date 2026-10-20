@@ -88,7 +88,7 @@ export const gqlConfirmation = (c: ConfirmationView | null) =>
 
 type Owner = { customerId?: string; guestSessionId?: string };
 
-export const gqlSession = (v: CheckoutView, extras: { hidePricesOnSlip: boolean; openChangeSet: () => Promise<ChangeSet | null> }) => ({
+const gqlSession = (v: CheckoutView, extras: { hidePricesOnSlip: boolean; openChangeSet: () => Promise<ChangeSet | null> }) => ({
   ...v,
   status: upper(v.status),
   source: upper(v.source),

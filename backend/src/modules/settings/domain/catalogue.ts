@@ -13,8 +13,6 @@ import type { SettingDefinition } from '../../../spec/settings.js';
 
 export type ValueType = SettingDefinition['valueType'];
 export type ApprovalRule = SettingDefinition['approval'];
-export type ApplyScope = SettingDefinition['applyScopes'][number];
-
 /** A definition as the service uses it: the API shape plus a few internal rules. */
 export interface Definition extends SettingDefinition {
   /** null is a valid value (optional texts such as the Android update message) */

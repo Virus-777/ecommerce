@@ -13,8 +13,6 @@ export const COUPON_KINDS: readonly Kind[] = ['percent_coupon', 'fixed_coupon', 
 export const SHIPPING_KINDS: readonly Kind[] = ['free_shipping'];
 /** Kinds that need the phase-3 feature (launch phase 3 or later) */
 export const PHASE3_KINDS: readonly Kind[] = ['bundle', 'quantity_deal'];
-export const SELLER_KINDS: readonly Kind[] = ['markdown', 'percent_coupon', 'fixed_coupon', 'min_spend', 'free_shipping'];
-
 /** A campaign decoded from its row and targets: what the rules work on */
 export interface CampaignModel {
   id: string;

@@ -225,4 +225,3 @@ export function stepOf(status: string): number {
 
 /** Statuses where the package is with the carrier (stalled detection, lost declaration) */
 export const MOVING: ShipmentStatus[] = ['shipped', 'in_transit', 'out_for_delivery'];
-export const FINAL: ShipmentStatus[] = ['delivered', 'returned_to_sender', 'cancelled'];

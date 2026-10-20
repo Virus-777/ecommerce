@@ -263,14 +263,6 @@ export function offerBlock(status: string, reasonCode?: string | null): NoticeKi
   return 'offer_ended';
 }
 
-/** Reason sent with OFFER_UNAVAILABLE */
-export const unavailableReason: Record<string, string> = {
-  out_of_stock: 'out_of_stock',
-  offer_ended: 'offer_ended',
-  seller_unavailable: 'seller_unavailable',
-  product_unavailable: 'product_unavailable',
-};
-
 export const unavailableMessage: Record<string, string> = {
   out_of_stock: 'This offer is out of stock.',
   offer_ended: 'This offer is no longer available.',

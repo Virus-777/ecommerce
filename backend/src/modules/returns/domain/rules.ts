@@ -50,7 +50,6 @@ export const is = <T extends string>(list: readonly T[], v: string | null | unde
 
 /* ---------------------------------------------------------------- reasons and shipping responsibility */
 
-export type CustomerReason = 'defective' | 'damaged' | 'wrong_item' | 'not_as_described' | 'missing_parts' | 'changed_mind' | 'better_price' | 'no_longer_needed' | 'wrong_size' | 'other';
 export type ReasonGroup = ShippingResponsibility['reasonGroup'];
 
 const REASON_GROUP: Record<string, ReasonGroup> = {

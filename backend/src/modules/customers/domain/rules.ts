@@ -30,12 +30,8 @@ export function scopeOfTrustAction(action: string): RestrictionScope | null {
   return null;
 }
 
-/** Which scopes stop new orders / new messages */
-export const blocksOrdering = (s: string) => s === 'ordering' || s === 'account';
-export const blocksMessaging = (s: string) => s === 'messaging' || s === 'account';
-
 /** What the customer may still do under any restriction or suspension (plan ch. 17, scenario 7) */
-export const STILL_WORKS = ['Existing orders', 'Returns and refunds', 'Support cases', 'Order tracking'];
+const STILL_WORKS = ['Existing orders', 'Returns and refunds', 'Support cases', 'Order tracking'];
 
 export function stillWorksFor(scope: RestrictionScope): string[] {
   switch (scope) {

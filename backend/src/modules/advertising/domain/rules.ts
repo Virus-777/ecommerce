@@ -14,7 +14,7 @@ export type PageTypeName = (typeof PAGE_TYPES)[number];
 export const isPageType = (p: unknown): p is PageTypeName => typeof p === 'string' && (PAGE_TYPES as readonly string[]).includes(p);
 
 /** Ads never cover these pages; the global rules can add pages but never remove these four */
-export const BASE_BLOCKED: readonly PageTypeName[] = ['checkout', 'payment_result', 'order_tracking', 'returns'];
+const BASE_BLOCKED: readonly PageTypeName[] = ['checkout', 'payment_result', 'order_tracking', 'returns'];
 
 const PAGE_LABEL: Record<string, string> = {
   home: 'Home',
@@ -434,7 +434,6 @@ export function stepFor(role: ReviewRole, advertiserKind: string): 'advertising'
 
 /* ------------------------------------------------------------------ status actions */
 
-export const LIVE_LIKE: readonly string[] = ['scheduled', 'live', 'paused'];
 
 export function allowedActions(status: string, o: { origin: string; area: 'admin' | 'seller'; pausedBySeller?: boolean; endingSoon?: boolean }): string[] {
   if (o.area === 'seller') {

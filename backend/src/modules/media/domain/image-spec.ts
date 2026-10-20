@@ -96,11 +96,6 @@ export function productImageIssues(size: { width: number; height: number }, spec
   return issues;
 }
 
-/** The four fields that decide what the renditions look like (settingsVersion is only a record) */
-export function sameSpec(a: Partial<ProductImageSetting> | null | undefined, b: ProductImageSetting): boolean {
-  return !!a && a.aspectRatio === b.aspectRatio && a.detailWidth === b.detailWidth && a.thumbnailWidth === b.thumbnailWidth && a.quality === b.quality;
-}
-
 /* ------------------------------------------------------------------ rendition sizes */
 
 export type RenditionSize = 'thumb' | 'small' | 'medium' | 'large' | 'zoom' | 'detail';

@@ -21,19 +21,7 @@ export function add(a: Money, b: Money): Money {
   return money(a.amount + b.amount, a.currency);
 }
 
-export function subtract(a: Money, b: Money): Money {
-  assertSameCurrency(a, b);
-  return money(a.amount - b.amount, a.currency);
-}
-
-export function compare(a: Money, b: Money): number {
-  assertSameCurrency(a, b);
-  return Math.sign(a.amount - b.amount);
-}
-
 export const sum = (items: Money[], currency = 'USD'): Money => items.reduce(add, money(0, currency));
-export const isZero = (m: Money) => m.amount === 0;
-
 /** Multiply by a rate (e.g. a 12.5% fee) and round half away from zero to a whole minor unit. */
 export function multiply(m: Money, factor: number): Money {
   const exact = m.amount * factor;

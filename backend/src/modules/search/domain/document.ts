@@ -63,14 +63,6 @@ export function attributesOf(p: catalog.Product): Record<string, string[]> {
   return out;
 }
 
-/** Display names of attribute keys (variant option and spec names) */
-export function attributeNames(p: catalog.Product): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const name of Object.keys(p.specs ?? {})) out[attrKey(name)] ??= name;
-  for (const v of p.variants ?? []) for (const name of Object.keys(v.options ?? {})) out[attrKey(name)] ??= name;
-  return out;
-}
-
 /** The featured offer: offers' choice when it is live, else the cheapest eligible in-stock offer, else the cheapest */
 export function pickFeatured(offers: SourceOffer[], featuredOfferId: string | null): SourceOffer | null {
   const chosen = featuredOfferId ? offers.find((o) => o.offerId === featuredOfferId) : undefined;

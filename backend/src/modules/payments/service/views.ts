@@ -6,7 +6,6 @@ import type * as common from '../../../spec/common.js';
 import type { Capture, Dispute, MethodSnapshot, PaymentDetail, PaymentRow, PaymentStatusView, ProviderCall, Refund, RefundItem, RefundView, SavedPaymentMethod, WebhookLog } from '../../../spec/payments.js';
 import {
   ACCEPTED,
-  CUSTOMER_STATE_LABEL,
   DISPUTE_STATUS_LABEL,
   REFUND_STATUS_LABEL,
   STATUS_LABEL,
@@ -368,5 +367,4 @@ export class Views {
   }
 }
 
-export const customerStateLabel = (s: PaymentDetail['customerState']) => CUSTOMER_STATE_LABEL[s];
 export type { common };

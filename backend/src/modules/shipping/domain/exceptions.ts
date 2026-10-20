@@ -2,7 +2,6 @@
  * Delivery exceptions (plan ch. 12): the required response per kind, the default next step and who acts.
  */
 export type ExceptionKind = 'seller_cannot_fulfill' | 'late_dispatch' | 'missing_tracking' | 'lost_or_damaged' | 'failed_delivery';
-export const EXCEPTION_KINDS: ExceptionKind[] = ['seller_cannot_fulfill', 'late_dispatch', 'missing_tracking', 'lost_or_damaged', 'failed_delivery'];
 export const OPEN_STATUSES = ['open', 'in_progress', 'escalated'];
 
 export const REQUIRED_RESPONSE: Record<ExceptionKind, string> = {

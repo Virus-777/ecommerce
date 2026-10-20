@@ -68,12 +68,6 @@ export default defineModule({
 export type * from '../../spec/${n}.js';
 `;
 
-  files['permissions.ts'] = () => `/** Permission keys and approval actions this module declares (spec permissions, approvalActions). */
-import { spec } from '../../spec/${n}.js';
-
-export const { permissions, approvalActions } = spec;
-`;
-
   files['repository.ts'] = () => {
     const tables = (mod.tables ?? []).map((t) => `${n}.${t.name}`);
     return `import type { ModuleStore } from '../../kernel/mongo/index.js';

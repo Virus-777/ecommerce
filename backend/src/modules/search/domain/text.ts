@@ -23,9 +23,6 @@ export function attrKey(name: string): string {
   return normalizeQuery(name).replace(/['-]/g, '').replace(/\s+/g, '_');
 }
 
-/** Attribute values compared case-insensitively */
-export const attrValue = (v: string) => v.trim().toLowerCase();
-
 /* ------------------------------------------------------------------ synonyms */
 
 export interface SynonymSet {
