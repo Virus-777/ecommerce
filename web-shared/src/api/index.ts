@@ -11,3 +11,4 @@ export {
   useProductImageSpec, ProductImageRatio, resolveProductImageSpec, exactImageSpec, validateProductImageSetting, parseRatio, renditionUrl, sizeText, productImageSpecKey,
   DEFAULT_PRODUCT_IMAGE_SETTING, DEFAULT_PRODUCT_IMAGE_SPEC, PRODUCT_IMAGE_LIMITS, type ProductImageSetting, type ProductImageSpec, type Size,
 } from './imageSpec';
+export { startLive, parseSse, backoffDelay, type LiveEvent, type LiveAuth, type LiveEndReason, type LiveOptions, type SseEvent } from './live';
