@@ -39,6 +39,7 @@ export const OFFER_EVENTS = [
   'offers.featured.changed',
   'offers.featured_rule.published',
   'offers.bulk_update.applied',
+  'offers.offer.cost_changed',
 ] as const;
 
 export interface SellerState {
@@ -355,14 +356,14 @@ export const sellerHeaders = (o: DevOptions = {}) => {
 };
 export const visitorHeaders = () => auth(token(devClaims('visitor'), 400 * 86_400));
 
-export async function call(h: Harness, method: 'GET' | 'POST' | 'PATCH' | 'DELETE', url: string, headers: Record<string, string>, payload?: unknown) {
+export async function call(h: Harness, method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', url: string, headers: Record<string, string>, payload?: unknown) {
   const res = await h.app.inject({ method, url, headers, ...(payload !== undefined ? { payload: payload as object } : {}) });
   await h.app.kernel.events.drain();
   return res;
 }
 
-export const asSeller = (h: Harness, sellerId: string, method: 'GET' | 'POST' | 'PATCH' | 'DELETE', path: string, payload?: unknown) => call(h, method, `/api/seller/offers${path}`, sellerHeaders({ sellerId }), payload);
-export const asStaff = (h: Harness, method: 'GET' | 'POST' | 'PATCH' | 'DELETE', path: string, payload?: unknown) => call(h, method, `/api/admin/offers${path}`, staffHeaders(), payload);
+export const asSeller = (h: Harness, sellerId: string, method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, payload?: unknown) => call(h, method, `/api/seller/offers${path}`, sellerHeaders({ sellerId }), payload);
+export const asStaff = (h: Harness, method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, payload?: unknown) => call(h, method, `/api/admin/offers${path}`, staffHeaders(), payload);
 export const asVisitor = (h: Harness, path: string) => call(h, 'GET', `/api/store/offers${path}`, visitorHeaders());
 
 export const eventsNamed = (h: Harness, name: string) => h.events.filter((e) => e.name === name).map((e) => e.payload);

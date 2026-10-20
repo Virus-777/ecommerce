@@ -62,6 +62,10 @@ export interface Offer {
   publishedAt?: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Seller views only (Seller Center offer detail and the offer write responses): the seller's unit cost in force today (offer_costs), null when none is set. Never filled for customers or staff: a seller's costs are private */
+  unitCost?: common.Money | null;
+  /** Seller views only: the market day unitCost took effect */
+  unitCostFrom?: string | null;
 }
 
 export const Offer: z.ZodType<Offer> = z.object({
@@ -114,7 +118,81 @@ export const Offer: z.ZodType<Offer> = z.object({
   publishedAt: z.iso.datetime({ offset: true }).nullish(),
   createdAt: z.iso.datetime({ offset: true }),
   updatedAt: z.iso.datetime({ offset: true }),
+  get unitCost() {
+    return common.Money.nullish();
+  },
+  unitCostFrom: z.iso.date().describe("Seller views only: the market day unitCost took effect").nullish(),
 }).register(common.apiTypes, { id: "offers.Offer" });
+
+export interface OfferCost {
+  id: string;
+  offerId: string;
+  productId: string;
+  unitCost: common.Money;
+  /** Market day the cost starts. It applies to sales from that day until the next later cost of the offer */
+  effectiveFrom: string;
+  /** e.g. 'new supplier' */
+  note?: string | null;
+  setBy: OfferCostSetter;
+  createdAt: string;
+}
+
+export const OfferCost: z.ZodType<OfferCost> = z.object({
+  id: z.uuid(),
+  offerId: z.uuid(),
+  productId: z.uuid(),
+  get unitCost() {
+    return common.Money;
+  },
+  effectiveFrom: z.iso.date().describe("Market day the cost starts. It applies to sales from that day until the next later cost of the offer"),
+  note: z.string().describe("e.g. 'new supplier'").nullish(),
+  get setBy() {
+    return OfferCostSetter;
+  },
+  createdAt: z.iso.datetime({ offset: true }),
+}).register(common.apiTypes, { id: "offers.OfferCost" });
+
+export interface OfferCostSetter {
+  /** The seller member's account */
+  id?: string | null;
+  name: string;
+}
+
+export const OfferCostSetter: z.ZodType<OfferCostSetter> = z.object({
+  id: z.uuid().describe("The seller member's account").nullish(),
+  name: z.string(),
+}).register(common.apiTypes, { id: "offers.OfferCostSetter" });
+
+export interface OfferCostItem {
+  offerId: string;
+  /** Zero or more, in the offer's currency */
+  unitCost: common.Money;
+  /** Default today (market day); at most 400 days back and 1 day ahead */
+  effectiveFrom?: string | null;
+  note?: string | null;
+}
+
+export const OfferCostItem: z.ZodType<OfferCostItem> = z.object({
+  offerId: z.uuid(),
+  get unitCost() {
+    return common.Money;
+  },
+  effectiveFrom: z.iso.date().describe("Default today (market day); at most 400 days back and 1 day ahead").nullish(),
+  note: z.string().nullish(),
+}).register(common.apiTypes, { id: "offers.OfferCostItem" });
+
+export interface OfferCostError {
+  offerId: string;
+  /** NOT_FOUND: not one of this seller's offers; VALIDATION_FAILED: see message */
+  code: "NOT_FOUND" | "VALIDATION_FAILED";
+  message: string;
+}
+
+export const OfferCostError: z.ZodType<OfferCostError> = z.object({
+  offerId: z.uuid(),
+  code: z.enum(["NOT_FOUND", "VALIDATION_FAILED"]).describe("NOT_FOUND: not one of this seller's offers; VALIDATION_FAILED: see message"),
+  message: z.string(),
+}).register(common.apiTypes, { id: "offers.OfferCostError" });
 
 export interface CompareAtPrice {
   amount: common.Money;
@@ -952,6 +1030,8 @@ export interface SellerOfferRow {
   stock: StockCue;
   /** Missing product content shown under the name (e.g. 'Missing images and identifiers'); empty when complete */
   contentGaps: ("images" | "identifiers")[];
+  /** The seller's unit cost in force today (the products list column); null when none is set. Private to the seller */
+  unitCost?: common.Money | null;
 }
 
 export const SellerOfferRow: z.ZodType<SellerOfferRow> = z.object({
@@ -965,6 +1045,9 @@ export const SellerOfferRow: z.ZodType<SellerOfferRow> = z.object({
     return StockCue;
   },
   contentGaps: z.array(z.enum(["images", "identifiers"])).describe("Missing product content shown under the name (e.g. 'Missing images and identifiers'); empty when complete"),
+  get unitCost() {
+    return common.Money.nullish();
+  },
 }).register(common.apiTypes, { id: "offers.SellerOfferRow" });
 
 export interface SellerOfferDetail {
@@ -1223,6 +1306,8 @@ export interface BulkUpdateTotals {
   unchanged: number;
   priceChanges: number;
   stockChanges: number;
+  /** Seller files: rows that set a new unit cost (unit_cost column) */
+  costChanges: number;
   pendingApproval: number;
   applied: number;
   skipped: number;
@@ -1235,6 +1320,7 @@ export const BulkUpdateTotals: z.ZodType<BulkUpdateTotals> = z.object({
   unchanged: z.number().int(),
   priceChanges: z.number().int(),
   stockChanges: z.number().int(),
+  costChanges: z.number().int().describe("Seller files: rows that set a new unit cost (unit_cost column)"),
   pendingApproval: z.number().int(),
   applied: z.number().int(),
   skipped: z.number().int(),
@@ -1249,6 +1335,10 @@ export interface BulkUpdateRow {
   priceTo?: common.Money | null;
   quantityFrom?: number | null;
   quantityTo?: number | null;
+  /** Seller files: the unit cost in force when the file was read */
+  unitCostFrom?: common.Money | null;
+  /** Seller files: the unit cost the row sets, effective today (null when the row leaves the cost as it is) */
+  unitCostTo?: common.Money | null;
   result: "ready" | "error" | "unchanged" | "applied" | "skipped" | "pending_approval";
   error?: BulkRowError | null;
   /** Signed price change in percent when the row changes the price */
@@ -1270,6 +1360,12 @@ export const BulkUpdateRow: z.ZodType<BulkUpdateRow> = z.object({
   },
   quantityFrom: z.number().int().nullish(),
   quantityTo: z.number().int().nullish(),
+  get unitCostFrom() {
+    return common.Money.nullish();
+  },
+  get unitCostTo() {
+    return common.Money.nullish();
+  },
   result: z.enum(["ready", "error", "unchanged", "applied", "skipped", "pending_approval"]),
   get error() {
     return BulkRowError.nullish();
@@ -1280,13 +1376,13 @@ export const BulkUpdateRow: z.ZodType<BulkUpdateRow> = z.object({
 
 export interface BulkRowError {
   /** Stable code */
-  code: "unknown_sku" | "negative_quantity" | "price_below_minimum" | "price_missing" | "price_change_too_large" | "offer_removed" | "not_a_number" | "duplicate_row";
+  code: "unknown_sku" | "negative_quantity" | "price_below_minimum" | "price_missing" | "price_change_too_large" | "offer_removed" | "not_a_number" | "duplicate_row" | "unit_cost_invalid";
   /** What is wrong and how to fix it, e.g. 'Price $2.40 is below the $5.00 minimum for Cables and adapters. Did you mean $24.00?' */
   message: string;
 }
 
 export const BulkRowError: z.ZodType<BulkRowError> = z.object({
-  code: z.enum(["unknown_sku", "negative_quantity", "price_below_minimum", "price_missing", "price_change_too_large", "offer_removed", "not_a_number", "duplicate_row"]).describe("Stable code"),
+  code: z.enum(["unknown_sku", "negative_quantity", "price_below_minimum", "price_missing", "price_change_too_large", "offer_removed", "not_a_number", "duplicate_row", "unit_cost_invalid"]).describe("Stable code"),
   message: z.string().describe("What is wrong and how to fix it, e.g. 'Price $2.40 is below the $5.00 minimum for Cables and adapters. Did you mean $24.00?'"),
 }).register(common.apiTypes, { id: "offers.BulkRowError" });
 
@@ -1859,6 +1955,26 @@ export const OffersBulkUpdateAppliedEvent: z.ZodType<OffersBulkUpdateAppliedEven
   pendingApproval: z.number().int(),
 });
 
+/** offers.offer.cost_changed: A seller saves a unit cost for an offer (PUT /offers/{id}/cost, POST /costs, a bulk file's unit_cost column): once per saved row, after the commit */
+export interface OffersOfferCostChangedEvent {
+  offerId: string;
+  sellerId: string;
+  productId: string;
+  unitCost: common.Money;
+  /** The cost applies to sales from this market day until the offer's next later cost */
+  effectiveFrom: string;
+}
+
+export const OffersOfferCostChangedEvent: z.ZodType<OffersOfferCostChangedEvent> = z.object({
+  offerId: z.uuid(),
+  sellerId: z.uuid(),
+  productId: z.uuid(),
+  get unitCost() {
+    return common.Money;
+  },
+  effectiveFrom: z.iso.date().describe("The cost applies to sales from this market day until the offer's next later cost"),
+});
+
 /* ------------------------------------------------------------------ public API (in-process) */
 
 /** What other modules may call in-process: `ctx.use('offers')` (or `ctx.tryUse` for an optional dependency). */
@@ -1911,6 +2027,8 @@ export interface OffersPublicApi {
   countActiveOffersByProfile(shippingProfileId: string): Promise<number>;
   /** Export rows for reports datasets offers.admin.offers and offers.seller.offers (seller rows scoped to the principal's seller) Used by: reports. */
   exportRows(dataset: string, filters: unknown, principal: identity.Principal, cursor?: string): Promise<{ rows: unknown[], nextCursor?: string }>;
+  /** The seller's unit cost in force for each offer at each time, in the same order as items: the offer_costs row with the latest effective_from on or before the market day of `at` (ties: the latest created_at). null when the offer has no cost for that day (or is unknown). Batched: one database query per call, however many items. Costs are private to the seller: callers use them only for the seller's own figures (reports: product cost and profit), never in staff views. Used by: reports. */
+  unitCostsAt(items: { offerId: string, at: string }[]): Promise<(common.Money | null)[]>;
 }
 
 /* ------------------------------------------------------------------ tables (row types) */
@@ -2078,9 +2196,32 @@ export interface OffersDb {
     price_to: number | null;
     qty_from: number | null;
     qty_to: number | null;
+    /** unit cost in force when the file was read; seller files */
+    cost_from: number | null;
+    /** unit cost the row sets, effective on the day it is applied */
+    cost_to: number | null;
     result: string;
     error_code: string | null;
     error_message: string | null;
+  };
+  /** The seller's unit cost per offer (doc 09 §3.1): one row per cost the seller sets, never edited. The cost for a market day is the row with the latest effective_from on or before it (ties: the latest created_at). Private to the seller: no staff view shows it */
+  offer_costs: {
+    id: string;
+    offer_id: string;
+    seller_id: string;
+    product_id: string;
+    /** ≥ 0, minor units */
+    unit_cost_minor: number;
+    /** the offer's currency */
+    currency: string;
+    /** market day the cost starts; at most 400 days back, 1 day ahead */
+    effective_from: string;
+    note: string | null;
+    /** seller member account */
+    set_by_id: string | null;
+    /** name shown in the history */
+    set_by_name: string;
+    created_at: Date;
   };
 }
 
@@ -2448,6 +2589,80 @@ export const endpoints = defineEndpoints({
     screens: ["seller/products"],
     phase: 1,
   },
+  listOfferCosts: {
+    area: "seller",
+    method: "GET",
+    path: "/offers/{id}/costs",
+    auth: "seller",
+    scope: "own-seller",
+    summary: "Unit cost history of one own offer, newest first",
+    desc: "Newest effective_from first (ties: newest saved first). Any member who may see the offer may read it. Another seller's offer is NOT_FOUND.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    paging: true,
+    response: () => OfferCost,
+    status: 200,
+    errors: ["NOT_FOUND"],
+    screens: ["seller/offer"],
+    phase: 1,
+  },
+  setOfferCost: {
+    area: "seller",
+    method: "PUT",
+    path: "/offers/{id}/cost",
+    auth: "seller",
+    permission: "offers.costs.manage",
+    scope: "own-seller",
+    summary: "Set the unit cost of one own offer from a day on",
+    desc: "Adds a cost row (rows are never edited; a later row for the same day wins). unitCost ≥ 0 in the offer's currency; effectiveFrom defaults to today (market day), at most 400 days back (so old sales get a cost) and at most 1 day ahead. Publishes offers.offer.cost_changed.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => z.object({
+      get unitCost() {
+        return common.Money;
+      },
+      effectiveFrom: z.iso.date().describe("Default today (market day)").nullish(),
+      note: z.string().nullish(),
+    }),
+    response: () => OfferCost,
+    status: 200,
+    errors: ["NOT_FOUND","VALIDATION_FAILED"],
+    audited: true,
+    events: ["offers.offer.cost_changed"],
+    screens: ["seller/offer","seller/products"],
+    phase: 1,
+  },
+  setOfferCosts: {
+    area: "seller",
+    method: "POST",
+    path: "/costs",
+    auth: "seller",
+    permission: "offers.costs.manage",
+    scope: "own-seller",
+    summary: "Set the unit cost of several own offers (1 to 500)",
+    desc: "Same rules as PUT /offers/{id}/cost for each item; each item is saved or refused on its own (errors lists the refused ones with NOT_FOUND or VALIDATION_FAILED). One offers.offer.cost_changed per saved row. An empty or longer list is VALIDATION_FAILED.",
+    body: () => z.object({
+      get items() {
+        return z.array(OfferCostItem);
+      },
+    }),
+    response: () => z.object({
+      saved: z.number().int(),
+      get errors() {
+        return z.array(OfferCostError);
+      },
+    }),
+    status: 200,
+    errors: ["VALIDATION_FAILED"],
+    audited: true,
+    events: ["offers.offer.cost_changed"],
+    screens: ["seller/products","seller/bulk-update"],
+    phase: 1,
+  },
   exportOwnOffers: {
     area: "seller",
     method: "POST",
@@ -2495,7 +2710,7 @@ export const endpoints = defineEndpoints({
     permission: "offers.bulk.update",
     scope: "own-seller",
     summary: "Download a CSV template prefilled with this seller's SKUs, prices and quantities",
-    desc: "Columns: seller_sku, price, quantity. Leaving a column out keeps the current value.",
+    desc: "Columns: seller_sku, price, quantity, unit_cost (the unit cost in force today, empty when none is set). Leaving a column out, or a cell empty, keeps the current value.",
     response: () => FileLink,
     status: 200,
     screens: ["seller/bulk-update"],
@@ -2580,7 +2795,7 @@ export const endpoints = defineEndpoints({
     permission: "offers.bulk.update",
     scope: "own-seller",
     summary: "Apply the valid rows",
-    desc: "Prices are changed here; quantities go to inventory as adjustments with reason 'Bulk update', the job id and the caller's name. Error rows are skipped.",
+    desc: "Prices are changed here; quantities go to inventory as adjustments with reason 'Bulk update', the job id and the caller's name; unit costs are saved effective today (offers.offer.cost_changed per row). Rows that change a unit cost need offers.costs.manage as well (FORBIDDEN, nothing applied). Error rows are skipped.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -2590,8 +2805,8 @@ export const endpoints = defineEndpoints({
     }),
     response: () => BulkUpdateJob,
     status: 202,
-    errors: ["ILLEGAL_TRANSITION","BULK_JOB_EXPIRED","LARGE_PRICE_CHANGE_UNCONFIRMED"],
-    events: ["offers.bulk_update.applied","offers.offer.price_changed"],
+    errors: ["ILLEGAL_TRANSITION","BULK_JOB_EXPIRED","LARGE_PRICE_CHANGE_UNCONFIRMED","FORBIDDEN"],
+    events: ["offers.bulk_update.applied","offers.offer.price_changed","offers.offer.cost_changed"],
     screens: ["seller/bulk-update"],
     phase: 2,
   },
@@ -3106,7 +3321,7 @@ export const spec = defineModuleSpec({
   summary: "How one seller (or the Official Store) sells one variant in one condition: price and authentic was-price, purchase limit, seller SKU, dispatch, shipping profile, return and warranty terms, offer status, and the published featured-offer rule that picks the main offer for a delivery location.",
   dependsOn: ["catalog","sellers","inventory"],
   optionalDeps: ["shipping","returns","promotions","access","audit","cart","finance","fulfillment-service","media","purchasing","reviews","trust","reports"],
-  publicApi: ["getOffer","quoteOffer","revalidate","snapshotForOrder","getFeaturedOffer","listActiveOffersForProduct","isPromotable","lowestPrice","priceRange","compareOffers","getFeaturedOfferForProduct","getOfferStats","getVariantOfferSummaries","listOwnOffersForProduct","getOwnOffer","searchOwnOffers","getOfferAdmin","listOffersAdmin","getFeaturedDecision","getPurchaseBoxOffer","listActiveOffersByIds","getOffers","countActiveOffersByProfile","exportRows"],
+  publicApi: ["getOffer","quoteOffer","revalidate","snapshotForOrder","getFeaturedOffer","listActiveOffersForProduct","isPromotable","lowestPrice","priceRange","compareOffers","getFeaturedOfferForProduct","getOfferStats","getVariantOfferSummaries","listOwnOffersForProduct","getOwnOffer","searchOwnOffers","getOfferAdmin","listOffersAdmin","getFeaturedDecision","getPurchaseBoxOffer","listActiveOffersByIds","getOffers","countActiveOffersByProfile","exportRows","unitCostsAt"],
   permissions: [
     {
       "key": "offers.offers.manage",
@@ -3122,6 +3337,11 @@ export const spec = defineModuleSpec({
       "key": "offers.prices.manage",
       "audience": "seller",
       "desc": "Change own offer prices"
+    },
+    {
+      "key": "offers.costs.manage",
+      "audience": "seller",
+      "desc": "Set own offers' unit costs (private to the seller; used for profit figures)"
     },
     {
       "key": "offers.bulk.update",
@@ -3355,6 +3575,7 @@ export const spec = defineModuleSpec({
       "offers.featured.changed": { when: "The featured offer for a variant and zone changes", payload: () => OffersFeaturedChangedEvent },
       "offers.featured_rule.published": { when: "A new featured-offer rule version is published", payload: () => OffersFeaturedRulePublishedEvent },
       "offers.bulk_update.applied": { when: "A bulk file is applied", payload: () => OffersBulkUpdateAppliedEvent },
+      "offers.offer.cost_changed": { when: "A seller saves a unit cost for an offer (PUT /offers/{id}/cost, POST /costs, a bulk file's unit_cost column): once per saved row, after the commit", payload: () => OffersOfferCostChangedEvent },
     },
     consumes: {
       "sellers.seller.restricted": "Read affectedActivities and scope (categoryIds, conditions, offerIds, productIds; empty = whole account). sales: make the in-scope offers Ineligible (reason, affected activity and appeal route copied to statusReason; ineligible_source = restrictionId). new_listings / new_offers: refuse new in-scope offers and publishing drafts (SELLER_RESTRICTED). offer_reactivation: refuse resume and reactivation. Other sellers' offers are untouched (scenario 7).",
@@ -4840,6 +5061,8 @@ export const spec = defineModuleSpec({
         "price_to",
         "qty_from",
         "qty_to",
+        "cost_from",
+        "cost_to",
         "result",
         "error_code",
         "error_message"
@@ -4850,6 +5073,8 @@ export const spec = defineModuleSpec({
         "price_to",
         "qty_from",
         "qty_to",
+        "cost_from",
+        "cost_to",
         "error_code",
         "error_message"
       ],
@@ -4927,6 +5152,22 @@ export const spec = defineModuleSpec({
                 "null"
               ]
             },
+            "cost_from": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "cost_to": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
             "result": {
               "bsonType": "string"
             },
@@ -4965,6 +5206,123 @@ export const spec = defineModuleSpec({
         }
       ],
       "unenforced": []
+    },
+    "offer_costs": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "offer_id",
+        "seller_id",
+        "product_id",
+        "unit_cost_minor",
+        "currency",
+        "effective_from",
+        "note",
+        "set_by_id",
+        "set_by_name",
+        "created_at"
+      ],
+      "nullable": [
+        "note",
+        "set_by_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "offer_id",
+            "seller_id",
+            "product_id",
+            "unit_cost_minor",
+            "currency",
+            "effective_from",
+            "set_by_name",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "offer_id": {
+              "bsonType": "string"
+            },
+            "seller_id": {
+              "bsonType": "string"
+            },
+            "product_id": {
+              "bsonType": "string"
+            },
+            "unit_cost_minor": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "currency": {
+              "bsonType": "string"
+            },
+            "effective_from": {
+              "bsonType": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "note": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "set_by_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "set_by_name": {
+              "bsonType": "string"
+            },
+            "created_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "offer_costs_offer_id_effective_from_created_at_574d95",
+          "key": {
+            "offer_id": 1,
+            "effective_from": -1,
+            "created_at": -1
+          }
+        },
+        {
+          "name": "offer_costs_seller_id_created_at_0d3517",
+          "key": {
+            "seller_id": 1,
+            "created_at": -1
+          }
+        }
+      ],
+      "unenforced": []
     }
   },
   endpoints,
@@ -4982,6 +5340,7 @@ declare module '../kernel/events/event-map.js' {
     "offers.featured.changed": OffersFeaturedChangedEvent;
     "offers.featured_rule.published": OffersFeaturedRulePublishedEvent;
     "offers.bulk_update.applied": OffersBulkUpdateAppliedEvent;
+    "offers.offer.cost_changed": OffersOfferCostChangedEvent;
   }
 }
 

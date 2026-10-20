@@ -2,7 +2,7 @@ import type { PageRequest } from '../../kernel/lib/pagination.js';
 import { isDuplicateKey, whereFilter, contains, type ModuleStore, type Where } from '../../kernel/mongo/index.js';
 import type { Filter, Sort, Table as Collection } from '../../kernel/mongo/table.js';
 import type * as common from '../../spec/common.js';
-import type { BulkJobRec, BulkRowRec, Db, EligibilityRec, FeaturedRec, IdTable, OfferListFilter, OfferRec, PriceChangeRec, RuleRec, Table } from './ports.js';
+import type { BulkJobRec, BulkRowRec, CostRec, Db, EligibilityRec, FeaturedRec, IdTable, OfferListFilter, OfferRec, PriceChangeRec, RuleRec, Table } from './ports.js';
 
 export interface FindOptions<R> {
   orderBy?: [keyof R & string, 'asc' | 'desc'][];
@@ -43,7 +43,7 @@ const sortOf = (orderBy: [string, 'asc' | 'desc'][] | undefined): Sort | undefin
 
 /**
  * offers.offers, offer_price_history, price_changes, offer_status_log, offer_eligibility, featured_offers,
- * featured_rules, bulk_update_jobs, bulk_update_rows: generic access by table (get / find / insert / update with a
+ * featured_rules, bulk_update_jobs, bulk_update_rows, offer_costs: generic access by table (get / find / insert / update with a
  * Where of column conditions, kernel whereFilter) plus the offer list filters, featured decisions and bulk rows.
  * Writes that a unique index refuses throw DuplicateKeyError.
  */
@@ -59,6 +59,7 @@ export class OffersRepository {
       rules: this.#table('featured_rules'),
       bulkJobs: this.#table('bulk_update_jobs'),
       bulkRows: this.#table('bulk_update_rows'),
+      costs: this.#table('offer_costs'),
     };
   }
 
@@ -252,6 +253,26 @@ export class OffersRepository {
 
   rules(): Promise<RuleRec[]> {
     return this.#t.rules.find({}, { sort: { version: 1 } });
+  }
+
+  /* ---------------------------------------------------------------- unit costs */
+
+  /**
+   * One offer's cost rows, newest effective_from first. Ids are time-ordered (newId), so the id tie-break of the
+   * keyset puts the later saved row first among rows of the same day, as created_at would.
+   */
+  costHistory(offerId: string, page: PageRequest): Promise<common.Page<CostRec>> {
+    return this.#t.costs.page({ offer_id: offerId }, page, { column: 'effective_from', direction: 'desc' });
+  }
+
+  /**
+   * Every cost row of these offers that starts on or before `upTo` (a market day), per offer newest first
+   * (effective_from, then created_at, then id): the first row of an offer on or before a day is its cost for that
+   * day. One query, whatever the number of offers.
+   */
+  async costsUpTo(offerIds: readonly string[], upTo: string): Promise<CostRec[]> {
+    if (!offerIds.length) return [];
+    return this.#t.costs.find({ offer_id: oneOf(offerIds), effective_from: { $lte: upTo } }, { sort: { offer_id: 1, effective_from: -1, created_at: -1, id: -1 } });
   }
 
   /* ---------------------------------------------------------------- bulk */

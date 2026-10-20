@@ -126,7 +126,12 @@ export class ViewsPart extends Part {
 
   /** `known`: stock the caller already read for these rows */
   private async sellerRows(rows: readonly OfferRec[], sellerId: string, cache: ProductCache, known?: StockMap): Promise<SellerOfferRow[]> {
-    const [summaries, stock, products] = await Promise.all([this.summaries(rows, cache), known ?? this.stock(rows, sellerId), this.sellerProducts(sellerId, rows.map((r) => r.product_id), cache)]);
+    const [summaries, stock, products, costs] = await Promise.all([
+      this.summaries(rows, cache),
+      known ?? this.stock(rows, sellerId),
+      this.sellerProducts(sellerId, rows.map((r) => r.product_id), cache),
+      this.parts.costs.current(rows.map((r) => r.id)),
+    ]);
     return rows.map((r) => {
       const p = products.get(r.product_id);
       const changes = p?.reviewState === 'changes_requested' ? [...(p.reviewLog ?? [])].reverse().find((l) => l.action === 'changes_requested') : undefined;
@@ -137,6 +142,7 @@ export class ViewsPart extends Part {
         reviewNote: changes?.reason ?? null,
         stock: stock.get(r.id) ?? EMPTY_STOCK,
         contentGaps: (r.content_gaps ?? []).filter((g): g is 'images' | 'identifiers' => g === 'images' || g === 'identifiers'),
+        unitCost: costs.get(r.id)?.unitCost ?? null,
       };
     });
   }
@@ -246,17 +252,20 @@ export class ViewsPart extends Part {
 
   async sellerDetail(row: OfferRec): Promise<SellerOfferDetail> {
     const cache: ProductCache = new Map();
-    const [offer, product, stock, history, log, context] = await Promise.all([
+    const [offer, product, stock, history, log, context, costs] = await Promise.all([
       this.core.toOffer(row),
       row.seller_id ? this.sellerProducts(row.seller_id, [row.product_id], cache).then((m) => m.get(row.product_id)) : this.core.productAdmin(row.product_id, cache).then((p) => p ?? undefined),
       this.stock([row], row.seller_id ?? undefined),
       this.repo.find('offer_price_history', { offer_id: row.id }, { orderBy: [['valid_from', 'desc']], limit: 50 }),
       this.repo.find('offer_status_log', { offer_id: row.id }, { orderBy: [['at', 'desc']], limit: 50 }),
       this.priceContext(row.variant_id, row.id),
+      this.parts.costs.current([row.id]),
     ]);
+    // the unit cost is on the seller's own view only (a seller's costs are private)
+    const cost = costs.get(row.id);
     const variant = product?.product.variants.find((v) => v.id === row.variant_id) ?? { id: row.variant_id, options: {}, gtin: null, images: [] };
     return {
-      offer,
+      offer: { ...offer, unitCost: cost?.unitCost ?? null, unitCostFrom: cost?.from ?? null },
       product: this.productSummary(product, row.product_id),
       variant,
       productIncludedItems: product?.product.includedItems ?? [],

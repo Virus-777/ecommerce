@@ -2080,7 +2080,7 @@ Indexes: `(seller_id, created_at)`, `(application_id)`
 
 Indexes: `(seller_id, at desc)`
 
-**template_grants**: Permissions added to a member role template after members were invited with it (seeded on boot from domain/seed.ts: the two Fulfilled by Marketly keys of products_inventory). Applied once, on the first start where the permission's module runs, to the open members of that template who lack it
+**template_grants**: Permissions added to a member role template after members were invited with it (seeded on boot from domain/seed.ts: the two Fulfilled by Marketly keys and offers.costs.manage of products_inventory). Applied once, on the first start where the permission's module runs, to the open members of that template who lack it
 
 | Column | Type |
 |---|---|
