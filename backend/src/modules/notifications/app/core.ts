@@ -329,6 +329,24 @@ export class Core {
     return this.ctx.tryUse('sellers');
   }
 
+  /**
+   * Every active seller (approved or restricted), walked page by page through sellers.searchSellers: the "all
+   * sellers" target of routing (platform changes) and announcements. Empty when sellers is off.
+   */
+  async activeSellerIds(): Promise<string[]> {
+    const api = this.sellers;
+    if (!api) return [];
+    const out: string[] = [];
+    let cursor: string | undefined;
+    for (let i = 0; i < 200; i++) {
+      const page = await api.searchSellers({ statuses: ['approved', 'restricted'] }, { limit: 100, ...(cursor ? { cursor } : {}) });
+      out.push(...page.items.map((s) => s.id));
+      if (!page.nextCursor || !page.items.length) break;
+      cursor = page.nextCursor;
+    }
+    return [...new Set(out)];
+  }
+
   get access() {
     return this.ctx.tryUse('access');
   }

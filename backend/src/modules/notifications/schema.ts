@@ -304,6 +304,25 @@ const broadcasts = new Schema(
 );
 broadcasts.index({"status":1,"scheduled_at":1}, {"name":"broadcasts_status_scheduled_at_0d1e63"});
 
+/** Messages from Marketly staff to sellers (topic seller.announcement), listed newest first in the Admin Center */
+const announcements = new Schema(
+  {
+    _id: { type: String, required: true }, // id
+    title: { type: String, required: true },
+    body: { type: String, required: true },
+    audience: { type: String, required: true, enum: ["all","chosen"] },
+    seller_ids: { type: [String], default: undefined }, // the chosen sellers; empty when sent to all
+    seller_count: { type: Number, required: true, validate: integer },
+    link: { type: Schema.Types.Mixed, default: null },
+    sent_by: { type: String, required: true },
+    sent_at: { type: Date, required: true },
+    /** lock-by-write counter (kernel/mongo/table.ts) */
+    _lock: Number,
+  },
+  collectionOptions("notifications.announcements"),
+);
+announcements.index({"sent_at":-1}, {"name":"announcements_sent_at_9fb0f6"});
+
 /** Table name → schema */
 export const schemas = {
   topics: topics,
@@ -320,4 +339,5 @@ export const schemas = {
   push_devices: push_devices,
   suppressions: suppressions,
   broadcasts: broadcasts,
+  announcements: announcements,
 };

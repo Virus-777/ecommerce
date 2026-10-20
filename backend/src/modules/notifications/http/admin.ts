@@ -67,4 +67,8 @@ export const adminRoutes = (service: NotificationsService) =>
     scheduleBroadcast: async ({ params, body, actor, requestId }) => service.admin.scheduleBroadcast(params.id, body, { actor, requestId }),
     /** POST /broadcasts/{id}/cancel: Cancel a draft or scheduled broadcast */
     cancelBroadcast: async ({ params, body, actor, requestId }) => service.admin.cancelBroadcast(params.id, body, { actor, requestId }),
+    /** GET /announcements: Announcements sent to sellers, newest first */
+    listAnnouncements: async ({ page }) => service.announcements.list(page),
+    /** POST /announcements: Send a message from Marketly to sellers (in-app and email) */
+    sendAnnouncement: async ({ body, actor, requestId }) => service.announcements.send(body, { actor, requestId }),
   });

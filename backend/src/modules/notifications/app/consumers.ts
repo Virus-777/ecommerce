@@ -77,6 +77,9 @@ export class Consumers {
       topic = realm === 'staff' ? send.topic.staff : send.topic.member;
     }
 
+    // live topics: "new review" style notices go out once per record, however often it is published again
+    if (send.once && (await repo.everSent(send.dedupe, topic))) return;
+
     if (send.skipIfRecent) {
       const s = send.skipIfRecent;
       const since = new Date(core.now().getTime() - Number(await core.setting('dedupeWindowMinutes')) * 60_000);
@@ -199,17 +202,7 @@ export class Consumers {
   }
 
   async #allSellers(): Promise<Target[]> {
-    const api = this.core.sellers;
-    if (!api) return [];
-    const out: Target[] = [];
-    let cursor: string | undefined;
-    for (let i = 0; i < 200; i++) {
-      const page = await api.searchSellers({ statuses: ['approved', 'restricted'] }, { limit: 100, ...(cursor ? { cursor } : {}) });
-      out.push(...page.items.map((s) => ({ kind: 'seller' as const, sellerId: s.id })));
-      if (!page.nextCursor || !page.items.length) break;
-      cursor = page.nextCursor;
-    }
-    return out;
+    return (await this.core.activeSellerIds()).map((sellerId) => ({ kind: 'seller' as const, sellerId }));
   }
 
   /* ---------------------------------------------------------------- side effects */

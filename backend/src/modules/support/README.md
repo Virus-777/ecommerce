@@ -929,14 +929,14 @@ Indexes: `(case_id, at)`
 
 | Publishes | When | Payload | Consumed by |
 |---|---|---|---|
-| `support.case.opened` | A case is opened by a customer, seller, staff or another module | `{ caseId: uuid, ref: string, kind: string, category: string, priority: string, customerId: uuid?, contactEmail: email?, sellerId: uuid?, orderId: uuid?, orderItemIds: uuid[], handler: enum(seller|official_store|marketplace_support), ownerStaffId: uuid?, trustReportId: uuid?, nextResponseDueAt: datetime? }` | messaging, notifications, orders, reports, sellers, shipping, trust |
+| `support.case.opened` | A case is opened by a customer, seller, staff or another module | `{ caseId: uuid, ref: string, kind: string, category: string, priority: string, customerId: uuid?, contactEmail: email?, sellerId: uuid?, orderId: uuid?, orderItemIds: uuid[], handler: enum(seller|official_store|marketplace_support), ownerStaffId: uuid?, team: string?, trustReportId: uuid?, nextResponseDueAt: datetime? }` | messaging, notifications, orders, reports, sellers, shipping, trust |
 | `support.case.escalated` | Marketly steps in, a case becomes a dispute, or it moves to another team | `{ caseId: uuid, ref: string, to: string, reason: string, sellerId: uuid?, orderId: uuid? }` | notifications, workqueues |
 | `support.case.decided` | A decision (or appeal decision) is recorded | `{ caseId: uuid, ref: string, outcome: string, orderId: uuid?, customerId: uuid?, contactEmail: email?, returnId: uuid?, sellerId: uuid?, remedies: Remedy[], appealDeadline: datetime?, final: bool, notified: bool }` | finance, notifications, returns |
 | `support.case.resolved` | A case is resolved (orders clears its open-case alert on the items) | `{ caseId: uuid, ref: string, orderId: uuid?, orderItemIds: uuid[], customerId: uuid?, contactEmail: email?, sellerId: uuid?, resolvedAt: datetime }` | notifications, orders, reports, sellers, workqueues |
 | `support.case.reopened` | A case is reopened (orders shows the open-case alert again) | `{ caseId: uuid, ref: string, orderId: uuid?, orderItemIds: uuid[], customerId: uuid?, contactEmail: email?, sellerId: uuid?, by: Actor, reason: text }` | orders |
 | `support.case.appealed` | A party appeals a decision | `{ caseId: uuid, by: Actor }` | - |
 | `support.case.appeal_decided` | An appeal is decided | `{ caseId: uuid, overturned: bool }` | - |
-| `support.case.assigned` | Owner changes | `{ caseId: uuid, ownerId: uuid, team: string }` | - |
+| `support.case.assigned` | Owner changes | `{ caseId: uuid, ownerId: uuid, team: string }` | notifications |
 | `support.case.message_added` | A visible message is added (drives notifications) | `{ caseId: uuid, messageId: uuid, customerId: uuid?, contactEmail: email?, sellerId: uuid?, audience: string, authorRole: string }` | notifications |
 | `support.case.overdue` | A response deadline passes (party or staff) | `{ caseId: uuid, whoMustAct: string, dueAt: datetime }` | notifications, workqueues |
 
