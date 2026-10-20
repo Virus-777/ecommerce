@@ -157,16 +157,19 @@ Each runs once, in order, on the next `npm run migrate` (its id is remembered in
 change or reuse the id of one that has run; add a new one instead. Make `up` safe to run again (filter on
 the documents that still need the change), because a run can be cut off.
 
-**Backups.** Back up with the MongoDB Database Tools (installed separately from the server):
+**Backups.** On the production server they are already set up: a nightly `backup.sh` (database, uploaded files,
+and the settings and keys) and **Admin Center → Backups** (list, back up now, download, upload, two-person
+restore). How the pieces fit is in [`docs/08-backups.md`](08-backups.md); the commands are in
+`backend/deploy/linux/README.md`. On a development PC the Backups page says backups are unavailable
+(`BACKUP_OPS_DIR` is not set); there, back up by hand with the MongoDB Database Tools:
 
 ```bash
 mongodump   --uri "$MONGODB_URI" --oplog --gzip --out backup-2026-10-13      # consistent copy of the whole server
 mongorestore --uri "$MONGODB_URI" --oplogReplay --gzip --drop backup-2026-10-13
 ```
 
-Run the dump daily from a scheduler, keep several days, and practise a restore into a spare server now and then:
-a backup that was never restored is not known to work. Media files live in `MEDIA_STORAGE_DIR` (or the
-storage provider), not in MongoDB: back that folder up as well.
+Practise a restore into a spare server now and then: a backup that was never restored is not known to work.
+Media files live in `MEDIA_STORAGE_DIR`, not in MongoDB: back that folder up as well.
 
 **Looking at the data.** `mongosh "$MONGODB_URI"`, then `db.getCollection('orders.orders').find({ ref: 'MK-…' })`.
 Ids are stored in `_id`. Money is in integer minor units (cents) or Decimal128. Change data through the API
