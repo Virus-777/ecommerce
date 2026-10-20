@@ -1149,6 +1149,8 @@ export interface SupportCaseOpenedEvent {
   handler: "seller" | "official_store" | "marketplace_support";
   /** Staff owner when one is assigned at opening (messaging adds them to the order conversation) */
   ownerStaffId?: string | null;
+  /** Team the case is routed to (its category's team, or returns for a return): customer_support, returns, finance, trust, seller_management or official_store. notifications sends a seller's request to that team's role */
+  team?: string | null;
   /** Trust and Risk report the case acts on (inform_customers outreach) */
   trustReportId?: string | null;
   nextResponseDueAt?: string | null;
@@ -1167,6 +1169,7 @@ export const SupportCaseOpenedEvent: z.ZodType<SupportCaseOpenedEvent> = z.objec
   orderItemIds: z.array(z.uuid()),
   handler: z.enum(["seller", "official_store", "marketplace_support"]).describe("Who handles the case first (Handler.kind); not a staff id (ownerStaffId is the staff owner)"),
   ownerStaffId: z.uuid().describe("Staff owner when one is assigned at opening (messaging adds them to the order conversation)").nullish(),
+  team: z.string().describe("Team the case is routed to (its category's team, or returns for a return): customer_support, returns, finance, trust, seller_management or official_store. notifications sends a seller's request to that team's role").nullish(),
   trustReportId: z.uuid().describe("Trust and Risk report the case acts on (inform_customers outreach)").nullish(),
   nextResponseDueAt: z.iso.datetime({ offset: true }).nullish(),
 });

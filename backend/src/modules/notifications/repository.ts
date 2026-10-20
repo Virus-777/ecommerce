@@ -2,7 +2,7 @@ import { orThrow } from '../../kernel/lib/or-throw.js';
 import type { PageRequest } from '../../kernel/lib/pagination.js';
 import type { Filter, ModuleStore } from '../../kernel/mongo/index.js';
 import type { Page } from '../../spec/common.js';
-import type { BroadcastRow, DeliveryEventRow, DeliveryFilter, DeliveryRow, InboxFilter, InboxOwner, InboxRow, InvitedMemberRow, MemberPrefRow, NoticeRow, PushDeviceRow, RecipientRow, ScheduledRow, StaffPrefRow, SubjectKey, SuppressionFilter, SuppressionRow, TemplateRow, TopicRow, VersionRow } from './ports.js';
+import type { AnnouncementRow, BroadcastRow, DeliveryEventRow, DeliveryFilter, DeliveryRow, InboxFilter, InboxOwner, InboxRow, InvitedMemberRow, MemberPrefRow, NoticeRow, PushDeviceRow, RecipientRow, ScheduledRow, StaffPrefRow, SubjectKey, SuppressionFilter, SuppressionRow, TemplateRow, TopicRow, VersionRow } from './ports.js';
 
 /** One of `values`, or nothing when the list is empty (an empty IN matches no row) */
 const oneOf = (values: readonly unknown[]) => ({ $in: [...values] });
@@ -51,6 +51,7 @@ export class NotificationsRepository {
       pushDevices: this.store.table<PushDeviceRow>('push_devices'),
       suppressions: this.store.table<SuppressionRow>('suppressions'),
       broadcasts: this.store.table<BroadcastRow>('broadcasts'),
+      announcements: this.store.table<AnnouncementRow>('announcements'),
       invited: this.store.table<InvitedMemberRow>('invited_members'),
     };
   }
@@ -163,6 +164,11 @@ export class NotificationsRepository {
 
   noticeExists(q: { dedupeKey: string; topicKey: string; addressKind: string; addressId: string; since: Date }): Promise<boolean> {
     return this.#t.notices.exists({ dedupe_key: q.dedupeKey, topic_key: q.topicKey, address_kind: q.addressKind, address_id: q.addressId, created_at: { $gte: q.since } });
+  }
+
+  /** Was this topic ever sent with this dedupe key (a notice, or an email when the in-app channel is off)? RouteSend.once */
+  async everSent(dedupeKey: string, topicKey: string): Promise<boolean> {
+    return (await this.#t.notices.exists({ dedupe_key: dedupeKey, topic_key: topicKey })) || this.#t.deliveries.exists({ dedupe_key: dedupeKey, topic_key: topicKey });
   }
 
   async listInbox(owner: InboxOwner, f: InboxFilter, page: PageRequest): Promise<Page<InboxRow>> {
@@ -598,6 +604,20 @@ export class NotificationsRepository {
 
   dueBroadcasts(now: Date, limit: number): Promise<BroadcastRow[]> {
     return this.#t.broadcasts.find({ status: 'scheduled', scheduled_at: { $lte: now } }, { sort: { scheduled_at: 1 }, limit });
+  }
+
+  /* ---------------------------------------------------------------- announcements to sellers */
+  insertAnnouncement(row: AnnouncementRow): Promise<AnnouncementRow> {
+    return this.#t.announcements.insert(row);
+  }
+
+  async updateAnnouncement(id: string, patch: Partial<AnnouncementRow>): Promise<AnnouncementRow> {
+    return orThrow(await this.#t.announcements.update(id, patch), `announcement ${id}`);
+  }
+
+  /** Newest first */
+  listAnnouncements(page: PageRequest): Promise<Page<AnnouncementRow>> {
+    return this.#t.announcements.page({}, page, { column: 'sent_at', direction: 'desc' });
   }
 
   /* ---------------------------------------------------------------- inboxes (a join is two reads) */

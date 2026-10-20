@@ -985,6 +985,69 @@ export const InboundAttachment: z.ZodType<InboundAttachment> = z.object({
   downloadUrl: z.url(),
 }).register(common.apiTypes, { id: "notifications.InboundAttachment" });
 
+export interface AnnouncementLink {
+  /** A Seller Center screen id (seller/…), e.g. seller/help or seller/store; the notice opens it like any NoticeLink (screen + id) */
+  screen: string;
+  /** The record the screen opens, 1–200 characters */
+  id: string;
+  /** Button text, at most 40 characters (default Read more) */
+  label?: string | null;
+}
+
+export const AnnouncementLink: z.ZodType<AnnouncementLink> = z.object({
+  screen: z.string().describe("A Seller Center screen id (seller/…), e.g. seller/help or seller/store; the notice opens it like any NoticeLink (screen + id)"),
+  id: z.string().describe("The record the screen opens, 1–200 characters"),
+  label: z.string().describe("Button text, at most 40 characters (default Read more)").nullish(),
+}).register(common.apiTypes, { id: "notifications.AnnouncementLink" });
+
+export interface AnnouncementInput {
+  /** 1–120 characters */
+  title: string;
+  /** Plain text, 1–2000 characters */
+  body: string;
+  /** 1–500 seller ids (each must be a known seller); omitted: every active seller (approved or restricted) */
+  sellerIds?: string[] | null;
+  /** Where the notice opens; omitted: the seller's notifications page */
+  link?: AnnouncementLink | null;
+}
+
+export const AnnouncementInput: z.ZodType<AnnouncementInput> = z.object({
+  title: z.string().describe("1–120 characters"),
+  body: z.string().describe("Plain text, 1–2000 characters"),
+  sellerIds: z.array(z.uuid()).describe("1–500 seller ids (each must be a known seller); omitted: every active seller (approved or restricted)").nullish(),
+  get link() {
+    return AnnouncementLink.nullish();
+  },
+}).register(common.apiTypes, { id: "notifications.AnnouncementInput" });
+
+export interface Announcement {
+  id: string;
+  title: string;
+  body: string;
+  /** all: every active seller when it was sent; chosen: the sellerIds of the request */
+  audience: "all" | "chosen";
+  /** Seller workspaces it was sent to */
+  sellerCount: number;
+  link?: AnnouncementLink | null;
+  sentBy: common.Actor;
+  sentAt: string;
+}
+
+export const Announcement: z.ZodType<Announcement> = z.object({
+  id: z.uuid(),
+  title: z.string(),
+  body: z.string(),
+  audience: z.enum(["all", "chosen"]).describe("all: every active seller when it was sent; chosen: the sellerIds of the request"),
+  sellerCount: z.number().int().describe("Seller workspaces it was sent to"),
+  get link() {
+    return AnnouncementLink.nullish();
+  },
+  get sentBy() {
+    return common.Actor;
+  },
+  sentAt: z.iso.datetime({ offset: true }),
+}).register(common.apiTypes, { id: "notifications.Announcement" });
+
 /* ------------------------------------------------------------------ events */
 
 /** notifications.delivery.failed: A delivery gives up after retries or fails permanently */
@@ -1336,6 +1399,19 @@ export interface NotificationsDb {
     campaign_id: string | null;
     created_by: string;
     created_at: Date;
+  };
+  /** Messages from Marketly staff to sellers (topic seller.announcement), listed newest first in the Admin Center */
+  announcements: {
+    id: string;
+    title: string;
+    body: string;
+    audience: 'all' | 'chosen';
+    /** the chosen sellers; empty when sent to all */
+    seller_ids: string[];
+    seller_count: number;
+    link: Json | null;
+    sent_by: string;
+    sent_at: Date;
   };
 }
 
@@ -2232,6 +2308,41 @@ export const endpoints = defineEndpoints({
     screens: ["admin/notifications"],
     phase: 1,
   },
+  listAnnouncements: {
+    area: "admin",
+    method: "GET",
+    path: "/announcements",
+    auth: "staff",
+    permission: "notifications.announcements.send",
+    scope: "staff",
+    summary: "Announcements sent to sellers, newest first",
+    paging: true,
+    response: () => Announcement,
+    status: 200,
+    screens: ["admin/notifications"],
+    phase: 1,
+  },
+  sendAnnouncement: {
+    area: "admin",
+    method: "POST",
+    path: "/announcements",
+    auth: "staff",
+    permission: "notifications.announcements.send",
+    scope: "staff",
+    summary: "Send a message from Marketly to sellers (in-app and email)",
+    desc: "Topic seller.announcement (essential, not promotional: no consent check; owners always get the email, other members by their channel choice). To the chosen sellers, or with no sellerIds to every active seller (approved or restricted) when it is sent. Each seller workspace gets one notice (dedupe announcement:<id>) linking to the given Seller Center screen, else seller/notifications. The sends happen before the answer; 202 says the notices are created and their emails queued.",
+    body: () => AnnouncementInput,
+    response: () => z.object({
+      get announcement() {
+        return Announcement;
+      },
+    }),
+    status: 202,
+    errors: ["VALIDATION_FAILED"],
+    audited: true,
+    screens: ["admin/notifications"],
+    phase: 1,
+  },
   emailProviderEvents: {
     area: "webhooks",
     method: "POST",
@@ -2338,6 +2449,11 @@ export const spec = defineModuleSpec({
       "key": "notifications.broadcasts.manage",
       "audience": "staff",
       "desc": "Create, schedule and cancel promotional broadcasts (Marketing Manager)"
+    },
+    {
+      "key": "notifications.announcements.send",
+      "audience": "staff",
+      "desc": "Send announcements from Marketly to sellers and read the ones sent (Seller Manager, Platform Administrator)"
     },
     {
       "key": "notifications.preferences.manage",
@@ -2511,7 +2627,7 @@ export const spec = defineModuleSpec({
       "customers.marketing_preferences.changed": "Refresh the consent cache used for promotional sends and broadcasts",
       "customers.account.closed": "Stop all promotional sends, remove push devices, keep essential notices for open obligations only",
       "customers.data_export.ready": "Email the customer the export download link",
-      "orders.order.accepted": "Customer: order accepted (confirmation only after acceptance). Seller: new order per seller group with fulfilledBy seller (orders group, members with order permission), with the dispatch reminder effect; Fulfilled by Marketly groups get no new-order notice or dispatch reminder (fulfillment-service sends seller.fulfillment.order_received)",
+      "orders.order.accepted": "Customer: order accepted (confirmation only after acceptance). Seller: new order per seller group with fulfilledBy seller (orders group, members with order permission), with the dispatch reminder effect; Fulfilled by Marketly groups get no new-order notice or dispatch reminder (fulfillment-service sends seller.fulfillment.order_received). Official Store groups (ownerType official): staff (topic staff.official_store.order_new, Official Store Manager role), one notice per group",
       "orders.cancellation.requested": "Seller (fulfilledBy seller; orders group, action required until respondBy): a customer asks to cancel items. Official Store and Fulfilled by Marketly groups: staff (order_manager role) decide it instead; no seller notice",
       "orders.item.cancelled": "Customer: cancellation update for the item, skipped when the payload's notifyCustomer is false (staff cancelled without telling the customer); seller: item cancelled (always)",
       "orders.item.delayed": "Customer: delay notice with the new estimate and options (wait, cancel, contact support)",
@@ -2526,7 +2642,7 @@ export const spec = defineModuleSpec({
       "shipping.shipment.delivered": "Customer: package delivered",
       "shipping.shipment.exception": "Customer: delivery problem with next steps; staff: Shipping Manager. No seller notice for Fulfilled by Marketly groups (fulfilledBy marketly_service)",
       "shipping.dispatch.overdue": "Seller (fulfilledBy seller only): dispatch overdue (action required); staff: overdue shipping to Shipping Manager (lead or backup). Fulfilled by Marketly groups: no seller notice; the staff notice names the Marketly warehouse and goes to warehouse_manager",
-      "returns.return.requested": "Seller: new return request with response deadline",
+      "returns.return.requested": "Seller: new return request with response deadline. Official Store returns (ownerType official): staff (topic staff.official_store.return_requested, Official Store Manager role), action required until the return is approved or rejected (return:<returnId>:respond)",
       "returns.return.info_requested": "Customer: more information needed for the return",
       "returns.return.approved": "Customer: return approved with label or drop-off instructions",
       "returns.return.rejected": "Customer: return declined with the reason and how to ask for help",
@@ -2534,9 +2650,9 @@ export const spec = defineModuleSpec({
       "returns.return.received": "Customer: return received; seller: inspect by deadline",
       "returns.return.inspected": "Customer: inspection outcome",
       "returns.return.escalated": "Staff: Returns Manager; seller: platform support stepped in",
-      "returns.refund.approved": "Customer: refund approved and processing (never says the money has arrived)",
+      "returns.refund.approved": "Customer: refund approved and processing (never says the money has arrived). Seller (topic seller.refund.approved, returns_cases group, members with returns.refunds.issue): a refund on one of its orders was approved and handed to payments, unless a seller member approved it (approvedBy kind seller); links to the return, the case, else the seller order list. Official Store refunds (ownerType official): staff (topic staff.official_store.refund_approved, Official Store Manager role). Neither says the money has arrived",
       "returns.replacement.created": "Customer: replacement on its way (its own shipment)",
-      "support.case.opened": "Customer: acknowledgment with expected reply time; seller: case opened on an order",
+      "support.case.opened": "Customer: acknowledgment with expected reply time; seller: case opened on an order. A seller's support request (kind seller_request): staff (topic staff.seller.support_request) of the role of the case's team (seller_management: Seller Manager, the default), action required until a staff owner is assigned (support.case.assigned) or the case is decided or resolved (seller-request:<caseId>)",
       "support.case.message_added": "Customer or seller: case reply (email carries a reply-to token)",
       "support.case.escalated": "Staff: escalated case to Customer Support Manager (or Returns Manager by category)",
       "support.case.overdue": "Staff: case past its response target to the queue lead and backup",
@@ -2597,6 +2713,11 @@ export const spec = defineModuleSpec({
       "content.article.review_due": "Staff (ownerStaffId, else the Content Manager role; topic staff.article.review_due): help article due for review, action required",
       "reviews.moderation.decided": "Reporters (topic customer.review_report.decided, seller variant for sellers): reporterOutcome; author (topic customer.review.moderated, seller.content.moderated for responses and answers): kept, edited or removed with the reason and appealUntil",
       "trust.report.resolved": "Each reporter (customers and sellers in-app and email, rights owners by external_email; topic trust.report.resolved): the reporterOutcome text, never the reported party's details",
+      "reviews.review.published": "Seller (topic seller.review.new, products group, members with reviews.responses.post): a new product review on its product, once per review (an edited, kept or reinstated review sends nothing again). Official Store reviews (sellerId OFFICIAL_STORE_ID): staff (topic staff.official_store.review_new, Official Store Manager role)",
+      "reviews.feedback.published": "Seller (topic seller.feedback.new, products group, members with reviews.responses.post): new store feedback, once per feedback. Official Store feedback: staff (topic staff.official_store.feedback_new, Official Store Manager role)",
+      "reviews.question.asked": "Each seller in sellerIds (topic seller.question.asked, products group, members with reviews.responses.post), action required until that seller answers (question:<questionId>:<sellerId>); officialStore: staff (topic staff.official_store.question_asked, Official Store Manager role), action required until Marketly staff answer (question:<questionId>:official-store)",
+      "reviews.answer.published": "Resolve the question notice of whoever answered: a seller answer resolves question:<questionId>:<sellerId>, a Marketly staff answer question:<questionId>:official-store; customer answers resolve nothing. Sends nothing",
+      "support.case.assigned": "Resolve the staff notice of a seller's support request (seller-request:<caseId>) once a staff owner is assigned. Sends nothing",
       "trust.rights_report.received": "Rights owner (external_email, topic rights_owner.report.received): confirmation with the TR reference and what happens next",
       "trust.evidence.requested": "The asked party: customer (topic customer.trust.evidence_requested, cases group) or seller owner (topic seller.trust.evidence_requested): Trust and Risk needs proof, what to send and by when; action required until trust records the answer (resolve by the request's dedupe key)",
       "trust.appeal.decided": "The appellant: customer (topic customer.trust.appeal_decided) or seller owner (topic seller.trust.appeal_decided): the appeal outcome and what changes (restriction lifted or kept)",
@@ -4400,6 +4521,102 @@ export const spec = defineModuleSpec({
           "key": {
             "status": 1,
             "scheduled_at": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "announcements": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "title",
+        "body",
+        "audience",
+        "seller_ids",
+        "seller_count",
+        "link",
+        "sent_by",
+        "sent_at"
+      ],
+      "nullable": [
+        "link"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "sent_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "title",
+            "body",
+            "audience",
+            "seller_ids",
+            "seller_count",
+            "sent_by",
+            "sent_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "title": {
+              "bsonType": "string"
+            },
+            "body": {
+              "bsonType": "string"
+            },
+            "audience": {
+              "bsonType": "string",
+              "enum": [
+                "all",
+                "chosen"
+              ]
+            },
+            "seller_ids": {
+              "bsonType": "array",
+              "items": {
+                "bsonType": "string"
+              }
+            },
+            "seller_count": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "link": {},
+            "sent_by": {
+              "bsonType": "string"
+            },
+            "sent_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "announcements_sent_at_9fb0f6",
+          "key": {
+            "sent_at": -1
           }
         }
       ],
