@@ -17,17 +17,22 @@ let made = 0;
 
 const baseConnection = () => (base ??= mongoose.createConnection(inject('mongoUri'), { appName: 'marketly-tests', maxPoolSize: 50 }).asPromise());
 
-/** Deletes the documents of every collection that has any (all at once); schema hashes stay */
+/**
+ * Deletes the documents of every collection that has any (all at once). Schema hashes stay; data migrations are
+ * forgotten, so the next app runs them again on the empty database (a seed migration such as content's news
+ * categories would otherwise count as done with its data gone).
+ */
 async function empty(db: Db) {
   const collections = await db.listCollections({}, { nameOnly: true }).toArray();
-  await Promise.all(
-    collections
+  await Promise.all([
+    ...collections
       .filter((c) => c.name !== 'kernel.migrations')
       .map(async ({ name }) => {
         const c = db.collection(name);
         if (await c.estimatedDocumentCount()) await c.deleteMany({});
       }),
-  );
+    db.collection<{ _id: string }>('kernel.migrations').deleteMany({ _id: { $not: /\/schema$/ } }),
+  ]);
 }
 
 /** A store on a database of its own; close() empties it for the next test app */
