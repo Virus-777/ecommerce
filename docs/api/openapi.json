@@ -96114,7 +96114,7 @@
           "Seller API · Reports"
         ],
         "summary": "Reports available to sellers",
-        "description": "**Screens:** seller/reports",
+        "description": "Only the reports the caller may open: one with a permission of its own (finance.balances.view for Earnings and profit and Profit by product) is left out without it.\n\n**Screens:** seller/reports",
         "security": [
           {
             "bearer": []
@@ -96180,8 +96180,8 @@
         "tags": [
           "Seller API · Reports"
         ],
-        "summary": "Run a seller report (product sales, order trend, returns by reason, service performance)",
-        "description": "Always scoped to the caller's seller; sellerId, soldBy and other sellers' data are never accepted. Figures by order date, market time zone, stating how each metric is calculated.\n\n**Permission:** `reports.seller.view`\n\n**Screens:** seller/reports, seller/dashboard",
+        "summary": "Run a seller report (product sales, order trend, returns by reason, service performance, earnings and profit, profit by product)",
+        "description": "Always scoped to the caller's seller; sellerId, soldBy and other sellers' data are never accepted. Figures by order date, market time zone, stating how each metric is calculated. A report with a permission of its own (seller.earnings and seller.profit_by_product: finance.balances.view) is FORBIDDEN without it.\n\n**Permission:** `reports.seller.view`\n\n**Screens:** seller/reports, seller/dashboard",
         "security": [
           {
             "bearer": []
@@ -198325,8 +198325,12 @@
               "last_30_days",
               "last_90_days",
               "month_to_date",
+              "quarter_to_date",
+              "year_to_date",
+              "last_12_months",
               "custom"
-            ]
+            ],
+            "description": "Days ending today in market time; quarter_to_date from the first day of the calendar quarter, year_to_date from 1 January, last_12_months from the day after the same date last year (at most maxRangeDays)"
           },
           "range": {
             "anyOf": [
@@ -198404,7 +198408,8 @@
               "day",
               "week",
               "month"
-            ]
+            ],
+            "description": "Series buckets (weeks start on Monday). Default: day up to 31 days, week up to 92, month beyond"
           },
           "compare": {
             "type": [
@@ -198413,8 +198418,10 @@
             ],
             "enum": [
               "none",
-              "previous_period"
-            ]
+              "previous_period",
+              "same_period_last_year"
+            ],
+            "description": "previous_period: the same number of days just before the range; same_period_last_year: the same calendar dates one year earlier (29 February becomes 28 February). Gives KPI deltas, meta.compareRange and a <key>:compare twin of every series"
           },
           "filters": {
             "description": "Report-specific filters from FilterSpec"
@@ -198467,7 +198474,8 @@
         "type": "object",
         "properties": {
           "key": {
-            "type": "string"
+            "type": "string",
+            "description": "With a comparison, every series has a twin keyed <key>:compare"
           },
           "label": {
             "type": "string"
@@ -198475,7 +198483,7 @@
           "points": {
             "type": "array",
             "items": {},
-            "description": "{ x: date, y: number }"
+            "description": "{ x: date (first day of the bucket), y: number, label } . On a <key>:compare twin x and label are the current period's bucket at the same position (so both draw on one axis), y is the comparison period's value (null when the comparison has no bucket there) and compareX is the comparison bucket's own first day"
           }
         },
         "required": [
@@ -198488,7 +198496,7 @@
         "type": "object",
         "properties": {
           "meta": {
-            "description": "{ reportKey, title, range, dateBasis, currency, timeZone, taxIncluded, freshAsOf, mayStillChange, definitionsVersion, compareRange?, scope: platform|seller }"
+            "description": "{ reportKey, title, range, dateBasis, dateBasisLabel, currency, timeZone, taxIncluded, freshAsOf, mayStillChange, definitionsVersion, compare?: previous_period|same_period_last_year, compareRange? (the dates the :compare twins hold), granularity, scope: platform|seller }"
           },
           "kpis": {
             "type": "array",

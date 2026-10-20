@@ -187,7 +187,7 @@ export class Exports {
     let reportKey: string | null = null;
     if (dataset === REPORT_DATASET) {
       if (!input.reportKey) throw invalid([{ path: 'reportKey', message: 'Choose the report to export' }]);
-      const report = p.kind === 'seller' ? await this.defs.sellerReport(input.reportKey) : await this.defs.staffReport(input.reportKey, by);
+      const report = p.kind === 'seller' ? await this.defs.sellerReport(input.reportKey, by) : await this.defs.staffReport(input.reportKey, by);
       const resolved = await this.queries.resolve(input.query, { seller: p.kind === 'seller' });
       reportKey = report.key;
       const schedule: ScheduledRun | null = o.scheduleId ? { id: o.scheduleId, periodLabel: periodLabel(resolved.range) } : null;

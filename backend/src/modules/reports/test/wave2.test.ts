@@ -67,8 +67,8 @@ describe('seller product sales (G47b, G48a)', () => {
 describe('report library (G74)', () => {
   const ADDED = ['commerce.orders', 'marketplace.discount_funding', 'marketplace.owed_to_sellers', 'marketplace.payouts', 'discovery.stockouts', 'service.dispatch', 'service.delivery_issues', 'service.cancellations', 'service.cases', 'ads.performance'];
 
-  it('lists the staff reports in the six areas (24 with wave 3)', async () => {
-    expect(REPORTS.filter((r) => r.audience === 'staff')).toHaveLength(24);
+  it('lists the staff reports in the six areas (24 with wave 3, 27 with the financial statistics)', async () => {
+    expect(REPORTS.filter((r) => r.audience === 'staff')).toHaveLength(27);
     const groups = await h.call('GET', '/api/admin/reports/catalogue', h.tokens.staff());
     expect(groups.status, JSON.stringify(groups.body)).toBe(200);
     const keys = JSON.stringify(groups.body);

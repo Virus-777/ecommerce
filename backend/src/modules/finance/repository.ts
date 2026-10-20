@@ -3,7 +3,7 @@ import { decodeCursor, type PageRequest } from '../../kernel/lib/pagination.js';
 import { orThrow } from '../../kernel/lib/or-throw.js';
 import { contains, whereFilter, type Filter, type ModuleStore, type Table as Collection, type Where } from '../../kernel/mongo/index.js';
 import type * as common from '../../spec/common.js';
-import type { AccountRec, DailyTypeSum, Db, EntryRec, FindOptions, IdTable, Table } from './ports.js';
+import type { AccountRec, DailyTypeSum, Db, EntryRec, FeeChargeRec, FindOptions, IdTable, Table } from './ports.js';
 
 type Row = Record<string, unknown>;
 
@@ -246,15 +246,70 @@ export class FinanceRepository {
     return out;
   }
 
-  /** Sum of entries per (market date, seller, type) for a range of instants */
+  /** Sum and count of entries per (market date, seller, type) for a range of instants */
   async dailyTypeSums(from: Date, to: Date, timeZone: string, types: string[], sellerId?: string): Promise<DailyTypeSum[]> {
     if (!types.length) return [];
-    const rows = await this.#entries.aggregate<{ _id: { day: string; seller_id: string; type: string }; amount: unknown }>([
+    const rows = await this.#entries.aggregate<{ _id: { day: string; seller_id: string; type: string }; amount: unknown; count: number }>([
       { $match: { at: { $gte: from, $lt: to }, type: { $in: types }, ...(sellerId ? { seller_id: sellerId } : {}) } },
-      { $group: { _id: { day: { $dateToString: { format: '%Y-%m-%d', date: '$at', timezone: timeZone } }, seller_id: '$seller_id', type: '$type' }, amount: { $sum: '$amount' } } },
+      { $group: { _id: { day: { $dateToString: { format: '%Y-%m-%d', date: '$at', timezone: timeZone } }, seller_id: '$seller_id', type: '$type' }, amount: { $sum: '$amount' }, count: { $sum: 1 } } },
       { $sort: { '_id.day': 1, '_id.seller_id': 1 } },
     ]);
-    return rows.map((r) => ({ day: r._id.day, sellerId: r._id.seller_id, type: r._id.type, amount: Number(r.amount ?? 0) }));
+    return rows.map((r) => ({ day: r._id.day, sellerId: r._id.seller_id, type: r._id.type, amount: Number(r.amount ?? 0), count: r.count }));
+  }
+
+  /**
+   * Sum of `amount` per (market date, `kind` column) of a company money table in a range of instants
+   * (trading_entries, platform_costs, discount_funding; each has an (at) index). `marketplaceOnly` keeps the rows
+   * of marketplace seller items: those with an earnings lot (one lookup on its unique order_item_id index), or
+   * without an order item at all.
+   */
+  async dailyKindSums(table: 'trading_entries' | 'platform_costs' | 'discount_funding', kindColumn: 'kind' | 'funded_by', from: Date, to: Date, timeZone: string, o: { marketplaceOnly?: boolean } = {}): Promise<{ day: string; kind: string; amount: number }[]> {
+    const pipeline: Row[] = [{ $match: { at: { $gte: from, $lt: to } } }];
+    if (o.marketplaceOnly) {
+      pipeline.push(
+        { $lookup: { from: this.#collection('earnings_lots'), localField: 'order_item_id', foreignField: 'order_item_id', pipeline: [{ $limit: 1 }, { $project: { _id: 1 } }], as: '_lot' } },
+        { $match: { $or: [{ order_item_id: null }, { _lot: { $ne: [] } }] } },
+      );
+    }
+    pipeline.push(
+      { $group: { _id: { day: { $dateToString: { format: '%Y-%m-%d', date: '$at', timezone: timeZone } }, kind: `$${kindColumn}` }, amount: { $sum: '$amount' } } },
+      { $sort: { '_id.day': 1, '_id.kind': 1 } },
+    );
+    const rows = await this.#t(table).aggregate<{ _id: { day: string; kind: string }; amount: unknown }>(pipeline);
+    return rows.map((r) => ({ day: r._id.day, kind: r._id.kind, amount: Number(r.amount ?? 0) }));
+  }
+
+  /** Fee charges changed at or after `since`, oldest change first, after the (changed_at, id) of the previous page */
+  feeChargesChangedSince(since: Date, after: { at: Date; id: string } | undefined, limit: number): Promise<FeeChargeRec[]> {
+    const conds: Filter[] = [{ changed_at: { $gte: since } }];
+    if (after) conds.push({ $or: [{ changed_at: { $gt: after.at } }, { changed_at: after.at, id: { $gt: after.id } }] });
+    return this.store.table<FeeChargeRec>('fee_charges').find({ $and: conds }, { sort: { changed_at: 1, id: 1 }, limit });
+  }
+
+  /**
+   * Seller ledger entries at or after `from`, summed per (seller, market day, bucket): what to take off today's
+   * balances to get an earlier day's end-of-day balances. `types` is every entry type, so the (type, at) index serves it.
+   */
+  async bucketSumsSince(from: Date, timeZone: string, types: string[]): Promise<{ sellerId: string; day: string; bucket: string; amount: number }[]> {
+    const rows = await this.#entries.aggregate<{ _id: { s: string; d: string; b: string }; amount: unknown }>([
+      { $match: { type: { $in: types }, at: { $gte: from } } },
+      { $group: { _id: { s: '$seller_id', d: { $dateToString: { format: '%Y-%m-%d', date: '$at', timezone: timeZone } }, b: '$bucket' }, amount: { $sum: '$amount' } } },
+    ]);
+    return rows.map((r) => ({ sellerId: r._id.s, day: r._id.d, bucket: r._id.b, amount: Number(r.amount ?? 0) }));
+  }
+
+  /**
+   * Earnings lots that left pending at or after `from`, with the pending-bucket entries they moved to available,
+   * summed per (seller, market day they left). A lot that left before left_pending_at was kept counts from its available_at.
+   */
+  async lotsLeftPendingSince(from: Date, timeZone: string): Promise<{ sellerId: string; day: string; amount: number }[]> {
+    const left = { $ifNull: ['$left_pending_at', '$available_at'] };
+    const rows = await this.#t('earnings_lots').aggregate<{ _id: { s: string; d: string }; amount: unknown }>([
+      { $match: { $or: [{ left_pending_at: { $gte: from } }, { left_pending_at: null, state: { $ne: 'pending' }, available_at: { $gte: from } }] } },
+      { $lookup: { from: this.#collection('ledger_entries'), localField: '_id', foreignField: 'lot_id', pipeline: [{ $match: { bucket: 'pending' } }, { $project: { amount: 1 } }], as: '_entries' } },
+      { $group: { _id: { s: '$seller_id', d: { $dateToString: { format: '%Y-%m-%d', date: left, timezone: timeZone } } }, amount: { $sum: { $sum: '$_entries.amount' } } } },
+    ]);
+    return rows.map((r) => ({ sellerId: r._id.s, day: r._id.d, amount: Number(r.amount ?? 0) }));
   }
 
   /** Sum of ledger amounts by type in a range (all sellers) */

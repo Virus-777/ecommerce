@@ -19,6 +19,7 @@ import {
   marketDay,
   pct,
   presetRange,
+  lastYearRange,
   previousRange,
   type Basis,
   type DayRange,
@@ -28,6 +29,7 @@ import {
 import type { ReportRow, SalesAgg, SalesFilter } from '../ports.js';
 import { invalid, type ReportsCore, type Settings } from './core.js';
 import type { Definitions } from './definitions.js';
+import { FinancialReports } from './financial.js';
 
 export type ReportScope = { kind: 'platform' } | { kind: 'seller'; sellerId: string };
 export type Period = 'today' | 'last_7_days' | 'last_14_days' | 'last_30_days';
@@ -35,7 +37,10 @@ export type Period = 'today' | 'last_7_days' | 'last_14_days' | 'last_30_days';
 export interface ResolvedQuery {
   preset: NonNullable<ReportQuery['preset']>;
   range: DayRange;
+  /** The comparison period's dates (KPI deltas and the :compare series twins), null without a comparison */
   compare: DayRange | null;
+  /** Which comparison was asked for (meta.compare) */
+  compareKind?: 'previous_period' | 'same_period_last_year';
   basis: Basis;
   soldBy: 'all' | 'official' | 'marketplace';
   sellerId?: string;
@@ -47,23 +52,23 @@ export interface ResolvedQuery {
   filters: Record<string, unknown>;
 }
 
-interface TableColumn {
+export interface TableColumn {
   key: string;
   label: string;
   unit: string;
   align: 'left' | 'right';
 }
-interface Table {
+export interface Table {
   columns: TableColumn[];
   rows: Record<string, unknown>[];
   totals: Record<string, unknown>;
 }
-interface Callout {
+export interface Callout {
   kind: 'info' | 'warning';
   title: string;
   body: string;
 }
-interface Part {
+export interface Part {
   kpis: KpiValue[];
   series: Series[];
   split?: unknown[];
@@ -72,6 +77,8 @@ interface Part {
   callouts: Callout[];
   unavailable: string[];
   models: string[];
+  /** meta.freshAsOf when the figures come from a pull rather than the read models' events */
+  freshAsOf?: string;
 }
 
 const BASIS_COLUMN: Record<Basis, SalesFilter['basis']> = { placement: 'placed_at', payment: 'paid_at', shipment: 'shipped_at', completion: 'completed_at' };
@@ -83,7 +90,7 @@ const MARKETPLACE_CALLOUT: Callout = {
   body: 'Sales by marketplace sellers belong to the sellers. The company earns the commission and fees on them, shown as Marketplace fee income in Marketplace finance.',
 };
 
-const col = (key: string, label: string, unit = 'text', align: 'left' | 'right' = unit === 'text' ? 'left' : 'right'): TableColumn => ({ key, label, unit, align });
+export const col = (key: string, label: string, unit = 'text', align: 'left' | 'right' = unit === 'text' ? 'left' : 'right'): TableColumn => ({ key, label, unit, align });
 /** commerce.gross_sales → gross_sales (series and column keys) */
 const suffix = (metricKey: string) => metricKey.slice(metricKey.indexOf('.') + 1);
 /** Average hours from a sum of minutes over n replies (0 without replies) */
@@ -108,11 +115,32 @@ const COST_REPORTS: Record<string, { metric: string; kind: string; label: string
   ],
 };
 
+/**
+ * The <key>:compare twin of each series: the comparison period's values at the same bucket positions, with the
+ * current period's x and label so both draw on one axis (compareX keeps the comparison bucket's own date). A
+ * position the comparison period does not have (a range with one more week, a series it did not produce) is null.
+ */
+export function twinsOf(current: Series[], compared: Series[]): Series[] {
+  return current.map((s) => {
+    const other = compared.find((c) => c.key === s.key)?.points as { x: string; y: number | null }[] | undefined;
+    return {
+      key: `${s.key}:compare`,
+      label: `${s.label} (comparison)`,
+      points: (s.points as { x: string; label?: string }[]).map((p, i) => ({ x: p.x, y: other?.[i]?.y ?? null, label: p.label ?? p.x, compareX: other?.[i]?.x ?? null })),
+    };
+  });
+}
+
 export class Queries {
+  /** The financial statistics reports (seller earnings and profit, platform income, seller money, Official Store P&L) */
+  readonly financial: FinancialReports;
+
   constructor(
     private readonly core: ReportsCore,
     private readonly defs: Definitions,
-  ) {}
+  ) {
+    this.financial = new FinancialReports(core, this);
+  }
 
   /* ---------------------------------------------------------------- query resolution */
 
@@ -142,7 +170,8 @@ export class Queries {
     return {
       preset,
       range,
-      compare: query.compare === 'previous_period' ? previousRange(range) : null,
+      compare: query.compare === 'previous_period' ? previousRange(range) : query.compare === 'same_period_last_year' ? lastYearRange(range) : null,
+      ...(query.compare && query.compare !== 'none' ? { compareKind: query.compare } : {}),
       basis: opts.seller ? 'placement' : (query.dateBasis ?? opts.defaultBasis ?? cfg.defaultBasis),
       soldBy: opts.seller ? 'marketplace' : (query.soldBy ?? 'all'),
       ...(query.sellerId ? { sellerId: query.sellerId } : {}),
@@ -160,6 +189,8 @@ export class Queries {
   async run(report: ReportRow, rq: ResolvedQuery, scope: ReportScope): Promise<ReportResult> {
     const cfg = await this.core.cfg();
     const part = await this.compute(report.key, rq, scope, cfg);
+    // the comparison period's series, drawn on the current period's axis (the same report run over compareRange)
+    const series = rq.compare ? [...part.series, ...twinsOf(part.series, (await this.compute(report.key, { ...rq, range: rq.compare, compare: null }, scope, cfg)).series)] : part.series;
     const metricKeys = Array.isArray(report.metrics) ? (report.metrics as string[]) : [];
     const definitions = await this.defs.inUse(metricKeys);
     const today = marketDay(this.core.now(), cfg.timeZone);
@@ -175,15 +206,15 @@ export class Queries {
         currency: rq.currency,
         timeZone: rq.timeZone,
         taxIncluded: cfg.taxIncluded,
-        freshAsOf: await this.freshAsOf(part.models),
+        freshAsOf: part.freshAsOf ?? (await this.freshAsOf(part.models)),
         mayStillChange: rq.range.to >= addDays(today, -30),
         definitionsVersion: Object.fromEntries(definitions.map((d) => [d.key, d.version])),
-        ...(rq.compare ? { compareRange: rq.compare } : {}),
+        ...(rq.compare ? { compare: rq.compareKind ?? 'previous_period', compareRange: rq.compare } : {}),
         granularity: rq.granularity,
         scope: scope.kind,
       },
       kpis: part.kpis,
-      series: part.series,
+      series,
       split: part.split ?? null,
       table: part.table ?? null,
       breakdowns: part.breakdowns ?? null,
@@ -200,7 +231,7 @@ export class Queries {
     return new Date(times.length ? Math.max(...times) : this.core.now().getTime()).toISOString();
   }
 
-  private salesFilter(rq: ResolvedQuery, scope: ReportScope, range: DayRange, over: Partial<SalesFilter> = {}): SalesFilter {
+  salesFilter(rq: ResolvedQuery, scope: ReportScope, range: DayRange, over: Partial<SalesFilter> = {}): SalesFilter {
     const { start, end } = instantsOf(range, rq.timeZone);
     const ownerType = scope.kind === 'seller' ? 'seller' : rq.soldBy === 'official' ? 'official' : rq.soldBy === 'marketplace' ? 'seller' : undefined;
     return {
@@ -224,7 +255,7 @@ export class Queries {
     return (await this.core.repo.salesAgg(this.salesFilter(rq, scope, range, over), 'none'))[0] ?? emptyAgg();
   }
 
-  private money(amount: number, currency: string): Money {
+  money(amount: number, currency: string): Money {
     return { amount: Math.round(amount), currency };
   }
 
@@ -243,13 +274,13 @@ export class Queries {
     };
   }
 
-  private series(key: string, label: string, buckets: string[], g: Granularity, values: Map<string, number>): Series {
+  series(key: string, label: string, buckets: string[], g: Granularity, values: Map<string, number>): Series {
     return { key, label, points: buckets.map((b) => ({ x: b, y: values.get(b) ?? 0, label: dayLabel(b, g) })) };
   }
 
   /* ---------------------------------------------------------------- names for tables */
 
-  private async sellerNames(ids: string[]): Promise<Map<string, string>> {
+  async sellerNames(ids: string[]): Promise<Map<string, string>> {
     const out = new Map<string, string>();
     const real = ids.filter((id) => id && id !== OFFICIAL_KEY);
     if (ids.includes(OFFICIAL_KEY)) out.set(OFFICIAL_KEY, 'Official Store');
@@ -258,7 +289,7 @@ export class Queries {
     return out;
   }
 
-  private async productNames(ids: string[]): Promise<Map<string, string>> {
+  async productNames(ids: string[]): Promise<Map<string, string>> {
     const out = new Map<string, string>();
     const catalog = this.core.api('catalog');
     if (!catalog) return out;
@@ -321,12 +352,22 @@ export class Queries {
         return this.companyCostsReport(key, rq, cfg);
       case 'service.complaints':
         return this.complaintsReport(rq, scope);
+      case 'seller.earnings':
+        return this.financial.sellerEarnings(rq, scope);
+      case 'seller.profit_by_product':
+        return this.financial.profitByProduct(rq, scope);
+      case 'finance.platform_income':
+        return this.financial.platformIncome(rq);
+      case 'finance.seller_money':
+        return this.financial.sellerMoney(rq);
+      case 'trading.pnl':
+        return this.financial.tradingPnl(rq);
       default:
         return { kpis: [], series: [], callouts: [{ kind: 'warning', title: 'No figures yet', body: 'This report has no figures in this version.' }], unavailable: [key], models: [] };
     }
   }
 
-  private gross(a: SalesAgg, cfg: Settings) {
+  gross(a: SalesAgg, cfg: Settings) {
     return a.gross + (cfg.taxIncluded ? a.tax : 0);
   }
 
@@ -603,10 +644,13 @@ export class Queries {
     // Fulfilled by Marketly fees show while fulfillment-service runs, or when the range holds fees charged while it ran
     const serviceFees = this.core.running('fulfillment-service') || Boolean(fin.service_fees_minor) || Boolean(prevFin?.service_fees_minor);
     const unavailable = [...(this.core.running('finance') ? [] : ['marketplace.fee_income', 'marketplace.held', 'marketplace.payouts_paid', 'marketplace.amounts_owed']), ...(this.core.running('advertising') ? [] : ['marketplace.ad_income']), ...(serviceFees ? [] : ['marketplace.service_fees'])];
-    const pulled = await this.core.repo.getCheckpoint('pull:marketplace_finance');
+    const recent = await this.core.repo.getCheckpoint('pull:finance_recent');
+    const nightly = await this.core.repo.getCheckpoint('pull:marketplace_finance');
     const callouts: Callout[] = [MARKETPLACE_CALLOUT];
-    const through = pulled?.last_event_id?.replace(/^pull:/, '');
-    callouts.push({ kind: 'info', title: 'Fee income is updated daily', body: through ? `Fee income from finance is included through ${through}; later days are added overnight.` : 'Fee income from finance is added overnight; recent days may be missing.' });
+    // reports.pull-finance-recent brings fee income every 15 minutes; the nightly pull re-reads the last three days
+    const through = nightly?.last_event_id?.replace(/^pull:/, '');
+    if (recent?.last_event_at) callouts.push({ kind: 'info', title: 'Fee income is updated every 15 minutes', body: `Fee income from finance is included up to ${recent.last_event_at.toISOString()}; the last three days are read again overnight.` });
+    else callouts.push({ kind: 'info', title: 'Fee income is updated daily', body: through ? `Fee income from finance is included through ${through}; later days are added overnight.` : 'Fee income from finance is added overnight; recent days may be missing.' });
     return {
       kpis: [
         this.kpi('marketplace.seller_sales', this.gross(sales, cfg), c, prevSales ? this.gross(prevSales, cfg) : null),
@@ -1563,9 +1607,9 @@ export interface SellerDashboardData {
   definitions: MetricDefinition[];
 }
 
-const emptyAgg = (): SalesAgg => ({ key: null, gross: 0, tax: 0, cancelled: 0, refunded: 0, orders: 0, units: 0, costedSales: 0, cost: 0, buyers: 0, platformDiscount: 0, sellerDiscount: 0 });
-const zeros = (cols: string[]): Record<string, number> & { key: null } => ({ key: null, ...Object.fromEntries(cols.map((c) => [c, 0])) }) as never;
-const humanize = (s: string) => (s.charAt(0).toUpperCase() + s.slice(1)).replace(/_/g, ' ');
+export const emptyAgg = (): SalesAgg => ({ key: null, gross: 0, tax: 0, cancelled: 0, refunded: 0, orders: 0, units: 0, costedSales: 0, cost: 0, buyers: 0, platformDiscount: 0, sellerDiscount: 0, shipping: 0, fee: 0, costedPlatformDiscount: 0 });
+export const zeros = (cols: string[]): Record<string, number> & { key: null } => ({ key: null, ...Object.fromEntries(cols.map((c) => [c, 0])) }) as never;
+export const humanize = (s: string) => (s.charAt(0).toUpperCase() + s.slice(1)).replace(/_/g, ' ');
 
 function itemsLabel(items: { title?: string; quantity?: number }[]): string {
   const units = items.reduce((n, i) => n + (i.quantity ?? 1), 0);

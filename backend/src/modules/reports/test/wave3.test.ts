@@ -57,7 +57,9 @@ describe('company trading cost reports', () => {
     expect(kpi(r.body, 'trading.write_offs').value).toBe(2_500);
     expect(kpi(r.body, 'trading.chargeback_losses').value).toBe(0);
     expect(r.body.table.totals).toMatchObject({ return_losses: { amount: 5_000 }, write_offs: { amount: 2_500 } });
-    expect(r.body.series.map((s: any) => s.key)).toEqual(['return_losses', 'write_offs', 'chargeback_losses']);
+    // with a comparison every series has its :compare twin (docs/09 §3.3): yesterday's 20.00 on today's x
+    expect(r.body.series.map((s: any) => s.key)).toEqual(['return_losses', 'write_offs', 'chargeback_losses', 'return_losses:compare', 'write_offs:compare', 'chargeback_losses:compare']);
+    expect(r.body.series.find((s: any) => s.key === 'return_losses:compare').points).toEqual([{ x: d, y: 2_000, label: expect.any(String), compareX: shift(d, -1) }]);
     expect(r.body.unavailable).toEqual([]);
   });
 

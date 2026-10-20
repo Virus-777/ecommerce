@@ -11,6 +11,7 @@ import { FinanceRepository } from './repository.js';
 import { createDevPayoutProvider } from './providers/payouts.js';
 import { FinanceService } from './service.js';
 import { schemas } from './schema.js';
+import { mongoMigrations } from './migrations.js';
 
 /**
  * Finance: Seller money and company money kept apart: the seller ledger (proceeds, pending, available, held, negative and amounts owed), fee rules, holds, adjustments, payout runs and payouts, statements, payout-destination verification, daily reconciliation checks, and company trading margins separate from marketplace fee income.
@@ -20,8 +21,9 @@ import { schemas } from './schema.js';
  */
 export default defineModule({
   spec,
-  version: '2.0.0',
+  version: '2.1.0',
   schemas,
+  mongoMigrations,
   register(ctx) {
     // payout provider: the deterministic development provider until a real one is wired in its place
     const provider = createDevPayoutProvider(ctx.clock);

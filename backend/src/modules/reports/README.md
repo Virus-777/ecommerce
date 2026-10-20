@@ -34,7 +34,7 @@ Business reporting with stated meanings: metric definitions with a named owner a
 |---|---|---|---|---|
 | GET | `/api/seller/reports/dashboard` | Today at this seller: work tiles, dispatch deadlines, sales, payouts, performance, announcements | seller | `SellerDashboard` |
 | GET | `/api/seller/reports/catalogue` | Reports available to sellers | seller | `ReportDefinition[]` |
-| POST | `/api/seller/reports/reports/{key}/query` | Run a seller report (product sales, order trend, returns by reason, service performance) | seller<br>`reports.seller.view` | `ReportQuery` → `ReportResult` |
+| POST | `/api/seller/reports/reports/{key}/query` | Run a seller report (product sales, order trend, returns by reason, service performance, earnings and profit, profit by product) | seller<br>`reports.seller.view` | `ReportQuery` → `ReportResult` |
 | POST | `/api/seller/reports/exports` | Export a seller report as CSV _(audited, phase 2)_ | seller<br>`reports.seller.export` | `ExportInput` → `ExportJob` |
 | GET | `/api/seller/reports/exports` | My seller exports _(phase 2)_ | seller<br>`reports.seller.export` | Page<ExportJob> |
 | GET | `/api/seller/reports/exports/{id}` | Seller export status and link (requester only) _(phase 2)_ | seller<br>`reports.seller.export` | `ExportJob` |
@@ -191,7 +191,7 @@ Business reporting with stated meanings: metric definitions with a named owner a
 
 | Field | Type |
 |---|---|
-| preset | `enum(today|last_7_days|last_14_days|last_30_days|last_90_days|month_to_date|custom)?` |
+| preset | `enum(today|last_7_days|last_14_days|last_30_days|last_90_days|month_to_date|quarter_to_date|year_to_date|last_12_months|custom)?` Days ending today in market time; quarter_to_date from the first day of the calendar quarter, year_to_date from 1 January, last_12_months from the day after the same date last year (at most maxRangeDays) |
 | range | `DateRange?` |
 | dateBasis | `enum(placement|payment|shipment|completion)?` |
 | soldBy | `enum(all|official|marketplace)?` |
@@ -200,8 +200,8 @@ Business reporting with stated meanings: metric definitions with a named owner a
 | productId | `uuid?` |
 | currency | `string?` USD only at launch |
 | timeZone | `string?` |
-| granularity | `enum(day|week|month)?` |
-| compare | `enum(none|previous_period)?` |
+| granularity | `enum(day|week|month)?` Series buckets (weeks start on Monday). Default: day up to 31 days, week up to 92, month beyond |
+| compare | `enum(none|previous_period|same_period_last_year)?` previous_period: the same number of days just before the range; same_period_last_year: the same calendar dates one year earlier (29 February becomes 28 February). Gives KPI deltas, meta.compareRange and a <key>:compare twin of every series |
 | filters | `json?` Report-specific filters from FilterSpec |
 
 ### KpiValue
@@ -220,15 +220,15 @@ Business reporting with stated meanings: metric definitions with a named owner a
 
 | Field | Type |
 |---|---|
-| key | `string` |
+| key | `string` With a comparison, every series has a twin keyed <key>:compare |
 | label | `string` |
-| points | `json[]` { x: date, y: number } |
+| points | `json[]` { x: date (first day of the bucket), y: number, label } . On a <key>:compare twin x and label are the current period's bucket at the same position (so both draw on one axis), y is the comparison period's value (null when the comparison has no bucket there) and compareX is the comparison bucket's own first day |
 
 ### ReportResult
 
 | Field | Type |
 |---|---|
-| meta | `json` { reportKey, title, range, dateBasis, currency, timeZone, taxIncluded, freshAsOf, mayStillChange, definitionsVersion, compareRange?, scope: platform|seller } |
+| meta | `json` { reportKey, title, range, dateBasis, dateBasisLabel, currency, timeZone, taxIncluded, freshAsOf, mayStillChange, definitionsVersion, compare?: previous_period|same_period_last_year, compareRange? (the dates the :compare twins hold), granularity, scope: platform|seller } |
 | kpis | `KpiValue[]` |
 | series | `Series[]` |
 | split | `json[]?` { label, amount: Money, sharePct } e.g. Official Store vs marketplace sellers |
@@ -606,7 +606,8 @@ Indexes: `(requested_by_id, created_at desc)`, `(state, created_at)`, `(state, e
 | cancelled_minor | bigint |
 | refunded_minor | bigint |
 | last_refund_at | timestamptz? |
-| buying_cost_minor | bigint? (Official Store, from inventory.getUnitCost) |
+| buying_cost_minor | bigint? (unit cost × quantity at placed_at: Official Store items from inventory.getUnitCost, seller items from the seller's own offer cost, offers.unitCostsAt; null while unknown. Seller costs are private: only that seller's reports read them) |
+| fee_minor | bigint? (marketplace fee on the item net of fee refunds, from finance.itemFeesChangedSince; null until finance has booked the fee, always null on Official Store items) |
 | accepted_at | timestamptz? (order acceptance; rows recorded before pass 4 hold the placement time) |
 | group_id | uuid? (seller group of the order; payments.payment.captured is matched on it) |
 | fulfilled_by | text? (official_warehouse|seller|marketly_service) (the group's PlacedGroup.fulfilledBy from orders.order.placed; null for rows recorded before it was kept) |
@@ -661,6 +662,37 @@ Indexes: `(seller_id, requested_at)`, `(product_id, requested_at)`, `(requested_
 | owed_minor | bigint |
 | ad_charges_minor | bigint |
 | service_fees_minor | bigint (Fulfilled by Marketly fees charged less reversals) |
+| fee_gross_minor | bigint (marketplace fees charged that day, ledger marketplace_fee; from finance.ledgerDailyTotals like the six columns after it) |
+| fee_refunds_minor | bigint (fees given back, ledger fee_refund) |
+| refunds_minor | bigint (refunds taken from the seller, ledger refund and refund_after_payout) |
+| shipping_charged_minor | bigint (shipping credited to the seller, ledger shipping_charge) |
+| label_charges_minor | bigint (shipping labels charged to the seller less voids, ledger label_charge) |
+| adjustments_minor | bigint (signed: credits positive, debits negative; ledger adjustment and seller_credit) |
+| chargebacks_minor | bigint (payment disputes lost, ledger chargeback) |
+
+Indexes: `unique(seller_id, day)`, `(day)`
+
+**fact_company_daily**: Company money per market day from finance.companyDailyTotals: Official Store trading by kind (source trading), platform costs by kind (platform_cost) and coupon funding on marketplace seller items by funder (discount_funding)
+
+| Column | Type |
+|---|---|
+| day | date |
+| source | text (trading|platform_cost|discount_funding) |
+| kind | text |
+| amount_minor | bigint (signed as finance gives it) |
+
+Indexes: `unique(day, source, kind)`
+
+**fact_seller_balances_daily**: End-of-day seller balances from finance.sellerBalancesByDay (today: as of the last pull). A seller with nothing in any bucket that day has no row
+
+| Column | Type |
+|---|---|
+| seller_id | uuid |
+| day | date |
+| pending_minor | bigint |
+| available_minor | bigint |
+| held_minor | bigint |
+| owed_minor | bigint (owed by the seller: a negative available balance as a positive amount) |
 
 Indexes: `unique(seller_id, day)`, `(day)`
 
@@ -792,6 +824,7 @@ Indexes: `pk (kind, ref_id)`
 | Consumes | From | Does |
 |---|---|---|
 | `orders.order.placed` | orders | fact_order_items rows with placement date; fact_customers |
+| `offers.offer.cost_changed` | offers | Re-cost the seller's fact_order_items rows of that offer placed on or after effectiveFrom (unit cost in force at placed_at from offers.unitCostsAt × quantity, so rows after a later cost keep it). Seller costs stay private: only that seller's reports read them |
 | `orders.order.accepted` | orders | Mark items accepted (orders count from acceptance) |
 | `payments.payment.captured` | payments | Payment date basis |
 | `shipping.shipment.dispatched` | shipping | Shipment date basis; on-time dispatch in fact_service_daily, or in fact_marketly_fulfillment_daily when fulfilledBy is marketly_service (never in the seller's row) |
@@ -872,7 +905,8 @@ Indexes: `pk (kind, ref_id)`
 |---|---|---|
 | `reports.run-exports` | every 1 min | Run queued export jobs in batches: call the owner module's exportRows(dataset, filters, principal, cursor) until nextCursor is empty (report results come from runReport), drop columns the requester may not see, write the file to media; publish reports.export.ready |
 | `reports.expire-exports` | hourly | Expire ready exports after exportLinkHours and delete files |
-| `reports.pull-daily` | daily 02:30 market time | Pull figures that have no event: search.zeroResultStats (unavailable searches), finance fee income per seller and day (finance.marketplaceIncomeByDay), advertising displays/clicks/dismissals and attributed purchases (advertising.dailyPerformance), inventory unit costs for Official Store items |
+| `reports.pull-daily` | daily 02:30 market time | Pull figures that have no event: search.zeroResultStats (unavailable searches), finance fee income per seller and day (finance.marketplaceIncomeByDay) and the finance facts of the last 3 days (as reports.pull-finance-recent), advertising displays/clicks/dismissals and attributed purchases (advertising.dailyPerformance), inventory unit costs for Official Store items |
+| `reports.pull-finance-recent` | every 15 min | Pull today and yesterday from finance: ledger totals into fact_marketplace_finance_daily (finance.ledgerDailyTotals; fee income the same day), company money into fact_company_daily (finance.companyDailyTotals), end-of-day balances into fact_seller_balances_daily (finance.sellerBalancesByDay), and the item fees changed since the last run into fact_order_items.fee_minor (finance.itemFeesChangedSince; its cursor in read_model_checkpoints). Every pull sets values (safe to run twice) |
 | `reports.run-schedules` | every 15 min | Phase 2: run due schedules: re-check each staff recipient's permission, create one export job per remaining recipient (requested in their name) and publish reports.scheduled_report.ready (notifications sends the emails) |
 | `reports.check-lag` | every 5 min | Mark read models stale when their lag exceeds readModelMaxLagMinutes |
 

@@ -149,10 +149,10 @@ export class LedgerPart extends Part {
         // category fee rates apply to the product category at purchase (the order item's snapshot)
         const calc = calculate(rule, { categoryId: item.categoryId ?? null, itemPrice: item.lineSubtotal.amount, sellerDiscount: split.seller, platformDiscount: split.platform, shippingCharged: item.shippingShare.amount + shipPaid }, cur);
         const lotId = detId(`lot:${item.id}`);
-        await tx.insertIfAbsent('earnings_lots', { id: lotId, seller_id: sellerId, order_id: order.id, order_item_id: item.id, state: 'pending', gross: item.lineSubtotal.amount, fee: calc.fee.amount, net: 0, delivered_at: null, available_at: null, payout_id: null });
+        await tx.insertIfAbsent('earnings_lots', { id: lotId, seller_id: sellerId, order_id: order.id, order_item_id: item.id, state: 'pending', gross: item.lineSubtotal.amount, fee: calc.fee.amount, net: 0, delivered_at: null, available_at: null, payout_id: null, left_pending_at: null });
         const lot = (await tx.findOne('earnings_lots', { order_item_id: item.id }))!;
         if (lot.id !== lotId || lot.seller_id !== sellerId) continue;
-        await tx.insertIfAbsent('fee_charges', { id: detId(`fee:${item.id}`), order_item_id: item.id, seller_id: sellerId, rule_set_id: ruleRow.id, basis_amount: calc.feeBasis.amount, rate_bps: calc.rateBps, fee: calc.fee.amount, refunded_fee: 0, status: 'charged', created_at: at });
+        await tx.insertIfAbsent('fee_charges', { id: detId(`fee:${item.id}`), order_item_id: item.id, seller_id: sellerId, rule_set_id: ruleRow.id, basis_amount: calc.feeBasis.amount, rate_bps: calc.rateBps, fee: calc.fee.amount, refunded_fee: 0, status: 'charged', created_at: at, changed_at: at });
         const ref = { kind: 'order' as const, id: order.id, label: order.ref };
         const what = `${item.title}${item.variantLabel ? ` (${item.variantLabel})` : ''} × ${item.quantity}`;
         const entries: NewEntry[] = [
@@ -216,7 +216,7 @@ export class LedgerPart extends Part {
       }
       const posted = await this.core.post(tx, l.seller_id, entries, out);
       if (!posted.length) return;
-      if (charge && feeBack) await tx.update('fee_charges', charge.id, { refunded_fee: charge.refunded_fee + feeBack, status: charge.refunded_fee + feeBack >= charge.fee ? 'reversed' : charge.status });
+      if (charge && feeBack) await tx.update('fee_charges', charge.id, { refunded_fee: charge.refunded_fee + feeBack, status: charge.refunded_fee + feeBack >= charge.fee ? 'reversed' : charge.status, changed_at: this.now() });
       const fresh = (await tx.get('earnings_lots', l.id))!;
       const gross = Math.max(0, fresh.gross - itemAmount);
       await tx.update('earnings_lots', l.id, { gross, fee: fresh.fee - feeBack });
@@ -418,7 +418,7 @@ export class LedgerPart extends Part {
         if (!posted.length) return;
         // the customer's return shipping pays for the label Marketly bought (booked from returns.label.created)
         if (returnShipping) await this.platformCost(tx, `return_shipping:${e.refundId}:${item.orderItemId}`, { at: new Date(e.sentAt), kind: 'label', amount: -returnShipping, order_id: e.orderId, order_item_id: item.orderItemId, ref_kind: 'refund', ref_id: e.refundId });
-        if (charge && feeBack) await tx.update('fee_charges', charge.id, { refunded_fee: charge.refunded_fee + feeBack, status: charge.refunded_fee + feeBack >= charge.fee ? 'reversed' : charge.status });
+        if (charge && feeBack) await tx.update('fee_charges', charge.id, { refunded_fee: charge.refunded_fee + feeBack, status: charge.refunded_fee + feeBack >= charge.fee ? 'reversed' : charge.status, changed_at: this.now() });
         const fresh = (await tx.get('earnings_lots', l.id))!;
         const gross = Math.max(0, fresh.gross - itemAmount);
         await tx.update('earnings_lots', l.id, { gross, fee: fresh.fee - feeBack });

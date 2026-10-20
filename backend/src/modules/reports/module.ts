@@ -7,6 +7,7 @@ import { adminRoutes } from './http/admin.js';
 import { ReportsRepository } from './repository.js';
 import { ReportsService } from './service.js';
 import { schemas } from './schema.js';
+import { mongoMigrations } from './migrations.js';
 
 /**
  * Reports: Business reporting with stated meanings: metric definitions with a named owner and versions, a report catalogue grouped by business area, report queries with an explicit date basis, currency and time zone, the admin and seller dashboards, and authorized export jobs. All figures come from read models fed by other modules' events, never from their tables.
@@ -16,8 +17,9 @@ import { schemas } from './schema.js';
  */
 export default defineModule({
   spec,
-  version: '2.0.0',
+  version: '2.1.0',
   schemas,
+  mongoMigrations,
   register(ctx) {
     const service = new ReportsService({ repo: new ReportsRepository(ctx.mongo), ctx });
     ctx.provide(service);
@@ -28,6 +30,7 @@ export default defineModule({
 
     // Events this module reacts to (spec events.consumes)
     ctx.events.on("orders.order.placed", (e) => service.onOrderPlacedFromOrders(e.payload, e));
+    ctx.events.on("offers.offer.cost_changed", (e) => service.onCostChangedFromOffers(e.payload, e));
     ctx.events.on("orders.order.accepted", (e) => service.onOrderAcceptedFromOrders(e.payload, e));
     ctx.events.on("payments.payment.captured", (e) => service.onPaymentCapturedFromPayments(e.payload, e));
     ctx.events.on("shipping.shipment.dispatched", (e) => service.onShipmentDispatchedFromShipping(e.payload, e));
@@ -60,6 +63,7 @@ export default defineModule({
     ctx.jobs.handle("reports.run-exports", () => service.runExports());
     ctx.jobs.handle("reports.expire-exports", () => service.expireExports());
     ctx.jobs.handle("reports.pull-daily", () => service.pullDaily());
+    ctx.jobs.handle("reports.pull-finance-recent", () => service.pullFinanceRecent());
     ctx.jobs.handle("reports.run-schedules", () => service.runSchedules());
     ctx.jobs.handle("reports.check-lag", () => service.checkLag());
   },

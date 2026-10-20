@@ -2,16 +2,21 @@ import { orThrow } from '../../kernel/lib/or-throw.js';
 import type { PageRequest } from '../../kernel/lib/pagination.js';
 import type { Filter, ModuleStore, Table as MongoTable } from '../../kernel/mongo/index.js';
 import type { Page } from '../../spec/common.js';
-import type { CheckpointRow, DailyFilter, DailyTable, DatasetRow, GroupRow, JobRow, MetricRow, OrderItemFact, OwnerChangeRow, ReportRow, Row, SalesAgg, SalesFilter, SalesGroup, SavedViewRow, ScheduleRow, SuggestionRow, Table, VersionRow } from './ports.js';
+import type { CheckpointRow, DailyFilter, DailyTable, DatasetRow, GroupRow, JobRow, MetricRow, OfferProfitAgg, OrderItemFact, OwnerChangeRow, ReportRow, Row, SalesAgg, SalesFilter, SalesGroup, SavedViewRow, ScheduleRow, SuggestionRow, Table, VersionRow } from './ports.js';
 
 type Doc = Record<string, unknown>;
+
+/** The fact_marketplace_finance_daily columns filled from finance.ledgerDailyTotals (zero until pulled) */
+export const LEDGER_COLUMN_DEFAULTS = { fee_gross_minor: 0, fee_refunds_minor: 0, refunds_minor: 0, shipping_charged_minor: 0, label_charges_minor: 0, adjustments_minor: 0, chargebacks_minor: 0 };
 
 /** Key columns and counter defaults of the daily fact tables */
 const DAILY: Record<DailyTable, { key: string[]; defaults: Record<string, unknown> }> = {
   fact_marketplace_finance_daily: {
     key: ['seller_id', 'day'],
-    defaults: { seller_sales_minor: 0, fee_income_minor: 0, platform_discount_minor: 0, seller_discount_minor: 0, held_minor: 0, payouts_paid_minor: 0, payouts_failed: 0, owed_minor: 0, ad_charges_minor: 0, service_fees_minor: 0 },
+    defaults: { seller_sales_minor: 0, fee_income_minor: 0, platform_discount_minor: 0, seller_discount_minor: 0, held_minor: 0, payouts_paid_minor: 0, payouts_failed: 0, owed_minor: 0, ad_charges_minor: 0, service_fees_minor: 0, ...LEDGER_COLUMN_DEFAULTS },
   },
+  fact_company_daily: { key: ['day', 'source', 'kind'], defaults: { amount_minor: 0 } },
+  fact_seller_balances_daily: { key: ['seller_id', 'day'], defaults: { pending_minor: 0, available_minor: 0, held_minor: 0, owed_minor: 0 } },
   fact_marketly_fulfillment_daily: { key: ['seller_id', 'day'], defaults: { dispatched: 0, dispatched_on_time: 0, overdue: 0, delivery_exceptions: 0 } },
   fact_service_daily: {
     key: ['seller_id', 'day'],
@@ -33,6 +38,10 @@ const lit = (v: unknown) => ({ $literal: v });
  */
 const bucketOf = (date: unknown, unit: string, timezone: string) => ({
   $dateToString: { format: '%Y-%m-%d', timezone, date: { $dateTrunc: { date, unit, timezone, ...(unit === 'week' ? { startOfWeek: 'monday' } : {}) } } },
+});
+/** The first day (YYYY-MM-DD) of the day, week (from Monday) or month a `day` column falls in */
+const dayBucket = (unit: string) => ({
+  $dateToString: { format: '%Y-%m-%d', date: { $dateTrunc: { date: { $dateFromString: { dateString: '$day', format: '%Y-%m-%d' } }, unit, ...(unit === 'week' ? { startOfWeek: 'monday' } : {}) } } },
 });
 /** The market day of an instant ((<instant> at time zone tz)::date) */
 const dayOf = (field: string, timezone: string) => ({ $dateToString: { format: '%Y-%m-%d', date: `$${field}`, timezone } });
@@ -342,6 +351,11 @@ export class ReportsRepository {
     return rows.map((r) => r._id);
   }
 
+  /** A seller's rows of one offer placed at or after `since`, by order item id after `after` (re-costing on a cost change) */
+  sellerRowsOfOffer(sellerId: string, offerId: string, since: Date, after: string | null, limit: number): Promise<OrderItemFact[]> {
+    return this.#items.find({ seller_id: sellerId, placed_at: { $gte: since }, offer_id: offerId, owner_type: 'seller', ...(after ? { order_item_id: { $gt: after } } : {}) }, { sort: { order_item_id: 1 }, limit });
+  }
+
   officialItemsWithoutCost(since: Date, limit: number): Promise<OrderItemFact[]> {
     return this.#items.find({ owner_type: 'official', buying_cost_minor: null, placed_at: { $gte: since } }, { sort: { placed_at: -1 }, limit });
   }
@@ -349,11 +363,12 @@ export class ReportsRepository {
   async salesAgg(f: SalesFilter, group: SalesGroup, bucket: 'day' | 'week' | 'month' = 'day'): Promise<SalesAgg[]> {
     const key =
       group === 'bucket' ? bucketOf(`$${f.basis}`, bucket, f.timeZone) : group === 'customer' ? '$customer_key' : group === 'none' ? null : { $ifNull: [`$${group}`, null] };
-    const sums = ['gross', 'tax', 'cancelled', 'refunded', 'units', 'costed_sales', 'cost', 'platform_discount', 'seller_discount'];
+    const sums = ['gross', 'tax', 'cancelled', 'refunded', 'units', 'costed_sales', 'cost', 'platform_discount', 'seller_discount', 'shipping', 'fee', 'costed_platform_discount'];
     const reSum = (prefix: string) => Object.fromEntries(sums.map((s) => [s, { $sum: `$${prefix}${s}` }]));
     // count(distinct order_id) and count(distinct customer_key) without holding every id of a group in one
     // document: rows → (key, customer, order) → (key, customer) → key; an order has one customer
-    const rows = await this.#items.aggregate<{ _id: string | null; orders: number; buyers: number; gross: number; tax: number; cancelled: number; refunded: number; units: number; costed_sales: number; cost: number; platform_discount: number; seller_discount: number }>([
+    const costed = (value: string) => ({ $cond: [{ $eq: [{ $ifNull: ['$buying_cost_minor', null] }, null] }, 0, value] });
+    const rows = await this.#items.aggregate<{ _id: string | null; orders: number; buyers: number; gross: number; tax: number; cancelled: number; refunded: number; units: number; costed_sales: number; cost: number; platform_discount: number; seller_discount: number; shipping: number; fee: number; costed_platform_discount: number }>([
       {
         $match: this.#items.filter({
           [f.basis]: { $gte: f.start, $lt: f.end },
@@ -371,10 +386,13 @@ export class ReportsRepository {
           cancelled: { $sum: '$cancelled_minor' },
           refunded: { $sum: '$refunded_minor' },
           units: { $sum: '$quantity' },
-          costed_sales: { $sum: { $cond: [{ $eq: [{ $ifNull: ['$buying_cost_minor', null] }, null] }, 0, '$item_minor'] } },
+          costed_sales: { $sum: costed('$item_minor') },
           cost: { $sum: '$buying_cost_minor' },
           platform_discount: { $sum: '$discount_platform_minor' },
           seller_discount: { $sum: '$discount_seller_minor' },
+          shipping: { $sum: '$shipping_minor' },
+          fee: { $sum: '$fee_minor' },
+          costed_platform_discount: { $sum: costed('$discount_platform_minor') },
         },
       },
       { $group: { _id: { k: '$_id.k', c: '$_id.c' }, ...reSum(''), orders: { $sum: 1 } } },
@@ -394,10 +412,52 @@ export class ReportsRepository {
         buyers: r.buyers,
         platformDiscount: r.platform_discount,
         sellerDiscount: r.seller_discount,
+        shipping: r.shipping,
+        fee: r.fee,
+        costedPlatformDiscount: r.costed_platform_discount,
       }),
     );
-    if (group === 'none') return oneRow(out, { key: null, gross: 0, tax: 0, cancelled: 0, refunded: 0, orders: 0, units: 0, costedSales: 0, cost: 0, buyers: 0, platformDiscount: 0, sellerDiscount: 0 });
+    if (group === 'none') return oneRow(out, { key: null, gross: 0, tax: 0, cancelled: 0, refunded: 0, orders: 0, units: 0, costedSales: 0, cost: 0, buyers: 0, platformDiscount: 0, sellerDiscount: 0, shipping: 0, fee: 0, costedPlatformDiscount: 0 });
     return byKey(out);
+  }
+
+  /**
+   * Sales, refunds, fees and costs per seller offer (and its product) in a range on the date basis, the parts with a
+   * known cost apart: Profit by product, a seller's own report (the filter always names the seller)
+   */
+  async offerProfitAgg(f: SalesFilter): Promise<OfferProfitAgg[]> {
+    const costed = (value: unknown) => ({ $cond: [{ $eq: [{ $ifNull: ['$buying_cost_minor', null] }, null] }, 0, value] });
+    const itemSales = { $add: ['$item_minor', '$discount_platform_minor'] };
+    const refunds = { $add: ['$cancelled_minor', '$refunded_minor'] };
+    const fee = { $ifNull: ['$fee_minor', 0] };
+    const rows = await this.#items.aggregate<{ _id: { o: string; p: string }; units: number; itemSales: number; refunds: number; fee: number; cost: number; costedItemSales: number; costedRefunds: number; costedFee: number; rows: number; costedRows: number }>([
+      {
+        $match: this.#items.filter({
+          [f.basis]: { $gte: f.start, $lt: f.end },
+          ...(f.ownerType ? { owner_type: f.ownerType } : {}),
+          ...(f.sellerId ? { seller_id: f.sellerId } : {}),
+          ...(f.categoryId ? { category_id: f.categoryId } : {}),
+          ...(f.productId ? { product_id: f.productId } : {}),
+        }),
+      },
+      {
+        $group: {
+          _id: { o: '$offer_id', p: '$product_id' },
+          units: { $sum: '$quantity' },
+          itemSales: { $sum: itemSales },
+          refunds: { $sum: refunds },
+          fee: { $sum: fee },
+          cost: { $sum: '$buying_cost_minor' },
+          costedItemSales: { $sum: costed(itemSales) },
+          costedRefunds: { $sum: costed(refunds) },
+          costedFee: { $sum: costed(fee) },
+          rows: { $sum: 1 },
+          costedRows: { $sum: costed(1) },
+        },
+      },
+      { $sort: { itemSales: -1, '_id.o': 1 } },
+    ]);
+    return rows.map(({ _id, ...r }) => ({ offerId: _id.o, productId: _id.p, ...r }));
   }
 
   /** Cancellations by cancellation date */
@@ -577,11 +637,62 @@ export class ReportsRepository {
     if (Object.keys(update).length) await this.#service.updateOne({ seller_id: sellerId, day }, [{ $set: update }]);
   }
 
+  /**
+   * Replaces one day of a pulled fact table with what the source gave: each row's values set (upserted on its key),
+   * and the day's rows the source no longer gives deleted (a seller whose balances went to zero). Safe to run twice.
+   */
+  async replaceDay(table: 'fact_company_daily' | 'fact_seller_balances_daily', day: string, rows: Record<string, unknown>[]): Promise<void> {
+    const def = DAILY[table];
+    const t = this.#t(table);
+    for (const row of rows) await this.bumpDaily(table, Object.fromEntries(def.key.map((k) => [k, String(row[k])])), {}, Object.fromEntries(Object.entries(row).filter(([k]) => !def.key.includes(k))));
+    const keep = rows.map((r) => ({ $and: def.key.filter((k) => k !== 'day').map((k) => ({ [k]: r[k] })) }));
+    await t.deleteMany({ day, ...(keep.length ? { $nor: keep } : {}) });
+  }
+
+  /** fact_company_daily summed per (bucket or nothing, source, kind) over market days */
+  async companySums(from: string, to: string, group: 'bucket' | 'none', bucket: 'day' | 'week' | 'month' = 'day'): Promise<{ key: string | null; source: string; kind: string; amount: number }[]> {
+    const t = this.#t('fact_company_daily');
+    const key = group === 'bucket' ? dayBucket(bucket) : null;
+    const rows = await t.aggregate<{ _id: { k: string | null; s: string; kind: string }; amount: number }>([
+      { $match: t.filter({ day: { $gte: from, $lte: to } }) },
+      { $group: { _id: { k: key, s: '$source', kind: '$kind' }, amount: { $sum: '$amount_minor' } } },
+    ]);
+    return rows.map((r) => ({ key: r._id.k ?? null, source: r._id.s, kind: r._id.kind, amount: r.amount }));
+  }
+
+  /**
+   * Seller balances summed per day for the given days: owed to sellers (pending + available of each seller, never
+   * below zero), held, owed by sellers and how many sellers owe (fact_seller_balances_daily)
+   */
+  async balanceTotals(days: string[], sellerId?: string): Promise<{ day: string; owed: number; held: number; negative: number; negativeCount: number }[]> {
+    if (!days.length) return [];
+    const t = this.#t('fact_seller_balances_daily');
+    const rows = await t.aggregate<{ _id: string; owed: number; held: number; negative: number; negativeCount: number }>([
+      { $match: t.filter({ day: { $in: days }, ...(sellerId ? { seller_id: sellerId } : {}) }) },
+      {
+        $group: {
+          _id: '$day',
+          owed: { $sum: { $max: [0, { $add: ['$pending_minor', '$available_minor'] }] } },
+          held: { $sum: '$held_minor' },
+          negative: { $sum: '$owed_minor' },
+          negativeCount: { $sum: { $cond: [{ $gt: ['$owed_minor', 0] }, 1, 0] } },
+        },
+      },
+    ]);
+    return rows.map((r) => ({ day: r._id, owed: r.owed, held: r.held, negative: r.negative, negativeCount: r.negativeCount }));
+  }
+
+  /** Each seller's balance row of a day */
+  sellerBalancesOn(day: string, sellerIds: string[]): Promise<Row<'fact_seller_balances_daily'>[]> {
+    if (!sellerIds.length) return Promise.resolve([]);
+    return this.#t<Row<'fact_seller_balances_daily'>>('fact_seller_balances_daily').find({ day, seller_id: { $in: sellerIds } });
+  }
+
   async dailySums(table: DailyTable, f: DailyFilter, columns: string[], group: 'bucket' | 'seller_id' | 'product_id' | 'campaign' | 'query_norm' | 'none', bucket: 'day' | 'week' | 'month' = 'day'): Promise<({ key: string | null } & Record<string, number>)[]> {
     const daily = this.#t(table);
     const key =
       group === 'bucket'
-        ? { $dateToString: { format: '%Y-%m-%d', date: { $dateTrunc: { date: { $dateFromString: { dateString: '$day', format: '%Y-%m-%d' } }, unit: bucket, ...(bucket === 'week' ? { startOfWeek: 'monday' } : {}) } } } }
+        ? dayBucket(bucket)
         : group === 'campaign'
           ? { $concat: ['$campaign_kind', ':', '$campaign_id'] }
           : group === 'none'
