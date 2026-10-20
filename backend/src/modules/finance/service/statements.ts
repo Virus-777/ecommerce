@@ -6,6 +6,7 @@
  */
 import type { Principal } from '../../../kernel/auth/index.js';
 import { AppError } from '../../../kernel/errors/index.js';
+import { csvCell } from '../../../kernel/lib/csv.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
@@ -301,7 +302,8 @@ export class StatementsPart extends Part {
   }
 
   csv(st: Statement): string {
-    const q = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    // every cell quoted; text a spreadsheet would run as a formula (a seller's SKU…) is guarded (kernel csvCell)
+    const q = (v: unknown) => csvCell(v, { quote: true });
     const rows = [['section', 'date', 'reference', 'sku', 'description', 'basis', 'amount'].join(',')];
     for (const s of st.sections) for (const l of s.lines) rows.push([s.key, l.date ?? '', l.reference?.ref ?? l.reference?.id ?? '', l.sku ?? '', l.description, l.basis ? (l.basis.amount / 100).toFixed(2) : '', (l.amount.amount / 100).toFixed(2)].map(q).join(','));
     rows.push(['payout', '', st.payout?.ref ?? '', '', 'Payout', '', (st.reconciliation.payout.amount / 100).toFixed(2)].map(q).join(','));

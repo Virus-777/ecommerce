@@ -144,3 +144,19 @@ describe('small helpers', () => {
     expect(() => orThrow(null, 'thing')).toThrow('thing not found');
   });
 });
+
+describe('csvCell', () => {
+  it('guards text a spreadsheet would run as a formula, keeps negative numbers, quotes when needed', async () => {
+    const { csvCell, csvLine } = await import('./csv.js');
+    expect(csvCell('=HYPERLINK("http://x","click")')).toBe(`"'=HYPERLINK(""http://x"",""click"")"`);
+    expect(csvCell('+1')).toBe(`"'+1"`);
+    expect(csvCell('@SUM(A1)')).toBe(`"'@SUM(A1)"`);
+    expect(csvCell('-cmd')).toBe(`"'-cmd"`);
+    expect(csvCell('-12.50')).toBe('-12.50');
+    expect(csvCell('SKU-1')).toBe('SKU-1');
+    expect(csvCell('a,b')).toBe('"a,b"');
+    expect(csvCell(null)).toBe('');
+    expect(csvCell('x', { quote: true })).toBe('"x"');
+    expect(csvLine(['=1', 'ok', 2])).toBe(`"'=1",ok,2`);
+  });
+});

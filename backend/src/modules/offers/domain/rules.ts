@@ -2,6 +2,7 @@
  * Pure offer rules (no I/O): condition labels and groups, dispatch / return / warranty wording,
  * price-change maths, was-price checks, restriction scope, eligibility reasons and the featured-offer ranking.
  */
+import { csvLine } from '../../../kernel/lib/csv.js';
 import type * as common from '../../../spec/common.js';
 import type { FeaturedRuleParameters, IneligibilityReason, ReturnTerms, WarrantyInput, WarrantyTerms } from '../../../spec/offers.js';
 
@@ -362,12 +363,8 @@ export function parseCsv(text: string): string[][] {
   return rows.filter((r) => r.some((f) => f.trim() !== ''));
 }
 
-const csvCell = (v: unknown) => {
-  const s = v === null || v === undefined ? '' : String(v);
-  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-};
-
-export const toCsv = (rows: readonly (readonly unknown[])[]) => rows.map((r) => r.map(csvCell).join(',')).join('\n') + '\n';
+/** The bulk-update correction report: seller-supplied text (SKUs, notes) is guarded against formula injection (kernel csvCell) */
+export const toCsv = (rows: readonly (readonly unknown[])[]) => rows.map((r) => csvLine(r)).join('\n') + '\n';
 
 /** "24.00", "$24", "24" → 2400; null when not a number */
 export function parsePrice(raw: string): number | null {

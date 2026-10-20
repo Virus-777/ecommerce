@@ -10,6 +10,7 @@
  */
 import { AppError } from '../../../kernel/errors/index.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
+import { csvCell } from '../../../kernel/lib/csv.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import { secretFor } from '../../../kernel/lib/secrets.js';
@@ -197,7 +198,7 @@ export class GiftCards {
     const media = this.core.ctx.tryUse('media');
     if (media) {
       try {
-        const csv = ['code', ...plain].join('\n') + '\n';
+        const csv = ['code', ...plain].map((c) => csvCell(c)).join('\n') + '\n';
         const asset = await media.storeGeneratedFile({
           owner: { kind: 'staff', id: by.actor.kind === 'staff' ? (by.actor.id ?? null) : null, label: by.actor.name ?? null },
           fileName: `gift-cards-${batchId}.csv`,

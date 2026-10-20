@@ -3,6 +3,7 @@
  * JSON lines, and a minimal Office Open XML workbook (one sheet, inline strings, stored zip).
  */
 import { crc32 } from 'node:zlib';
+import { csvCell } from '../../../kernel/lib/csv.js';
 
 export interface ExportColumn {
   key: string;
@@ -48,12 +49,8 @@ export function cellText(v: unknown): string {
   return String(v);
 }
 
-/** Text that a spreadsheet would run as a formula is prefixed with ' (negative numbers stay numbers) */
-const FORMULA = /^(?:[=+@\t\r]|-(?![\d.]))/;
-const csvField = (raw: string) => {
-  const s = FORMULA.test(raw) ? `'${raw}` : raw;
-  return /[",\r\n']/.test(s) && (s !== raw || /[",\r\n]/.test(s)) ? `"${s.replace(/"/g, '""')}"` : s;
-};
+/** Text that a spreadsheet would run as a formula is prefixed with ' (negative numbers stay numbers): kernel csvCell */
+const csvField = (raw: string) => csvCell(raw);
 
 export function toCsv(columns: ExportColumn[], rows: unknown[]): Buffer {
   const lines = [columns.map((c) => csvField(c.label)).join(',')];
