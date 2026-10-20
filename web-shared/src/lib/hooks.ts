@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
 import { useSearchParams } from 'react-router';
 
 /**
@@ -111,6 +111,39 @@ export function useElementWidth<T extends HTMLElement>(): [RefObject<T | null>, 
     return () => ro.disconnect();
   }, []);
   return [ref, width];
+}
+
+/**
+ * Where to put a `position: fixed` panel (date pickers): under its anchor, above it when there is no room below,
+ * always inside the viewport. Hidden until placed, so it never flashes at the wrong spot; follows scroll and resize.
+ */
+export function usePopoverPosition(open: boolean, anchor: RefObject<HTMLElement | null>, pop: RefObject<HTMLElement | null>, gap = 6, edge = 8): CSSProperties {
+  const [pos, setPos] = useState<CSSProperties>({ visibility: 'hidden' });
+  useLayoutEffect(() => {
+    if (!open) {
+      setPos({ visibility: 'hidden' });
+      return;
+    }
+    const place = () => {
+      const r = anchor.current?.getBoundingClientRect();
+      const p = pop.current;
+      if (!r || !p) return;
+      const w = Math.min(p.offsetWidth, window.innerWidth - 2 * edge);
+      const h = p.offsetHeight;
+      const below = r.bottom + gap;
+      const top = below + h > window.innerHeight - edge && r.top - gap - h >= edge ? r.top - gap - h : Math.max(edge, Math.min(below, window.innerHeight - edge - h));
+      const left = Math.max(edge, Math.min(r.right - w, window.innerWidth - edge - w));
+      setPos({ top, left });
+    };
+    place();
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+    };
+  }, [open, anchor, pop, gap, edge]);
+  return pos;
 }
 
 /** `value` once it has stopped changing for `ms` (search boxes: one request after typing, not one per key). */

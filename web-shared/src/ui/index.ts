@@ -17,5 +17,21 @@ export { DateTimeField } from './DateTimeField';
 export { RichText, InlineHtml, DataTable, htmlToText, PlainLink, type ContentLink } from './RichText';
 export { LoadError, SkeletonLines, isForbidden } from './Loading';
 export { LineChart, BarChart, Legend, SplitBar } from './Charts';
+// Charts (docs/09 §4.1): Recharts styled with the chart tokens; one file per component under ./charts.
+export { TrendChart, type TrendChartProps } from './charts/TrendChart';
+export { BarsChart, type BarsChartProps } from './charts/BarsChart';
+export { ComboChart, type ComboChartProps } from './charts/ComboChart';
+export { WaterfallChart, toWaterfall, waterfallTable, type WaterfallStepInput, type WaterfallBar } from './charts/WaterfallChart';
+export { DonutChart, foldSlices, donutTable, type DonutSlice } from './charts/DonutChart';
+export { ShareBar, type SharePart } from './charts/ShareBar';
+export { ChartFrame, DataTableView, seriesTable, type ChartFrameProps, type ChartTable, type ChartTableColumn } from './charts/ChartFrame';
+export { ChartLegend, useHiddenSeries, type LegendItem } from './charts/ChartLegend';
+export { ChartTooltip, type TooltipLine } from './charts/ChartTooltip';
+export { seriesFromReport, rowsFrom, type ReportChartData, type ReportSeriesPick, type ReportLike } from './charts/seriesFromReport';
+export {
+  chartColor, seriesColor, compareKey, valueOf, hasCompare, changeText, fmtForUnit, fmtMoney, fmtMoneyCompact, fmtCount, fmtCountCompact, fmtPercent, fmtPercentCompact,
+  MAX_SERIES, COMPARE_COLOR, POSITIVE_COLOR, NEGATIVE_COLOR, type ChartRow, type ChartSeries, type Fmt,
+} from './charts/model';
+export { PeriodControl, usePeriod, type PeriodControlProps, type Period, type PeriodCompare, type PeriodGrain, type PeriodPreset, type PeriodQuery } from './PeriodControl';
 export { announce } from './announce';
 export { ToastStack, addToast, MAX_TOASTS, type ToastItem } from './ToastStack';

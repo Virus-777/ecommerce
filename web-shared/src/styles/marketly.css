@@ -987,32 +987,55 @@ button.toast-main:hover .t { text-decoration: underline; }
 .deadline.t-warning { color: var(--warning); }
 .deadline.t-ok { color: var(--text-2); }
 
-/* ---- Charts ---- */
-.chart { width: 100%; display: block; overflow: visible; }
-.chart text { fill: var(--chart-axis); font-size: var(--fs-2xs); font-family: var(--font-ui); font-variant-numeric: tabular-nums; }
-.chart .grid-line { stroke: var(--chart-grid); stroke-width: 1; }
-.chart .s1 { stroke: var(--chart-1); fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
-.chart .s2 { stroke: var(--chart-2); fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
-.chart .a1 { fill: var(--chart-1); opacity: 0.12; stroke: none; }
-.chart .b1 { fill: var(--chart-1); }
-.chart .b2 { fill: var(--chart-2); }
-.chart .end1 { fill: var(--chart-1); stroke: var(--surface); stroke-width: 2; }
-.chart .end2 { fill: var(--chart-2); stroke: var(--surface); stroke-width: 2; }
-.chart .hit { fill: transparent; }
-.chart .hit:hover + .tip, .chart g.hov:hover .tip { opacity: 1; }
-.chart g.hov .tip { opacity: 0; transition: opacity var(--dur-fast) var(--ease); pointer-events: none; }
-.chart g.hov .tip rect { fill: var(--text); }
-.chart g.hov .tip text { fill: var(--text-inverse); font-weight: var(--fw-semibold); }
-.chart g.hov:hover .bar-hl { opacity: 0.85; }
+/* ---- Charts (web-shared/src/ui/charts: Recharts + chart tokens) ---- */
+.chart { width: 100%; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.chart .recharts-surface { overflow: visible; }
+.chart .recharts-wrapper:focus, .chart .recharts-surface:focus { outline: none; }
+.chart .recharts-wrapper:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--r-sm); }
+.chart text { font-family: var(--font-ui); font-variant-numeric: tabular-nums; }
+/* series key: a short line, a dashed line (comparison) or a square, in the series colour (--key) */
+.chart-key { display: inline-block; flex: none; width: 14px; height: 0; border-top: 2px solid var(--key); border-radius: 1px; }
+.chart-key.is-dash { border-top-style: dashed; }
+.chart-key.is-rect { width: 10px; height: 10px; border: 0; background: var(--key); border-radius: var(--r-2xs); }
+.chart-legend { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); font-size: var(--fs-xs); color: var(--text-2); }
+.chart-legend-item { display: inline-flex; align-items: center; gap: var(--sp-1-5); min-height: 28px; padding: 0 var(--sp-1); margin: 0 calc(-1 * var(--sp-1)); border: 0; border-radius: var(--r-sm); background: none; color: inherit; font: inherit; text-align: left; }
+button.chart-legend-item { cursor: pointer; }
+button.chart-legend-item:hover { background: var(--surface-2); }
+.chart-legend-item.is-off { color: var(--text-3); text-decoration: line-through; }
+.chart-legend-item.is-off .chart-key { opacity: 0.35; }
+.chart-legend-note { color: var(--text-3); font-variant-numeric: tabular-nums; }
+.chart-tip { min-width: 150px; max-width: 260px; padding: var(--sp-2) var(--sp-3); background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: var(--sh-2); font-size: var(--fs-xs); color: var(--text-2); display: flex; flex-direction: column; gap: var(--sp-1); pointer-events: none; }
+.chart-tip-h { font-weight: var(--fw-semibold); color: var(--text); }
+.chart-tip-row { display: flex; align-items: center; gap: var(--sp-1-5); font-variant-numeric: tabular-nums; }
+.chart-tip-row b { color: var(--text); font-weight: var(--fw-bold); }
+.chart-tip-row.is-compare { color: var(--text-3); padding-left: 0; }
+.chart-frame .card-head { flex-wrap: wrap; gap: var(--sp-2); }
+.chart-frame-actions { flex-wrap: wrap; }
+.chart-frame-body.is-refreshing { opacity: 0.55; transition: opacity var(--dur-fast) var(--ease); }
+.chart-empty { margin: 0; padding: var(--sp-6) 0; text-align: center; }
+.chart-steps-key { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); margin: 0; }
+.chart-steps-key > span { display: inline-flex; align-items: center; gap: var(--sp-1-5); }
+.chart-donut-plot { position: relative; }
+.chart-donut-total { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; text-align: center; }
+.chart-donut-total b { font-size: var(--fs-lg); color: var(--text); }
+.chart-share { display: flex; flex-direction: column; gap: var(--sp-2); }
+.chart-share-bar { display: flex; height: 10px; gap: 2px; border-radius: var(--r-pill); overflow: hidden; background: var(--surface-2); }
+.chart-share-bar i { display: block; height: 100%; }
+.chart-share-key { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--sp-1) var(--sp-4); color: var(--text-2); }
+.chart-share-key > span { display: inline-flex; align-items: center; gap: var(--sp-1-5); }
+/* period control: preset, dates, grain, comparison in one wrapping row (phones: two rows) */
+.period-control { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); min-width: 0; }
+.period-control .select { width: auto; max-width: 100%; }
+.period-range { white-space: nowrap; }
+.period-dates .dtp-field { min-height: var(--ctl-sm); }
+.period-dates .dtp-trigger { height: var(--ctl-sm); font-size: var(--fs-sm); }
+.period-grain > button:disabled { opacity: 0.45; cursor: not-allowed; }
+.dtp-pop .rdp-range_middle .rdp-day_button { background: none; color: var(--text); }
+.dtp-pop .rdp-range_start .rdp-day_button, .dtp-pop .rdp-range_end .rdp-day_button { color: var(--on-brand); }
+/* .legend: small colour keys outside charts (account order packages) */
 .legend { display: flex; gap: var(--sp-4); flex-wrap: wrap; font-size: var(--fs-xs); color: var(--text-2); }
 .legend span { display: inline-flex; align-items: center; gap: var(--sp-1-5); }
 .legend i { width: 10px; height: 10px; border-radius: var(--r-2xs); display: inline-block; }
-.legend i.l1 { background: var(--chart-1); }
-.legend i.l2 { background: var(--chart-2); }
-.splitbar { display: flex; height: 10px; border-radius: var(--r-pill); overflow: hidden; gap: var(--sp-0-5); background: var(--surface); }
-.splitbar i { display: block; height: 100%; }
-.splitbar i.l1 { background: var(--chart-1); }
-.splitbar i.l2 { background: var(--chart-2); }
 
 @media (prefers-reduced-motion: reduce) {
   .app *, .app *::before, .app *::after { transition: none !important; animation: none !important; }
