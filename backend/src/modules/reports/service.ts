@@ -1,8 +1,8 @@
+import { actorOfPrincipal } from '../../kernel/auth/index.js';
 import { stringList } from '../../kernel/lib/text.js';
 import type { EventPayload } from '../../kernel/events/index.js';
 import { newId } from '../../kernel/lib/ids.js';
 import type * as common from '../../spec/common.js';
-import type { Actor } from '../../spec/common.js';
 import type * as identity from '../../spec/identity.js';
 import type { AdminDashboard, ExportDataset, ExportJob, MetricDefinition, ReportQuery, ReportResult, ReportsPublicApi, SellerDashboard } from '../../spec/reports.js';
 import { nextRun, periodLabel } from './domain/rules.js';
@@ -15,8 +15,6 @@ import { ReadModels, type Env } from './service/readmodels.js';
 
 export type { ReportsServiceDeps, Caller };
 
-/** The actor of a principal calling in-process (another module's export endpoint) */
-export const actorOfPrincipal = (p: identity.Principal & { name?: string | null }): Actor => ({ kind: p.kind, id: p.accountId ?? null, ...(p.name ? { name: p.name } : {}) });
 
 /** Events delivered straight to a consumer (tests) get an envelope of their own */
 const envOf = (e?: Partial<Env>): Env => ({ id: e?.id ?? newId(), at: e?.at ?? new Date().toISOString() });

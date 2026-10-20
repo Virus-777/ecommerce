@@ -1,3 +1,4 @@
+import { actorOfPrincipal } from '../../kernel/auth/index.js';
 import { isIP } from 'node:net';
 import { createHash } from 'node:crypto';
 import type { Readable } from 'node:stream';
@@ -1699,10 +1700,6 @@ function categoryOf(row: AssetRow): audit.RecordInput['category'] {
 
 const snapshot = (r: AssetRow) => ({ status: r.status, purpose: r.purpose, owner: { kind: r.owner_kind, id: r.owner_id }, removedReason: r.removed_reason, showPlaceholder: r.show_placeholder });
 
-function actorOfPrincipal(p: identity.Principal): common.Actor {
-  if (p.kind === 'visitor') return { kind: 'visitor', id: p.guestSessionId ?? p.sessionId ?? null };
-  return { kind: p.kind, id: p.accountId ?? null };
-}
 
 function formatOfRow(row: AssetRow): string {
   return fileTypeOf(row.content_type, row.file_name) ?? row.content_type.split('/')[1] ?? 'unknown';
