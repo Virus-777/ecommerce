@@ -18,6 +18,7 @@ import type {
   FeaturedRule,
   IneligibilityReason,
   Offer,
+  OfferCost,
   OfferShipping,
   OfferStatusEntry,
   PricePoint,
@@ -26,7 +27,7 @@ import type {
   WarrantyTerms,
 } from '../../spec/offers.js';
 import { changePct as changePctOf, compareAtExplanation, dispatchLabel, reason, returnSummary, warrantyTerms } from './domain/rules.js';
-import type { BulkJobRec, BulkRowRec, EligibilityRec, OfferRec, PriceHistoryRec, RuleRec, StatusLogRec } from './ports.js';
+import type { BulkJobRec, BulkRowRec, CostRec, EligibilityRec, OfferRec, PriceHistoryRec, RuleRec, StatusLogRec } from './ports.js';
 
 /** The Official Store's display name wherever a seller name is shown */
 export const OFFICIAL_NAME = OFFICIAL_STORE_NAME;
@@ -246,7 +247,7 @@ export function statusEntry(l: StatusLogRec): OfferStatusEntry {
   return { from: l.from_status, to: l.to_status, event: l.event, reasonCode: l.reason_code, reason: l.reason, actor: actorOf(l.actor_kind, l.actor_id), at: isoReq(l.at) };
 }
 
-export const EMPTY_TOTALS: BulkUpdateTotals = { rows: 0, ready: 0, errors: 0, unchanged: 0, priceChanges: 0, stockChanges: 0, pendingApproval: 0, applied: 0, skipped: 0 };
+export const EMPTY_TOTALS: BulkUpdateTotals = { rows: 0, ready: 0, errors: 0, unchanged: 0, priceChanges: 0, stockChanges: 0, costChanges: 0, pendingApproval: 0, applied: 0, skipped: 0 };
 
 /** totals jsonb also keeps the Official Store file's reason (`reason`), which is not part of the API totals */
 export function totalsOf(j: BulkJobRec): BulkUpdateTotals {
@@ -289,10 +290,27 @@ export function bulkRow(r: BulkRowRec, currency: string, productLabel: string | 
     priceTo: r.price_to !== null ? money(r.price_to, currency) : null,
     quantityFrom: r.qty_from,
     quantityTo: r.qty_to,
+    // rows saved before unit costs existed have no cost columns
+    unitCostFrom: r.cost_from != null ? money(r.cost_from, currency) : null,
+    unitCostTo: r.cost_to != null ? money(r.cost_to, currency) : null,
     result: r.result as BulkUpdateRow['result'],
     error: r.error_code ? ({ code: r.error_code as BulkRowError['code'], message: r.error_message ?? '' } satisfies BulkRowError) : null,
     changePct,
     largeChange,
+  };
+}
+
+/** A seller's unit cost row (offer_costs) */
+export function offerCost(r: CostRec): OfferCost {
+  return {
+    id: r.id,
+    offerId: r.offer_id,
+    productId: r.product_id,
+    unitCost: money(r.unit_cost_minor, r.currency),
+    effectiveFrom: r.effective_from,
+    note: r.note,
+    setBy: { id: r.set_by_id, name: r.set_by_name },
+    createdAt: isoReq(r.created_at),
   };
 }
 

@@ -19,7 +19,7 @@ import { schemas } from './schema.js';
  */
 export default defineModule({
   spec,
-  version: '2.0.0',
+  version: '2.0.1',
   schemas,
   register(ctx) {
     // KYC/KYB, payout tokenisation and address checks: deterministic dev adapters until real providers are wired

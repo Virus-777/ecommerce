@@ -4,6 +4,7 @@ import type * as identity from '../../spec/identity.js';
 import type { FeaturedDecision, Offer, OfferChange, OfferComparison, OfferSnapshot, OfferSummary, OffersPublicApi, OfferView, VariantAvailability } from '../../spec/offers.js';
 import { BulkPart } from './service/bulk.js';
 import { Core, type OffersServiceDeps } from './service/core.js';
+import { CostsPart } from './service/costs.js';
 import { EnforcementPart } from './service/enforcement.js';
 import { FeaturedPart } from './service/featured.js';
 import { ManagePart } from './service/manage.js';
@@ -27,6 +28,7 @@ export class OffersService implements OffersPublicApi {
   readonly enforcement: EnforcementPart;
   readonly views: ViewsPart;
   readonly bulk: BulkPart;
+  readonly costs: CostsPart;
 
   constructor(deps: OffersServiceDeps) {
     this.core = new Core(deps);
@@ -37,7 +39,8 @@ export class OffersService implements OffersPublicApi {
     this.enforcement = new EnforcementPart(this.core);
     this.views = new ViewsPart(this.core);
     this.bulk = new BulkPart(this.core);
-    this.core.parts = { manage: this.manage, pricing: this.pricing, storefront: this.storefront, featured: this.featured, enforcement: this.enforcement, views: this.views, bulk: this.bulk };
+    this.costs = new CostsPart(this.core);
+    this.core.parts = { manage: this.manage, pricing: this.pricing, storefront: this.storefront, featured: this.featured, enforcement: this.enforcement, views: this.views, bulk: this.bulk, costs: this.costs };
   }
 
   /* ---------------- public API (in-process) */
@@ -145,6 +148,11 @@ export class OffersService implements OffersPublicApi {
 
   exportRows(dataset: string, filters: unknown, principal: identity.Principal, cursor?: string): Promise<{ rows: unknown[]; nextCursor?: string }> {
     return this.views.exportRows(dataset, filters, principal, cursor);
+  }
+
+  /** The seller's unit cost in force for each offer at each time, in the order given (null without one); one query */
+  unitCostsAt(items: { offerId: string; at: string }[]): Promise<(common.Money | null)[]> {
+    return this.costs.costsAt(items);
   }
 
   /* ---------------- events consumed */

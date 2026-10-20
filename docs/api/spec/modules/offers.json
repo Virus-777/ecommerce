@@ -19,7 +19,8 @@
     "Featured-offer rule (versioned, published), eligibility and ineligibility reasons, featured-offer selection per variant and delivery zone",
     "Comparable totals per delivery location for the purchase box and the all-offers page",
     "Seller and Official Store bulk price and quantity file updates with preview and correction report",
-    "Frozen offer snapshots for order items (seller, condition, price, terms accepted at purchase)"
+    "Frozen offer snapshots for order items (seller, condition, price, terms accepted at purchase)",
+    "Seller unit costs per offer with history (offer_costs, doc 09 §3.1): private to the seller, read by reports for product cost and profit"
   ],
   "notOwns": [
     "Shared product content (title, specs, included items, variants): catalog",
@@ -265,6 +266,14 @@
       "usedBy": [
         "reports"
       ]
+    },
+    {
+      "name": "unitCostsAt",
+      "signature": "(items: { offerId: uuid, at: datetime }[]) => (Money | null)[]",
+      "desc": "The seller's unit cost in force for each offer at each time, in the same order as items: the offer_costs row with the latest effective_from on or before the market day of `at` (ties: the latest created_at). null when the offer has no cost for that day (or is unknown). Batched: one database query per call, however many items. Costs are private to the seller: callers use them only for the seller's own figures (reports: product cost and profit), never in staff views.",
+      "usedBy": [
+        "reports"
+      ]
     }
   ],
   "types": {
@@ -349,7 +358,58 @@
       },
       "publishedAt": "datetime?",
       "createdAt": "datetime",
-      "updatedAt": "datetime"
+      "updatedAt": "datetime",
+      "unitCost": {
+        "type": "Money?",
+        "desc": "Seller views only (Seller Center offer detail and the offer write responses): the seller's unit cost in force today (offer_costs), null when none is set. Never filled for customers or staff: a seller's costs are private"
+      },
+      "unitCostFrom": {
+        "type": "date?",
+        "desc": "Seller views only: the market day unitCost took effect"
+      }
+    },
+    "OfferCost": {
+      "id": "uuid",
+      "offerId": "uuid",
+      "productId": "uuid",
+      "unitCost": "Money",
+      "effectiveFrom": {
+        "type": "date",
+        "desc": "Market day the cost starts. It applies to sales from that day until the next later cost of the offer"
+      },
+      "note": {
+        "type": "text?",
+        "desc": "e.g. 'new supplier'"
+      },
+      "setBy": "OfferCostSetter",
+      "createdAt": "datetime"
+    },
+    "OfferCostSetter": {
+      "id": {
+        "type": "uuid?",
+        "desc": "The seller member's account"
+      },
+      "name": "string"
+    },
+    "OfferCostItem": {
+      "offerId": "uuid",
+      "unitCost": {
+        "type": "Money",
+        "desc": "Zero or more, in the offer's currency"
+      },
+      "effectiveFrom": {
+        "type": "date?",
+        "desc": "Default today (market day); at most 400 days back and 1 day ahead"
+      },
+      "note": "text?"
+    },
+    "OfferCostError": {
+      "offerId": "uuid",
+      "code": {
+        "type": "enum(NOT_FOUND|VALIDATION_FAILED)",
+        "desc": "NOT_FOUND: not one of this seller's offers; VALIDATION_FAILED: see message"
+      },
+      "message": "string"
     },
     "CompareAtPrice": {
       "amount": "Money",
@@ -854,6 +914,10 @@
       "contentGaps": {
         "type": "enum(images|identifiers)[]",
         "desc": "Missing product content shown under the name (e.g. 'Missing images and identifiers'); empty when complete"
+      },
+      "unitCost": {
+        "type": "Money?",
+        "desc": "The seller's unit cost in force today (the products list column); null when none is set. Private to the seller"
       }
     },
     "SellerOfferDetail": {
@@ -969,6 +1033,10 @@
       "unchanged": "int",
       "priceChanges": "int",
       "stockChanges": "int",
+      "costChanges": {
+        "type": "int",
+        "desc": "Seller files: rows that set a new unit cost (unit_cost column)"
+      },
       "pendingApproval": "int",
       "applied": "int",
       "skipped": "int"
@@ -982,6 +1050,14 @@
       "priceTo": "Money?",
       "quantityFrom": "int?",
       "quantityTo": "int?",
+      "unitCostFrom": {
+        "type": "Money?",
+        "desc": "Seller files: the unit cost in force when the file was read"
+      },
+      "unitCostTo": {
+        "type": "Money?",
+        "desc": "Seller files: the unit cost the row sets, effective today (null when the row leaves the cost as it is)"
+      },
       "result": "enum(ready|error|unchanged|applied|skipped|pending_approval)",
       "error": "BulkRowError?",
       "changePct": {
@@ -995,7 +1071,7 @@
     },
     "BulkRowError": {
       "code": {
-        "type": "enum(unknown_sku|negative_quantity|price_below_minimum|price_missing|price_change_too_large|offer_removed|not_a_number|duplicate_row)",
+        "type": "enum(unknown_sku|negative_quantity|price_below_minimum|price_missing|price_change_too_large|offer_removed|not_a_number|duplicate_row|unit_cost_invalid)",
         "desc": "Stable code"
       },
       "message": {
@@ -1405,6 +1481,8 @@
         "price_to": "bigint?",
         "qty_from": "int?",
         "qty_to": "int?",
+        "cost_from": "bigint? (unit cost in force when the file was read; seller files)",
+        "cost_to": "bigint? (unit cost the row sets, effective on the day it is applied)",
         "result": "text",
         "error_code": "text?",
         "error_message": "text?"
@@ -1412,6 +1490,27 @@
       "indexes": [
         "pk (job_id, row_no)",
         "(job_id, result, row_no)"
+      ]
+    },
+    {
+      "name": "offer_costs",
+      "desc": "The seller's unit cost per offer (doc 09 §3.1): one row per cost the seller sets, never edited. The cost for a market day is the row with the latest effective_from on or before it (ties: the latest created_at). Private to the seller: no staff view shows it",
+      "columns": {
+        "id": "uuid pk",
+        "offer_id": "uuid → offers",
+        "seller_id": "uuid",
+        "product_id": "uuid",
+        "unit_cost_minor": "bigint (≥ 0, minor units)",
+        "currency": "text (the offer's currency)",
+        "effective_from": "date (market day the cost starts; at most 400 days back, 1 day ahead)",
+        "note": "text?",
+        "set_by_id": "uuid? (seller member account)",
+        "set_by_name": "text (name shown in the history)",
+        "created_at": "timestamptz"
+      },
+      "indexes": [
+        "(offer_id, effective_from desc, created_at desc)",
+        "(seller_id, created_at desc)"
       ]
     }
   ],
@@ -2050,6 +2149,88 @@
       ]
     },
     {
+      "id": "listOfferCosts",
+      "area": "seller",
+      "method": "GET",
+      "path": "/offers/{id}/costs",
+      "summary": "Unit cost history of one own offer, newest first",
+      "desc": "Newest effective_from first (ties: newest saved first). Any member who may see the offer may read it. Another seller's offer is NOT_FOUND.",
+      "auth": "seller",
+      "params": {
+        "id": "uuid"
+      },
+      "paging": true,
+      "response": "OfferCost",
+      "errors": [
+        "NOT_FOUND"
+      ],
+      "screens": [
+        "seller/offer"
+      ]
+    },
+    {
+      "id": "setOfferCost",
+      "area": "seller",
+      "method": "PUT",
+      "path": "/offers/{id}/cost",
+      "summary": "Set the unit cost of one own offer from a day on",
+      "desc": "Adds a cost row (rows are never edited; a later row for the same day wins). unitCost ≥ 0 in the offer's currency; effectiveFrom defaults to today (market day), at most 400 days back (so old sales get a cost) and at most 1 day ahead. Publishes offers.offer.cost_changed.",
+      "auth": "seller",
+      "permission": "offers.costs.manage",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "unitCost": "Money",
+        "effectiveFrom": {
+          "type": "date?",
+          "desc": "Default today (market day)"
+        },
+        "note": "text?"
+      },
+      "response": "OfferCost",
+      "errors": [
+        "NOT_FOUND",
+        "VALIDATION_FAILED"
+      ],
+      "events": [
+        "offers.offer.cost_changed"
+      ],
+      "audited": true,
+      "screens": [
+        "seller/offer",
+        "seller/products"
+      ]
+    },
+    {
+      "id": "setOfferCosts",
+      "area": "seller",
+      "method": "POST",
+      "path": "/costs",
+      "summary": "Set the unit cost of several own offers (1 to 500)",
+      "desc": "Same rules as PUT /offers/{id}/cost for each item; each item is saved or refused on its own (errors lists the refused ones with NOT_FOUND or VALIDATION_FAILED). One offers.offer.cost_changed per saved row. An empty or longer list is VALIDATION_FAILED.",
+      "auth": "seller",
+      "permission": "offers.costs.manage",
+      "body": {
+        "items": "OfferCostItem[]"
+      },
+      "response": {
+        "saved": "int",
+        "errors": "OfferCostError[]"
+      },
+      "errors": [
+        "VALIDATION_FAILED"
+      ],
+      "events": [
+        "offers.offer.cost_changed"
+      ],
+      "audited": true,
+      "screens": [
+        "seller/products",
+        "seller/bulk-update"
+      ]
+    },
+    {
       "id": "exportOwnOffers",
       "area": "seller",
       "method": "POST",
@@ -2100,7 +2281,7 @@
       "method": "GET",
       "path": "/bulk-updates/template",
       "summary": "Download a CSV template prefilled with this seller's SKUs, prices and quantities",
-      "desc": "Columns: seller_sku, price, quantity. Leaving a column out keeps the current value.",
+      "desc": "Columns: seller_sku, price, quantity, unit_cost (the unit cost in force today, empty when none is set). Leaving a column out, or a cell empty, keeps the current value.",
       "auth": "seller",
       "permission": "offers.bulk.update",
       "response": "FileLink",
@@ -2190,7 +2371,7 @@
       "method": "POST",
       "path": "/bulk-updates/{id}/apply",
       "summary": "Apply the valid rows",
-      "desc": "Prices are changed here; quantities go to inventory as adjustments with reason 'Bulk update', the job id and the caller's name. Error rows are skipped.",
+      "desc": "Prices are changed here; quantities go to inventory as adjustments with reason 'Bulk update', the job id and the caller's name; unit costs are saved effective today (offers.offer.cost_changed per row). Rows that change a unit cost need offers.costs.manage as well (FORBIDDEN, nothing applied). Error rows are skipped.",
       "auth": "seller",
       "permission": "offers.bulk.update",
       "params": {
@@ -2204,11 +2385,13 @@
       "errors": [
         "ILLEGAL_TRANSITION",
         "BULK_JOB_EXPIRED",
-        "LARGE_PRICE_CHANGE_UNCONFIRMED"
+        "LARGE_PRICE_CHANGE_UNCONFIRMED",
+        "FORBIDDEN"
       ],
       "events": [
         "offers.bulk_update.applied",
-        "offers.offer.price_changed"
+        "offers.offer.price_changed",
+        "offers.offer.cost_changed"
       ],
       "screens": [
         "seller/bulk-update"
@@ -2930,6 +3113,20 @@
           "skipped": "int",
           "pendingApproval": "int"
         }
+      },
+      {
+        "name": "offers.offer.cost_changed",
+        "when": "A seller saves a unit cost for an offer (PUT /offers/{id}/cost, POST /costs, a bulk file's unit_cost column): once per saved row, after the commit",
+        "payload": {
+          "offerId": "uuid",
+          "sellerId": "uuid",
+          "productId": "uuid",
+          "unitCost": "Money",
+          "effectiveFrom": {
+            "type": "date",
+            "desc": "The cost applies to sales from this market day until the offer's next later cost"
+          }
+        }
       }
     ],
     "consumes": [
@@ -3026,6 +3223,11 @@
       "key": "offers.prices.manage",
       "audience": "seller",
       "desc": "Change own offer prices"
+    },
+    {
+      "key": "offers.costs.manage",
+      "audience": "seller",
+      "desc": "Set own offers' unit costs (private to the seller; used for profit figures)"
     },
     {
       "key": "offers.bulk.update",
