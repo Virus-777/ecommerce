@@ -15,8 +15,8 @@ import type { KpiValue } from '../../../spec/reports.js';
 import { metricSeed } from '../domain/catalogue.js';
 import { addDays, bucketsOf, dayLabel, displayMoney, marketDay, pct, type DayRange, type Granularity } from '../domain/rules.js';
 import type { SalesAgg } from '../ports.js';
-import type { ReportsCore } from './core.js';
-import { col, emptyAgg, humanize, zeros, type Callout, type Part, type Queries, type ReportScope, type ResolvedQuery, type TableColumn } from './queries.js';
+import type { ReportsCore, Settings } from './core.js';
+import { BASIS_LABEL, col, emptyAgg, grossMarginOf, humanize, zeros, type Callout, type Part, type Queries, type ReportScope, type ResolvedQuery, type TableColumn } from './queries.js';
 
 type Figures = Record<string, number>;
 
@@ -75,17 +75,25 @@ type CompanyRow = { source: string; kind: string; amount: number };
 const sumOf = (rows: CompanyRow[], source: string, kind?: string) => rows.filter((r) => r.source === source && (!kind || r.kind === kind)).reduce((n, r) => n + r.amount, 0);
 
 /**
- * Official Store trading by booking day (fact_company_daily, source trading; kinds as finance stores them), the same
- * arithmetic as finance's trading summary (GET /api/admin/finance/trading)
+ * The Official Store profit and loss of a period, from two sources:
+ * - sales, cost of goods sold and gross margin from the order facts (order date), exactly as the Official Store
+ *   margin report (trading.margin) counts them: item value after customer discounts (tax added when prices include
+ *   it), the unit cost at sale × quantity, and the margin of the rows that have a cost. Like trading.margin,
+ *   cancellations and refunds on those orders are not taken off sales or cost here.
+ * - the other lines from finance's trading entries (fact_company_daily, source trading; booking day).
+ *
+ * finance books `buying_cost` when stock is received from a supplier: that is stock bought, not the cost of what was
+ * sold, so it shows as trading.stock_bought and is not taken off the margin. finance's `discount` lines are shown but
+ * not taken off either, because the sales above are already after customer discounts.
+ * `sales` is the shown Official Store sales figure (Queries.gross: tax included when prices include it).
  */
-function tradingFigures(rows: CompanyRow[]): Figures {
+function tradingFigures(sales: number, s: SalesAgg, rows: CompanyRow[]): Figures {
   const t = (kind: string) => sumOf(rows, 'trading', kind);
-  const sales = t('sale');
-  const gross = sales - t('buying_cost');
-  const net = gross - t('discount') - t('shipping_expense') - t('return') - t('write_off') - t('chargeback_loss') + t('supplier_credit');
+  const gross = grossMarginOf(s);
+  const net = gross - t('shipping_expense') - t('return') - t('write_off') - t('chargeback_loss') + t('supplier_credit');
   return {
     'trading.official_sales': sales,
-    'trading.buying_cost': t('buying_cost'),
+    'trading.buying_cost': s.cost,
     'trading.gross_margin': gross,
     'trading.discounts': t('discount'),
     'trading.shipping_expense': t('shipping_expense'),
@@ -94,18 +102,23 @@ function tradingFigures(rows: CompanyRow[]): Figures {
     'trading.chargeback_losses': t('chargeback_loss'),
     'trading.supplier_credits': t('supplier_credit'),
     'trading.net_margin': net,
-    'trading.net_margin_pct': pct(net, sales),
+    // over the sales that have a cost, like Gross margin %: the margin leaves the others out
+    'trading.net_margin_pct': pct(net, s.costedSales),
+    'trading.stock_bought': t('buying_cost'),
+    // the part of sales the margin leaves out: sales without a unit cost (and tax when prices include it)
+    notInMargin: sales - s.cost - gross,
+    salesWithoutCost: s.gross - s.costedSales,
+    salesWithoutCostPct: pct(s.gross - s.costedSales, s.gross),
   };
 }
 
-/** The marketplace income statement of a period from the finance facts (booking date) */
-function platformFigures(fin: Record<string, number | null>, company: CompanyRow[]): Figures {
+/** The marketplace income statement of a period from the finance facts (booking date), plus the Official Store net margin (tradingFigures) */
+function platformFigures(fin: Record<string, number | null>, company: CompanyRow[], official: number): Figures {
   const n = (k: string) => fin[k] ?? 0;
   const feeNet = n('fee_gross_minor') - n('fee_refunds_minor');
   const discountFunding = -sumOf(company, 'discount_funding', 'platform');
   const costs = sumOf(company, 'platform_cost');
   const netIncome = feeNet + n('ad_charges_minor') + n('service_fees_minor') + n('label_charges_minor') + discountFunding - costs;
-  const official = tradingFigures(company)['trading.net_margin']!;
   return {
     'platform.fee_income_gross': n('fee_gross_minor'),
     'platform.fee_refunds': n('fee_refunds_minor'),
@@ -122,6 +135,8 @@ function platformFigures(fin: Record<string, number | null>, company: CompanyRow
 }
 
 const TRADING_KEYS = ['trading.official_sales', 'trading.buying_cost', 'trading.gross_margin', 'trading.discounts', 'trading.shipping_expense', 'trading.returns_cost', 'trading.write_offs', 'trading.chargeback_losses', 'trading.net_margin', 'trading.net_margin_pct'];
+/** The P&L lines read from finance's trading entries (booking day): unavailable while finance is off */
+const TRADING_BOOKED_KEYS = ['trading.discounts', 'trading.shipping_expense', 'trading.returns_cost', 'trading.write_offs', 'trading.chargeback_losses', 'trading.supplier_credits', 'trading.stock_bought', 'trading.net_margin', 'trading.net_margin_pct'];
 
 /* ---------------------------------------------------------------- staff: Seller balances and payouts */
 
@@ -308,9 +323,12 @@ export class FinancialReports {
   async platformIncome(rq: ResolvedQuery): Promise<Part> {
     const c = rq.currency;
     const repo = this.core.repo;
+    const cfg = await this.core.cfg();
     const totals = async (range: DayRange) => {
-      const [[fin], company] = await Promise.all([repo.dailySums('fact_marketplace_finance_daily', range, PLATFORM_FIN_COLS, 'none'), repo.companySums(range.from, range.to, 'none')]);
-      return { figures: platformFigures(fin ?? zeros(PLATFORM_FIN_COLS), company), company };
+      const [[fin], company, [sales]] = await Promise.all([repo.dailySums('fact_marketplace_finance_daily', range, PLATFORM_FIN_COLS, 'none'), repo.companySums(range.from, range.to, 'none'), this.officialSales(rq, range, 'none')]);
+      const s = sales ?? emptyAgg();
+      const official = tradingFigures(this.q.gross(s, cfg), s, company);
+      return { figures: platformFigures(fin ?? zeros(PLATFORM_FIN_COLS), company, official['trading.net_margin']!), company };
     };
     const platform = { kind: 'platform' } as const;
     const [now, prev, finBuckets, companyBuckets, byCategory, bySeller] = await Promise.all([
@@ -325,7 +343,8 @@ export class FinancialReports {
     const f = now.figures;
     const buckets = bucketsOf(rq.range, rq.granularity);
     const finAt = new Map(finBuckets.map((b) => [b.key!, b]));
-    const byBucket = new Map(buckets.map((b) => [b, platformFigures(finAt.get(b) ?? zeros(PLATFORM_FIN_COLS), companyBuckets.filter((r) => r.key === b))]));
+    const official = await this.tradingByBucket(rq, cfg, companyBuckets);
+    const byBucket = new Map(buckets.map((b) => [b, platformFigures(finAt.get(b) ?? zeros(PLATFORM_FIN_COLS), companyBuckets.filter((r) => r.key === b), official.get(b)!['trading.net_margin']!)]));
     // costs by kind
     const costKinds = now.company.filter((r) => r.source === 'platform_cost' && r.amount !== 0).sort((a, b) => b.amount - a.amount);
     // fee income by category (order date): category names from catalog
@@ -362,7 +381,7 @@ export class FinancialReports {
       ],
       table: this.periodTable(PLATFORM_KEYS, buckets, rq.granularity, byBucket, f, c),
       callouts: [
-        { kind: 'info', title: 'By booking day', body: 'Every figure counts on the day finance booked it, so fee income shows the same day. Fee income by category is the exception: it follows the order date (the fees on the orders of the period, net of fee refunds so far).' },
+        { kind: 'info', title: 'By booking day', body: `Marketplace figures count on the day finance booked them, so fee income shows the same day. Two exceptions: fee income by category follows the order date (the fees on the orders of the period, net of fee refunds so far), and the Official Store net margin takes its sales and cost of goods sold by ${BASIS_LABEL[rq.basis]}, as Official Store profit and loss does. Stock bought from suppliers is not taken off it.` },
         { kind: 'info', title: 'Not included yet', body: 'Tax collected and store credit owed to customers are not part of this statement.' },
       ],
       unavailable: this.core.running('finance') ? [] : PLATFORM_KEYS,
@@ -443,18 +462,43 @@ export class FinancialReports {
 
   /* ---------------------------------------------------------------- trading.pnl */
 
+  /** Official Store order facts of a range, filtered the way trading.margin filters them (owner official, the query's date basis) */
+  private officialSales(rq: ResolvedQuery, range: DayRange, group: 'none' | 'bucket') {
+    return this.core.repo.salesAgg(this.q.salesFilter(rq, { kind: 'platform' }, range, { ownerType: 'official' }), group, rq.granularity);
+  }
+
+  /** The Official Store P&L of the whole range (order facts and the trading lines finance booked) */
+  private async tradingTotals(rq: ResolvedQuery, range: DayRange, cfg: Settings): Promise<Figures> {
+    const [[sales], company] = await Promise.all([this.officialSales(rq, range, 'none'), this.core.repo.companySums(range.from, range.to, 'none')]);
+    const s = sales ?? emptyAgg();
+    return tradingFigures(this.q.gross(s, cfg), s, company);
+  }
+
+  /** The Official Store P&L per bucket of the range; `company` holds the range's fact_company_daily rows by bucket */
+  private async tradingByBucket(rq: ResolvedQuery, cfg: Settings, company: (CompanyRow & { key: string | null })[]): Promise<Map<string, Figures>> {
+    const salesAt = new Map((await this.officialSales(rq, rq.range, 'bucket')).map((b) => [b.key!, b]));
+    return new Map(
+      bucketsOf(rq.range, rq.granularity).map((b) => {
+        const s = salesAt.get(b) ?? emptyAgg();
+        return [b, tradingFigures(this.q.gross(s, cfg), s, company.filter((r) => r.key === b))];
+      }),
+    );
+  }
+
   async tradingPnl(rq: ResolvedQuery): Promise<Part> {
     const c = rq.currency;
-    const repo = this.core.repo;
-    const totals = async (range: DayRange) => tradingFigures(await repo.companySums(range.from, range.to, 'none'));
-    const [now, prev, perBucket] = await Promise.all([totals(rq.range), rq.compare ? totals(rq.compare) : null, repo.companySums(rq.range.from, rq.range.to, 'bucket', rq.granularity)]);
+    const cfg = await this.core.cfg();
+    const [now, prev, company] = await Promise.all([this.tradingTotals(rq, rq.range, cfg), rq.compare ? this.tradingTotals(rq, rq.compare, cfg) : null, this.core.repo.companySums(rq.range.from, rq.range.to, 'bucket', rq.granularity)]);
     const buckets = bucketsOf(rq.range, rq.granularity);
-    const byBucket = new Map(buckets.map((b) => [b, tradingFigures(perBucket.filter((r) => r.key === b))]));
+    const byBucket = await this.tradingByBucket(rq, cfg, company);
+    const notInMargin = now.notInMargin!;
     const waterfall = [
       this.step('trading.official_sales', nameOf('trading.official_sales'), now['trading.official_sales']!, c, 'start'),
+      // sales the margin leaves out, so the steps add up to the gross margin
+      ...(notInMargin ? [this.step('trading.not_in_margin', cfg.taxIncluded ? 'Tax and sales without a unit cost' : 'Sales without a unit cost', -notInMargin, c)] : []),
       this.step('trading.buying_cost', nameOf('trading.buying_cost'), -now['trading.buying_cost']!, c),
       this.step('trading.gross_margin', nameOf('trading.gross_margin'), now['trading.gross_margin']!, c, 'total'),
-      this.step('trading.discounts', nameOf('trading.discounts'), -now['trading.discounts']!, c),
+      // discounts are not a step: Official Store sales are already after them
       this.step('trading.shipping_expense', nameOf('trading.shipping_expense'), -now['trading.shipping_expense']!, c),
       this.step('trading.returns_cost', nameOf('trading.returns_cost'), -now['trading.returns_cost']!, c),
       this.step('trading.write_offs', nameOf('trading.write_offs'), -now['trading.write_offs']!, c),
@@ -462,17 +506,23 @@ export class FinancialReports {
       this.step('trading.supplier_credits', nameOf('trading.supplier_credits'), now['trading.supplier_credits']!, c),
       this.step('trading.net_margin', nameOf('trading.net_margin'), now['trading.net_margin']!, c, 'total'),
     ];
+    const keys = [...TRADING_KEYS, 'trading.stock_bought'];
+    const basis = BASIS_LABEL[rq.basis];
+    const callouts: Callout[] = [
+      { kind: 'info', title: 'Two dates', body: `Official Store sales, cost of goods sold and gross margin follow the ${basis}, the same figures as the Official Store margin report: sales after customer discounts, cost at the unit cost when sold. Cancellations and refunds are not taken off them here. Shipping expense, returns cost, write-offs, chargeback losses, supplier credits, discounts and stock bought count on the day finance booked them. Supplier credits are added to net margin.` },
+      { kind: 'info', title: 'Stock bought is not a cost of sales', body: `Stock bought (${displayMoney(now['trading.stock_bought']!, c)} in this period) is what goods received from suppliers cost. It is shown on its own and not taken off the margin; the cost of the units sold is. Discounts are shown for reference only: sales are already after them.` },
+    ];
+    const withoutCost = now.salesWithoutCost!;
+    if (withoutCost > 0) callouts.push({ kind: 'warning', title: 'Some sales have no unit cost', body: `${displayMoney(withoutCost, c)} (${now.salesWithoutCostPct}%) of Official Store sales has no unit cost yet. Its cost is not guessed: those sales are left out of cost of goods sold and of gross and net margin.` });
     return {
-      kpis: this.kpis(TRADING_KEYS, now, prev, c),
-      series: this.seriesOf(TRADING_KEYS, buckets, rq.granularity, byBucket),
+      kpis: this.kpis(keys, now, prev, c, { 'trading.discounts': 'Already taken off sales', 'trading.stock_bought': 'Not taken off the margin' }),
+      series: this.seriesOf(keys, buckets, rq.granularity, byBucket),
       breakdowns: [{ key: 'waterfall', label: 'From sales to net margin', rows: waterfall }],
-      // the table also shows supplier credits, which net margin adds back
-      table: this.periodTable([...TRADING_KEYS.slice(0, -2), 'trading.supplier_credits', ...TRADING_KEYS.slice(-2)], buckets, rq.granularity, byBucket, now, c),
-      callouts: [
-        { kind: 'info', title: 'By booking day', body: 'Sales and costs count on the day finance booked them, the same figures as the Official Store page. The Official Store margin report follows the order date instead. Supplier credits lower the cost and are included in net margin.' },
-      ],
-      unavailable: this.core.running('finance') ? [] : TRADING_KEYS,
-      models: ['company_finance'],
+      // the table also shows supplier credits, which net margin adds back, and stock bought
+      table: this.periodTable([...TRADING_KEYS.slice(0, -2), 'trading.supplier_credits', ...TRADING_KEYS.slice(-2), 'trading.stock_bought'], buckets, rq.granularity, byBucket, now, c),
+      callouts,
+      unavailable: [...(this.core.running('finance') ? [] : TRADING_BOOKED_KEYS), ...(this.core.running('inventory') ? [] : ['trading.buying_cost', 'trading.gross_margin', 'trading.net_margin', 'trading.net_margin_pct'])],
+      models: ['order_items', 'company_finance'],
       freshAsOf: await this.financePulledAt(),
     };
   }

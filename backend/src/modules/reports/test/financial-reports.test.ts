@@ -2,7 +2,8 @@
  * The financial statistics reports (docs/09 §3.3) on the real finance module: Earnings and profit and Profit by
  * product (seller), Platform income, Seller balances and payouts and Official Store profit and loss (staff).
  * Reconciliations: a seller's net earnings equal its ledger entries for the period's orders and charges (payouts
- * excluded); trading.pnl gives the same figures as GET /api/admin/finance/trading. Audience: a seller only ever sees
+ * excluded); trading.pnl's sales, cost of goods sold and gross margin equal the Official Store margin report, its
+ * booked lines equal GET /api/admin/finance/trading's, and stock bought never moves the margin. Audience: a seller only ever sees
  * its own figures, the seller reports need finance.balances.view, and seller unit costs never reach a staff report.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -212,8 +213,11 @@ describe('finance.platform_income', () => {
     expect(v('platform.discount_funding')).toBe(-500);
     expect(v('platform.costs')).toBe(700);
     expect(v('platform.net_income')).toBe(2_000 + 1_200 + 300 + 650 - 500 - 700);
-    // Official Store: sale 6,000 − buying 3,100 − discount 600 − shipping (−400 recovered) − write-off 200 + supplier credit 150
-    expect(v('platform.official_net_margin')).toBe(6_000 - 3_100 - 600 + 400 - 200 + 150);
+    // Official Store: no unit cost on its sale yet, so gross margin 0; shipping (−400 recovered) − write-off 200 +
+    // supplier credit 150. The 3,100 of stock bought is not a cost of sales
+    expect(v('platform.official_net_margin')).toBe(0 + 400 - 200 + 150);
+    const pnl = await h.call('POST', ADMIN_Q('trading.pnl'), h.tokens.staff(), { preset: 'today' });
+    expect(v('platform.official_net_margin')).toBe(kpi(pnl.body, 'trading.net_margin').value);
     expect(v('platform.company_result')).toBe(v('platform.net_income') + v('platform.official_net_margin'));
     expect(res.body.meta.freshAsOf).toBe((await h.service.core.repo.getCheckpoint('pull:finance_recent'))!.last_event_at!.toISOString());
     const breakdowns = Object.fromEntries(res.body.breakdowns.map((b: { key: string; rows: unknown[] }) => [b.key, b.rows]));
@@ -254,24 +258,72 @@ describe('finance.seller_money', () => {
 });
 
 describe('trading.pnl', () => {
-  it('gives the same figures as GET /api/admin/finance/trading for the same range', async () => {
+  const pnl = async () => {
     const res = await h.call('POST', ADMIN_Q('trading.pnl'), h.tokens.staff(), { preset: 'today' });
     expect(res.status, JSON.stringify(res.body)).toBe(200);
+    return { body: res.body, v: (k: string) => kpi(res.body, k).value as number };
+  };
+
+  beforeAll(async () => {
+    // the Official Store sale gets a unit cost (2,500 for the line); a second Official Store sale has none
+    await h.service.core.repo.updateOrderItems({ itemIds: [official.groups[0]!.items[0]!.id] }, { buying_cost_minor: 2_500 });
+    const uncosted = h.order({ sellerId: null, items: [{ unit: 1_000, shipping: 0, tax: 0 }] });
+    h.accepted(uncosted);
+    await pull();
+  });
+
+  it('takes sales, cost of goods sold and gross margin from the order facts, as the Official Store margin report does', async () => {
+    const { body, v } = await pnl();
+    const margin = await h.call('POST', ADMIN_Q('trading.margin'), h.tokens.staff(), { preset: 'today' });
+    expect(margin.status, JSON.stringify(margin.body)).toBe(200);
+    for (const key of ['trading.official_sales', 'trading.buying_cost', 'trading.gross_margin']) expect(v(key), key).toBe(kpi(margin.body, key).value);
+    // sales after discounts (6,000 − 600, and 1,000); the 1,000 without a unit cost is left out of cost and margin
+    expect(v('trading.official_sales')).toBe(5_400 + 1_000);
+    expect(v('trading.buying_cost')).toBe(2_500);
+    expect(v('trading.gross_margin')).toBe(5_400 - 2_500);
+    expect(kpi(body, 'trading.buying_cost').label).toBe('Cost of goods sold');
+    expect(body.callouts).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'warning', title: 'Some sales have no unit cost', body: expect.stringContaining('(15.6%)') })]));
+    // the waterfall adds up step by step to each total
+    const waterfall = body.breakdowns.find((b: { key: string }) => b.key === 'waterfall').rows as { key: string; amount: { amount: number }; step: string }[];
+    expect(waterfall.map((r) => r.key)).toEqual(['trading.official_sales', 'trading.not_in_margin', 'trading.buying_cost', 'trading.gross_margin', 'trading.shipping_expense', 'trading.returns_cost', 'trading.write_offs', 'trading.chargeback_losses', 'trading.supplier_credits', 'trading.net_margin']);
+    let running = 0;
+    for (const r of waterfall) {
+      if (r.step === 'total') expect(r.amount.amount, r.key).toBe(running);
+      running = r.step === 'start' || r.step === 'total' ? r.amount.amount : running + (r.step === 'minus' ? -r.amount.amount : r.amount.amount);
+    }
+    expect(waterfall.at(-1)).toMatchObject({ key: 'trading.net_margin', step: 'total', amount: usd(v('trading.net_margin')) });
+  });
+
+  it('takes the other lines from the trading entries by booking day, the same lines as GET /api/admin/finance/trading', async () => {
+    const { body, v } = await pnl();
     const t = await h.call('GET', `/api/admin/finance/trading?from=${today}&to=${today}`, h.tokens.staff());
     expect(t.status, JSON.stringify(t.body)).toBe(200);
-    const v = (k: string) => kpi(res.body, k).value;
-    expect(v('trading.official_sales')).toBe(t.body.productSales.amount);
-    expect(v('trading.buying_cost')).toBe(t.body.buyingCost.amount);
-    expect(v('trading.gross_margin')).toBe(t.body.grossMargin.amount);
     expect(v('trading.discounts')).toBe(t.body.discounts.amount);
     expect(v('trading.shipping_expense')).toBe(t.body.shippingExpense.amount);
     expect(v('trading.returns_cost')).toBe(t.body.returnsCost.amount);
     expect(v('trading.write_offs')).toBe(t.body.writeOffs.amount);
     expect(v('trading.chargeback_losses')).toBe(t.body.chargebackLosses.amount);
-    expect(v('trading.net_margin')).toBe(t.body.netMargin.amount);
-    expect(v('trading.net_margin')).toBe(6_000 - 3_100 - 600 + 400 - 200 + 150);
-    const waterfall = res.body.breakdowns.find((b: { key: string }) => b.key === 'waterfall').rows;
-    expect(waterfall.at(-1)).toMatchObject({ key: 'trading.net_margin', step: 'total', amount: usd(v('trading.net_margin')) });
-    expect(res.body.table.columns.map((c: { key: string }) => c.key)).toContain('supplier_credits');
+    // finance's buying cost is the stock received from suppliers: here that is Stock bought
+    expect(v('trading.stock_bought')).toBe(t.body.buyingCost.amount);
+    // supplier credits: what finance's net margin adds back after its other lines
+    const supplierCredits = body.table.totals.supplier_credits.amount;
+    expect(supplierCredits).toBe(t.body.netMargin.amount - (t.body.grossMargin.amount - t.body.discounts.amount - t.body.shippingExpense.amount - t.body.returnsCost.amount - t.body.writeOffs.amount - t.body.chargebackLosses.amount));
+    // net margin: gross margin less the booked costs (not discounts: sales are already after them), plus supplier credits
+    expect(v('trading.net_margin')).toBe(v('trading.gross_margin') - v('trading.shipping_expense') - v('trading.returns_cost') - v('trading.write_offs') - v('trading.chargeback_losses') + supplierCredits);
+    expect(v('trading.net_margin')).toBe(2_900 + 400 - 200 + 150);
+    expect(body.table.columns.map((c: { key: string }) => c.key)).toEqual(expect.arrayContaining(['supplier_credits', 'stock_bought']));
+  });
+
+  it('a goods receipt changes stock bought, never the margin', async () => {
+    const before = await pnl();
+    const platformBefore = await h.call('POST', ADMIN_Q('finance.platform_income'), h.tokens.staff(), { preset: 'today' });
+    // what purchasing books when goods are received from a supplier
+    await finance.recordCompanyCost({ kind: 'buying_cost', amount: usd(124_200), reference: { kind: 'receipt', id: newId() }, at: h.clock.now().toISOString() });
+    await pull();
+    const after = await pnl();
+    expect(after.v('trading.stock_bought')).toBe(before.v('trading.stock_bought') + 124_200);
+    for (const key of ['trading.official_sales', 'trading.buying_cost', 'trading.gross_margin', 'trading.net_margin', 'trading.net_margin_pct']) expect(after.v(key), key).toBe(before.v(key));
+    const platformAfter = await h.call('POST', ADMIN_Q('finance.platform_income'), h.tokens.staff(), { preset: 'today' });
+    expect(kpi(platformAfter.body, 'platform.official_net_margin').value).toBe(kpi(platformBefore.body, 'platform.official_net_margin').value);
   });
 });

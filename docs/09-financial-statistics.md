@@ -151,8 +151,12 @@ the existing shape `{ key, label, amount?: Money, sharePct?, ... }`. A waterfall
 5. `trading.pnl` — "Official Store profit and loss", staff, `reports.trading.view`. Series/KPIs:
    `trading.official_sales`, `trading.buying_cost`, `trading.gross_margin`, `trading.discounts`,
    `trading.shipping_expense`, `trading.returns_cost`, `trading.write_offs`, `trading.chargeback_losses`,
-   `trading.net_margin`, `trading.net_margin_pct`. Breakdown `waterfall`. Table per period. Same figures as
-   `GET /api/admin/finance/trading` for the same range (test).
+   `trading.net_margin`, `trading.net_margin_pct`, `trading.stock_bought`. Breakdown `waterfall`. Table per period.
+   Changed 2026-10-21: sales, `trading.buying_cost` (now labelled "Cost of goods sold") and gross margin come from
+   the order facts exactly as `trading.margin` (test); finance's trading `buying_cost` entries are booked when stock
+   is received from a supplier, so they show as `trading.stock_bought` and are not taken off the margin. The other
+   lines are finance's trading lines by booking day, the same as `GET /api/admin/finance/trading` (test); discounts
+   are shown but not taken off again (sales are after discounts). `platform.official_net_margin` is this net margin.
 
 `seller.order_trend` and `seller.product_sales` are unchanged apart from the comparison twins.
 

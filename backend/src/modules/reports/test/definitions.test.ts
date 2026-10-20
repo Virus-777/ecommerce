@@ -153,6 +153,19 @@ describe('metric definitions', () => {
     expect(twice.status).toBe(409);
     expect(h.audits.some((a) => a.action === 'reports.metric_suggestion.accept')).toBe(true);
   });
+
+  it('a corrected seed text reaches a database seeded before it, unless staff have revised the metric', async () => {
+    const repo = h.service.core.repo;
+    // as seeded before 2026-10-21
+    await repo.updateMetric('trading.buying_cost', { name: 'Buying cost' });
+    await h.service.seed();
+    expect((await repo.getMetric('trading.buying_cost'))?.name).toBe('Cost of goods sold');
+    expect(((await repo.listVersions('trading.buying_cost')).find((v) => v.version === 1)!.snapshot as { name: string }).name).toBe('Cost of goods sold');
+    // a metric staff revised (version 2) keeps their text
+    await repo.updateMetric('trading.chargeback_losses', { name: 'Disputes lost', version: 2 });
+    await h.service.seed();
+    expect((await repo.getMetric('trading.chargeback_losses'))?.name).toBe('Disputes lost');
+  });
 });
 
 describe('saved views', () => {

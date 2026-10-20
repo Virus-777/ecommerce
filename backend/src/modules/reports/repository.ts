@@ -137,6 +137,16 @@ export class ReportsRepository {
     if (await this.#metrics.insertIfAbsent(row)) await this.#versions.insertIfAbsent(version, ['metric_key', 'version']);
   }
 
+  /**
+   * Rewrites the text of a seeded metric that staff have not revised (still version 1, published, with the launch
+   * note) and its version-1 snapshot. The row after the update, or undefined when staff have revised it.
+   */
+  async refreshSeededMetric(key: string, launchNote: string, text: Partial<MetricRow>, snapshot: (row: MetricRow) => unknown): Promise<MetricRow | undefined> {
+    const row = await this.#metrics.updateOne({ key, version: 1, status: 'published', change_note: launchNote }, text);
+    if (row) await this.#versions.updateOne({ metric_key: key, version: 1 }, { snapshot: snapshot(row) });
+    return row;
+  }
+
   getMetric(key: string, opts: { forUpdate?: boolean } = {}): Promise<MetricRow | undefined> {
     return this.#metrics.get(key, opts);
   }

@@ -68,6 +68,13 @@ export class Definitions {
         change_note: 'First published definition (launch set)',
       };
       await this.core.repo.seedMetric(row, { id: newId(), metric_key: m.key, version: 1, snapshot: snapshotOf(row, 'First published definition (launch set)') as never, change_note: 'First published definition (launch set)', changed_by: 'system', effective_from: SEED_EFFECTIVE_FROM, created_at: now });
+      // a corrected seed text (e.g. 2026-10-21: Buying cost → Cost of goods sold) reaches databases seeded before it,
+      // as long as staff have not revised that metric themselves
+      const text = { name: m.name, definition: m.definition, formula: m.formula, includes: m.includes, excludes: m.excludes, related_keys: m.relatedKeys };
+      const stored = await this.core.repo.getMetric(m.key);
+      if (stored && JSON.stringify(Object.keys(text).map((k) => stored[k as keyof MetricRow])) !== JSON.stringify(Object.values(text))) {
+        await this.core.repo.refreshSeededMetric(m.key, row.change_note!, text, (r) => snapshotOf(r, r.change_note!));
+      }
     }
     for (const r of REPORTS) {
       await this.core.repo.upsertReport({

@@ -109,15 +109,15 @@ export const METRICS: MetricSeed[] = [
     dateBasisOptions: SALES_BASES, defaultDateBasis: 'placement', relatedKeys: ['trading.gross_margin'],
   },
   {
-    key: 'trading.buying_cost', name: 'Buying cost', group: 'company_trading', unit: 'money', audience: 'staff', higherIsBetter: false,
-    definition: 'Weighted average buying cost of the Official Store units sold, from inventory.',
+    key: 'trading.buying_cost', name: 'Cost of goods sold', group: 'company_trading', unit: 'money', audience: 'staff', higherIsBetter: false,
+    definition: 'What the Official Store units sold cost to buy: the weighted average unit cost from inventory when they were sold, times the quantity. Not the stock bought from suppliers in the period (see Stock bought).',
     formula: 'Sum of fact_order_items.buying_cost_minor (unit cost × quantity) for Official Store items',
-    includes: [], excludes: ['Items whose cost is not known yet'],
+    includes: [], excludes: ['Items whose cost is not known yet', 'Stock bought from suppliers'],
     dateBasisOptions: SALES_BASES, defaultDateBasis: 'placement', relatedKeys: ['trading.gross_margin'],
   },
   {
     key: 'trading.gross_margin', name: 'Gross margin', group: 'company_trading', unit: 'money', audience: 'staff',
-    definition: 'Official Store sales minus their buying cost, for items whose cost is known.',
+    definition: 'Official Store sales minus their cost of goods sold, for items whose cost is known.',
     formula: 'Σ item_minor − Σ buying_cost_minor over Official Store items with a known cost',
     includes: [], excludes: ['Items whose cost is not known yet', 'Marketplace seller items'],
     dateBasisOptions: SALES_BASES, defaultDateBasis: 'placement', relatedKeys: ['trading.official_sales', 'trading.buying_cost'],
@@ -637,9 +637,9 @@ export const METRICS: MetricSeed[] = [
   },
   {
     key: 'platform.official_net_margin', name: 'Official Store net margin', group: 'marketplace_finance', unit: 'money', audience: 'staff',
-    definition: 'Official Store sales less buying cost, discounts, shipping, returns, write-offs and lost disputes, plus supplier credits, by booking day.',
-    formula: 'trading.net_margin (fact_company_daily, source trading)',
-    includes: [], excludes: [],
+    definition: 'The Official Store net margin of Official Store profit and loss: gross margin (sales less cost of goods sold, by order date) less shipping, returns, write-offs and lost disputes, plus supplier credits (by booking day).',
+    formula: 'trading.net_margin',
+    includes: [], excludes: ['Stock bought from suppliers'],
     dateBasisOptions: EVENT, defaultDateBasis: 'event', relatedKeys: ['trading.net_margin', 'platform.company_result'],
   },
   {
@@ -692,7 +692,10 @@ export const METRICS: MetricSeed[] = [
     includes: [], excludes: [],
     dateBasisOptions: EVENT, defaultDateBasis: 'event', relatedKeys: ['sellers.payouts_paid'],
   },
-  /* Official Store profit and loss: by booking day (fact_company_daily, source trading) */
+  /*
+   * Official Store profit and loss: sales, cost of goods sold and gross margin by order date (fact_order_items, as
+   * trading.margin), the other lines by booking day (fact_company_daily, source trading)
+   */
   {
     key: 'trading.returns_cost', name: 'Returns cost', group: 'company_trading', unit: 'money', audience: 'staff', higherIsBetter: false,
     definition: 'Refunds sent for Official Store returns, booked as a company cost, by booking day.',
@@ -702,17 +705,24 @@ export const METRICS: MetricSeed[] = [
   },
   {
     key: 'trading.net_margin', name: 'Net margin', group: 'company_trading', unit: 'money', audience: 'staff',
-    definition: 'Official Store sales less buying cost, discounts, shipping expense, returns cost, write-offs and lost disputes, plus supplier credits, by booking day. The same figure as the Official Store page.',
-    formula: 'sale − buying_cost − discount − shipping_expense − return − write_off − chargeback_loss + supplier_credit (fact_company_daily, source trading)',
-    includes: ['Supplier credits'], excludes: ['Marketplace income'],
-    dateBasisOptions: EVENT, defaultDateBasis: 'event', relatedKeys: ['trading.net_margin_pct', 'trading.gross_margin'],
+    definition: 'Official Store gross margin (sales less cost of goods sold, by order date, for items whose cost is known) less shipping expense, returns cost, write-offs and lost disputes, plus supplier credits (by booking day). Stock bought from suppliers and discounts are not taken off: sales are already after discounts.',
+    formula: 'trading.gross_margin − shipping_expense − return − write_off − chargeback_loss + supplier_credit (fact_company_daily, source trading)',
+    includes: ['Supplier credits'], excludes: ['Marketplace income', 'Stock bought from suppliers', 'Sales whose cost is not known yet'],
+    dateBasisOptions: EVENT, defaultDateBasis: 'event', relatedKeys: ['trading.net_margin_pct', 'trading.gross_margin', 'trading.stock_bought'],
   },
   {
     key: 'trading.net_margin_pct', name: 'Net margin %', group: 'company_trading', unit: 'percent', audience: 'staff',
-    definition: 'Net margin as a share of Official Store sales, by booking day.',
-    formula: 'trading.net_margin ÷ Official Store sales × 100',
+    definition: 'Net margin as a share of the Official Store sales that have a known cost (the sales the margin counts).',
+    formula: 'trading.net_margin ÷ sales with a known cost × 100',
     includes: [], excludes: [],
     dateBasisOptions: EVENT, defaultDateBasis: 'event', relatedKeys: ['trading.net_margin'],
+  },
+  {
+    key: 'trading.stock_bought', name: 'Stock bought', group: 'company_trading', unit: 'money', audience: 'staff', higherIsBetter: false,
+    definition: 'What the goods received from suppliers cost, on the day finance booked the receipt. Stock bought is not a cost of sales: it is shown next to the profit and loss and not taken off the margin.',
+    formula: 'Σ fact_company_daily.amount_minor, source trading, kind buying_cost',
+    includes: [], excludes: ['Supplier credits (shown on their own)'],
+    dateBasisOptions: EVENT, defaultDateBasis: 'event', relatedKeys: ['trading.buying_cost', 'trading.purchasing_booked'],
   },
 ];
 
@@ -964,8 +974,8 @@ export const REPORTS: ReportSeed[] = [
   },
   {
     key: 'trading.pnl', title: 'Official Store profit and loss', group: 'company_trading', audience: 'staff', permission: 'reports.trading.view',
-    description: 'Official Store sales down to net margin by booking day: buying cost, gross margin, discounts, shipping, returns, write-offs and lost disputes.',
-    metrics: ['trading.official_sales', 'trading.buying_cost', 'trading.gross_margin', 'trading.discounts', 'trading.shipping_expense', 'trading.returns_cost', 'trading.write_offs', 'trading.chargeback_losses', 'trading.net_margin', 'trading.net_margin_pct'],
+    description: 'Official Store sales down to net margin: cost of goods sold and gross margin by order date, then shipping, returns, write-offs and lost disputes by booking day. Stock bought from suppliers is shown on its own.',
+    metrics: ['trading.official_sales', 'trading.buying_cost', 'trading.gross_margin', 'trading.discounts', 'trading.shipping_expense', 'trading.returns_cost', 'trading.write_offs', 'trading.chargeback_losses', 'trading.net_margin', 'trading.net_margin_pct', 'trading.stock_bought'],
     dimensions: ['day'], filters: [RANGE],
     layout: ['kpis', 'series', 'breakdown', 'table', 'definitions', 'callouts'],
   },

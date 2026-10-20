@@ -82,7 +82,7 @@ export interface Part {
 }
 
 const BASIS_COLUMN: Record<Basis, SalesFilter['basis']> = { placement: 'placed_at', payment: 'paid_at', shipment: 'shipped_at', completion: 'completed_at' };
-const BASIS_LABEL: Record<Basis, string> = { placement: 'order placement date', payment: 'payment date', shipment: 'shipment date', completion: 'completion date' };
+export const BASIS_LABEL: Record<Basis, string> = { placement: 'order placement date', payment: 'payment date', shipment: 'shipment date', completion: 'completion date' };
 
 const MARKETPLACE_CALLOUT: Callout = {
   kind: 'info',
@@ -598,7 +598,7 @@ export class Queries {
     const official = { ownerType: 'official' as const };
     const total = await this.salesTotals(rq, scope, rq.range, official);
     const prev = rq.compare ? await this.salesTotals(rq, scope, rq.compare, official) : null;
-    const margin = (a: SalesAgg) => a.costedSales - a.cost;
+    const margin = grossMarginOf;
     const buckets = bucketsOf(rq.range, rq.granularity);
     const byBucket = await this.core.repo.salesAgg(this.salesFilter(rq, scope, rq.range, official), 'bucket', rq.granularity);
     const products = (await this.core.repo.salesAgg(this.salesFilter(rq, scope, rq.range, official), 'product_id')).sort((a, b) => b.gross - a.gross);
@@ -614,7 +614,7 @@ export class Queries {
       ],
       series: [this.series('gross_margin', 'Gross margin', buckets, rq.granularity, new Map(byBucket.map((b) => [b.key!, margin(b)])))],
       table: {
-        columns: [col('product', 'Product'), col('units', 'Units', 'count'), col('sales', 'Sales', 'money'), col('cost', 'Buying cost', 'money'), col('margin', 'Gross margin', 'money'), col('marginPct', 'Margin %', 'percent')],
+        columns: [col('product', 'Product'), col('units', 'Units', 'count'), col('sales', 'Sales', 'money'), col('cost', 'Cost of goods sold', 'money'), col('margin', 'Gross margin', 'money'), col('marginPct', 'Margin %', 'percent')],
         rows: products.map((p) => ({ productId: p.key, product: names.get(p.key!) ?? p.key, units: p.units, sales: this.money(this.gross(p, cfg), c), cost: this.money(p.cost, c), margin: this.money(margin(p), c), marginPct: pct(margin(p), p.costedSales) })),
         totals: { units: total.units, sales: this.money(this.gross(total, cfg), c), cost: this.money(total.cost, c), margin: this.money(margin(total), c), marginPct: pct(margin(total), total.costedSales) },
       },
@@ -1218,7 +1218,7 @@ export class Queries {
         const spent = sum(rows, 'discount') + sum(rows, 'shipping_expense');
         callouts.push({ kind: 'info', title: 'Share of Official Store sales', body: `Discounts and shipping expense come to ${pct(spent, value(total))}% of Official Store sales in the range.` });
       }
-      if (key === 'trading.purchasing') callouts.push({ kind: 'info', title: 'Two views of buying cost', body: 'Buying cost of units sold follows the order date; purchasing costs and supplier credits follow the day finance booked them.' });
+      if (key === 'trading.purchasing') callouts.push({ kind: 'info', title: 'Two views of buying cost', body: 'Cost of goods sold (the buying cost of the units sold) follows the order date; purchasing costs and supplier credits follow the day finance booked them.' });
     }
     const perKind = new Map(kinds.map((k) => [k.kind, perBucket(k.kind)]));
     return {
@@ -1607,6 +1607,12 @@ export interface SellerDashboardData {
   definitions: MetricDefinition[];
 }
 
+/**
+ * Gross margin of Official Store sales (trading.margin, trading.pnl): the item value of the rows that have a unit
+ * cost less that cost (fact_order_items.buying_cost_minor = unit cost at sale × quantity). Rows without a cost are
+ * left out of both sides rather than counted as pure margin.
+ */
+export const grossMarginOf = (a: SalesAgg) => a.costedSales - a.cost;
 export const emptyAgg = (): SalesAgg => ({ key: null, gross: 0, tax: 0, cancelled: 0, refunded: 0, orders: 0, units: 0, costedSales: 0, cost: 0, buyers: 0, platformDiscount: 0, sellerDiscount: 0, shipping: 0, fee: 0, costedPlatformDiscount: 0 });
 export const zeros = (cols: string[]): Record<string, number> & { key: null } => ({ key: null, ...Object.fromEntries(cols.map((c) => [c, 0])) }) as never;
 export const humanize = (s: string) => (s.charAt(0).toUpperCase() + s.slice(1)).replace(/_/g, ' ');
