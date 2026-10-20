@@ -7,7 +7,7 @@ import { StoreLayout } from '@/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Avatar, Badge, Button, Checkbox, EmptyState, Field, FileDrop, Icon, IconButton, KeyValue, Meter, OptionCard, Select, Steps, TextInput, announce, type IconName } from '@marketly/web-shared/ui';
+import { Alert, Avatar, Badge, Button, Checkbox, EmptyState, Field, FileDrop, Icon, IconButton, KeyValue, Meter, OptionCard, PhoneInput, Select, Steps, TextInput, announce, type IconName } from '@marketly/web-shared/ui';
 import { dayDateYear, timePT } from '../help/data/format';
 import { ApiLink } from '../help/data/links';
 import { LoadError, Loading, SkLines } from '../help/data/states';
@@ -207,7 +207,7 @@ function AccountStep({ f, set, e, app, email, inviteNeeded, loginLocked, loginPa
           <TextInput id="ap-contact" value={f.contact} error={!!e.contact} onChange={(ev) => set('contact', ev.target.value)} autoComplete="name" />
         </Field>
         <Field label="Phone" error={e.cphone}>
-          <TextInput id="ap-cphone" type="tel" value={f.cphone} error={!!e.cphone} onChange={(ev) => set('cphone', ev.target.value)} autoComplete="tel" />
+          <PhoneInput id="ap-cphone" value={f.cphone} error={!!e.cphone} onChange={(ev) => set('cphone', ev.target.value)} autoComplete="tel" />
         </Field>
       </div>
       {f.acct === 'existing' && (
@@ -277,7 +277,7 @@ function BusinessStep({ f, set, e, categories }: StepProps & { categories: Array
       </Field>
       <div className="grid md2">
         <Field label="Business phone" error={e.phone}>
-          <TextInput id="ap-phone" type="tel" value={f.phone} error={!!e.phone} onChange={(ev) => set('phone', ev.target.value)} />
+          <PhoneInput id="ap-phone" value={f.phone} error={!!e.phone} onChange={(ev) => set('phone', ev.target.value)} />
         </Field>
         <Field label="Website" optional error={e.web}>
           <TextInput id="ap-web" value={f.web} error={!!e.web} onChange={(ev) => set('web', ev.target.value)} />
@@ -437,7 +437,7 @@ function ReturnFields({ f, set, e }: StepProps) {
           <TextInput id="ap-rname" value={f.rname} error={!!e.rname} onChange={(ev) => set('rname', ev.target.value)} />
         </Field>
         <Field label="Phone" error={e.rphone}>
-          <TextInput id="ap-rphone" type="tel" value={f.rphone} error={!!e.rphone} onChange={(ev) => set('rphone', ev.target.value)} />
+          <PhoneInput id="ap-rphone" value={f.rphone} error={!!e.rphone} onChange={(ev) => set('rphone', ev.target.value)} />
         </Field>
       </div>
       <Field label="Street address" hint="Must be a street address. Carriers can't deliver returns to PO boxes." error={e.rline1}>

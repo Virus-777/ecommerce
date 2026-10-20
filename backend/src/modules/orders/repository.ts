@@ -137,6 +137,11 @@ export class OrdersRepository {
 
   /* ---------------------------------------------------------------- store lists */
 
+  /** The customer's first order past payment (spending statistics, range all) */
+  firstPaidOrderOf(customerId: string): Promise<OrderRec | undefined> {
+    return this.#orders.findOne({ customer_id: customerId, lifecycle: { $ne: 'payment_pending' } }, { sort: { placed_at: 1 } });
+  }
+
   customerOrders(customerId: string, f: CustomerOrderFilter, page: PageRequest): Promise<common.Page<OrderRec>> {
     const match: Doc = { customer_id: customerId };
     if (f.placedFrom || f.placedTo) match.placed_at = { ...(f.placedFrom ? { $gte: f.placedFrom } : {}), ...(f.placedTo ? { $lt: f.placedTo } : {}) };

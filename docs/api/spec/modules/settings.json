@@ -54,6 +54,7 @@
       "support": "SupportContacts",
       "legalName": { "type": "string", "desc": "market.legalName" },
       "companyLine": { "type": "string", "desc": "market.companyLine" },
+      "phoneFormat": { "type": "string", "desc": "market.phoneFormat: input mask for phone numbers, # = one digit, e.g. (###) ###-####" },
       "defaultDeliveryLocation": { "type": "DeliveryLocation?", "desc": "market.defaultDeliveryLocation: where prices and delivery dates are estimated before a visitor gives an address" },
       "company": { "type": "CompanyFacts?", "desc": "Public company facts (market.* keys)" }
     },
@@ -88,7 +89,7 @@
       "maintenance": "MaintenanceNotice"
     },
     "ServedChannels": { "website": { "type": "bool", "desc": "apps.serveWebsite: the desktop and tablet website is maintained" }, "android": { "type": "bool", "desc": "apps.serveAndroidApp: the Android app is maintained" } },
-    "PublicMarket": { "country": "string", "currency": "string", "timeZone": "string", "locale": "string", "serviceRegionLabel": "string", "legalName": { "type": "string", "desc": "Legal name of the operating company, e.g. Marketly, Inc. (footer, policies, receipts)" }, "companyLine": { "type": "string", "desc": "One-line company details for the footer and emails, e.g. Marketly, Inc. · Portland, OR" }, "defaultDeliveryLocation": { "type": "DeliveryLocation?", "desc": "Where prices and delivery dates are estimated before a visitor gives an address (Deliver to … label); always given" }, "company": { "type": "CompanyFacts?", "desc": "Contact emails, postal address, founding year and headquarters for the About and contact pages; always given" } },
+    "PublicMarket": { "country": "string", "currency": "string", "timeZone": "string", "locale": "string", "serviceRegionLabel": "string", "legalName": { "type": "string", "desc": "Legal name of the operating company, e.g. Marketly, Inc. (footer, policies, receipts)" }, "companyLine": { "type": "string", "desc": "One-line company details for the footer and emails, e.g. Marketly, Inc. · Portland, OR" }, "phoneFormat": { "type": "string", "desc": "How phone number inputs are masked: # = one digit, other characters shown as typed, e.g. (###) ###-####. A number starting with + or longer than the pattern stays as typed" }, "defaultDeliveryLocation": { "type": "DeliveryLocation?", "desc": "Where prices and delivery dates are estimated before a visitor gives an address (Deliver to … label); always given" }, "company": { "type": "CompanyFacts?", "desc": "Contact emails, postal address, founding year and headquarters for the About and contact pages; always given" } },
     "PublicSupport": { "hoursLabel": "string", "openNow": "bool", "nextOpenAt": "datetime?", "phone": "string", "chatHoursLabel": "string", "closedLabel": "string?" },
     "CheckoutSettings": { "guestCheckoutEnabled": "bool", "offerAccountAfterGuestPurchase": "bool" },
     "MaintenanceNotice": { "active": "bool", "kind": { "type": "enum(maintenance|incident)?", "desc": "maintenance = planned work; incident = live service problem (the error page shows it as a status note)" }, "message": "string?", "until": "datetime?", "updatedAt": { "type": "datetime?", "desc": "When the notice was last changed, shown as Updated 9:42 AM PT" } },

@@ -100,6 +100,10 @@ const KEY_RULES: Record<string, z.ZodType> = {
   'market.pressEmail': z.email().nullable(),
   'market.defaultDeliveryLocation': z.object({ postalCode: z.string().regex(/^\d{5}(-\d{4})?$/, 'a ZIP code, e.g. 97205'), label: z.string().trim().min(1, 'a label, e.g. Portland, OR 97205') }).strict(),
   'support.phone': z.string().regex(/^[0-9+()\-. ]{5,30}$/, 'a phone number'),
+  'market.phoneFormat': z
+    .string()
+    .regex(/^[#0-9+()\-. ]{1,40}$/, 'a pattern of # (one per digit) with spaces, brackets, dots, dashes or +, e.g. (###) ###-####')
+    .refine((p) => (p.match(/#/g)?.length ?? 0) >= 7 && (p.match(/#/g)?.length ?? 0) <= 15, 'a pattern with 7 to 15 # (one per digit)'),
   'apps.android.updateUrl': z.url({ protocol: /^https?$/ }),
   'apps.android.latestVersionName': z.string().regex(/^\d+(\.\d+){0,3}([-+][\w.]+)?$/, 'a version name such as 1.4.0'),
   'apps.maintenance': maintenance,

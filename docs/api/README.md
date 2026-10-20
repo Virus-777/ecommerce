@@ -1,6 +1,6 @@
 # Marketly API design
 
-Generated from `docs/api/spec/` by `node docs/api/tools/build.mjs`. 34 modules, 1,358 endpoints.
+Generated from `docs/api/spec/` by `node docs/api/tools/build.mjs`. 34 modules, 1,359 endpoints.
 
 - **GraphQL read layer:** [graphql/README.md](graphql/README.md), composed schemas `graphql/schema.{store,seller,admin}.graphql`, screen queries in `graphql/operations/`
 - **OpenAPI 3.1:** [openapi.json](openapi.json) (open in Swagger UI, Redoc or Postman)
@@ -11,7 +11,7 @@ Generated from `docs/api/spec/` by `node docs/api/tools/build.mjs`. 34 modules, 
 
 | Area | Prefix | Who | Auth | Endpoints |
 |---|---|---|---|---|
-| Store API | `/api/store/{module}` | Customers and guests on the website and the Android app | Every request carries a token: a visitor token (guests, issued when the app opens) or a customer access token. | 272 |
+| Store API | `/api/store/{module}` | Customers and guests on the website and the Android app | Every request carries a token: a visitor token (guests, issued when the app opens) or a customer access token. | 273 |
 | Seller API | `/api/seller/{module}` | Seller owners and seller staff in Seller Center (website + Android app) | Seller member session. Every request acts for one seller account; seller member permissions apply. | 274 |
 | Admin API | `/api/admin/{module}` | Internal staff in the Admin Center and Operations Center | Staff session. Role permissions and approval limits apply. | 782 |
 | Public API | `/api/public/{module}` | Anyone (sign-in, registration, public settings) | Visitor token of any app. Refresh and sign-out take the refresh token; the bootstrap endpoint takes an app proof. | 21 |
@@ -25,7 +25,7 @@ Every endpoint needs a token ([../03-auth-middleware.md](../03-auth-middleware.m
 |---|---|---|---|
 | Store API | `visitor` | Any valid token of the app: a visitor token (before sign-in) or a signed-in access token | 56 |
 | Store API | `shopper` | A store token that can hold a cart: visitor (guest) or customer | 103 |
-| Store API | `customer` | Signed-in customer | 102 |
+| Store API | `customer` | Signed-in customer | 103 |
 | Store API | `account` | Any signed-in account, any realm (self-service security endpoints) | 11 |
 | Seller API | `seller` | Seller member acting for the seller in the token; optional `permission` narrows it | 274 |
 | Admin API | `staff` | Staff member (email and password sign-in); optional `permission` narrows it | 782 |
@@ -72,7 +72,7 @@ Every endpoint needs a token ([../03-auth-middleware.md](../03-auth-middleware.m
 |---|---|---|---|---|
 | [cart](modules/cart.md) | 1 | One cart across the Official Store and marketplace sellers for customers and guests. Every line is bound to the exact offer the customer chose, lines are grouped into seller packages with delivery estimates and shipping, and every read re-checks price, stock and eligibility so changes are explained per item instead of discarding the cart. | offers, inventory | 18 |
 | [checkout](modules/checkout.md) | 1 | Turns a cart (or a Buy now offer) into an accepted order: identify the customer or guest, choose an address with a per-item shippability check, pick delivery options per package, apply coupons or credit with reasons and item coverage, choose payment, review sellers, return terms and totals, revalidate into a change set the customer must accept, and place the order idempotently with clear payment results. | cart, orders, payments, shipping, customers, offers, inventory | 20 |
-| [orders](modules/orders.md) | 1 | The accepted purchase: one order per checkout, one seller group per seller package, and items with their own state (Confirmed, Preparing, Delayed, Shipped, Delivered, cancellation, return, refund). Keeps frozen purchase snapshots, derives the overall status from the items, tracks payment, delivery and returns progress separately, and runs item-level cancellations, seller fulfillment tasks with dispatch deadlines, timelines and purchase documents. | catalog, offers | 36 |
+| [orders](modules/orders.md) | 1 | The accepted purchase: one order per checkout, one seller group per seller package, and items with their own state (Confirmed, Preparing, Delayed, Shipped, Delivered, cancellation, return, refund). Keeps frozen purchase snapshots, derives the overall status from the items, tracks payment, delivery and returns progress separately, and runs item-level cancellations, seller fulfillment tasks with dispatch deadlines, timelines and purchase documents. | catalog, offers | 37 |
 | [payments](modules/payments.md) | 1 | Charging customers through provider adapters (card, digital wallet): payment intents per checkout attempt, authorization and capture per order and seller group, declines with retry, uncertain results resolved by a status-check job, refund execution (Requested → Processing → Sent / Failed) capped at the remaining refundable amount, chargebacks and payment disputes, saved payment methods and provider webhooks. | orders | 32 |
 | [shipping](modules/shipping.md) | 1 | How things get delivered: carriers and services, destinations and excluded areas, shipping profiles with rates (Official Store and sellers), free-shipping rules, dispatch targets and cutoffs, the holiday and service-interruption calendar, delivery estimates for a location, shipments with contents and tracking, labels where supported, partial shipments, and delivery exceptions with their required responses and carrier claims. | orders | 73 |
 

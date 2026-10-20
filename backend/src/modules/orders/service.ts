@@ -11,6 +11,7 @@ import { Core, invalid, notFound, type OrdersServiceDeps } from './service/core.
 import { Fulfillment } from './service/fulfillment.js';
 import { Placement } from './service/placement.js';
 import { Reads, type StoreViewer } from './service/reads.js';
+import { Spending } from './service/spending.js';
 import { Views } from './service/views.js';
 
 export type { OrdersServiceDeps };
@@ -42,6 +43,7 @@ export class OrdersService implements OrdersPublicApi {
   readonly core: Core;
   readonly views: Views;
   readonly reads: Reads;
+  readonly spending: Spending;
   readonly placement: Placement;
   readonly cancellations: Cancellations;
   readonly fulfillment: Fulfillment;
@@ -52,6 +54,7 @@ export class OrdersService implements OrdersPublicApi {
     this.core = new Core(deps);
     this.views = new Views(this.core);
     this.reads = new Reads(this.core, this.views);
+    this.spending = new Spending(this.core, this.views);
     this.placement = new Placement(this.core, this.views);
     this.cancellations = new Cancellations(this.core, this.views);
     this.fulfillment = new Fulfillment(this.core, this.views, this.cancellations);

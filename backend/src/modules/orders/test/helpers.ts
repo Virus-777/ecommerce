@@ -113,6 +113,16 @@ export async function harness(o: { fulfillmentService?: boolean; shippingExcepti
           [
             { id: CATEGORY.root, parentId: null, name: 'Home', slug: 'home', position: 1, visible: true, comingSoon: false, productCount: 0, children: [{ id: CATEGORY.child, parentId: CATEGORY.root, name: 'Kitchen', slug: 'kitchen', position: 1, visible: true, comingSoon: false, productCount: 0, children: [] }] },
           ] as catalog.Category[],
+        getCategoryPaths: async (ids) =>
+          Object.fromEntries(
+            ids.flatMap((id) =>
+              id === CATEGORY.child
+                ? [[id, { categoryId: id, names: ['Home', 'Kitchen'], ids: [CATEGORY.root, CATEGORY.child] }]]
+                : id === CATEGORY.root
+                  ? [[id, { categoryId: id, names: ['Home'], ids: [CATEGORY.root] }]]
+                  : [],
+            ),
+          ),
       },
       customers: {
         getCustomerByUserId: async (userId) => ({ id: userId, userId, ref: 'CU-000001', displayName: 'Sam Rivera', email: 'sam@example.com', accountStatus: 'active', canOrder: true, canMessage: true }),

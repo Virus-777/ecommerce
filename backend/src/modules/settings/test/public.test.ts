@@ -39,6 +39,7 @@ describe('app-config', () => {
         serviceRegionLabel: 'United States, 48 contiguous states',
         legalName: 'Marketly, Inc.',
         companyLine: 'Marketly, Inc. · Portland, OR',
+        phoneFormat: '(###) ###-####',
       },
       support: { hoursLabel: 'Mon–Sat, 8 AM–8 PM PT', phone: expect.any(String), openNow: expect.any(Boolean), closedLabel: 'Closed Sundays and US holidays' },
       checkout: { guestCheckoutEnabled: true, offerAccountAfterGuestPurchase: true },

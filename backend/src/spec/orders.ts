@@ -571,6 +571,237 @@ export const CaseRef: z.ZodType<CaseRef> = z.object({
   nextUpdateBy: z.iso.datetime({ offset: true }).nullish(),
 }).register(common.apiTypes, { id: "orders.CaseRef" });
 
+export interface CustomerSpending {
+  /** First market day covered (range all: the day of the first counted order, else today) */
+  from: string;
+  /** Last market day covered */
+  to: string;
+  /** Size of each series point: the grain asked for, else day up to 31 days, week up to 92, month beyond */
+  grain: "day" | "week" | "month";
+  currency: string;
+  totals: SpendingTotals;
+  /** The same number of days just before from; null for range all */
+  previous?: SpendingPrevious | null;
+  /** One point per day, week (starting Monday) or month from from to to, zeros included */
+  series: SpendingPoint[];
+  /** Top-level categories by amount, at most 5 plus Other */
+  byCategory: SpendingShare[];
+  /** Sellers by amount (key official for the Marketly Official Store), at most 5 plus Other */
+  bySeller: SpendingShare[];
+  /** By payment method label, e.g. Visa •••• 4242 */
+  byPaymentMethod: SpendingShare[];
+  /** Monday to Sunday by the day orders were placed (market time zone) */
+  byWeekday: SpendingWeekday[];
+  /** At most 5, by amount */
+  topProducts: SpendingProduct[];
+}
+
+export const CustomerSpending: z.ZodType<CustomerSpending> = z.object({
+  from: z.iso.date().describe("First market day covered (range all: the day of the first counted order, else today)"),
+  to: z.iso.date().describe("Last market day covered"),
+  grain: z.enum(["day", "week", "month"]).describe("Size of each series point: the grain asked for, else day up to 31 days, week up to 92, month beyond"),
+  currency: z.string(),
+  get totals() {
+    return SpendingTotals;
+  },
+  get previous() {
+    return SpendingPrevious.nullish();
+  },
+  get series() {
+    return z.array(SpendingPoint);
+  },
+  get byCategory() {
+    return z.array(SpendingShare);
+  },
+  get bySeller() {
+    return z.array(SpendingShare);
+  },
+  get byPaymentMethod() {
+    return z.array(SpendingShare);
+  },
+  get byWeekday() {
+    return z.array(SpendingWeekday);
+  },
+  get topProducts() {
+    return z.array(SpendingProduct);
+  },
+}).register(common.apiTypes, { id: "orders.CustomerSpending" });
+
+export interface SpendingTotals {
+  /** What the customer paid for items not cancelled, minus refunds on them (shipping and tax shares included) */
+  spent: common.Money;
+  /** Refunds on items not cancelled (returns, partial refunds) */
+  refunded: common.Money;
+  /** Value of items cancelled before or after charging (not in spent) */
+  cancelled: common.Money;
+  /** Discounts on items not cancelled (coupons, promotions) */
+  savings: common.Money;
+  /** Shipping share of items not cancelled */
+  shipping: common.Money;
+  /** Tax share of items not cancelled */
+  tax: common.Money;
+  /** Orders with at least one item not cancelled */
+  orders: number;
+  /** Units not cancelled */
+  units: number;
+  /** spent ÷ orders (0 without orders) */
+  averageOrder: common.Money;
+  largestOrder?: SpendingOrderRef | null;
+}
+
+export const SpendingTotals: z.ZodType<SpendingTotals> = z.object({
+  get spent() {
+    return common.Money;
+  },
+  get refunded() {
+    return common.Money;
+  },
+  get cancelled() {
+    return common.Money;
+  },
+  get savings() {
+    return common.Money;
+  },
+  get shipping() {
+    return common.Money;
+  },
+  get tax() {
+    return common.Money;
+  },
+  orders: z.number().int().describe("Orders with at least one item not cancelled"),
+  units: z.number().int().describe("Units not cancelled"),
+  get averageOrder() {
+    return common.Money;
+  },
+  get largestOrder() {
+    return SpendingOrderRef.nullish();
+  },
+}).register(common.apiTypes, { id: "orders.SpendingTotals" });
+
+export interface SpendingOrderRef {
+  orderId: string;
+  ref: string;
+  placedAt: string;
+  /** What counts toward spent for this order */
+  amount: common.Money;
+}
+
+export const SpendingOrderRef: z.ZodType<SpendingOrderRef> = z.object({
+  orderId: z.uuid(),
+  ref: z.string(),
+  placedAt: z.iso.datetime({ offset: true }),
+  get amount() {
+    return common.Money;
+  },
+}).register(common.apiTypes, { id: "orders.SpendingOrderRef" });
+
+export interface SpendingPrevious {
+  from: string;
+  to: string;
+  spent: common.Money;
+  orders: number;
+  /** Change of spent against the previous period in %, one decimal; null when the previous period spent nothing */
+  changePct?: number | null;
+}
+
+export const SpendingPrevious: z.ZodType<SpendingPrevious> = z.object({
+  from: z.iso.date(),
+  to: z.iso.date(),
+  get spent() {
+    return common.Money;
+  },
+  orders: z.number().int(),
+  changePct: z.number().describe("Change of spent against the previous period in %, one decimal; null when the previous period spent nothing").nullish(),
+}).register(common.apiTypes, { id: "orders.SpendingPrevious" });
+
+export interface SpendingPoint {
+  /** First day of the point (Monday for weeks, the 1st for months; never before from) */
+  start: string;
+  /** e.g. Oct 14, Week of Oct 13, Oct 2026 */
+  label: string;
+  spent: common.Money;
+  refunded: common.Money;
+  orders: number;
+}
+
+export const SpendingPoint: z.ZodType<SpendingPoint> = z.object({
+  start: z.iso.date().describe("First day of the point (Monday for weeks, the 1st for months; never before from)"),
+  label: z.string().describe("e.g. Oct 14, Week of Oct 13, Oct 2026"),
+  get spent() {
+    return common.Money;
+  },
+  get refunded() {
+    return common.Money;
+  },
+  orders: z.number().int(),
+}).register(common.apiTypes, { id: "orders.SpendingPoint" });
+
+export interface SpendingShare {
+  /** Category id, seller id or official, payment method label, or other */
+  key: string;
+  label: string;
+  /** Part of spent */
+  amount: common.Money;
+  /** Share of spent in %, one decimal */
+  sharePct: number;
+  orders: number;
+  units: number;
+}
+
+export const SpendingShare: z.ZodType<SpendingShare> = z.object({
+  key: z.string().describe("Category id, seller id or official, payment method label, or other"),
+  label: z.string(),
+  get amount() {
+    return common.Money;
+  },
+  sharePct: z.number().describe("Share of spent in %, one decimal"),
+  orders: z.number().int(),
+  units: z.number().int(),
+}).register(common.apiTypes, { id: "orders.SpendingShare" });
+
+export interface SpendingWeekday {
+  weekday: "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+  /** Mon … Sun */
+  label: string;
+  amount: common.Money;
+  orders: number;
+}
+
+export const SpendingWeekday: z.ZodType<SpendingWeekday> = z.object({
+  weekday: z.enum(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]),
+  label: z.string().describe("Mon … Sun"),
+  get amount() {
+    return common.Money;
+  },
+  orders: z.number().int(),
+}).register(common.apiTypes, { id: "orders.SpendingWeekday" });
+
+export interface SpendingProduct {
+  productId: string;
+  /** For the product link; null when the catalog did not answer */
+  productSlug?: string | null;
+  title: string;
+  image?: common.MediaRef | null;
+  units: number;
+  /** Part of spent */
+  amount: common.Money;
+  lastBoughtAt: string;
+}
+
+export const SpendingProduct: z.ZodType<SpendingProduct> = z.object({
+  productId: z.uuid(),
+  productSlug: z.string().describe("For the product link; null when the catalog did not answer").nullish(),
+  title: z.string(),
+  get image() {
+    return common.MediaRef.nullish();
+  },
+  units: z.number().int(),
+  get amount() {
+    return common.Money;
+  },
+  lastBoughtAt: z.iso.datetime({ offset: true }),
+}).register(common.apiTypes, { id: "orders.SpendingProduct" });
+
 export interface OrderSummary {
   id: string;
   ref: string;
@@ -2486,6 +2717,27 @@ export const endpoints = defineEndpoints({
     }),
     status: 200,
     screens: ["account/orders"],
+    phase: 1,
+  },
+  getMySpending: {
+    area: "store",
+    method: "GET",
+    path: "/orders/spending",
+    auth: "customer",
+    scope: "own-customer",
+    summary: "What the customer spent in a period: totals, trend and breakdowns",
+    desc: "Orders count by the day they were placed (market time zone); refunds count on their order's day. Orders still waiting for payment are left out. from/to (both or neither) replace range; at most 3 years. Default range last_12_months.",
+    query: () =>
+      z.object({
+        range: z.enum(["last_30_days", "last_3_months", "last_6_months", "last_12_months", "this_year", "last_year", "all"]).optional(),
+        from: z.iso.date().optional(),
+        to: z.iso.date().optional(),
+        grain: z.enum(["day", "week", "month"]).optional(),
+      }),
+    response: () => CustomerSpending,
+    status: 200,
+    errors: ["VALIDATION_FAILED"],
+    screens: ["account/statistics"],
     phase: 1,
   },
   getMyOrder: {

@@ -5,7 +5,7 @@ import { ApiError, call, errorMessage, newIdempotencyKey, useApi, useUploads } f
 import { useSession } from '@/app/session';
 import { StoreLayout } from '@/layouts';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Breadcrumbs, Button, Field, FileDrop, Icon, KeyValue, OptionCard, Select, Textarea, TextInput, type IconName } from '@marketly/web-shared/ui';
+import { Alert, Breadcrumbs, Button, Field, FileDrop, Icon, KeyValue, OptionCard, PhoneInput, Select, Textarea, type IconName } from '@marketly/web-shared/ui';
 import { dateLong } from './data/format';
 import { LoadError, SkLines } from './data/states';
 import { UploadList } from './data/UploadList';
@@ -218,7 +218,7 @@ export default function Contact() {
                 </div>
                 {channel === 'phone' && !phone && (
                   <Field label="Phone number for the call back" error={phoneError ?? fieldErrors.callbackPhone}>
-                    <TextInput id="ct-phone" type="tel" autoComplete="tel" value={callbackPhone} error={!!phoneError} onChange={(e) => setCallbackPhone(e.target.value)} />
+                    <PhoneInput id="ct-phone" autoComplete="tel" value={callbackPhone} error={!!phoneError} onChange={(e) => setCallbackPhone(e.target.value)} />
                   </Field>
                 )}
                 {duplicate ? (

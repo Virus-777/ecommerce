@@ -75330,6 +75330,132 @@
         "x-phase": 1
       }
     },
+    "/api/store/orders/orders/spending": {
+      "get": {
+        "operationId": "orders.getMySpending",
+        "tags": [
+          "Store API · Orders"
+        ],
+        "summary": "What the customer spent in a period: totals, trend and breakdowns",
+        "description": "Orders count by the day they were placed (market time zone); refunds count on their order's day. Orders still waiting for payment are left out. from/to (both or neither) replace range; at most 3 years. Default range last_12_months.\n\n**Screens:** account/statistics",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "range",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "last_30_days",
+                "last_3_months",
+                "last_6_months",
+                "last_12_months",
+                "this_year",
+                "last_year",
+                "all"
+              ]
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date"
+            }
+          },
+          {
+            "name": "grain",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "day",
+                "week",
+                "month"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/orders.CustomerSpending"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "orders",
+        "x-area": "store",
+        "x-auth": "customer",
+        "x-screens": [
+          "account/statistics"
+        ],
+        "x-phase": 1
+      }
+    },
     "/api/store/orders/orders/{id}": {
       "get": {
         "operationId": "orders.getMyOrder",
@@ -187853,6 +187979,366 @@
           "itemIds"
         ]
       },
+      "orders.CustomerSpending": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date",
+            "description": "First market day covered (range all: the day of the first counted order, else today)"
+          },
+          "to": {
+            "type": "string",
+            "format": "date",
+            "description": "Last market day covered"
+          },
+          "grain": {
+            "type": "string",
+            "enum": [
+              "day",
+              "week",
+              "month"
+            ],
+            "description": "Size of each series point: the grain asked for, else day up to 31 days, week up to 92, month beyond"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/orders.SpendingTotals"
+          },
+          "previous": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/orders.SpendingPrevious"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The same number of days just before from; null for range all"
+          },
+          "series": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/orders.SpendingPoint"
+            },
+            "description": "One point per day, week (starting Monday) or month from from to to, zeros included"
+          },
+          "byCategory": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/orders.SpendingShare"
+            },
+            "description": "Top-level categories by amount, at most 5 plus Other"
+          },
+          "bySeller": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/orders.SpendingShare"
+            },
+            "description": "Sellers by amount (key official for the Marketly Official Store), at most 5 plus Other"
+          },
+          "byPaymentMethod": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/orders.SpendingShare"
+            },
+            "description": "By payment method label, e.g. Visa •••• 4242"
+          },
+          "byWeekday": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/orders.SpendingWeekday"
+            },
+            "description": "Monday to Sunday by the day orders were placed (market time zone)"
+          },
+          "topProducts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/orders.SpendingProduct"
+            },
+            "description": "At most 5, by amount"
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "grain",
+          "currency",
+          "totals",
+          "series",
+          "byCategory",
+          "bySeller",
+          "byPaymentMethod",
+          "byWeekday",
+          "topProducts"
+        ]
+      },
+      "orders.SpendingTotals": {
+        "type": "object",
+        "properties": {
+          "spent": {
+            "$ref": "#/components/schemas/Money",
+            "description": "What the customer paid for items not cancelled, minus refunds on them (shipping and tax shares included)"
+          },
+          "refunded": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Refunds on items not cancelled (returns, partial refunds)"
+          },
+          "cancelled": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Value of items cancelled before or after charging (not in spent)"
+          },
+          "savings": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Discounts on items not cancelled (coupons, promotions)"
+          },
+          "shipping": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Shipping share of items not cancelled"
+          },
+          "tax": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Tax share of items not cancelled"
+          },
+          "orders": {
+            "type": "integer",
+            "description": "Orders with at least one item not cancelled"
+          },
+          "units": {
+            "type": "integer",
+            "description": "Units not cancelled"
+          },
+          "averageOrder": {
+            "$ref": "#/components/schemas/Money",
+            "description": "spent ÷ orders (0 without orders)"
+          },
+          "largestOrder": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/orders.SpendingOrderRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "spent",
+          "refunded",
+          "cancelled",
+          "savings",
+          "shipping",
+          "tax",
+          "orders",
+          "units",
+          "averageOrder"
+        ]
+      },
+      "orders.SpendingOrderRef": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ref": {
+            "type": "string"
+          },
+          "placedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Money",
+            "description": "What counts toward spent for this order"
+          }
+        },
+        "required": [
+          "orderId",
+          "ref",
+          "placedAt",
+          "amount"
+        ]
+      },
+      "orders.SpendingPrevious": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date"
+          },
+          "to": {
+            "type": "string",
+            "format": "date"
+          },
+          "spent": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "orders": {
+            "type": "integer"
+          },
+          "changePct": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Change of spent against the previous period in %, one decimal; null when the previous period spent nothing"
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "spent",
+          "orders"
+        ]
+      },
+      "orders.SpendingPoint": {
+        "type": "object",
+        "properties": {
+          "start": {
+            "type": "string",
+            "format": "date",
+            "description": "First day of the point (Monday for weeks, the 1st for months; never before from)"
+          },
+          "label": {
+            "type": "string",
+            "description": "e.g. Oct 14, Week of Oct 13, Oct 2026"
+          },
+          "spent": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "refunded": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "orders": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "start",
+          "label",
+          "spent",
+          "refunded",
+          "orders"
+        ]
+      },
+      "orders.SpendingShare": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Category id, seller id or official, payment method label, or other"
+          },
+          "label": {
+            "type": "string"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Part of spent"
+          },
+          "sharePct": {
+            "type": "number",
+            "description": "Share of spent in %, one decimal"
+          },
+          "orders": {
+            "type": "integer"
+          },
+          "units": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "amount",
+          "sharePct",
+          "orders",
+          "units"
+        ]
+      },
+      "orders.SpendingWeekday": {
+        "type": "object",
+        "properties": {
+          "weekday": {
+            "type": "string",
+            "enum": [
+              "mon",
+              "tue",
+              "wed",
+              "thu",
+              "fri",
+              "sat",
+              "sun"
+            ]
+          },
+          "label": {
+            "type": "string",
+            "description": "Mon … Sun"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "orders": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "weekday",
+          "label",
+          "amount",
+          "orders"
+        ]
+      },
+      "orders.SpendingProduct": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "productSlug": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "For the product link; null when the catalog did not answer"
+          },
+          "title": {
+            "type": "string"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MediaRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "units": {
+            "type": "integer"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Part of spent"
+          },
+          "lastBoughtAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "productId",
+          "title",
+          "units",
+          "amount",
+          "lastBoughtAt"
+        ]
+      },
       "orders.OrderSummary": {
         "type": "object",
         "properties": {
@@ -212646,6 +213132,10 @@
             "type": "string",
             "description": "market.companyLine"
           },
+          "phoneFormat": {
+            "type": "string",
+            "description": "market.phoneFormat: input mask for phone numbers, # = one digit, e.g. (###) ###-####"
+          },
           "defaultDeliveryLocation": {
             "anyOf": [
               {
@@ -212680,7 +213170,8 @@
           "closures",
           "support",
           "legalName",
-          "companyLine"
+          "companyLine",
+          "phoneFormat"
         ]
       },
       "settings.DeliveryLocation": {
@@ -212913,6 +213404,10 @@
             "type": "string",
             "description": "One-line company details for the footer and emails, e.g. Marketly, Inc. · Portland, OR"
           },
+          "phoneFormat": {
+            "type": "string",
+            "description": "How phone number inputs are masked: # = one digit, other characters shown as typed, e.g. (###) ###-####. A number starting with + or longer than the pattern stays as typed"
+          },
           "defaultDeliveryLocation": {
             "anyOf": [
               {
@@ -212943,7 +213438,8 @@
           "locale",
           "serviceRegionLabel",
           "legalName",
-          "companyLine"
+          "companyLine",
+          "phoneFormat"
         ]
       },
       "settings.PublicSupport": {

@@ -37,7 +37,7 @@ export function Field({ label, hint, error, optional, className, children, label
   );
 }
 
-interface TextInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'prefix'> {
+export interface TextInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'prefix'> {
   id: string;
   /** Leading/trailing text inside the field ($, %, kg). */
   prefix?: ReactNode;

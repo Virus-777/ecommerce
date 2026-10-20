@@ -103,6 +103,16 @@ export const BUILT_INS: BuiltIn[] = [
     exampleValue: true,
   },
   {
+    key: 'market.phoneFormat',
+    section: 'market',
+    label: 'Phone number format',
+    description:
+      'How phone number inputs are masked in the website, Seller Center, Admin Center and Android app: # is one digit, other characters appear as the customer types (e.g. (###) ###-####). Numbers starting with + or longer than the pattern stay as typed.',
+    valueType: 'string',
+    default: '(###) ###-####',
+    approval: 'second_reviewer',
+  },
+  {
     key: 'market.defaultDeliveryLocation',
     section: 'market',
     label: 'Default delivery location',

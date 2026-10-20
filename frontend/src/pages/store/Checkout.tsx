@@ -6,7 +6,7 @@ import { CheckoutLayout } from '@/layouts';
 import { formatMoney } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
 import { ApiError, call, errorMessage, useApi, type Api } from '@marketly/web-shared/api';
-import { Alert, Avatar, Badge, Button, Card, Checkbox, Dialog, Field, Icon, OptionCard, Select, SellerBadge, SummaryRow, TextInput, Textarea, announce } from '@marketly/web-shared/ui';
+import { Alert, Avatar, Badge, Button, Card, Checkbox, Dialog, Field, Icon, OptionCard, PhoneInput, Select, SellerBadge, SummaryRow, TextInput, Textarea, announce } from '@marketly/web-shared/ui';
 import { BuyMini, CheckoutSteps, PurchaseSkeleton, SecN, plural } from './data/purchase';
 import { AddressSuggestion, useAddressCheck, type AddressCheck } from './data/address-check';
 import {
@@ -566,7 +566,7 @@ function CheckoutForm({ c }: { c: CheckoutView }) {
           <TextInput id={`${idp}name`} value={a.name} error={!!errs[`${prefix}name`]} autoComplete="name" onChange={(e) => set({ ...a, name: e.target.value })} onBlur={onBlur} />
         </Field>
         <Field label="Phone" error={errs[`${prefix}phone`]}>
-          <TextInput id={`${idp}phone`} type="tel" value={a.phone} error={!!errs[`${prefix}phone`]} autoComplete="tel" onChange={(e) => set({ ...a, phone: e.target.value })} onBlur={onBlur} />
+          <PhoneInput id={`${idp}phone`} value={a.phone} error={!!errs[`${prefix}phone`]} autoComplete="tel" onChange={(e) => set({ ...a, phone: e.target.value })} onBlur={onBlur} />
         </Field>
       </div>
       <Field label="Street address" error={errs[`${prefix}line1`]}>
@@ -633,7 +633,7 @@ function CheckoutForm({ c }: { c: CheckoutView }) {
                       <TextInput id="co-g-email" type="email" value={contact.email} error={!!shown.email} autoComplete="email" onChange={(e) => setContact({ ...contact, email: e.target.value })} onBlur={saveContact} />
                     </Field>
                     <Field label="Mobile phone" hint="Only for delivery updates about this order." error={shown.gphone}>
-                      <TextInput id="co-g-phone" type="tel" value={contact.phone} error={!!shown.gphone} autoComplete="tel" onChange={(e) => setContact({ ...contact, phone: e.target.value })} onBlur={saveContact} />
+                      <PhoneInput id="co-g-phone" value={contact.phone} error={!!shown.gphone} autoComplete="tel" onChange={(e) => setContact({ ...contact, phone: e.target.value })} onBlur={saveContact} />
                     </Field>
                   </div>
                   {(config?.checkout.offerAccountAfterGuestPurchase ?? true) && (

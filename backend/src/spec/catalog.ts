@@ -1319,7 +1319,7 @@ export interface CatalogPublicApi {
   getVariants(variantIds: string[]): Promise<VariantRef[]>;
   /** Shipping weight and dimensions of one unit per variant (decision: parcel data lives on the catalog variant). null when the variant has no weight yet; callers fall back to their own default parcel Used by: offers, shipping, cart, checkout. */
   getParcels(variantIds: string[]): Promise<Record<string, VariantParcel | null>>;
-  /** Root-first category names and ids for each category, so callers can show the path and match subcategories (a rule on a category covers every id whose ids[] contains it) Used by: returns, checkout, finance, reports. */
+  /** Root-first category names and ids for each category, so callers can show the path and match subcategories (a rule on a category covers every id whose ids[] contains it) Used by: returns, checkout, finance, reports, orders. */
   getCategoryPaths(categoryIds: string[]): Promise<Record<string, CategoryPath>>;
   /** Category tree for menus and the Categories tab, with in-stock product counts and category images Used by: graphql, search. */
   listCategories(opts: { includeHidden?: boolean }): Promise<Category[]>;
