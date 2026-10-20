@@ -1,9 +1,10 @@
 // Building blocks shared by the sign-in, register, recover and guest order screens: the auth card shell,
 // password field with show/hide, code entry, password rules from the server's policy, resend timers,
 // error copy for the identity error codes and finishing a sign-in (adopt tokens, claim the guest cart, go on).
+import { useHashToken as useSharedHashToken } from '@marketly/web-shared/lib/hooks';
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
-import { useLocation, useNavigate, useSearchParams } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { useSession } from '@/app/session';
 import { StoreLayout } from '@/layouts';
 import { ApiError, call, errorMessage, useApi, useSessionState, type components } from '@marketly/web-shared/api';
@@ -76,14 +77,8 @@ export function useRedirectSignedIn() {
 }
 
 /** The token in the URL fragment of an emailed link (`#token=…`), removed from the address bar once read. */
-export function useHashToken(): string | null {
-  const { hash } = useLocation();
-  const [token] = useState(() => new URLSearchParams(hash.replace(/^#/, '')).get('token'));
-  useEffect(() => {
-    if (token && window.location.hash) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search);
-  }, [token]);
-  return token;
-}
+/** The emailed link's token (null when there is none): the shared hook, which survives a remount. */
+export const useHashToken = (): string | null => useSharedHashToken() || null;
 
 /**
  * After sign-in, 2-step verification or registration: adopt the customer tokens, ask cart for the one-time

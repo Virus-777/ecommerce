@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useHashToken } from '@marketly/web-shared/lib/hooks';
 import { ApiError, errorMessage, type components } from '@marketly/web-shared/api';
 import { Icon } from '@marketly/web-shared/ui';
 
@@ -7,25 +7,7 @@ import { Icon } from '@marketly/web-shared/ui';
 
 export type PasswordPolicy = components['schemas']['identity.PasswordPolicy'];
 
-/**
- * Reads `#token=…` once and removes it from the address bar (history.replaceState), so the token never stays in
- * the URL, history or a shared screenshot. It goes in request bodies only.
- */
-export function useHashToken(): string {
-  const [token] = useState(() => {
-    const t = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('token');
-    // Kept in memory for this page: React's development double render (and a remount) would otherwise read the
-    // address again after the fragment is gone.
-    if (t) captured = { path: window.location.pathname, token: t };
-    return captured?.path === window.location.pathname ? captured.token : '';
-  });
-  useEffect(() => {
-    if (window.location.hash) history.replaceState(history.state, '', window.location.pathname + window.location.search);
-  }, []);
-  return token;
-}
-
-let captured: { path: string; token: string } | null = null;
+export { useHashToken };
 
 const FAILED_TEXT: Record<string, (p?: PasswordPolicy) => string> = {
   min_length: (p) => `Use at least ${p?.minLength ?? 12} characters.`,

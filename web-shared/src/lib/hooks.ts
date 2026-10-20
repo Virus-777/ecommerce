@@ -140,3 +140,23 @@ export function useInView<T extends HTMLElement>(onVisible: () => void, enabled:
   }, [enabled]);
   return ref;
 }
+
+let capturedToken: { path: string; token: string } | null = null;
+
+/**
+ * Reads `#token=…` (emailed links: password reset, invitations) once and removes it from the address bar
+ * (history.replaceState), so the token never stays in the URL, history or a shared screenshot; '' when there is
+ * none. It is kept in memory for this page, so React's development double render or a remount still has it after
+ * the fragment is gone.
+ */
+export function useHashToken(): string {
+  const [token] = useState(() => {
+    const t = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('token');
+    if (t) capturedToken = { path: window.location.pathname, token: t };
+    return capturedToken?.path === window.location.pathname ? capturedToken.token : '';
+  });
+  useEffect(() => {
+    if (window.location.hash) history.replaceState(history.state, '', window.location.pathname + window.location.search);
+  }, []);
+  return token;
+}
