@@ -366,7 +366,9 @@ export class Core {
       const acct = await tx.lockAccount(lot.seller_id, this.currency(), this.now());
       await this.saveAccount(tx, acct, { pending: acct.pending - lot.net, available: acct.available + lot.net, held: acct.held }, out);
     }
-    return tx.update('earnings_lots', lot.id, { state, ...patch });
+    // when it left pending: the ledger rebuild of end-of-day balances (sellerBalancesByDay) splits pending from available by it
+    const left = lot.state === 'pending' && state !== 'pending' ? { left_pending_at: this.now() } : {};
+    return tx.update('earnings_lots', lot.id, { state, ...left, ...patch });
   }
 
   /**

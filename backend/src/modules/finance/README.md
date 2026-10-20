@@ -1067,8 +1067,9 @@ Indexes: `(seller_id, at desc)`, `(ref_kind, ref_id)`, `(statement_id)`, `(lot_i
 | delivered_at | timestamptz? |
 | available_at | timestamptz? |
 | payout_id | uuid? |
+| left_pending_at | timestamptz? (when the lot left pending: made available or reversed; null while pending and on lots that left before 2026-10-21) |
 
-Indexes: `(state, available_at)`, `(seller_id, state)`, `(payout_id)`, `(order_id)`
+Indexes: `(state, available_at)`, `(seller_id, state)`, `(payout_id)`, `(order_id)`, `(left_pending_at)`
 
 **fee_rule_sets**
 
@@ -1116,6 +1117,9 @@ Indexes: `(rule_set_id, category_id) unique`
 | refunded_fee | bigint |
 | status | text (charged|kept_disputed|reversed) |
 | created_at | timestamptz |
+| changed_at | timestamptz? (last change of fee, refunded fee or status; reports pulls the fees changed since its last run. Older rows get created_at from a data migration) |
+
+Indexes: `(changed_at, id)`
 
 **refund_allocations**: Funding split from returns.refund.approved, applied when payments.refund.sent arrives
 
@@ -1537,6 +1541,10 @@ Indexes: `(at)`
 | hasPayoutBlock | `(sellerId: uuid) => { blocked: bool, reasons: string[] }`<br>Whether a seller can be paid (verified destination, no full hold) | sellers |
 | marketplaceIncomeByDay | `(range: DateRange, sellerId?: uuid) => DailySellerIncome[]`<br>Fee income per seller per market day (commission and fees charged, fee refunds, net, ad income), from fee_charges and ledger_entries. Company revenue only; seller sales are not income. | reports |
 | companyCostsByDay | `(range: DateRange) => DailyCompanyCost[]`<br>Official Store trading costs per market day and kind (buying cost, Official Store discounts, shipping expense, return losses, write-offs, chargeback losses, supplier credits), from what recordCompanyCost and the order and claim events record in trading_entries. Costs are positive; reversals are negative; supplier credits are positive amounts that lower cost. | reports |
+| ledgerDailyTotals | `(range: { from: date, to: date, sellerId?: uuid }) => { sellerId: uuid, day: date, type: string, amount: Money, count: int }[]`<br>Seller ledger entries summed per seller, market day of at and entry type (amounts signed as in the ledger, e.g. marketplace_fee negative), for the reports finance facts (docs/09 §3.2). One aggregation on the (type, at) index, or (seller_id, at) for one seller | reports |
+| companyDailyTotals | `(range: { from: date, to: date }) => { day: date, source: 'trading' | 'platform_cost' | 'discount_funding', kind: string, amount: Money }[]`<br>Company money per market day: Official Store trading_entries by kind as stored (sale, buying_cost, discount, shipping_expense, return, write_off, chargeback_loss, supplier_credit), platform_costs by kind (signed: costs positive, recoveries negative) and coupon discount_funding by funder (kind platform or seller, reversals negative) on marketplace seller items only: funding on Official Store items is already in the trading discount | reports |
+| itemFeesChangedSince | `(input: { since: datetime, after?: string, limit: int }) => { orderItemId: uuid, sellerId: uuid, fee: Money, refundedFee: Money, changedAt: datetime, cursor: string }[]`<br>Fee charges (fee_charges) whose fee, refunded fee or status changed at or after since, oldest change first, keyset-paged by (changed_at, id): pass the cursor of the last row as after for the next page; at most limit (1-1000) rows | reports |
+| sellerBalancesByDay | `(range: { from: date, to: date }) => { day: date, sellerId: uuid, pending: Money, available: Money, held: Money, owed: Money }[]`<br>End-of-day seller balances per market day (today: as of now), rebuilt from the ledger. held and the total (pending + available + held) come exactly from the entries; pending is the entries of earnings lots still pending at the end of the day (earnings_lots.left_pending_at; lots that left pending before that column existed use their available_at, and a lot reversed before delivery counts as pending, which only matters when it kept a non-zero net); available is the rest. owed = what the seller owes Marketly (a negative available balance, as a positive amount). Sellers whose four figures are all zero that day are left out | reports |
 | getSellerAccount | `(sellerId: uuid) => SellerFinanceDetail`<br>One seller's balances, ledger, payouts, statements, holds, amounts owed and adjustments (seller Finance page, admin seller 360) | graphql |
 | getStatementForSeller | `(sellerId: uuid, ref: string) => Statement | null`<br>An itemised statement of this seller | graphql |
 | getStatement | `(ref: string) => Statement | null`<br>Any seller's statement as the seller sees it (staff) | graphql |

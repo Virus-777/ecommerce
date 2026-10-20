@@ -2119,6 +2119,14 @@ export interface FinancePublicApi {
   marketplaceIncomeByDay(range: common.DateRange, sellerId?: string): Promise<DailySellerIncome[]>;
   /** Official Store trading costs per market day and kind (buying cost, Official Store discounts, shipping expense, return losses, write-offs, chargeback losses, supplier credits), from what recordCompanyCost and the order and claim events record in trading_entries. Costs are positive; reversals are negative; supplier credits are positive amounts that lower cost. Used by: reports. */
   companyCostsByDay(range: common.DateRange): Promise<DailyCompanyCost[]>;
+  /** Seller ledger entries summed per seller, market day of at and entry type (amounts signed as in the ledger, e.g. marketplace_fee negative), for the reports finance facts (docs/09 §3.2). One aggregation on the (type, at) index, or (seller_id, at) for one seller Used by: reports. */
+  ledgerDailyTotals(range: { from: string, to: string, sellerId?: string }): Promise<{ sellerId: string, day: string, type: string, amount: common.Money, count: number }[]>;
+  /** Company money per market day: Official Store trading_entries by kind as stored (sale, buying_cost, discount, shipping_expense, return, write_off, chargeback_loss, supplier_credit), platform_costs by kind (signed: costs positive, recoveries negative) and coupon discount_funding by funder (kind platform or seller, reversals negative) on marketplace seller items only: funding on Official Store items is already in the trading discount Used by: reports. */
+  companyDailyTotals(range: { from: string, to: string }): Promise<{ day: string, source: 'trading' | 'platform_cost' | 'discount_funding', kind: string, amount: common.Money }[]>;
+  /** Fee charges (fee_charges) whose fee, refunded fee or status changed at or after since, oldest change first, keyset-paged by (changed_at, id): pass the cursor of the last row as after for the next page; at most limit (1-1000) rows Used by: reports. */
+  itemFeesChangedSince(input: { since: string, after?: string, limit: number }): Promise<{ orderItemId: string, sellerId: string, fee: common.Money, refundedFee: common.Money, changedAt: string, cursor: string }[]>;
+  /** End-of-day seller balances per market day (today: as of now), rebuilt from the ledger. held and the total (pending + available + held) come exactly from the entries; pending is the entries of earnings lots still pending at the end of the day (earnings_lots.left_pending_at; lots that left pending before that column existed use their available_at, and a lot reversed before delivery counts as pending, which only matters when it kept a non-zero net); available is the rest. owed = what the seller owes Marketly (a negative available balance, as a positive amount). Sellers whose four figures are all zero that day are left out Used by: reports. */
+  sellerBalancesByDay(range: { from: string, to: string }): Promise<{ day: string, sellerId: string, pending: common.Money, available: common.Money, held: common.Money, owed: common.Money }[]>;
   /** One seller's balances, ledger, payouts, statements, holds, amounts owed and adjustments (seller Finance page, admin seller 360) Used by: graphql. */
   getSellerAccount(sellerId: string): Promise<SellerFinanceDetail>;
   /** An itemised statement of this seller Used by: graphql. */
@@ -2193,6 +2201,8 @@ export interface FinanceDb {
     delivered_at: Date | null;
     available_at: Date | null;
     payout_id: string | null;
+    /** when the lot left pending: made available or reversed; null while pending and on lots that left before 2026-10-21 */
+    left_pending_at: Date | null;
   };
   fee_rule_sets: {
     id: string;
@@ -2229,6 +2239,8 @@ export interface FinanceDb {
     refunded_fee: number;
     status: 'charged' | 'kept_disputed' | 'reversed';
     created_at: Date;
+    /** last change of fee, refunded fee or status; reports pulls the fees changed since its last run. Older rows get created_at from a data migration */
+    changed_at: Date | null;
   };
   /** Funding split from returns.refund.approved, applied when payments.refund.sent arrives */
   refund_allocations: {
@@ -3699,7 +3711,7 @@ export const spec = defineModuleSpec({
   summary: "Seller money and company money kept apart: the seller ledger (proceeds, pending, available, held, negative and amounts owed), fee rules, holds, adjustments, payout runs and payouts, statements, payout-destination verification, daily reconciliation checks, and company trading margins separate from marketplace fee income.",
   dependsOn: ["orders","payments","sellers","access"],
   optionalDeps: ["returns","advertising","promotions","purchasing","inventory","shipping","support","wallet","workqueues","notifications","audit","identity","media","reports","settings","offers"],
-  publicApi: ["previewRefundImpact","sellerBalanceTotals","bookedRefundImpact","calculateFee","getSellerBalances","balancesForSellers","recordAdCharge","recordServiceFee","creditSellerCharge","creditSeller","getSellerCredit","withdrawSellerCredit","recordExternalDifference","recordCompanyCost","hasPayoutBlock","marketplaceIncomeByDay","companyCostsByDay","getSellerAccount","getStatementForSeller","getStatement","getPayoutRun","listPayoutRuns","holdsForReference","previewOfferEarnings","getNextPayoutRun","previewRefundImpactForOrder","exportRows"],
+  publicApi: ["previewRefundImpact","sellerBalanceTotals","bookedRefundImpact","calculateFee","getSellerBalances","balancesForSellers","recordAdCharge","recordServiceFee","creditSellerCharge","creditSeller","getSellerCredit","withdrawSellerCredit","recordExternalDifference","recordCompanyCost","hasPayoutBlock","marketplaceIncomeByDay","companyCostsByDay","ledgerDailyTotals","companyDailyTotals","itemFeesChangedSince","sellerBalancesByDay","getSellerAccount","getStatementForSeller","getStatement","getPayoutRun","listPayoutRuns","holdsForReference","previewOfferEarnings","getNextPayoutRun","previewRefundImpactForOrder","exportRows"],
   permissions: [
     {
       "key": "finance.ledger.view",
@@ -4699,18 +4711,21 @@ export const spec = defineModuleSpec({
         "net",
         "delivered_at",
         "available_at",
-        "payout_id"
+        "payout_id",
+        "left_pending_at"
       ],
       "nullable": [
         "delivered_at",
         "available_at",
-        "payout_id"
+        "payout_id",
+        "left_pending_at"
       ],
       "decimal": [],
       "binary": [],
       "dates": [
         "delivered_at",
-        "available_at"
+        "available_at",
+        "left_pending_at"
       ],
       "identity": null,
       "validator": {
@@ -4787,6 +4802,12 @@ export const spec = defineModuleSpec({
                 "string",
                 "null"
               ]
+            },
+            "left_pending_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
             }
           },
           "additionalProperties": false
@@ -4824,6 +4845,12 @@ export const spec = defineModuleSpec({
           "name": "earnings_lots_order_id_4c5e85",
           "key": {
             "order_id": 1
+          }
+        },
+        {
+          "name": "earnings_lots_left_pending_at_a5dac6",
+          "key": {
+            "left_pending_at": 1
           }
         }
       ],
@@ -5034,13 +5061,17 @@ export const spec = defineModuleSpec({
         "fee",
         "refunded_fee",
         "status",
-        "created_at"
+        "created_at",
+        "changed_at"
       ],
-      "nullable": [],
+      "nullable": [
+        "changed_at"
+      ],
       "decimal": [],
       "binary": [],
       "dates": [
-        "created_at"
+        "created_at",
+        "changed_at"
       ],
       "identity": null,
       "validator": {
@@ -5116,6 +5147,12 @@ export const spec = defineModuleSpec({
             },
             "created_at": {
               "bsonType": "date"
+            },
+            "changed_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
             }
           },
           "additionalProperties": false
@@ -5128,6 +5165,13 @@ export const spec = defineModuleSpec({
             "order_item_id": 1
           },
           "unique": true
+        },
+        {
+          "name": "fee_charges_changed_at__id_7508f6",
+          "key": {
+            "changed_at": 1,
+            "_id": 1
+          }
         }
       ],
       "unenforced": []
