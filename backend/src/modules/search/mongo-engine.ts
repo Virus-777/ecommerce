@@ -46,7 +46,7 @@ const prefixMatch = (list: string[]) => ({ $and: list.map((s) => ({ 'terms.t': {
  * pg_trgm's word_similarity(a, text): the greatest similarity between a's trigrams and any continuous extent of
  * the text's ordered trigrams (word_similarity('word', 'two words') = 0.8)
  */
-function wordSimilarity(a: string, text: string): number {
+export function wordSimilarity(a: string, text: string): number {
   const ta = trigrams(a);
   if (!ta.size) return 0;
   const ordered = text
@@ -274,12 +274,24 @@ export function createMongoSearchEngine(store: ModuleStore, terms: TermLookup): 
     return out;
   }
 
-  /** Candidate words for a misspelled word: title words and suggestion term words with its first letter */
+  /**
+   * Candidate words for a misspelled word: title words and suggestion term words with its first letter. The distinct
+   * title words are gathered in the database (titles are split on whitespace, as wordsStartingWith does), so only the
+   * words travel, not every title.
+   */
   async function candidateWords(word: string): Promise<string[]> {
     const first = word.charAt(0);
-    const titles = await agg<{ title_norm: string }>([{ $match: { title_norm: { $regex: `(^| )${escapeRegExp(first)}` } } }, { $project: { _id: 0, title_norm: 1 } }]);
-    const fromTerms = await termRows.aggregate<{ term: string }>([{ $match: { term: { $regex: `(^|\\s)${escapeRegExp(first)}`, $options: 'i' } } }, { $project: { _id: 0, term: 1 } }]);
-    return wordsStartingWith([...titles.map((t) => t.title_norm), ...fromTerms.map((t) => t.term)], first);
+    const [titleWords, fromTerms] = await Promise.all([
+      agg<{ _id: string }>([
+        { $match: { title_norm: { $regex: `(^| )${escapeRegExp(first)}` } } },
+        { $project: { _id: 0, w: { $map: { input: { $regexFindAll: { input: { $toLower: '$title_norm' }, regex: /\S+/ } }, in: '$$this.match' } } } },
+        { $unwind: '$w' },
+        { $match: { w: { $regex: `^${escapeRegExp(first)}` } } },
+        { $group: { _id: '$w' } },
+      ]),
+      termRows.aggregate<{ term: string }>([{ $match: { term: { $regex: `(^|\\s)${escapeRegExp(first)}`, $options: 'i' } } }, { $project: { _id: 0, term: 1 } }]),
+    ]);
+    return wordsStartingWith([...titleWords.map((t) => t._id), ...fromTerms.map((t) => t.term)], first);
   }
 
   return {
@@ -446,26 +458,36 @@ export function createMongoSearchEngine(store: ModuleStore, terms: TermLookup): 
       const p = prefix.toLowerCase();
       const ps = prefixStems(prefix);
       const first = p.charAt(0);
-      const or: Doc[] = [...(ps.length ? [prefixMatch(ps)] : []), ...(first ? [{ title_norm: { $regex: `(^| )${escapeRegExp(first)}` } }] : [])];
-      if (!or.length) return [];
-      // asked while typing: rank the candidates on the few fields that decide, then read the chosen documents whole
-      const found = await agg([
-        { $match: { offer_count: { $gt: 0 }, $or: or } },
-        { $project: { title: 1, title_norm: 1, in_stock: 1, popularity: 1, rating_count: 1, 'terms.t': 1 } },
-      ]);
-      const startsWith = (d: Doc) => ps.length > 0 && ps.every((s) => ((d.terms ?? []) as { t: string }[]).some((x) => x.t.startsWith(s)));
-      const ids = found
-        .filter((d) => startsWith(d) || wordSimilarity(p, d.title_norm) >= threshold)
-        .sort(
-          (a, b) =>
-            Number(b.title_norm.includes(p)) - Number(a.title_norm.includes(p)) ||
-            Number(b.in_stock) - Number(a.in_stock) ||
-            Number(b.popularity) - Number(a.popularity) ||
-            b.rating_count - a.rating_count ||
-            byKey(a.title, b.title),
-        )
-        .slice(0, limit)
-        .map((d) => d._id as string);
+      if (!ps.length && !first) return [];
+      // asked on every key press, ranked by: the typed text in the title, in stock, popularity, ratings, title
+      const rankFields = { title: 1, title_norm: 1, in_stock: 1, popularity: 1, rating_count: 1 };
+      const byRank = (a: Doc, b: Doc) =>
+        Number(b.title_norm.includes(p)) - Number(a.title_norm.includes(p)) ||
+        Number(b.in_stock) - Number(a.in_stock) ||
+        Number(b.popularity) - Number(a.popularity) ||
+        b.rating_count - a.rating_count ||
+        byKey(a.title, b.title) ||
+        byKey(a._id, b._id);
+      // products with a word starting with each typed word (indexed search terms), ranked and cut in the database
+      const prefixed = ps.length
+        ? await agg([
+            { $match: { offer_count: { $gt: 0 }, ...prefixMatch(ps) } },
+            { $project: rankFields },
+            { $set: { _inTitle: { $gte: [{ $indexOfCP: ['$title_norm', p] }, 0] } } },
+            { $sort: { _inTitle: -1, in_stock: -1, popularity: -1, rating_count: -1, title: 1, _id: 1 } },
+            { $limit: limit },
+          ])
+        : [];
+      let chosen = prefixed;
+      // too few: add titles similar to what was typed (among titles with a word starting with its first letter)
+      if (prefixed.length < limit && first) {
+        const seen = new Set(prefixed.map((d) => d._id as string));
+        const similar = (await agg([{ $match: { offer_count: { $gt: 0 }, title_norm: { $regex: `(^| )${escapeRegExp(first)}` } } }, { $project: rankFields }])).filter(
+          (d) => !seen.has(d._id as string) && wordSimilarity(p, d.title_norm) >= threshold,
+        );
+        chosen = [...prefixed, ...similar].sort(byRank).slice(0, limit);
+      }
+      const ids = chosen.map((d) => d._id as string);
       if (!ids.length) return [];
       const byId = new Map((await agg([{ $match: { _id: { $in: ids } } }, { $project: { terms: 0, offers: 0 } }])).map((d) => [d._id as string, d]));
       return ids.flatMap((id) => (byId.has(id) ? [docOut(byId.get(id)!)] : []));
