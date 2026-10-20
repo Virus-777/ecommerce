@@ -1,8 +1,10 @@
 import { Bar, BarChart, CartesianGrid, ReferenceLine, Tooltip, XAxis, YAxis } from 'recharts';
-import { barCursor, grid, margin, tooltipBase, xAxis, yAxis } from './axes';
+import { useElementWidth } from '../../lib/hooks';
+import { barCursor, grid, labelColumn, margin, tooltipBase, valueAxis, xAxis, yAxis } from './axes';
 import { ChartLegend, useHiddenSeries, type LegendItem } from './ChartLegend';
 import { ChartTooltip } from './ChartTooltip';
-import { COMPARE_COLOR, compareKey, hasCompare, seriesColor, valueOf, type ChartRow, type ChartSeries, type Fmt } from './model';
+import { labelTick } from './LabelTick';
+import { allowsDecimals, COMPARE_COLOR, compareKey, hasCompare, seriesColor, valueOf, type ChartRow, type ChartSeries, type Fmt } from './model';
 
 // Bars: grouped or stacked, upright (over time) or horizontal (rankings: one row per item, the longest at the
 // top when the caller sorts). Negative values grow down (or left) from a zero line. Bars are at most 24 px thick
@@ -24,11 +26,10 @@ export interface BarsChartProps {
 }
 
 const COMPARE = '__compare';
-/** Long category names are cut on the axis (the tooltip and the table show them whole). */
-const cut = (s: string) => (s.length > 18 ? `${s.slice(0, 17)}…` : s);
 
 export function BarsChart({ rows, series, fmt, axisFmt, stacked, horizontal, compareLabel, height, label }: BarsChartProps) {
   const [hidden, toggle] = useHiddenSeries();
+  const [box, width] = useElementWidth<HTMLDivElement>();
   const withTwin = compareLabel && !stacked ? series.filter((s) => hasCompare(rows, s.key)) : [];
   const shown = series.filter((s) => !hidden.has(s.key));
   const showTwins = withTwin.length > 0 && !hidden.has(COMPARE);
@@ -40,21 +41,25 @@ export function BarsChart({ rows, series, fmt, axisFmt, stacked, horizontal, com
   if (withTwin.length) legend.push({ key: COMPARE, label: compareLabel!, color: COMPARE_COLOR, shape: 'rect' });
   const keys = legend.map((l) => l.key);
   const h = height ?? (horizontal ? Math.max(120, rows.length * 32 + 32) : 240);
+  // value axis: whole-number ticks for counts; one "$0" tick when there is nothing but zeros
+  const values = valueAxis(rows, shown.map((s) => s.key), axisFmt ?? fmt, { whole: !allowsDecimals(axisFmt ?? fmt), stacked });
+  // horizontal: the label column fits the names up to 40% of the chart; longer ones are cut in the middle
+  const names = horizontal ? labelColumn(rows.map((r) => r.label), width) : null;
 
   return (
-    <div className="chart" role="figure" aria-label={label}>
+    <div className="chart" role="figure" aria-label={label} ref={box}>
       {legend.length > 1 && <ChartLegend items={legend} hidden={hidden} onToggle={(k) => toggle(k, keys)} />}
       <BarChart data={rows} layout={horizontal ? 'vertical' : 'horizontal'} responsive style={{ width: '100%', height: h }} margin={margin} barCategoryGap="20%" barGap={2}>
         <CartesianGrid {...grid} vertical={!!horizontal} horizontal={!horizontal} />
         {horizontal ? (
           <>
-            <XAxis {...yAxis} type="number" width={undefined} tickFormatter={axisFmt ?? fmt} />
-            <YAxis {...xAxis} type="category" width="auto" interval={0} tickFormatter={cut} />
+            <XAxis {...yAxis} type="number" width={undefined} {...values} />
+            <YAxis {...xAxis} type="category" width={names!.width} interval={0} tick={labelTick(names!.fit)} />
           </>
         ) : (
           <>
             <XAxis {...xAxis} />
-            <YAxis {...yAxis} tickFormatter={axisFmt ?? fmt} />
+            <YAxis {...yAxis} {...values} />
           </>
         )}
         {negative && (horizontal ? <ReferenceLine x={0} stroke="var(--border-strong)" /> : <ReferenceLine y={0} stroke="var(--border-strong)" />)}

@@ -1,8 +1,8 @@
 import { Bar, CartesianGrid, ComposedChart, Line, ReferenceLine, Tooltip, XAxis, YAxis } from 'recharts';
-import { barCursor, grid, margin, tooltipBase, xAxis, yAxis } from './axes';
+import { barCursor, grid, margin, tooltipBase, valueAxis, xAxis, yAxis } from './axes';
 import { ChartLegend, useHiddenSeries, type LegendItem } from './ChartLegend';
 import { ChartTooltip } from './ChartTooltip';
-import { fmtPercent, fmtPercentCompact, seriesColor, valueOf, type ChartRow, type ChartSeries, type Fmt } from './model';
+import { allowsDecimals, fmtPercent, fmtPercentCompact, seriesColor, valueOf, type ChartRow, type ChartSeries, type Fmt } from './model';
 
 // Bars plus one line on a second (right) axis, e.g. product cost and profit bars with the margin % line.
 // The line takes the colour slot after the bars so it never shares a colour with one of them.
@@ -40,8 +40,8 @@ export function ComboChart({ rows, bars, line, fmt, axisFmt, lineFmt = fmtPercen
       <ComposedChart data={rows} responsive style={{ width: '100%', height }} margin={margin} barCategoryGap="20%" barGap={2}>
         <CartesianGrid {...grid} />
         <XAxis {...xAxis} />
-        <YAxis {...yAxis} yAxisId="left" tickFormatter={axisFmt ?? fmt} />
-        <YAxis {...yAxis} yAxisId="right" orientation="right" tickFormatter={lineAxisFmt} hide={!showLine} />
+        <YAxis {...yAxis} yAxisId="left" {...valueAxis(rows, shownBars.map((s) => s.key), axisFmt ?? fmt, { whole: !allowsDecimals(axisFmt ?? fmt), stacked })} />
+        <YAxis {...yAxis} yAxisId="right" orientation="right" {...valueAxis(rows, [line.key], lineAxisFmt, { whole: !allowsDecimals(lineAxisFmt) })} hide={!showLine} />
         {negative && <ReferenceLine yAxisId="left" y={0} stroke="var(--border-strong)" />}
         <Tooltip
           {...tooltipBase}

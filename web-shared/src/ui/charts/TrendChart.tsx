@@ -1,8 +1,8 @@
 import { Area, CartesianGrid, ComposedChart, Line, Tooltip, XAxis, YAxis } from 'recharts';
-import { grid, lineCursor, margin, tooltipBase, xAxis, yAxis } from './axes';
+import { grid, lineCursor, margin, tooltipBase, valueAxis, xAxis, yAxis } from './axes';
 import { ChartLegend, useHiddenSeries, type LegendItem } from './ChartLegend';
 import { ChartTooltip } from './ChartTooltip';
-import { COMPARE_COLOR, compareKey, fmtPercent, fmtPercentCompact, hasCompare, seriesColor, type ChartRow, type ChartSeries, type Fmt } from './model';
+import { allowsDecimals, COMPARE_COLOR, compareKey, fmtPercent, fmtPercentCompact, hasCompare, seriesColor, type ChartRow, type ChartSeries, type Fmt } from './model';
 
 // Values over time: one or more lines (or areas), each optionally with its comparison twin drawn dashed in
 // --chart-compare on the same x axis. A series with axis: 'right' goes on a second, percentage axis (e.g. margin %
@@ -37,6 +37,9 @@ export function TrendChart({ rows, series, fmt, axisFmt, rightFmt = fmtPercent, 
   const showTwins = withTwin.length > 0 && !hidden.has(COMPARE);
   const hasRight = shown.some((s) => s.axis === 'right');
   const fmtOf = (s: ChartSeries) => (s.axis === 'right' ? rightFmt : fmt);
+  // each axis looks at its own series (and their comparison twins): whole-number ticks, one 0 tick for zeros
+  const leftKeys = shown.filter((s) => s.axis !== 'right').map((s) => s.key);
+  const rightKeys = shown.filter((s) => s.axis === 'right').map((s) => s.key);
 
   const legend: LegendItem[] = series.map((s, i) => ({ key: s.key, label: s.label, color: seriesColor(s, i), shape: area ? 'rect' : 'line' }));
   if (withTwin.length) legend.push({ key: COMPARE, label: compareLabel!, color: COMPARE_COLOR, shape: 'dash' });
@@ -49,8 +52,8 @@ export function TrendChart({ rows, series, fmt, axisFmt, rightFmt = fmtPercent, 
       <ComposedChart data={rows} responsive style={{ width: '100%', height }} margin={margin}>
         <CartesianGrid {...grid} />
         <XAxis {...xAxis} />
-        <YAxis {...yAxis} yAxisId="left" tickFormatter={axisFmt ?? fmt} />
-        {hasRight && <YAxis {...yAxis} yAxisId="right" orientation="right" tickFormatter={rightAxisFmt} />}
+        <YAxis {...yAxis} yAxisId="left" {...valueAxis(rows, leftKeys, axisFmt ?? fmt, { whole: !allowsDecimals(axisFmt ?? fmt) })} />
+        {hasRight && <YAxis {...yAxis} yAxisId="right" orientation="right" {...valueAxis(rows, rightKeys, rightAxisFmt, { whole: !allowsDecimals(rightAxisFmt) })} />}
         <Tooltip
           {...tooltipBase}
           cursor={lineCursor}

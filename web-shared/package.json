@@ -24,7 +24,7 @@
     "gen:icons": "node tools/gen-icons.mjs",
     "design:extract": "node tools/extract-design.mjs",
     "gen:api": "node tools/gen-api.mjs",
-    "test": "node --test tools/live.test.mjs tools/period.test.mjs tools/format.test.mjs"
+    "test": "node --test tools/live.test.mjs tools/period.test.mjs tools/format.test.mjs tools/axes.test.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.104.2",

@@ -78,10 +78,15 @@ export const fmtMoneyCompact: Fmt = (cents) => {
 export const fmtCount: Fmt = (v) => num(Math.round(v * 10) / 10);
 /** 12k */
 export const fmtCountCompact: Fmt = compact;
-/** 12.5% (the value is already a percentage, 0–100). */
-export const fmtPercent: Fmt = (v) => `${v.toFixed(1)}%`;
+/** 12.5%, −1.9% (the value is already a percentage, 0–100). */
+export const fmtPercent: Fmt = (v) => `${v.toFixed(1)}%`.replace(/^-/, '−');
 /** 13% (axis ticks). */
-export const fmtPercentCompact: Fmt = (v) => `${Math.round(v)}%`;
+export const fmtPercentCompact: Fmt = (v) => `${Math.round(v)}%`.replace(/^-/, '−');
+
+const fmtHours: Fmt = (v) => `${v.toFixed(1)} h`;
+const fmtHoursAxis: Fmt = (v) => `${Math.round(v)} h`;
+const fmtDays: Fmt = (v) => `${v.toFixed(1)} days`;
+const fmtDaysAxis: Fmt = (v) => `${Math.round(v)} d`;
 
 /** Formats for a report metric unit (reports.MetricDefinition.unit): [full, axis]. */
 export function fmtForUnit(unit: string | null | undefined): [Fmt, Fmt] {
@@ -91,10 +96,17 @@ export function fmtForUnit(unit: string | null | undefined): [Fmt, Fmt] {
     case 'percent':
       return [fmtPercent, fmtPercentCompact];
     case 'duration_hours':
-      return [(v) => `${v.toFixed(1)} h`, (v) => `${Math.round(v)} h`];
+      return [fmtHours, fmtHoursAxis];
     case 'days':
-      return [(v) => `${v.toFixed(1)} days`, (v) => `${Math.round(v)} d`];
+      return [fmtDays, fmtDaysAxis];
     default:
       return [fmtCount, fmtCountCompact];
   }
 }
+
+// Axis formats that need whole-number ticks: counts (0.3 sellers means nothing) and formats that round to whole
+// units anyway (a 0–2 h axis would otherwise read "0 h, 1 h, 1 h, 2 h").
+const WHOLE_TICKS = new Set<Fmt>([fmtCount, fmtCountCompact, fmtPercentCompact, fmtHoursAxis, fmtDaysAxis]);
+
+/** False when an axis drawn with this format must only get whole-number ticks (Recharts' allowDecimals). */
+export const allowsDecimals = (axisFmt: Fmt) => !WHOLE_TICKS.has(axisFmt);
