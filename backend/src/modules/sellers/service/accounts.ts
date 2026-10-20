@@ -138,7 +138,6 @@ export class AccountsPart extends Part {
 
   /** The account view; staff views also show a closure waiting for a second reviewer and its approval */
   async account(s: SellerRec, me: MemberAccess | null, unavailable: string[] = [], o: { staff?: boolean } = {}): Promise<SellerAccount> {
-    const app = await this.core.applicationOf(s);
     const closure = o.staff ? (await this.core.pendingChangesFor('closure', [s.id])).get(s.id) : undefined;
     return {
       id: s.id,
@@ -173,7 +172,6 @@ export class AccountsPart extends Part {
   }
 
   async setupSteps(s: SellerRec, unavailable: string[]) {
-    const app = await this.core.applicationOf(s);
     const profile = await this.repo.getProfile(s.id);
     const pa = await this.productApproval(s.id, unavailable);
     const readiness = map.payoutReadiness(s, await this.core.payoutState(s));
