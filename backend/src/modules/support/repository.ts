@@ -1,5 +1,5 @@
 import { orThrow } from '../../kernel/lib/or-throw.js';
-import { decodeCursor, encodeCursor, type PageRequest } from '../../kernel/lib/pagination.js';
+import { encodeCursor, offsetOf, type PageRequest } from '../../kernel/lib/pagination.js';
 import { contains, whereFilter, type Filter, type ModuleStore, type Table, type Where } from '../../kernel/mongo/index.js';
 import type * as common from '../../spec/common.js';
 import { CLOSED_STATUSES } from './domain/rules.js';
@@ -240,7 +240,7 @@ export class SupportRepository {
 
   /** Cases matching a filter in the given order; offset paging in both modes */
   async listCases(f: CaseFilter, sort: CaseSort, page: PageRequest): Promise<common.Page<CaseRec>> {
-    const offset = page.mode === 'page' ? (page.page - 1) * page.limit : page.cursor ? Number(decodeCursor(page.cursor)[0]) || 0 : 0;
+    const offset = offsetOf(page);
     const filter = caseFilter(f);
     let rows: Record<string, unknown>[];
     if (sort === 'newest' || sort === 'updated') {

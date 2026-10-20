@@ -13,7 +13,8 @@ import { ACTIONS, humanize, isAction, OPEN_APPEAL, TEAM_QUEUES, isTeam } from '.
 import type { AppealRec, EnforcementRec } from '../ports.js';
 import type { Actions } from './actions.js';
 import { actorOf, invalidField, notFound, type By, type Core } from './core.js';
-import { offsetOf, pageFrom } from './reports.js';
+import { offsetOf } from '../../../kernel/lib/pagination.js';
+import { pageFrom } from './reports.js';
 import type { Views } from './views.js';
 
 const text = (s: unknown) => (typeof s === 'string' ? s.trim() : '');

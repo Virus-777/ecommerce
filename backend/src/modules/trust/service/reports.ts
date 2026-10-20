@@ -5,7 +5,7 @@
  */
 import { AppError, isAppError } from '../../../kernel/errors/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
-import { decodeCursor, encodeCursor, toPageRequest, type PageRequest } from '../../../kernel/lib/pagination.js';
+import { encodeCursor, offsetOf, toPageRequest, type PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type * as identity from '../../../spec/identity.js';
 import type * as reports from '../../../spec/reports.js';
@@ -56,13 +56,6 @@ export interface OpenInput {
 }
 
 type Page<T> = common.Page<T>;
-
-export function offsetOf(req: PageRequest): number {
-  if (req.mode === 'page') return (req.page - 1) * req.limit;
-  if (!req.cursor) return 0;
-  const n = Number(decodeCursor(req.cursor)[0]);
-  return Number.isFinite(n) && n >= 0 ? n : 0;
-}
 
 export function pageFrom<T>(items: T[], total: number, req: PageRequest): Page<T> {
   const offset = offsetOf(req);
@@ -1209,7 +1202,7 @@ export class Reports {
     const filter = await this.filterOf({ status: str('status'), type: str('type'), riskLevel: str('riskLevel'), source: str('source'), assigneeId: str('assigneeId'), subjectType: str('subjectType'), subjectId: str('subjectId'), q: str('q'), sort: str('sort') });
     const access = this.core.ctx.use('access');
     const identities = await access.hasPermission(principal, 'trust.reports.export-identities').catch(() => false);
-    const offset = cursor ? Number(decodeCursor(cursor)[0]) || 0 : 0;
+    const offset = cursor ? offsetOf({ mode: 'cursor', cursor, limit: 1 }) : 0;
     const limit = 200;
     const res = await this.core.repo.listReports(filter, { offset, limit });
     const aggs = await this.core.loadMany(res.items.map((r) => r.id));

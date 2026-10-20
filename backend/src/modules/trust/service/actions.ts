@@ -15,7 +15,8 @@ import { ACTIONS, amountOf, humanize, isAction, isTeam, normalizeParams, OWNER_T
 import type { EnforcementRec, RecommendationRec, TargetRec } from '../ports.js';
 import type { TrustRepository } from '../repository.js';
 import { actorText, illegal, invalid, invalidField, notFound, type By, type Core } from './core.js';
-import { offsetOf, pageFrom } from './reports.js';
+import { offsetOf } from '../../../kernel/lib/pagination.js';
+import { pageFrom } from './reports.js';
 import type { Views } from './views.js';
 
 const text = (s: unknown) => (typeof s === 'string' ? s.trim() : '');
