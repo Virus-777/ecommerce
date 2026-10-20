@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { call, errorMessage, useApi, useUploads, type components } from '@marketly/web-shared/api';
 import { SellerLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
-import { Alert, announce, Badge, Button, Card, Checkbox, Deadline, Dialog, Field, FileDrop, Icon, PageHeader, Select, StatusBadge, TableWrap, Textarea, type Tone } from '@marketly/web-shared/ui';
+import { Alert, announce, Badge, BarsChart, Button, Card, ChartFrame, Checkbox, Deadline, Dialog, Field, FileDrop, fmtCount, Icon, PageHeader, Select, seriesTable, StatusBadge, TableWrap, Textarea, type ChartRow, type Tone } from '@marketly/web-shared/ui';
 import { useSellerSession } from '@/app/session';
 import { date, dateTime, LoadError, monthYear, shortDate, SkeletonLines, time, weekdayDate } from './data/home';
 
@@ -16,7 +16,8 @@ import { date, dateTime, LoadError, monthYear, shortDate, SkeletonLines, time, w
 // sellers.account-health.manage. The SellerPerformance screen query would answer the same in one call; REST is
 // used for its generated types (and to stay clear of G13).
 // Restriction scope categories come with names; uploaded documents carry their documentType; history events are
-// coloured by their state and name who recorded them when known.
+// coloured by their state and name who recorded them when known, and counted per month in a chart (warnings
+// apart from other actions) over the same 12 months.
 
 type Account = components['schemas']['sellers.SellerAccount'];
 type Summary = components['schemas']['sellers.PerformanceSummary'];
@@ -73,6 +74,32 @@ const DOC_ACCEPT = /\.(pdf|png|jpe?g)$|^(application\/pdf|image\/(png|jpeg))$/i;
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const year = (iso: string) => new Date(iso).getFullYear();
+
+type HistoryEvent = Summary['history'][number];
+const HISTORY_SERIES = [
+  { key: 'warnings', label: 'Warnings' },
+  { key: 'actions', label: 'Other actions' },
+];
+
+/** The 12 months up to `asOf` (market time), each with its warnings (warning/danger events) and other actions. */
+function historyByMonth(events: HistoryEvent[], asOf: string): ChartRow[] {
+  const month = (iso: string) => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }).slice(0, 7);
+  const last = month(asOf);
+  const rows: ChartRow[] = [];
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(Date.UTC(Number(last.slice(0, 4)), Number(last.slice(5, 7)) - 1 - i, 15));
+    const key = d.toISOString().slice(0, 7);
+    rows.push({ x: key, label: d.toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', year: '2-digit' }), warnings: 0, actions: 0 });
+  }
+  const byKey = new Map(rows.map((r) => [r.x, r]));
+  for (const e of events) {
+    const row = byKey.get(month(e.at));
+    if (!row) continue;
+    const k = e.state === 'warning' || e.state === 'danger' ? 'warnings' : 'actions';
+    row[k] = Number(row[k]) + 1;
+  }
+  return rows;
+}
 
 function MetricTarget({ m, windowDays }: { m: Metric; windowDays: number }) {
   const t = m.target;
@@ -340,6 +367,7 @@ export default function Performance() {
 
   const a = account.data as Account | undefined;
   const p = perf.data;
+  const historyRows = p ? historyByMonth(p.history, p.updatedAt) : [];
   const active = (restrictions.data?.items ?? []) as Restriction[];
   const feedback = p?.feedback ?? null;
   const windowDays = p?.metrics[0]?.target.windowDays ?? 30;
@@ -495,35 +523,42 @@ export default function Performance() {
             </>
           )}
         </Card>
-        <Card titleAs="h3" title="Warnings and actions" sub="Last 12 months">
-          {perf.isError ? (
-            <p className="small sub">Not available right now.</p>
-          ) : !p ? (
-            <SkeletonLines rows={4} />
-          ) : !p.history.length ? (
-            <p className="small sub">No warnings or actions in the last 12 months.</p>
-          ) : (
-            <ol className="timeline">
-              {p.history.map((e, i) => {
-                const warn = e.state === 'warning' || e.state === 'danger';
-                return (
-                  <li key={`${e.at}-${i}`} className={cx('ev', EV_CLASS[e.state ?? ''] ?? 'is-done')}>
-                    {warn && <span className="sr-only">{e.state === 'danger' ? 'Urgent: ' : 'At risk: '}</span>}
-                    <span className="dot" aria-hidden="true" />
-                    <div className="stack gap-1">
-                      <span className="t">{e.label.charAt(0).toUpperCase() + e.label.slice(1)}</span>
-                      <span className="d">
-                        {date(e.at)}
-                        {e.detail && ` · ${e.detail}`}
-                        {e.actor?.name && ` · ${e.actor.name}`}
-                      </span>
-                    </div>
-                  </li>
-                );
-              })}
-            </ol>
+        <div className="stack gap-5">
+          {p && p.history.length > 0 && (
+            <ChartFrame title="Warnings and actions per month" sub="Last 12 months" height={200} table={seriesTable(historyRows, HISTORY_SERIES, fmtCount, { xLabel: 'Month' })}>
+              <BarsChart rows={historyRows} series={HISTORY_SERIES} fmt={fmtCount} stacked height={200} label="Warnings and other account actions per month, last 12 months" />
+            </ChartFrame>
           )}
-        </Card>
+          <Card titleAs="h3" title="Warnings and actions" sub="Last 12 months">
+            {perf.isError ? (
+              <p className="small sub">Not available right now.</p>
+            ) : !p ? (
+              <SkeletonLines rows={4} />
+            ) : !p.history.length ? (
+              <p className="small sub">No warnings or actions in the last 12 months.</p>
+            ) : (
+              <ol className="timeline">
+                {p.history.map((e, i) => {
+                  const warn = e.state === 'warning' || e.state === 'danger';
+                  return (
+                    <li key={`${e.at}-${i}`} className={cx('ev', EV_CLASS[e.state ?? ''] ?? 'is-done')}>
+                      {warn && <span className="sr-only">{e.state === 'danger' ? 'Urgent: ' : 'At risk: '}</span>}
+                      <span className="dot" aria-hidden="true" />
+                      <div className="stack gap-1">
+                        <span className="t">{e.label.charAt(0).toUpperCase() + e.label.slice(1)}</span>
+                        <span className="d">
+                          {date(e.at)}
+                          {e.detail && ` · ${e.detail}`}
+                          {e.actor?.name && ` · ${e.actor.name}`}
+                        </span>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
+            )}
+          </Card>
+        </div>
       </div>
     </SellerLayout>
   );

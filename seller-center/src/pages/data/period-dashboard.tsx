@@ -15,7 +15,8 @@ import { breakdownsOf, kpiOf, REPORT, statDelta, tableOf, type Kpi, type Product
 // order, returns and dispatch for the last 30 days, 12 weeks, 12 months or 4 quarters, each compared with the
 // period before, with charts and a table per day / week / month / quarter, top products and returns by reason.
 // Data: seller reports (POST /api/seller/reports/reports/{key}/query) — order trend, product sales, returns by
-// reason, service performance. The API buckets by day, week or month; quarters are summed from months here.
+// reason, service performance; with finance.balances.view also seller.earnings (net earnings and profit tiles,
+// docs/09 §4.2). The API buckets by day, week or month; quarters are summed from months here.
 
 export type Grain = 'day' | 'week' | 'month' | 'quarter';
 
@@ -147,17 +148,20 @@ export function PeriodPerformance({ part = 'summary', today: todaySales }: { par
   const today = dayKey(new Date());
   const r = rangeFor(grain, today);
   const canView = can('reports.seller.view');
-  const useReport = (key: string, extra: Partial<ReportQuery> = {}) =>
+  // earnings and profit are money figures: only for members who may see balances
+  const canMoney = canView && can('finance.balances.view');
+  const useReport = (key: string, extra: Partial<ReportQuery> = {}, enabled = canView) =>
     useQuery({
       queryKey: ['reports', 'seller', sellerId, key, grain, today],
       queryFn: () => call(api.POST('/api/seller/reports/reports/{key}/query', { params: { path: { key } }, body: { ...r.query, compare: 'previous_period', ...extra } })) as Promise<ReportResult>,
-      enabled: canView,
+      enabled,
       staleTime: 5 * 60_000,
     });
   const trend = useReport(REPORT.trend);
   const products = useReport(REPORT.products, { granularity: undefined });
   const returns = useReport(REPORT.returns, { granularity: undefined });
   const service = useReport('seller.service_performance', { granularity: r.bucket === 'day' ? 'week' : r.bucket });
+  const earnings = useReport('seller.earnings', { granularity: undefined }, canMoney);
 
   if (!canView) {
     if (part === 'details') return null;
@@ -183,6 +187,11 @@ export function PeriodPerformance({ part = 'summary', today: todaySales }: { par
   const returnReqs = kpiOf(returns.data, 'service.return_requests');
   const returnRate = kpiOf(products.data, 'service.return_rate');
   const onTime = kpiOf(service.data, 'service.on_time_dispatch');
+  const net = kpiOf(earnings.data, 'seller.net_earnings');
+  const profit = kpiOf(earnings.data, 'seller.profit');
+  const coverage = kpiOf(earnings.data, 'seller.cost_coverage_pct');
+  // the figures exist only once the backend has the report; a failed earnings query leaves the sales tiles alone
+  const earningsLoading = earnings.isPending && !earnings.isError;
 
   const serviceSeries = (service.data?.series ?? []) as Series[];
   const ratePts = serviceSeries.find((s) => s.key === 'on_time_dispatch')?.points ?? [];
@@ -374,18 +383,24 @@ export function PeriodPerformance({ part = 'summary', today: todaySales }: { par
         <div className="row gap-3">
           <SegmentedControl items={GRAINS} active={grain} onChange={setGrain} label="Group sales by" />
           <Link className="small strong" to={href('seller/reports')}>
-            All reports
+            Statistics
           </Link>
         </div>
       </div>
       {failed && <LoadError error={failed.error} onRetry={() => [trend, products, returns, service].forEach((q) => q.isError && void q.refetch())} title="We couldn’t load your sales figures" />}
-      <div className="grid m2 md3 gap-3">
+      <div className={`grid m2 ${canMoney ? 'md4' : 'md3'} gap-3`}>
         <KpiCard k={gross} label="Gross sales" loading={trend.isPending} note={statDelta(gross).delta ? compareNote : undefined} />
         <KpiCard k={orders} label="Orders" loading={trend.isPending} />
         <KpiCard k={aov} label="Average order" loading={trend.isPending} />
         <KpiCard k={units} label="Units sold" loading={products.isPending} note={totals.orders ? `${(totals.units / totals.orders).toFixed(1)} per order` : undefined} />
         <KpiCard k={returnRate} label="Return rate" loading={products.isPending} note={returnRate?.note ?? undefined} />
         <KpiCard k={onTime} label="On-time dispatch" loading={service.isPending} />
+        {canMoney && (
+          <>
+            <KpiCard k={net} label="Net earnings" loading={earningsLoading} note={earnings.isError ? 'Not available yet' : 'after fees, refunds and charges'} />
+            <KpiCard k={profit} label="Profit" loading={earningsLoading} note={earnings.isError ? 'Not available yet' : coverage ? `costs set for ${coverage.display} of sales` : undefined} />
+          </>
+        )}
       </div>
       <div className="grid lg2 gap-5">
         <ChartFrame
