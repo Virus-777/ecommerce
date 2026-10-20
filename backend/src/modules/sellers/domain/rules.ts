@@ -2,6 +2,7 @@
  * Pure rules of the sellers module (no I/O): application completeness, payout details, dates and
  * deadlines, restriction scope matching, labels. Everything here is deterministic and unit-testable.
  */
+import { isPoBoxLine } from '../../../kernel/lib/address.js';
 import { dateInZone } from '../../../kernel/lib/clock.js';
 import type * as common from '../../../spec/common.js';
 import type {
@@ -163,7 +164,7 @@ export function holderMatches(holder: string, legalName: string | undefined, own
 export const taxIdDigits = (s: string) => s.replace(/[^0-9]/g, '');
 export const validTaxId = (type: 'ein' | 'ssn', s: string) => taxIdDigits(s).length === 9 && (type === 'ein' || !/^(000|666|9)/.test(taxIdDigits(s)));
 
-export const isPoBox = (a: common.Address | null | undefined) => Boolean(a && /\bp\.?\s*o\.?\s*box\b|\bpost office box\b/i.test(`${a.line1} ${a.line2 ?? ''}`));
+export const isPoBox = (a: common.Address | null | undefined) => Boolean(a && (isPoBoxLine(a.line1) || isPoBoxLine(a.line2)));
 
 export const sameStoreName = (a: string, b: string) => a.trim().toLowerCase().replace(/\s+/g, ' ') === b.trim().toLowerCase().replace(/\s+/g, ' ');
 

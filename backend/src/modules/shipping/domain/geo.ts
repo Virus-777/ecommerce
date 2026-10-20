@@ -2,6 +2,7 @@
  * Destinations: ZIP code → state, address kinds (PO box, military, territory) and zone matching.
  * One service region (the US) at launch; everything here is pure.
  */
+import { isPoBoxLine } from '../../../kernel/lib/address.js';
 import type * as common from '../../../spec/common.js';
 import type { TransitRange } from '../../../spec/shipping.js';
 
@@ -54,14 +55,13 @@ export function destinationOf(input: { postalCode: string; region?: string | nul
   return { postalCode, region, city: a?.city ?? null, line1: [a?.line1, a?.line2].filter(Boolean).join(' ') || null, country: (a?.country ?? input.country ?? 'US').toUpperCase() };
 }
 
-const PO_BOX = /\b(p\.?\s*o\.?\s*box|post\s+office\s+box|pmb\b)/i;
 const MILITARY_CITY = /^(apo|fpo|dpo)$/i;
 
 /** What kind of address it is (the carrier address check stands behind the same rule in production) */
 export function addressKindOf(d: Destination): AddressKind {
   if ((d.region && MILITARY.includes(d.region)) || (d.city && MILITARY_CITY.test(d.city.trim()))) return 'military';
   if (d.region && TERRITORIES.includes(d.region)) return 'territory';
-  if (d.line1 && PO_BOX.test(d.line1)) return 'po_box';
+  if (isPoBoxLine(d.line1)) return 'po_box';
   return 'street';
 }
 
