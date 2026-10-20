@@ -538,8 +538,8 @@ export const METRICS: MetricSeed[] = [
   },
   {
     key: 'seller.margin_pct', name: 'Margin', group: 'marketplace_finance', unit: 'percent', audience: 'seller',
-    definition: 'Profit as a share of the item sales that have a cost.',
-    formula: 'seller.profit ÷ item sales with a unit cost × 100',
+    definition: 'Profit as a share of item sales. In Earnings and profit, profit keeps the sales without a unit cost at no cost, so check the cost coverage; in Profit by product, profit and sales count only the sales that have a cost.',
+    formula: 'seller.profit ÷ item sales × 100 (Profit by product: ÷ item sales with a unit cost)',
     includes: [], excludes: [],
     dateBasisOptions: ['placement'], defaultDateBasis: 'placement', relatedKeys: ['seller.profit'],
   },

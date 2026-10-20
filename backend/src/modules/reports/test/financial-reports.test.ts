@@ -103,7 +103,7 @@ describe('seller.earnings', () => {
     const net = kpi(res.body, 'seller.net_earnings').value;
     expect(kpi(res.body, 'seller.product_cost').value).toBe(2_000);
     expect(kpi(res.body, 'seller.profit').value).toBe(net - 2_000);
-    expect(kpi(res.body, 'seller.margin_pct').value).toBe(Math.round(((net - 2_000) / 9_000) * 1000) / 10);
+    expect(kpi(res.body, 'seller.margin_pct').value).toBe(Math.round(((net - 2_000) / 17_000) * 1000) / 10);
     expect(kpi(res.body, 'seller.cost_coverage_pct').value).toBe(Math.round((9_000 / 17_000) * 1000) / 10);
     expect(res.body.callouts.map((c: { title: string }) => c.title)).toEqual(['Two dates', 'Some sales have no unit cost']);
   });

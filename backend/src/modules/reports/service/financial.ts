@@ -37,7 +37,7 @@ const SELLER_FIN_COLS = ['ad_charges_minor', 'service_fees_minor', 'label_charge
  * A seller's earnings figures from its order facts (order date) and its finance facts (charge date). Item sales
  * include Marketly-funded discounts (finance pays them to the seller with the sale); refunds are the item value
  * cancelled or refunded on those orders so far; fees are net of fee refunds. Profit is net earnings less the product
- * cost of the sales that have a cost; margin divides it by the item sales that have a cost (docs/09 §3.3).
+ * cost of the sales that have a cost; margin divides it by all item sales (docs/09 §3.3).
  */
 function earningsFigures(s: SalesAgg, f: Record<string, number | null>): Figures {
   const n = (k: string) => f[k] ?? 0;
@@ -59,7 +59,9 @@ function earningsFigures(s: SalesAgg, f: Record<string, number | null>): Figures
     'seller.net_earnings': netEarnings,
     'seller.product_cost': s.cost,
     'seller.profit': profit,
-    'seller.margin_pct': costedItemSales > 0 ? pct(profit, costedItemSales) : 0,
+    // profit here keeps the earnings of sales without a cost, so it is divided by all item sales (dividing by the
+    // costed sales alone gave margins over 100 %); the coverage KPI says how much of it has a cost
+    'seller.margin_pct': costedItemSales > 0 ? pct(profit, itemSales) : 0,
     'seller.paid_out': n('payouts_paid_minor'),
     'seller.cost_coverage_pct': pct(costedItemSales, itemSales),
     costedItemSales,

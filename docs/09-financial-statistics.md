@@ -126,7 +126,7 @@ the existing shape `{ key, label, amount?: Money, sharePct?, ... }`. A waterfall
    orders of the period, refunds on them so far); ad spend, service fees, labels, adjustments and paid out **by
    charge date** (fact_marketplace_finance_daily). A callout says so. Net earnings = item sales + shipping
    charged − refunds − fees − ad spend − service fees − labels ± adjustments. Profit = net earnings − product
-   cost of the sales that have a cost; margin = profit ÷ item sales of costed sales.
+   cost of the sales that have a cost; margin = profit ÷ item sales (Profit by product: ÷ the item sales that have a cost).
    Test: for a closed period where every order is delivered, net earnings equal the seller's ledger entries for
    those orders and charges (payouts excluded).
    Breakdowns: `waterfall` (item sales → … → net earnings → product cost → profit), `fees_by_type`.
