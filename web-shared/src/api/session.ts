@@ -139,6 +139,16 @@ export class Session {
     return this.pending ?? (this.pending = this.resume().finally(() => (this.pending = null)));
   }
 
+  /**
+   * The access token while it is still valid, without refreshing or starting anything (null otherwise). The Admin
+   * Center's live stream connects with it: a refresh counts as staff activity, and an open stream must not keep an
+   * idle staff session alive (identity's staffIdleMinutes).
+   */
+  currentToken(): string | null {
+    if (!this.accessToken || !this.claims || this.claims.exp * 1000 - this.serverNow() <= 5_000) return null;
+    return this.accessToken;
+  }
+
   /** Called by the API client after a 401 with a token_* reason. */
   async refresh(): Promise<string> {
     this.accessToken = null;

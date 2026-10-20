@@ -45,12 +45,18 @@ export function zodToJson(schema: $ZodType, registry: Registry): Json {
 /** @fastify/swagger `transform`: converts the Zod parts of each route schema */
 export function createOpenApiTransform(registry: Registry, skip: string[] = []): SwaggerTransform {
   const json = (s: unknown) => (s instanceof $ZodType ? zodToJson(s, registry) : s);
+  // a response given per content type (event streams: { description, content: { 'text/event-stream': { schema } } })
+  const perContentType = (s: unknown) => {
+    if (s instanceof $ZodType || !s || typeof s !== 'object' || !('content' in s)) return json(s);
+    const content = (s as { content: Record<string, { schema: unknown }> }).content;
+    return { ...s, content: Object.fromEntries(Object.entries(content).map(([type, m]) => [type, { ...m, schema: json(m.schema) }])) };
+  };
   return ({ schema, url }) => {
     if (!schema || schema.hide || skip.some((s) => url.startsWith(s))) return { schema: { ...schema, hide: true }, url };
     const { response, headers, querystring, body, params, ...rest } = schema as Json;
     const out: Json = { ...rest };
     for (const [k, v] of Object.entries({ headers, querystring, body, params })) if (v) out[k] = json(v);
-    if (response) out.response = Object.fromEntries(Object.entries(response as Json).map(([status, s]) => [status, json(s)]));
+    if (response) out.response = Object.fromEntries(Object.entries(response as Json).map(([status, s]) => [status, perContentType(s)]));
     return { schema: out, url };
   };
 }

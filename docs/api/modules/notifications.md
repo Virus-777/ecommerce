@@ -47,6 +47,7 @@ Who is told what, on which channel: notification topics for customers, sellers a
 |---|---|---|---|---|
 | GET | `/api/seller/notifications/inbox` | Seller workspace notifications | seller | Page<Notice> |
 | GET | `/api/seller/notifications/inbox/summary` | Unread, needs action (sorted by deadline) | seller | `InboxSummary` |
+| GET | `/api/seller/notifications/stream` | Live notices for my Seller Center inbox (Server-Sent Events) | seller | Server-Sent Events |
 | POST | `/api/seller/notifications/inbox/{id}/read` | Mark one notice as read (for me) | seller | `Notice` |
 | POST | `/api/seller/notifications/inbox/{id}/archive` | Archive one notice (for me) | seller | `Notice` |
 | POST | `/api/seller/notifications/inbox/archive-all` | Archive all (or one group) for me | seller | `{ group: string?, readOnly: bool? }` → `{ updated: int }` |
@@ -62,6 +63,7 @@ Who is told what, on which channel: notification topics for customers, sellers a
 |---|---|---|---|---|
 | GET | `/api/admin/notifications/inbox` | My staff notices (routed by role, including roles I cover as backup) | staff | Page<Notice> |
 | GET | `/api/admin/notifications/inbox/summary` | Counts and today's routing for my roles | staff | `StaffInboxSummary` |
+| GET | `/api/admin/notifications/stream` | Live notices for my Admin Center inbox (Server-Sent Events) | staff | Server-Sent Events |
 | POST | `/api/admin/notifications/inbox/{id}/read` | Mark one notice as read (for me) | staff | `Notice` |
 | POST | `/api/admin/notifications/inbox/{id}/archive` | Archive one notice (for me) | staff | `Notice` |
 | POST | `/api/admin/notifications/inbox/archive-all` | Archive all (or one area) for me | staff | `{ area: string?, readOnly: bool? }` → `{ updated: int }` |
@@ -89,6 +91,8 @@ Who is told what, on which channel: notification topics for customers, sellers a
 | POST | `/api/admin/notifications/broadcasts` | Draft a broadcast to opted-in customers or sellers | staff<br>`notifications.broadcasts.manage` | `BroadcastInput` → `Broadcast` |
 | POST | `/api/admin/notifications/broadcasts/{id}/schedule` | Schedule a broadcast _(audited)_ | staff<br>`notifications.broadcasts.manage` | `{ scheduledAt: datetime }` → `Broadcast` |
 | POST | `/api/admin/notifications/broadcasts/{id}/cancel` | Cancel a draft or scheduled broadcast _(audited)_ | staff<br>`notifications.broadcasts.manage` | `{ reason: text }` → `Broadcast` |
+| GET | `/api/admin/notifications/announcements` | Announcements sent to sellers, newest first | staff<br>`notifications.announcements.send` | Page<Announcement> |
+| POST | `/api/admin/notifications/announcements` | Send a message from Marketly to sellers (in-app and email) _(audited)_ | staff<br>`notifications.announcements.send` | `AnnouncementInput` → `{ announcement: Announcement }` |
 
 ## Webhooks
 
@@ -597,6 +601,36 @@ Who is told what, on which channel: notification topics for customers, sellers a
 | sizeBytes | `int` |
 | downloadUrl | `url` |
 
+### AnnouncementLink
+
+| Field | Type |
+|---|---|
+| screen | `string` A Seller Center screen id (seller/…), e.g. seller/help or seller/store; the notice opens it like any NoticeLink (screen + id) |
+| id | `string` The record the screen opens, 1–200 characters |
+| label | `string?` Button text, at most 40 characters (default Read more) |
+
+### AnnouncementInput
+
+| Field | Type |
+|---|---|
+| title | `string` 1–120 characters |
+| body | `text` Plain text, 1–2000 characters |
+| sellerIds | `uuid[]?` 1–500 seller ids (each must be a known seller); omitted: every active seller (approved or restricted) |
+| link | `AnnouncementLink?` Where the notice opens; omitted: the seller's notifications page |
+
+### Announcement
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| title | `string` |
+| body | `text` |
+| audience | `enum(all|chosen)` all: every active seller when it was sent; chosen: the sellerIds of the request |
+| sellerCount | `int` Seller workspaces it was sent to |
+| link | `AnnouncementLink?` |
+| sentBy | `Actor` |
+| sentAt | `datetime` |
+
 ## Status flows
 
 ### Template version (`TemplateVersion.status`)
@@ -905,6 +939,22 @@ Indexes: `unique (channel, address_hash) where removed_at is null`, `(account_id
 
 Indexes: `(status, scheduled_at)`
 
+**announcements**: Messages from Marketly staff to sellers (topic seller.announcement), listed newest first in the Admin Center
+
+| Column | Type |
+|---|---|
+| id | uuid pk |
+| title | text |
+| body | text |
+| audience | text (all|chosen) |
+| seller_ids | uuid[] (the chosen sellers; empty when sent to all) |
+| seller_count | int |
+| link | jsonb? |
+| sent_by | text |
+| sent_at | timestamptz |
+
+Indexes: `(sent_at desc)`
+
 ## Events
 
 | Publishes | When | Payload | Consumed by |
@@ -932,7 +982,7 @@ Indexes: `(status, scheduled_at)`
 | `customers.marketing_preferences.changed` | customers | Refresh the consent cache used for promotional sends and broadcasts |
 | `customers.account.closed` | customers | Stop all promotional sends, remove push devices, keep essential notices for open obligations only |
 | `customers.data_export.ready` | customers | Email the customer the export download link |
-| `orders.order.accepted` | orders | Customer: order accepted (confirmation only after acceptance). Seller: new order per seller group with fulfilledBy seller (orders group, members with order permission), with the dispatch reminder effect; Fulfilled by Marketly groups get no new-order notice or dispatch reminder (fulfillment-service sends seller.fulfillment.order_received) |
+| `orders.order.accepted` | orders | Customer: order accepted (confirmation only after acceptance). Seller: new order per seller group with fulfilledBy seller (orders group, members with order permission), with the dispatch reminder effect; Fulfilled by Marketly groups get no new-order notice or dispatch reminder (fulfillment-service sends seller.fulfillment.order_received). Official Store groups (ownerType official): staff (topic staff.official_store.order_new, Official Store Manager role), one notice per group |
 | `orders.cancellation.requested` | orders | Seller (fulfilledBy seller; orders group, action required until respondBy): a customer asks to cancel items. Official Store and Fulfilled by Marketly groups: staff (order_manager role) decide it instead; no seller notice |
 | `orders.item.cancelled` | orders | Customer: cancellation update for the item, skipped when the payload's notifyCustomer is false (staff cancelled without telling the customer); seller: item cancelled (always) |
 | `orders.item.delayed` | orders | Customer: delay notice with the new estimate and options (wait, cancel, contact support) |
@@ -947,7 +997,7 @@ Indexes: `(status, scheduled_at)`
 | `shipping.shipment.delivered` | shipping | Customer: package delivered |
 | `shipping.shipment.exception` | shipping | Customer: delivery problem with next steps; staff: Shipping Manager. No seller notice for Fulfilled by Marketly groups (fulfilledBy marketly_service) |
 | `shipping.dispatch.overdue` | shipping | Seller (fulfilledBy seller only): dispatch overdue (action required); staff: overdue shipping to Shipping Manager (lead or backup). Fulfilled by Marketly groups: no seller notice; the staff notice names the Marketly warehouse and goes to warehouse_manager |
-| `returns.return.requested` | returns | Seller: new return request with response deadline |
+| `returns.return.requested` | returns | Seller: new return request with response deadline. Official Store returns (ownerType official): staff (topic staff.official_store.return_requested, Official Store Manager role), action required until the return is approved or rejected (return:<returnId>:respond) |
 | `returns.return.info_requested` | returns | Customer: more information needed for the return |
 | `returns.return.approved` | returns | Customer: return approved with label or drop-off instructions |
 | `returns.return.rejected` | returns | Customer: return declined with the reason and how to ask for help |
@@ -955,9 +1005,9 @@ Indexes: `(status, scheduled_at)`
 | `returns.return.received` | returns | Customer: return received; seller: inspect by deadline |
 | `returns.return.inspected` | returns | Customer: inspection outcome |
 | `returns.return.escalated` | returns | Staff: Returns Manager; seller: platform support stepped in |
-| `returns.refund.approved` | returns | Customer: refund approved and processing (never says the money has arrived) |
+| `returns.refund.approved` | returns | Customer: refund approved and processing (never says the money has arrived). Seller (topic seller.refund.approved, returns_cases group, members with returns.refunds.issue): a refund on one of its orders was approved and handed to payments, unless a seller member approved it (approvedBy kind seller); links to the return, the case, else the seller order list. Official Store refunds (ownerType official): staff (topic staff.official_store.refund_approved, Official Store Manager role). Neither says the money has arrived |
 | `returns.replacement.created` | returns | Customer: replacement on its way (its own shipment) |
-| `support.case.opened` | support | Customer: acknowledgment with expected reply time; seller: case opened on an order |
+| `support.case.opened` | support | Customer: acknowledgment with expected reply time; seller: case opened on an order. A seller's support request (kind seller_request): staff (topic staff.seller.support_request) of the role of the case's team (seller_management: Seller Manager, the default), action required until a staff owner is assigned (support.case.assigned) or the case is decided or resolved (seller-request:<caseId>) |
 | `support.case.message_added` | support | Customer or seller: case reply (email carries a reply-to token) |
 | `support.case.escalated` | support | Staff: escalated case to Customer Support Manager (or Returns Manager by category) |
 | `support.case.overdue` | support | Staff: case past its response target to the queue lead and backup |
@@ -1018,6 +1068,11 @@ Indexes: `(status, scheduled_at)`
 | `content.article.review_due` | content | Staff (ownerStaffId, else the Content Manager role; topic staff.article.review_due): help article due for review, action required |
 | `reviews.moderation.decided` | reviews | Reporters (topic customer.review_report.decided, seller variant for sellers): reporterOutcome; author (topic customer.review.moderated, seller.content.moderated for responses and answers): kept, edited or removed with the reason and appealUntil |
 | `trust.report.resolved` | trust | Each reporter (customers and sellers in-app and email, rights owners by external_email; topic trust.report.resolved): the reporterOutcome text, never the reported party's details |
+| `reviews.review.published` | reviews | Seller (topic seller.review.new, products group, members with reviews.responses.post): a new product review on its product, once per review (an edited, kept or reinstated review sends nothing again). Official Store reviews (sellerId OFFICIAL_STORE_ID): staff (topic staff.official_store.review_new, Official Store Manager role) |
+| `reviews.feedback.published` | reviews | Seller (topic seller.feedback.new, products group, members with reviews.responses.post): new store feedback, once per feedback. Official Store feedback: staff (topic staff.official_store.feedback_new, Official Store Manager role) |
+| `reviews.question.asked` | reviews | Each seller in sellerIds (topic seller.question.asked, products group, members with reviews.responses.post), action required until that seller answers (question:<questionId>:<sellerId>); officialStore: staff (topic staff.official_store.question_asked, Official Store Manager role), action required until Marketly staff answer (question:<questionId>:official-store) |
+| `reviews.answer.published` | reviews | Resolve the question notice of whoever answered: a seller answer resolves question:<questionId>:<sellerId>, a Marketly staff answer question:<questionId>:official-store; customer answers resolve nothing. Sends nothing |
+| `support.case.assigned` | support | Resolve the staff notice of a seller's support request (seller-request:<caseId>) once a staff owner is assigned. Sends nothing |
 | `trust.rights_report.received` | trust | Rights owner (external_email, topic rights_owner.report.received): confirmation with the TR reference and what happens next |
 | `trust.evidence.requested` | trust | The asked party: customer (topic customer.trust.evidence_requested, cases group) or seller owner (topic seller.trust.evidence_requested): Trust and Risk needs proof, what to send and by when; action required until trust records the answer (resolve by the request's dedupe key) |
 | `trust.appeal.decided` | trust | The appellant: customer (topic customer.trust.appeal_decided) or seller owner (topic seller.trust.appeal_decided): the appeal outcome and what changes (restriction lifted or kept) |
@@ -1072,6 +1127,7 @@ Indexes: `(status, scheduled_at)`
 | `notifications.deliveries.retry` | staff | Retry failed deliveries |
 | `notifications.suppressions.manage` | staff | View and remove suppressed addresses |
 | `notifications.broadcasts.manage` | staff | Create, schedule and cancel promotional broadcasts (Marketing Manager) |
+| `notifications.announcements.send` | staff | Send announcements from Marketly to sellers and read the ones sent (Seller Manager, Platform Administrator) |
 | `notifications.preferences.manage` | seller | Set notification preferences for every seller member (owner by default) |
 
 ## Error codes

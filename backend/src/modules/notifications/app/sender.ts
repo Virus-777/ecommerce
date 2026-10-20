@@ -14,6 +14,7 @@ import { deliveryMachine } from '../domain/state-machines.js';
 import { redact, render } from '../domain/templates.js';
 import type { DeliveryRow, NoticeRow, ProviderResult, ProviderSyncEvent, RecipientRow, TemplateData } from '../ports.js';
 import { actorText, Core, groupBy, SYSTEM } from './core.js';
+import type { LiveHub } from './live.js';
 
 import type { RecipientKind, RecipientReason, Target } from '../domain/routing.js';
 
@@ -89,7 +90,11 @@ const firstName = (name: string | null | undefined) => (name ?? '').trim().split
 export class Sender {
   readonly #pending = new Map<string, Pending>();
 
-  constructor(private readonly core: Core) {}
+  constructor(
+    private readonly core: Core,
+    /** Open live inbox streams (app/live.ts): every saved notice is pushed to them */
+    private readonly live?: LiveHub,
+  ) {}
 
   /* ---------------------------------------------------------------- send */
 
@@ -173,6 +178,8 @@ export class Sender {
       return true;
     });
     if (!fresh) return { noticeIds: [], deliveryIds: [] };
+    // only now that they are saved: live inbox streams get the new notices (a toast before the email goes out)
+    await this.live?.publish(notices, recipients);
 
     for (const [id, m] of messages) this.#pending.set(id, m);
     for (const d of deliveries) {

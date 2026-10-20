@@ -9,9 +9,11 @@ import type * as common from '../../spec/common.js';
 import type * as identity from '../../spec/identity.js';
 import type { NotificationsPublicApi, Recipient, NotifyInput, Notice, InboxSummary, StaffInboxSummary } from '../../spec/notifications.js';
 import { Admin } from './app/admin.js';
+import { Announcements } from './app/announcements.js';
 import { Consumers } from './app/consumers.js';
 import { Core } from './app/core.js';
 import { Inbox, type Reader } from './app/inbox.js';
+import { LiveHub } from './app/live.js';
 import { Preferences } from './app/preferences.js';
 import { Sender, type Target } from './app/sender.js';
 import { Webhooks } from './app/webhooks.js';
@@ -71,15 +73,21 @@ export class NotificationsService implements NotificationsPublicApi {
   readonly admin: Admin;
   readonly consumers: Consumers;
   readonly webhooks: Webhooks;
+  /** Messages from Marketly staff to sellers (live topics) */
+  readonly announcements: Announcements;
+  /** Open live inbox streams; the sender pushes each saved notice to them */
+  readonly live: LiveHub;
 
   constructor(protected readonly deps: NotificationsServiceDeps) {
     this.core = new Core(deps);
-    this.sender = new Sender(this.core);
     this.inbox = new Inbox(this.core);
+    this.live = new LiveHub({ core: this.core, inbox: this.inbox });
+    this.sender = new Sender(this.core, this.live);
     this.prefs = new Preferences(this.core, this.inbox);
     this.admin = new Admin(this.core, this.sender);
     this.consumers = new Consumers(this.core, this.sender, (input, sendAt, by, claimKey) => this.#schedule(input, sendAt, by, claimKey));
     this.webhooks = new Webhooks(this.core, this.sender);
+    this.announcements = new Announcements(this.core, this.sender);
   }
 
   /** Seeds the topic catalogue and default templates (called at boot; also done lazily on first use) */
@@ -682,6 +690,33 @@ export class NotificationsService implements NotificationsPublicApi {
   /** workqueues.day_end.completed: Staff (topic staff.day_end.completed, to roleKeys): the day-end summary; resolves the staff.day_end.summary action notices */
   async onDayEndCompletedFromWorkqueues(event: EventPayload<'workqueues.day_end.completed'>, eventId?: string): Promise<void> {
     await this.consumers.handle('workqueues.day_end.completed', event, eventId);
+  }
+
+  /* Live topics (2026-10-20): reviews, feedback and questions for sellers and the Official Store, seller support requests */
+
+  /** reviews.review.published: Seller (or Official Store staff): a new product review, once per review */
+  async onReviewPublishedFromReviews(event: EventPayload<'reviews.review.published'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('reviews.review.published', event, eventId);
+  }
+
+  /** reviews.feedback.published: Seller (or Official Store staff): new store feedback, once per feedback */
+  async onFeedbackPublishedFromReviews(event: EventPayload<'reviews.feedback.published'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('reviews.feedback.published', event, eventId);
+  }
+
+  /** reviews.question.asked: each seller with an offer (and Official Store staff): a question to answer */
+  async onQuestionAskedFromReviews(event: EventPayload<'reviews.question.asked'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('reviews.question.asked', event, eventId);
+  }
+
+  /** reviews.answer.published: resolves the question notice of whoever answered */
+  async onAnswerPublishedFromReviews(event: EventPayload<'reviews.answer.published'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('reviews.answer.published', event, eventId);
+  }
+
+  /** support.case.assigned: resolves the staff notice of a seller's support request */
+  async onCaseAssignedFromSupport(event: EventPayload<'support.case.assigned'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('support.case.assigned', event, eventId);
   }
 
   /** trust.evidence.requested: the asked customer or seller owner: proof needed, action required until trust resolves trust-evidence:<requestId> */

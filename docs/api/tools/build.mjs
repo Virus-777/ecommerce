@@ -167,6 +167,10 @@ const SETTING_TYPES = ['int', 'number', 'bool', 'string', 'money', 'duration', '
 const SETTING_APPROVALS = ['none', 'second_reviewer', 'business_owner'];
 /** A request body of raw bytes (any content type) instead of JSON */
 const BINARY_BODY = 'binary';
+/** A response that stays open and carries Server-Sent Events (text/event-stream) instead of one JSON body */
+const EVENT_STREAM = 'event-stream';
+/** OpenAPI text of an event-stream response (the backend's kernel/http/event-stream.ts EVENT_STREAM_TEXT is the same) */
+const EVENT_STREAM_TEXT = 'A stream of Server-Sent Events (text/event-stream, UTF-8): the response stays open and the server writes each event as it happens. The endpoint description names the event types.';
 const fullPath = (m, ep) => common.areas[ep.area].prefix.replace('{module}', m.name) + ep.path;
 const seenRoutes = new Map();
 for (const [name, c] of Object.entries(common.constants ?? {})) {
@@ -268,7 +272,14 @@ for (const m of modules) {
       if (!['PUT', 'POST'].includes(ep.method)) err(E, 'a binary body needs PUT or POST');
       if (ep.idempotent) err(E, 'a binary body cannot be idempotent (the request hash covers JSON bodies)');
     } else if (ep.body !== undefined) typeToSchema(ep.body, m, `${E} body`);
-    if (ep.response !== undefined && ep.response !== null) typeToSchema(ep.response, m, `${E} response`);
+    if (ep.response === EVENT_STREAM) {
+      // a long-lived GET: nothing to page, replay or upload
+      if (ep.method !== 'GET') err(E, 'an event-stream response needs GET');
+      if (ep.paging) err(E, 'an event-stream response cannot be paged');
+      if (ep.idempotent) err(E, 'an event-stream response cannot be idempotent');
+      if (ep.body !== undefined) err(E, 'an event-stream endpoint takes no body');
+      if (ep.status !== undefined && ep.status !== 200) err(E, 'an event-stream response answers 200');
+    } else if (ep.response !== undefined && ep.response !== null) typeToSchema(ep.response, m, `${E} response`);
     const key = `${ep.method} ${fullPath(m, ep).replace(/\{\w+\}/g, '{}')}`;
     if (seenRoutes.has(key)) err(E, `route ${key} is also defined by ${seenRoutes.get(key)}`);
     seenRoutes.set(key, `${m.name}.${ep.id}`);
@@ -323,9 +334,16 @@ for (const m of modules) {
       ...(ep.idempotent ? [{ name: 'Idempotency-Key', in: 'header', required: true, description: common.headers['Idempotency-Key'], schema: { type: 'string' } }] : []),
     ];
     const status = String(ep.status ?? (ep.response === null ? 204 : 200));
-    let respSchema = ep.response === null || ep.response === undefined ? null : typeToSchema(ep.response, m, '').schema;
+    const stream = ep.response === EVENT_STREAM;
+    let respSchema = ep.response === null || ep.response === undefined || stream ? null : typeToSchema(ep.response, m, '').schema;
     if (respSchema && ep.paging) respSchema = pageSchema(respSchema);
-    const responses = { [status]: respSchema ? { description: 'Success', content: { 'application/json': { schema: respSchema } } } : { description: 'Success, no content' } };
+    const responses = {
+      [status]: stream
+        ? { description: EVENT_STREAM_TEXT, content: { 'text/event-stream': { schema: { type: 'string' } } } }
+        : respSchema
+          ? { description: 'Success', content: { 'application/json': { schema: respSchema } } }
+          : { description: 'Success, no content' },
+    };
     const codes = new Set(['VALIDATION_FAILED', ...authErrors(ep), ...(ep.params ? ['NOT_FOUND'] : []), ...(ep.errors ?? [])]);
     for (const code of codes) {
       const def = allErrorCodes(m)[code];
@@ -377,7 +395,7 @@ writeFileSync(join(apiDir, 'openapi.json'), JSON.stringify(clean(openapi), null,
 
 /* ------------------------------------------------------------------ Markdown */
 const fmtType = (t) => (typeof t === 'string' ? `\`${t}\`` : isDescriptor(t) ?`\`${t.type}\`${t.desc ? ` ${t.desc}` : ''}` : `\`${JSON.stringify(t)}\``);
-const fmtShape = (t, status) => (t === undefined ? '' : t === null ? `${status ?? 204} No content` : t === BINARY_BODY ? 'raw bytes' : typeof t === 'string' ? `\`${t}\`` : `\`{ ${Object.entries(t).map(([k, v]) => `${k}: ${typeof v === 'string' ? v : v.type ?? 'object'}`).join(', ')} }\``);
+const fmtShape = (t, status) => (t === undefined ? '' : t === null ? `${status ?? 204} No content` : t === BINARY_BODY ? 'raw bytes' : t === EVENT_STREAM ? 'Server-Sent Events' : typeof t === 'string' ? `\`${t}\`` : `\`{ ${Object.entries(t).map(([k, v]) => `${k}: ${typeof v === 'string' ? v : v.type ?? 'object'}`).join(', ')} }\``);
 mkdirSync(join(apiDir, 'modules'), { recursive: true });
 const consumersOf = (event) => modules.filter((x) => x.events?.consumes?.some((c) => c.name === event)).map((x) => x.name);
 
@@ -545,6 +563,46 @@ idx.push(
   '4. 426 `UPGRADE_REQUIRED`: show the update screen (`details.updateUrl`). 429: wait `Retry-After` seconds. 503: retry with backoff.',
   '5. Send one `Idempotency-Key` per user action on idempotent endpoints, the same on every retry.',
   '6. Show or log the `X-Request-Id` of a failed response when reporting a problem.',
+);
+// endpoints whose response is "event-stream" (FORMAT.md): today the two notification inbox streams
+const streamPaths = modules.flatMap((m) => m.endpoints.filter((e) => e.response === EVENT_STREAM).map((e) => `\`${e.method} ${fullPath(m, e)}\``));
+if (streamPaths.length) idx.push(
+  '',
+  '## Live notifications (Server-Sent Events)',
+  '',
+  `Seller Center and Admin Center receive new inbox notices as they happen: ${streamPaths.join(' and ')}. Each answers \`text/event-stream\` (UTF-8) and stays open. Customers have no stream (the Android app polls the inbox).`,
+  '',
+  '**Request.** `Authorization: Bearer <access token>` like every call: read the stream with `fetch` and a reader (not `EventSource`, which cannot send the header; never put a token in the URL). Optional `Last-Event-ID: <notice id>`, the id of the last notice received. Refusals (401, 403, 503) come before the stream opens, as normal JSON errors.',
+  '',
+  '**Wire format.**',
+  '',
+  '```',
+  'retry: 5000',
+  '',
+  'id: <noticeId>          catch-up notices first, then live ones',
+  'event: notice',
+  'data: <Notice JSON>     exactly one item of GET …/notifications/inbox for this caller',
+  '',
+  'event: ready',
+  'data: {"at":"<ISO time>","caughtUp":<int>}',
+  '',
+  ': ping                  a comment every 25 s (keeps proxies and firewalls from closing the line)',
+  '',
+  'event: end',
+  'data: {"reason":"signed_out" | "session_idle" | "restart" | "max_age"}',
+  '```',
+  '',
+  '- **Catch-up:** with `Last-Event-ID`, the inbox notices created after that notice, only from the last 15 minutes, at most 20, oldest first, then `ready`. An unknown id, or no header: just `ready`.',
+  '- **Who gets a notice:** exactly who sees it in GET /inbox. Staff: the notices routed to them (role, backup, direct), with their own `routedTo`. Sellers: workspace notices whose topic the member receives, and notices addressed to the member. A notice is sent only after it is saved.',
+  '- **`end`**, after which the server closes the response: `signed_out` (session or account revoked, or the staff session expired: stop; the next normal request leads to sign-in), `session_idle` (the staff session went idle: stop), `restart` (the server is shutting down: reconnect after `retry`), `max_age` (seller streams end after 60 minutes so permissions are read again: reconnect at once). Staff streams have no maximum age.',
+  '- **Staff activity:** an open stream is not activity. The connect request counts once, like any request; after that the server re-checks the session at every heartbeat without touching it, so the idle sign-out (identity setting `staffIdleMinutes`) still applies.',
+  '',
+  '**Client rules.**',
+  '',
+  '1. One stream per browser per app: the tab holding the Web Lock `marketly-live:<audience>` (`navigator.locks.request`) opens the stream and relays every event to the other tabs over `BroadcastChannel(\'marketly-live:<audience>\')`; when it closes, another tab takes the lock. Without Web Locks every tab opens its own stream.',
+  '2. When the connection drops (without `end`), reconnect with backoff 1 s, 2 s, 5 s, 10 s, then every 30 s, plus up to 1 s of jitter, sending `Last-Event-ID` = the last notice id.',
+  '3. Tokens: Seller Center may refresh the session as usual before connecting. Admin Center must never refresh just for the stream (a refresh is staff activity and would defeat the idle sign-out): it uses the current access token while it is valid; once it has expired, it waits (checking every 30 s) until normal app activity has refreshed it, then reconnects.',
+  '4. On `ready` and on every `notice`, refetch the inbox and its counts (the bell).',
 );
 if (Object.keys(common.constants ?? {}).length) idx.push('', '## Constants', '', 'Reserved values every module may use (exported from `backend/src/spec/common.ts`).', '', '| Name | Value | Meaning |', '|---|---|---|', ...Object.entries(common.constants).map(([n, c]) => `| \`${n}\` | \`${JSON.stringify(c.value)}\` | ${c.desc} |`));
 writeFileSync(join(apiDir, 'README.md'), `${idx.join('\n')}\n`);

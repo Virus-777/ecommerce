@@ -9,7 +9,7 @@ import type * as identity from '../../../spec/identity.js';
 import type { InboxSummary, Notice, NoticeLink, RoutingInfo, RoutingRow, StaffInboxSummary } from '../../../spec/notifications.js';
 import { roleName, TOPICS, topicDef, type Category } from '../domain/catalog.js';
 import { deadlineOf, defaultGroups, defaultMemberChannel, effectiveGroups, formatDate, memberReceives, type MemberAccessLike } from '../domain/rules.js';
-import type { InboxFilter, InboxOwner, InboxRow } from '../ports.js';
+import type { InboxFilter, InboxOwner, InboxRow, RecipientRow } from '../ports.js';
 import { actorText, Core, groupBy } from './core.js';
 
 export interface InboxQuery {
@@ -195,41 +195,52 @@ export class Inbox {
     const recipients = routed.length ? await this.core.repo.recipientsOf(routed.map((n) => n.id)) : [];
     const names = recipients.length ? await this.core.accounts(recipients.map((x) => x.account_id)) : new Map<string, identity.AccountSummary>();
     const recipientsOf = groupBy(recipients, (x) => x.notice_id);
-    return rows.map((n) => {
-      const t = topicDef(n.topic_key);
-      let routedTo: RoutingInfo | null = null;
-      if (staff && n.address_kind === 'role') {
-        routedTo = {
-          roleKey: n.address_id,
-          roleName: roleName(n.address_id),
-          reason: (n.reason ?? 'member') as RoutingInfo['reason'],
-          coveringFor: n.covering_for,
-          recipients: (recipientsOf.get(n.id) ?? []).map((x) => ({ staffId: x.account_id, name: names.get(x.account_id)?.displayName ?? 'Staff member', as: (x.reason === 'lead' || x.reason === 'backup' ? x.reason : 'member') as 'lead' | 'backup' | 'member' })),
-        };
-      }
-      return {
-        id: n.id,
-        topicKey: n.topic_key,
-        category: t?.category ?? 'essential',
-        group: n.group_key,
-        title: n.title,
-        body: n.body,
-        icon: n.icon,
-        tone: n.tone as Notice['tone'],
-        link: linkOf(n.link),
-        createdAt: n.created_at.toISOString(),
-        readAt: n.read_at?.toISOString() ?? null,
-        archivedAt: n.archived_at?.toISOString() ?? null,
-        actionRequired: n.action_required,
-        deadline: deadlineOf(n.deadline_at, now),
-        resolvedAt: n.resolved_at?.toISOString() ?? null,
-        // action notices only: an expired one ("No longer needed") is never shown as resolved
-        state: n.action_required ? (n.resolved_at ? 'resolved' : n.expired_at ? 'expired' : 'open') : null,
-        expiredAt: n.expired_at?.toISOString() ?? null,
-        routedTo,
-      };
-    });
+    return rows.map((n) => noticeOf(n, now, staff && n.address_kind === 'role' ? { recipients: recipientsOf.get(n.id) ?? [], names } : undefined));
   }
+}
+
+/** Who a staff notice routed by role went to, for its routedTo (the notice's recipient rows and their names) */
+export interface Routing {
+  recipients: RecipientRow[];
+  names: Map<string, identity.AccountSummary>;
+}
+
+/**
+ * API shape of one inbox row: the inbox lists and the live streams (app/live.ts) both use it, so a streamed
+ * notice is exactly the item GET /inbox returns. `routing` only for staff readers of notices routed by role.
+ */
+export function noticeOf(n: InboxRow, now: Date, routing?: Routing): Notice {
+  const t = topicDef(n.topic_key);
+  const routedTo: RoutingInfo | null = routing
+    ? {
+        roleKey: n.address_id,
+        roleName: roleName(n.address_id),
+        reason: (n.reason ?? 'member') as RoutingInfo['reason'],
+        coveringFor: n.covering_for,
+        recipients: routing.recipients.map((x) => ({ staffId: x.account_id, name: routing.names.get(x.account_id)?.displayName ?? 'Staff member', as: (x.reason === 'lead' || x.reason === 'backup' ? x.reason : 'member') as 'lead' | 'backup' | 'member' })),
+      }
+    : null;
+  return {
+    id: n.id,
+    topicKey: n.topic_key,
+    category: t?.category ?? 'essential',
+    group: n.group_key,
+    title: n.title,
+    body: n.body,
+    icon: n.icon,
+    tone: n.tone as Notice['tone'],
+    link: linkOf(n.link),
+    createdAt: n.created_at.toISOString(),
+    readAt: n.read_at?.toISOString() ?? null,
+    archivedAt: n.archived_at?.toISOString() ?? null,
+    actionRequired: n.action_required,
+    deadline: deadlineOf(n.deadline_at, now),
+    resolvedAt: n.resolved_at?.toISOString() ?? null,
+    // action notices only: an expired one ("No longer needed") is never shown as resolved
+    state: n.action_required ? (n.resolved_at ? 'resolved' : n.expired_at ? 'expired' : 'open') : null,
+    expiredAt: n.expired_at?.toISOString() ?? null,
+    routedTo,
+  };
 }
 
 /** The public part of a stored link (link.subjects stays internal) */

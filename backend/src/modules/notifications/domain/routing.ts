@@ -81,6 +81,11 @@ export interface RouteSend {
    * signed-in customers, the delivery log (dedupe key) for guest addresses, who have no inbox
    */
   skipIfRecent?: { topic: string; key: SubjectKey; value: string; dedupe: string };
+  /**
+   * Send only the first time: skipped when this topic was ever sent with this dedupe key (a review published again
+   * after an edit or a moderation decision is not new)
+   */
+  once?: boolean;
 }
 
 export type Effect = 'refreshConsent' | 'customerClosed' | 'reroute' | 'awayEnded' | 'dropOffReminder' | 'approvalDueReminder' | 'dispatchReminder';
@@ -192,6 +197,27 @@ const ROLE_AREA: Record<string, string> = {
   seller_manager: 'Sellers',
   customer_support_manager: 'Support',
 };
+
+/* Live topics (2026-10-20): Official Store counterparts of seller notices, seller support requests */
+
+/** Staff role of each support team (the lead roles of support's TEAM_ROLES): a seller's request goes to its team */
+const TEAM_ROLES: Record<string, string> = {
+  customer_support: 'customer_support_manager',
+  returns: 'returns_manager',
+  finance: 'finance_manager',
+  trust: 'trust_and_risk_manager',
+  seller_management: 'seller_manager',
+  official_store: 'official_store_manager',
+};
+
+/** The Official Store has no seller members: its counterparts of seller notices go to the Official Store Manager role */
+const officialStore = (): RouteTarget => role('official_store_manager');
+
+/** Review and feedback words for the templates */
+const reviewContext = (p: { rating: number; verified: boolean }) => ({ review: { rating: p.rating, kind: p.verified ? 'verified purchase' : 'not a verified purchase' } });
+const feedbackContext = (p: { sentiment: string }, f: Fmt) => ({ feedback: { sentiment: f.human(p.sentiment) || 'new' } });
+/** Dedupe key of a question notice: one per answering party, resolved when that party answers */
+const questionKey = (questionId: string, party: string) => `question:${questionId}:${party}`;
 
 /** Staff work area of a work queue */
 export function queueArea(queueKey: string): string {
@@ -370,6 +396,17 @@ export const ROUTES: Routes = {
           subjects: { orderId: p.orderId, groupId: g.groupId },
           sellerId: g.sellerId,
           dedupe: `order:${p.orderId}:${g.groupId}:new`,
+        })),
+      // live topics: the Official Store's groups go to its staff (it has no seller workspace)
+      ...p.groups
+        .filter((g) => g.ownerType === 'official')
+        .map((g) => ({
+          topic: 'staff.official_store.order_new',
+          to: [officialStore()],
+          link: L('order', p.orderId, 'admin/order', 'Open order', p.ref),
+          context: { order: { ref: p.ref, total: f.money(g.total) }, due: { date: f.dateTime(g.dispatchBy) } },
+          subjects: { orderId: p.orderId, groupId: g.groupId },
+          dedupe: `order:${p.orderId}:${g.groupId}:official`,
         })),
     ],
   },
@@ -664,6 +701,16 @@ export const ROUTES: Routes = {
           deadline: p.responseDueAt,
           dedupe: `return:${p.returnId}:respond`,
         },
+      // live topics: Official Store returns go to its staff, action required until approved or rejected (same key)
+      p.ownerType === 'official' && {
+        topic: 'staff.official_store.return_requested',
+        to: [officialStore()],
+        link: L('return', p.returnId, 'admin/returns', 'Respond', p.ref),
+        context: { return: { ref: p.ref, reason: f.human(p.reason) }, order: { ref: p.orderRef }, due: { date: f.dateTime(p.responseDueAt) } },
+        subjects: { returnId: p.returnId, orderId: p.orderId },
+        deadline: p.responseDueAt,
+        dedupe: `return:${p.returnId}:respond`,
+      },
     ],
   },
   'returns.return.info_requested': {
@@ -737,6 +784,27 @@ export const ROUTES: Routes = {
         dedupe: `refund-request:${p.refundRequestId}`,
         ...guestLink(p, p.orderId),
       },
+      // live topics: the seller hears of refunds on its orders, unless one of its members approved it themselves
+      p.ownerType === 'seller' &&
+        p.sellerId &&
+        p.approvedBy.kind !== 'seller' && {
+          topic: 'seller.refund.approved',
+          to: [seller(p.sellerId)],
+          // the return, the case, else the order list (the event names no seller order group)
+          link: p.returnId ? sellerReturnLink(p.returnId, p.returnRef) : p.caseId ? L('case', p.caseId, 'seller/help', 'View case', p.caseRef) : L('order', p.orderId, 'seller/orders', 'View orders', p.orderRef),
+          context: { order: { ref: p.orderRef }, refund: { amount: f.money(p.total) } },
+          subjects: { orderId: p.orderId, returnId: p.returnId, caseId: p.caseId },
+          sellerId: p.sellerId,
+          dedupe: `refund-request:${p.refundRequestId}`,
+        },
+      p.ownerType === 'official' && {
+        topic: 'staff.official_store.refund_approved',
+        to: [officialStore()],
+        link: p.returnId ? L('return', p.returnId, 'admin/returns', 'View refund', p.returnRef) : p.caseId ? L('case', p.caseId, 'admin/case', 'View refund', p.caseRef) : L('order', p.orderId, 'admin/order', 'View refund', p.orderRef),
+        context: { order: { ref: p.orderRef }, refund: { amount: f.money(p.total) } },
+        subjects: { orderId: p.orderId, returnId: p.returnId, caseId: p.caseId },
+        dedupe: `refund-request:${p.refundRequestId}`,
+      },
     ],
   },
   'returns.replacement.created': {
@@ -776,6 +844,24 @@ export const ROUTES: Routes = {
           deadline: p.handler === 'seller' ? p.nextResponseDueAt : null,
           dedupe: `case:${p.caseId}`,
         },
+      // live topics: a seller contacted Marketly (Seller Center › Help). Its team's role answers; action required until
+      // a staff owner is assigned, or the case is decided or resolved (support.case.assigned / decided / resolved)
+      p.kind === 'seller_request' &&
+        (() => {
+          const roleKey = TEAM_ROLES[p.team ?? ''] ?? 'seller_manager';
+          return {
+            topic: 'staff.seller.support_request',
+            to: [role(roleKey)],
+            link: L('case', p.caseId, 'admin/case', 'Open request', p.ref),
+            context: { case: { ref: p.ref, topic: f.human(p.category) }, due: { date: p.nextResponseDueAt ? f.dateTime(p.nextResponseDueAt) : 'the next business day' } },
+            subjects: { caseId: p.caseId, orderId: p.orderId },
+            group: ROLE_AREA[roleKey] ?? 'Sellers',
+            // opened with a staff owner already (a staff member opened it for the seller): nothing left to pick up
+            actionRequired: !p.ownerStaffId,
+            deadline: p.ownerStaffId ? null : (p.nextResponseDueAt ?? null),
+            dedupe: `seller-request:${p.caseId}`,
+          };
+        })(),
     ],
   },
   'support.case.message_added': {
@@ -819,7 +905,8 @@ export const ROUTES: Routes = {
     ],
   },
   'support.case.decided': {
-    resolve: (p) => [`case:${p.caseId}`],
+    // seller-request: the staff notice of a seller's support request (live topics)
+    resolve: (p) => [`case:${p.caseId}`, `seller-request:${p.caseId}`],
     // decided without notifying the parties (notifyParties false): nothing is sent
     sends: (p, f) => [
       p.notified !== false && {
@@ -843,9 +930,11 @@ export const ROUTES: Routes = {
     ],
   },
   'support.case.resolved': {
-    resolve: (p) => [`case:${p.caseId}`],
+    resolve: (p) => [`case:${p.caseId}`, `seller-request:${p.caseId}`],
     sends: (p) => [{ topic: 'customer.case.resolved', to: shopper(p, byCase(p.caseId)), link: caseLink(p.caseId, p.ref), context: { case: { ref: p.ref } }, subjects: { caseId: p.caseId }, dedupe: `case:${p.caseId}:resolved` }],
   },
+  // live topics: a staff owner picked up the seller's support request
+  'support.case.assigned': { resolve: (p) => [`seller-request:${p.caseId}`] },
 
   /* ---------------------------------------------------------------- messaging */
   'messaging.message.sent': {
@@ -1148,6 +1237,48 @@ export const ROUTES: Routes = {
   'reviews.report.created': {
     sends: (p, f) => [
       { topic: 'staff.moderation.report', to: [role('content_manager')], link: L('report', p.reportId, 'admin/reviews', 'Open moderation queue'), context: { report: { type: f.human(p.reason) } }, dedupe: `review-report:${p.reportId}` },
+    ],
+  },
+
+  /* ---------------------------------------------------------------- live topics: reviews, feedback, questions (2026-10-20)
+   * Sellers hear about new reviews, feedback and questions on their products and store; the Official Store's go to
+   * its staff. Reviews and feedback are published again after an edit or a moderation decision: `once` sends each
+   * only the first time. */
+  'reviews.review.published': {
+    sends: (p) => {
+      const official = p.sellerId === OFFICIAL_STORE_ID;
+      const dedupe = `review:${p.reviewId}:new`;
+      return [
+        !official && { topic: 'seller.review.new', to: [seller(p.sellerId)], link: L('review', p.reviewId, 'seller/customers', 'View review'), context: reviewContext(p), sellerId: p.sellerId, dedupe, once: true },
+        official && { topic: 'staff.official_store.review_new', to: [officialStore()], link: L('review', p.reviewId, 'admin/official', 'View review'), context: reviewContext(p), dedupe, once: true },
+      ];
+    },
+  },
+  'reviews.feedback.published': {
+    sends: (p, f) => {
+      const official = p.sellerId === OFFICIAL_STORE_ID;
+      const dedupe = `feedback:${p.feedbackId}:new`;
+      const subjects = { orderId: p.orderId };
+      return [
+        !official && { topic: 'seller.feedback.new', to: [seller(p.sellerId)], link: L('feedback', p.feedbackId, 'seller/customers', 'View feedback'), context: feedbackContext(p, f), subjects, sellerId: p.sellerId, dedupe, once: true },
+        official && { topic: 'staff.official_store.feedback_new', to: [officialStore()], link: L('feedback', p.feedbackId, 'admin/official', 'View feedback'), context: feedbackContext(p, f), subjects, dedupe, once: true },
+      ];
+    },
+  },
+  'reviews.question.asked': {
+    // one action notice per answering party (each seller with an offer, the Official Store's staff), resolved when that party answers
+    sends: (p) => [
+      ...p.sellerIds
+        .filter((sellerId) => sellerId !== OFFICIAL_STORE_ID)
+        .map((sellerId) => ({ topic: 'seller.question.asked', to: [seller(sellerId)], link: L('question', p.questionId, 'seller/customers', 'Answer'), sellerId, dedupe: questionKey(p.questionId, sellerId) })),
+      p.officialStore && { topic: 'staff.official_store.question_asked', to: [officialStore()], link: L('question', p.questionId, 'admin/official', 'Answer'), dedupe: questionKey(p.questionId, 'official-store') },
+    ],
+  },
+  'reviews.answer.published': {
+    // a customer's answer helps the shopper but leaves the seller's question open
+    resolve: (p) => [
+      p.label === 'seller' && p.sellerId ? questionKey(p.questionId, p.sellerId === OFFICIAL_STORE_ID ? 'official-store' : p.sellerId) : null,
+      p.label === 'marketly_staff' ? questionKey(p.questionId, 'official-store') : null,
     ],
   },
   'trust.report.created': {

@@ -1,6 +1,7 @@
 import { routes } from '../../../kernel/http/index.js';
 import type { Principal, SellerMemberAccess } from '../../../kernel/auth/index.js';
 import { endpoints } from '../../../spec/notifications.js';
+import { lastEventIdOf, SELLER_STREAM_MAX_AGE_MS } from '../app/live.js';
 import type { SellerCaller } from '../app/preferences.js';
 import type { NotificationsService } from '../service.js';
 import { accountOf } from './store.js';
@@ -26,6 +27,11 @@ export const sellerRoutes = (service: NotificationsService) =>
     getSellerInboxSummary: async ({ principal, sellerAccess }) => {
       const s = await service.inbox.summary({ principal, sellerAccess });
       return { unread: s.unread, byGroup: s.byGroup, total: s.total, totalByGroup: s.totalByGroup, actionRequired: s.actionRequired, needsAction: s.needsAction };
+    },
+    /** GET /stream: Live notices for my Seller Center inbox (Server-Sent Events); the inbox owner is built as for GET /inbox */
+    streamSellerInbox: async ({ principal, sellerAccess, stream, request }) => {
+      stream.maxAge(SELLER_STREAM_MAX_AGE_MS); // the reconnect reads the member's permissions and topics again
+      await service.live.serve({ principal, sellerAccess }, stream, lastEventIdOf(request.headers));
     },
     /** POST /inbox/{id}/read: Mark one notice as read (for me) */
     markSellerRead: async ({ principal, sellerAccess, params }) => service.inbox.markRead({ principal, sellerAccess }, params.id),

@@ -27,6 +27,13 @@ const cart = useQuery({ queryKey: ['cart'], queryFn: () => call(api.GET('/api/st
 - `gql(query, variables)` runs a GraphQL screen query on the app's endpoint and returns `{ data, errors }` (partial data allowed).
 - The store's `useSession()` (`frontend/src/app/session.tsx`) gives `signedIn`, `customer`, `cartCount`, `unreadNotifications`, `adopt(tokens)` (after sign-in/registration), `signOut()`, `refreshCart()`.
 
+## Live notices (Seller Center, Admin Center)
+
+- `<LiveNotifications audience scope linkOf keysFor />` (`src/api/LiveNotifications.tsx`) sits in each app's signed-in shell (`app/session.tsx`). It streams `GET /api/<seller|admin>/notifications/stream` (Server-Sent Events read with fetch, so the token rides in `Authorization`), invalidates `['notifications']` plus the app's `keysFor(notice)` keys, and shows a toast per notice (`ui/ToastStack.tsx`). Clicking a toast opens `linkOf(notice)`, the same helper the inbox rows use.
+- The stream client is `src/api/live.ts`: one stream per browser and app (Web Locks leader, BroadcastChannel relay to the other tabs), reconnect backoff 1/2/5/10/30 s, `Last-Event-ID` resume, `end` reasons. The Admin Center never refreshes its session for the stream (`session.currentToken()`): a refresh is staff activity and would defeat the idle sign-out.
+- `<LiveAlertSettings audience />` ("Desktop alerts", "Sound") is on the Notifications / Inbox page header; the choice is kept in localStorage per app. Desktop alerts need a secure context (https or localhost), so the switch is hidden over plain http on the LAN.
+- Tests: `npm test -w @marketly/web-shared` (parser, backoff, stream loop, one stream per name).
+
 ## Rules
 
 1. **Reads are `useQuery`, writes are `useMutation`.** Query keys start with the module: `['catalog', 'product', id]`, `['cart']`, `['orders', 'list', params]`. After a write, invalidate what changed (`qc.invalidateQueries({ queryKey: ['cart'] })`) or set the returned data. Cart changes also call `refreshCart()` (header badge).

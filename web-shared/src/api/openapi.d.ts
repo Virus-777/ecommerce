@@ -4350,6 +4350,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/store/content/news/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What changed in the news list since the app's last sync
+         * @description The app keeps the news on the device and syncs once per app start. items are the listed posts published or changed since the token (all of them without one); listed and pinned describe the whole list, so posts that left it (unpublished, removed, past their archive time) and pin changes reach the device without being sent again. The token is the server's time when this answer was built, so the device clock never matters; an unreadable token counts as none.
+         *
+         *     **Screens:** store/news, store/news-post
+         */
+        get: operations["content.getNewsChanges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/store/content/news/{slug}": {
         parameters: {
             query?: never;
@@ -12333,6 +12355,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/seller/notifications/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Live notices for my Seller Center inbox (Server-Sent Events)
+         * @description The notices GET /inbox shows this member (workspace notices whose topic the member receives, and notices to the member), as they are created. Events: `notice` (id: the notice id; data: one Notice exactly as GET /inbox returns it to this caller), sent only after the notice is saved; `ready` (data { at, caughtUp }) once the catch-up is sent; `end` (data { reason }) just before the server closes the stream. A `: ping` comment every 25 s keeps proxies from closing the line. With the Last-Event-ID header (the id of the last notice received), first the notices of this inbox created after that one, only from the last 15 minutes, at most 20, oldest first; an unknown id catches up nothing. End reasons: `signed_out` (the session or account was revoked: stop; the next request leads to sign-in), `restart` (the server is shutting down: reconnect after retry), `max_age` (after 60 minutes, so permissions and topics are read again: reconnect at once). Wire format and client rules: docs/api/README.md, "Live notifications".
+         *
+         *     **Screens:** seller/notifications
+         */
+        get: operations["notifications.streamSellerInbox"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/seller/notifications/inbox/{id}/read": {
         parameters: {
             query?: never;
@@ -12535,6 +12579,28 @@ export interface paths {
          * @description **Screens:** admin/inbox, admin/dashboard
          */
         get: operations["notifications.getStaffInboxSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/notifications/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Live notices for my Admin Center inbox (Server-Sent Events)
+         * @description The notices GET /inbox shows this staff member (routed to them by role, as a backup or directly), as they are created, with their own reason and cover. Events: `notice` (id: the notice id; data: one Notice exactly as GET /inbox returns it to this caller), sent only after the notice is saved; `ready` (data { at, caughtUp }) once the catch-up is sent; `end` (data { reason }) just before the server closes the stream. A `: ping` comment every 25 s keeps proxies from closing the line. With the Last-Event-ID header (the id of the last notice received), first the notices of this inbox created after that one, only from the last 15 minutes, at most 20, oldest first; an unknown id catches up nothing. The open stream is not activity: the connect request counts once, and staffIdleMinutes still signs out a person who only has the stream open. End reasons: `signed_out` (the session or account was revoked, or the session expired: stop), `session_idle` (the staff session went idle: stop), `restart` (the server is shutting down: reconnect after retry). No maximum age. Wire format and client rules: docs/api/README.md, "Live notifications".
+         *
+         *     **Screens:** admin/inbox
+         */
+        get: operations["notifications.streamStaffInbox"];
         put?: never;
         post?: never;
         delete?: never;
@@ -13117,6 +13183,38 @@ export interface paths {
          *     **Screens:** admin/notifications
          */
         post: operations["notifications.cancelBroadcast"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/notifications/announcements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Announcements sent to sellers, newest first
+         * @description **Permission:** `notifications.announcements.send`
+         *
+         *     **Screens:** admin/notifications
+         */
+        get: operations["notifications.listAnnouncements"];
+        put?: never;
+        /**
+         * Send a message from Marketly to sellers (in-app and email)
+         * @description Topic seller.announcement (essential, not promotional: no consent check; owners always get the email, other members by their channel choice). To the chosen sellers, or with no sellerIds to every active seller (approved or restricted) when it is sent. Each seller workspace gets one notice (dedupe announcement:<id>) linking to the given Seller Center screen, else seller/notifications. The sends happen before the answer; 202 says the notices are created and their emails queued.
+         *
+         *     **Permission:** `notifications.announcements.send`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Screens:** admin/notifications
+         */
+        post: operations["notifications.sendAnnouncement"];
         delete?: never;
         options?: never;
         head?: never;
@@ -20933,6 +21031,28 @@ export interface paths {
          *     **Screens:** store/search, store/home
          */
         get: operations["search.getSuggestions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/store/search/popular-searches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Popular search keywords across the store (shown as chips before the customer types)
+         * @description The most searched keywords of the last 30 days that found results (suggestion_terms of kind query, rebuilt hourly by search.refresh-suggestions), most searched first. A keyword needs at least popularSearchesMinCount searches to be listed.
+         *
+         *     **Screens:** store/search
+         */
+        get: operations["search.listPopularSearches"];
         put?: never;
         post?: never;
         delete?: never;
@@ -33149,6 +33269,18 @@ export interface components {
             /** Format: date-time */
             latestPublishedAt?: string | null;
         };
+        "content.NewsChanges": {
+            /** @description Listed posts new or changed since `since` (every listed post without it), with their body; related is empty */
+            items: components["schemas"]["content.NewsPost"][];
+            /** @description Every listed post, in list order (pinned first, then newest): a saved post missing here left the list */
+            listed: string[];
+            /** @description The pinned posts among listed */
+            pinned: string[];
+            /** @description As GET /news/categories */
+            categories: components["schemas"]["content.NewsCategory"][];
+            /** @description Send as since on the next sync */
+            syncToken: string;
+        };
         "content.Curator": {
             name: string;
             avatar?: components["schemas"]["MediaRef"] | null;
@@ -37318,6 +37450,41 @@ export interface components {
             sizeBytes: number;
             /** Format: uri */
             downloadUrl: string;
+        };
+        "notifications.AnnouncementLink": {
+            /** @description A Seller Center screen id (seller/…), e.g. seller/help or seller/store; the notice opens it like any NoticeLink (screen + id) */
+            screen: string;
+            /** @description The record the screen opens, 1–200 characters */
+            id: string;
+            /** @description Button text, at most 40 characters (default Read more) */
+            label?: string | null;
+        };
+        "notifications.AnnouncementInput": {
+            /** @description 1–120 characters */
+            title: string;
+            /** @description Plain text, 1–2000 characters */
+            body: string;
+            /** @description 1–500 seller ids (each must be a known seller); omitted: every active seller (approved or restricted) */
+            sellerIds?: string[] | null;
+            /** @description Where the notice opens; omitted: the seller's notifications page */
+            link?: components["schemas"]["notifications.AnnouncementLink"] | null;
+        };
+        "notifications.Announcement": {
+            /** Format: uuid */
+            id: string;
+            title: string;
+            body: string;
+            /**
+             * @description all: every active seller when it was sent; chosen: the sellerIds of the request
+             * @enum {string}
+             */
+            audience: "all" | "chosen";
+            /** @description Seller workspaces it was sent to */
+            sellerCount: number;
+            link?: components["schemas"]["notifications.AnnouncementLink"] | null;
+            sentBy: components["schemas"]["Actor"];
+            /** Format: date-time */
+            sentAt: string;
         };
         "offers.Offer": {
             /** Format: uuid */
@@ -43130,6 +43297,10 @@ export interface components {
             filtersLabel?: string | null;
             /** Format: date-time */
             searchedAt: string;
+        };
+        "search.PopularSearch": {
+            /** @description Normalized keyword, e.g. 'wireless headphones' */
+            query: string;
         };
         "search.Suggestions": {
             query: string;
@@ -61589,6 +61760,55 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["content.NewsSummary"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "content.getNewsChanges": {
+        parameters: {
+            query?: {
+                since?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["content.NewsChanges"];
                 };
             };
             /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
@@ -86342,6 +86562,56 @@ export interface operations {
             };
         };
     };
+    "notifications.streamSellerInbox": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A stream of Server-Sent Events (text/event-stream, UTF-8): the response stays open and the server writes each event as it happens. The endpoint description names the event types. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     "notifications.markSellerRead": {
         parameters: {
             query?: never;
@@ -86912,6 +87182,53 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["notifications.StaffInboxSummary"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "notifications.streamStaffInbox": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A stream of Server-Sent Events (text/event-stream, UTF-8): the response stays open and the server writes each event as it happens. The endpoint description names the event types. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
                 };
             };
             /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
@@ -88744,6 +89061,126 @@ export interface operations {
             };
             /** @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event. */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "notifications.listAnnouncements": {
+        parameters: {
+            query?: {
+                /** @description Opaque cursor from the previous response. Used by the Android app's infinite scroll. */
+                cursor?: string | null;
+                /** @description 1-based page number. Used by the website's numbered pages. */
+                page?: number | null;
+                /** @description Items per batch, 1–100, default 24 */
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["notifications.Announcement"][];
+                        /** @description Pass as ?cursor= for the next batch (app). Null at the end. */
+                        nextCursor: string | null;
+                        page?: number;
+                        totalPages?: number;
+                        total?: number;
+                    };
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "notifications.sendAnnouncement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["notifications.AnnouncementInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        announcement: components["schemas"]["notifications.Announcement"];
+                    };
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -112835,6 +113272,55 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["search.Suggestions"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "search.listPopularSearches": {
+        parameters: {
+            query?: {
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["search.PopularSearch"][];
                 };
             };
             /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */

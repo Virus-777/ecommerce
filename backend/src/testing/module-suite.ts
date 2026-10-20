@@ -114,8 +114,11 @@ export function describeModule(name: string) {
       });
     }
 
-    // GET endpoints whose query has no required fields can be called as they are
-    const callable = endpoints.filter(([, d]) => d.method === 'GET' && BEARER.has(d.auth) && !d.stepUp && (!d.query || d.query().safeParse({}).success));
+    // GET endpoints whose query has no required fields can be called as they are. Event streams stay open, which
+    // inject() would wait on forever: the module's own tests open them over real HTTP
+    const callable = endpoints.filter(
+      ([, d]) => d.method === 'GET' && BEARER.has(d.auth) && !d.stepUp && d.responseFormat !== 'event-stream' && (!d.query || d.query().safeParse({}).success),
+    );
     if (callable.length) {
       it.each(callable)('%s reaches its handler with the right token', async (_id, def) => {
         const res = await call(def, tokenFor(def));

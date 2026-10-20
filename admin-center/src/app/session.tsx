@@ -1,14 +1,17 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocation } from 'react-router';
 import { createContext, useCallback, useContext, useEffect, useRef, useMemo, type ReactNode } from 'react';
-import { call, useApi, useSessionState, type SessionTokens } from '@marketly/web-shared/api';
+import { call, LiveNotifications, useApi, useSessionState, type SessionTokens } from '@marketly/web-shared/api';
 import { BackOfficeIdentityProvider, type BackOfficeIdentity, type NavCount } from '@marketly/web-shared/layouts';
 import { announce } from '@marketly/web-shared/ui';
+import { liveQueryKeys, noticeHref } from '@/pages/admin/data/inbox';
 import { SignIn } from './SignIn';
 
 // The Admin and Operations Center session, backed by the API: a staff session (identity, audience admin),
 // the staff member's roles and permissions (access/me), and the counts the sidebar and bell show (work
 // queues with live counts, staff notice inbox). One session serves both areas (Admin at /, Operations at /ops).
+// The live notice stream (LiveNotifications) refreshes the bell when a notice arrives; the inbox summary's 5-minute
+// refetch is the fallback while the stream is down. Queue counts keep their 60 s refetch: they change without notices.
 
 interface StaffSession {
   accountId: string;
@@ -27,6 +30,9 @@ interface StaffSession {
 }
 
 const Ctx = createContext<StaffSession | null>(null);
+
+/** The inbox summary refetches this often besides the live stream's refreshes (the stream may be down). */
+export const LIVE_FALLBACK = 5 * 60_000;
 
 /** Which sidebar entry shows a queue's count: queues name the screen they are worked on. */
 const NAV_BY_SCREEN: Record<string, { admin?: string; ops?: string }> = {
@@ -85,7 +91,7 @@ function SignedIn({ accountId, children }: { accountId: string; children: ReactN
 
   const me = useQuery({ queryKey: ['access', 'me', accountId], queryFn: () => call(api.GET('/api/admin/access/me')) });
   const queues = useQuery({ queryKey: ['workqueues', 'queues'], queryFn: () => call(api.GET('/api/admin/workqueues/queues')) as Promise<QueueCount[]>, refetchInterval: 60_000, retry: false });
-  const inbox = useQuery({ queryKey: ['notifications', 'summary', 'staff'], queryFn: () => call(api.GET('/api/admin/notifications/inbox/summary')), refetchInterval: 60_000 });
+  const inbox = useQuery({ queryKey: ['notifications', 'summary', 'staff'], queryFn: () => call(api.GET('/api/admin/notifications/inbox/summary')), refetchInterval: LIVE_FALLBACK });
 
   const signOut = useCallback(async () => {
     await session.signOut();
@@ -131,7 +137,10 @@ function SignedIn({ accountId, children }: { accountId: string; children: ReactN
 
   return (
     <Ctx.Provider value={value}>
-      <BackOfficeIdentityProvider value={identity}>{children}</BackOfficeIdentityProvider>
+      <BackOfficeIdentityProvider value={identity}>
+        {children}
+        <LiveNotifications audience="admin" scope={accountId} linkOf={noticeHref} keysFor={liveQueryKeys} />
+      </BackOfficeIdentityProvider>
     </Ctx.Provider>
   );
 }

@@ -2,7 +2,7 @@ import { orThrow } from '../../kernel/lib/or-throw.js';
 import type { PageRequest } from '../../kernel/lib/pagination.js';
 import type { Filter, ModuleStore } from '../../kernel/mongo/index.js';
 import type { Page } from '../../spec/common.js';
-import type { BroadcastRow, DeliveryEventRow, DeliveryFilter, DeliveryRow, InboxFilter, InboxOwner, InboxRow, InvitedMemberRow, MemberPrefRow, NoticeRow, PushDeviceRow, RecipientRow, ScheduledRow, StaffPrefRow, SubjectKey, SuppressionFilter, SuppressionRow, TemplateRow, TopicRow, VersionRow } from './ports.js';
+import type { AnnouncementRow, BroadcastRow, DeliveryEventRow, DeliveryFilter, DeliveryRow, InboxFilter, InboxOwner, InboxRow, InvitedMemberRow, MemberPrefRow, NoticeRow, PushDeviceRow, RecipientRow, ScheduledRow, StaffPrefRow, SubjectKey, SuppressionFilter, SuppressionRow, TemplateRow, TopicRow, VersionRow } from './ports.js';
 
 /** One of `values`, or nothing when the list is empty (an empty IN matches no row) */
 const oneOf = (values: readonly unknown[]) => ({ $in: [...values] });
@@ -51,6 +51,7 @@ export class NotificationsRepository {
       pushDevices: this.store.table<PushDeviceRow>('push_devices'),
       suppressions: this.store.table<SuppressionRow>('suppressions'),
       broadcasts: this.store.table<BroadcastRow>('broadcasts'),
+      announcements: this.store.table<AnnouncementRow>('announcements'),
       invited: this.store.table<InvitedMemberRow>('invited_members'),
     };
   }
@@ -165,6 +166,11 @@ export class NotificationsRepository {
     return this.#t.notices.exists({ dedupe_key: q.dedupeKey, topic_key: q.topicKey, address_kind: q.addressKind, address_id: q.addressId, created_at: { $gte: q.since } });
   }
 
+  /** Was this topic ever sent with this dedupe key (a notice, or an email when the in-app channel is off)? RouteSend.once */
+  async everSent(dedupeKey: string, topicKey: string): Promise<boolean> {
+    return (await this.#t.notices.exists({ dedupe_key: dedupeKey, topic_key: topicKey })) || this.#t.deliveries.exists({ dedupe_key: dedupeKey, topic_key: topicKey });
+  }
+
   async listInbox(owner: InboxOwner, f: InboxFilter, page: PageRequest): Promise<Page<InboxRow>> {
     const result = await this.#t.notices.page(await this.#inboxFilter(owner, f), page, { column: 'created_at', direction: 'desc' });
     return { ...result, items: await this.#withReadState(owner.accountId, result.items) };
@@ -206,6 +212,19 @@ export class NotificationsRepository {
     // archived or not: the notice can still be opened, read and archived
     const notice = await this.#t.notices.findOne({ $and: [await this.#inboxBase(owner), { id: noticeId }] });
     return notice ? (await this.#withReadState(owner.accountId, [notice]))[0] : undefined;
+  }
+
+  /**
+   * Live stream catch-up (Last-Event-ID): the inbox's notices created after the notice `afterId`, none older than
+   * `since`, the newest `limit` of them, oldest first. Nothing when `afterId` is not a notice of this inbox.
+   */
+  async inboxAfter(owner: InboxOwner, afterId: string, since: Date, limit: number): Promise<InboxRow[]> {
+    const anchor = await this.#t.notices.findOne({ $and: [await this.#inboxBase(owner), { id: afterId }] });
+    if (!anchor) return [];
+    // after the anchor in inbox order (created_at, then id: one send creates several notices at the same time)
+    const after = { $or: [{ created_at: { $gt: anchor.created_at } }, { created_at: anchor.created_at, id: { $gt: anchor.id } }] };
+    const rows = await this.#t.notices.find({ $and: [await this.#inboxFilter(owner, {}), after, { created_at: { $gte: since } }] }, { sort: { created_at: -1, id: -1 }, limit });
+    return (await this.#withReadState(owner.accountId, rows)).reverse();
   }
 
   /** My recipient row's read state back to unread */
@@ -598,6 +617,20 @@ export class NotificationsRepository {
 
   dueBroadcasts(now: Date, limit: number): Promise<BroadcastRow[]> {
     return this.#t.broadcasts.find({ status: 'scheduled', scheduled_at: { $lte: now } }, { sort: { scheduled_at: 1 }, limit });
+  }
+
+  /* ---------------------------------------------------------------- announcements to sellers */
+  insertAnnouncement(row: AnnouncementRow): Promise<AnnouncementRow> {
+    return this.#t.announcements.insert(row);
+  }
+
+  async updateAnnouncement(id: string, patch: Partial<AnnouncementRow>): Promise<AnnouncementRow> {
+    return orThrow(await this.#t.announcements.update(id, patch), `announcement ${id}`);
+  }
+
+  /** Newest first */
+  listAnnouncements(page: PageRequest): Promise<Page<AnnouncementRow>> {
+    return this.#t.announcements.page({}, page, { column: 'sent_at', direction: 'desc' });
   }
 
   /* ---------------------------------------------------------------- inboxes (a join is two reads) */

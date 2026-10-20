@@ -263,6 +263,8 @@ export class Cases {
         orderItemIds: items.map((i) => i.order_item_id),
         handler,
         ownerStaffId: ownerId,
+        // notifications sends a seller's request to the role of this team
+        team,
         trustReportId: facts.trustReportId ?? null,
         nextResponseDueAt: firstDue.toISOString(),
       },

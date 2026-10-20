@@ -22,7 +22,7 @@ import { schemas } from './schema.js';
  */
 export default defineModule({
   spec,
-  version: '2.1.0',
+  version: '2.2.0',
   schemas,
   async register(ctx) {
     // Providers: deterministic development adapters (no network); real adapters plug in behind the same ports
@@ -127,6 +127,12 @@ export default defineModule({
     ctx.events.on("workqueues.item.resolved", (e) => service.onItemResolvedFromWorkqueues(e.payload, e.id));
     ctx.events.on("settings.change.scheduled", (e) => service.onChangeScheduledFromSettings(e.payload, e.id));
     ctx.events.on("audit.integrity.failed", (e) => service.onIntegrityFailedFromAudit(e.payload, e.id));
+    // live topics (2026-10-20): reviews, feedback and questions for sellers and the Official Store; seller support requests
+    ctx.events.on("reviews.review.published", (e) => service.onReviewPublishedFromReviews(e.payload, e.id));
+    ctx.events.on("reviews.feedback.published", (e) => service.onFeedbackPublishedFromReviews(e.payload, e.id));
+    ctx.events.on("reviews.question.asked", (e) => service.onQuestionAskedFromReviews(e.payload, e.id));
+    ctx.events.on("reviews.answer.published", (e) => service.onAnswerPublishedFromReviews(e.payload, e.id));
+    ctx.events.on("support.case.assigned", (e) => service.onCaseAssignedFromSupport(e.payload, e.id));
     ctx.events.on("reports.export.ready", (e) => service.onExportReadyFromReports(e.payload, e.id));
     ctx.events.on("reports.scheduled_report.ready", (e) => service.onScheduledReportReadyFromReports(e.payload, e.id));
     ctx.events.on("purchasing.purchase_order.sent", (e) => service.onPurchaseOrderSentFromPurchasing(e.payload, e.id));

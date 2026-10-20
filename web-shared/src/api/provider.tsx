@@ -9,6 +9,8 @@ interface ApiContext {
   session: Session;
   api: Api;
   gql: ReturnType<typeof createGraphql>;
+  /** API origin ('' = same origin): for requests the typed client can't make, like the live stream. */
+  baseUrl: string;
 }
 
 const Ctx = createContext<ApiContext | null>(null);
@@ -34,7 +36,7 @@ function makeQueryClient() {
 export function ApiProvider({ audience, baseUrl = '', children }: { audience: Audience; baseUrl?: string; children: ReactNode }) {
   const [value] = useState<ApiContext>(() => {
     const session = new Session({ audience, baseUrl });
-    return { session, api: createApi(session, baseUrl), gql: createGraphql(session, baseUrl) };
+    return { session, api: createApi(session, baseUrl), gql: createGraphql(session, baseUrl), baseUrl };
   });
   const [queryClient] = useState(makeQueryClient);
   return (

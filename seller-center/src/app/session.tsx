@@ -1,14 +1,17 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createContext, useCallback, useContext, useRef, useMemo, useState, type ReactNode } from 'react';
-import { call, useApi, useSessionState, type SessionTokens } from '@marketly/web-shared/api';
+import { call, LiveNotifications, useApi, useSessionState, type SessionTokens } from '@marketly/web-shared/api';
 import { BackOfficeIdentityProvider, type BackOfficeIdentity } from '@marketly/web-shared/layouts';
 import { initials } from '@marketly/web-shared/lib/format';
 import { Dialog, Icon } from '@marketly/web-shared/ui';
+import { liveQueryKeys, noticeHref } from '@/pages/data/home';
 import { SignIn } from './SignIn';
 
 // The Seller Center session, backed by the API: a seller-audience session (identity) acting for one seller
 // (seller context), the seller account (sellers), the member's name (identity security overview), and the
-// counts the sidebar and bell show (orders, inventory, returns, messaging, notifications).
+// counts the sidebar and bell show (orders, inventory, returns, messaging, notifications). The live notice stream
+// (LiveNotifications) refreshes the bell and counts when a notice arrives; the 5-minute refetch is the fallback
+// while the stream is down.
 
 export interface SellerContextItem {
   sellerId: string;
@@ -34,6 +37,9 @@ interface SellerSession {
 }
 
 const Ctx = createContext<SellerSession | null>(null);
+
+/** Counts refetch this often besides the live stream's refreshes (the stream may be down or reconnecting). */
+export const LIVE_FALLBACK = 5 * 60_000;
 
 const STATUS: Record<string, { label: string; tone: 'success' | 'warning' | 'danger' | 'info' | 'muted' }> = {
   approved: { label: 'Approved · selling', tone: 'success' },
@@ -77,11 +83,11 @@ function SignedIn({ sellerId, children }: { sellerId: string; children: ReactNod
   const account = useQuery({ queryKey: ['sellers', 'account', sellerId], queryFn: () => call(api.GET('/api/seller/sellers/account')) });
   const security = useQuery({ queryKey: ['identity', 'security'], queryFn: () => call(api.GET('/api/store/identity/security')) });
   const contexts = useQuery({ queryKey: ['identity', 'sellers'], queryFn: () => call(api.GET('/api/seller/identity/session/sellers')) as Promise<SellerContextItem[]> });
-  const orders = useQuery({ queryKey: ['orders', 'counts', sellerId], queryFn: () => call(api.GET('/api/seller/orders/orders/counts')), refetchInterval: 60_000 });
+  const orders = useQuery({ queryKey: ['orders', 'counts', sellerId], queryFn: () => call(api.GET('/api/seller/orders/orders/counts')), refetchInterval: LIVE_FALLBACK });
   const stock = useQuery({ queryKey: ['inventory', 'summary', sellerId], queryFn: () => call(api.GET('/api/seller/inventory/summary')) });
   const returns = useQuery({ queryKey: ['returns', 'counts', sellerId], queryFn: () => call(api.GET('/api/seller/returns/requests/counts')) });
   const messages = useQuery({ queryKey: ['messaging', 'stats', sellerId], queryFn: () => call(api.GET('/api/seller/messaging/response-stats')) });
-  const inbox = useQuery({ queryKey: ['notifications', 'summary', sellerId], queryFn: () => call(api.GET('/api/seller/notifications/inbox/summary')), refetchInterval: 60_000 });
+  const inbox = useQuery({ queryKey: ['notifications', 'summary', sellerId], queryFn: () => call(api.GET('/api/seller/notifications/inbox/summary')), refetchInterval: LIVE_FALLBACK });
 
   const signOut = useCallback(async () => {
     await session.signOut();
@@ -154,6 +160,7 @@ function SignedIn({ sellerId, children }: { sellerId: string; children: ReactNod
     <Ctx.Provider value={value}>
       <BackOfficeIdentityProvider value={identity}>
         {children}
+        <LiveNotifications audience="seller" scope={sellerId} linkOf={noticeHref} keysFor={liveQueryKeys} />
         <Dialog open={switching} onClose={() => setSwitching(false)} title="Switch store">
           <p className="small sub">You can act for one store at a time. Pages reload for the store you choose.</p>
           <StorePicker contexts={contexts.data ?? []} current={sellerId} onPick={(id) => void pick(id)} busy={busy} />
