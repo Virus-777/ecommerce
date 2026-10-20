@@ -181,6 +181,31 @@ describe('storefront', () => {
     expect((await kit.call('GET', `${STORE}/stores/unknown-store-${newId().slice(-4)}`, s.token)).status).toBe(404);
   });
 
+  it('a store shows up to three phone numbers, only while showPhone is on', async () => {
+    const s = await approvedSeller(kit, { launch: true });
+    const contact = { orderMessages: true, productQuestions: true, replyTarget: 'within_24h' };
+    const patch = (c: object) => kit.call('PATCH', `${SELLER}/store-profile`, s.sellerToken, { contactOptions: { ...contact, ...c } });
+
+    const empty = await patch({ showPhone: true, phones: [' '] });
+    expect(empty.body.error).toMatchObject({ code: 'VALIDATION_FAILED' });
+    const bad = await patch({ showPhone: true, phones: ['+1 503 555 0100', 'call me'] });
+    expect(JSON.stringify(bad.body.error)).toContain('contactOptions.phones.1');
+    expect((await patch({ showPhone: true, phones: ['5035550100', '5035550101', '5035550102', '5035550103'] })).body.error.code).toBe('VALIDATION_FAILED');
+
+    const up = await patch({ showPhone: true, phones: [' +1 503 555 0100 ', '(503) 555-0101', '+15035550100'] });
+    expect(up.status).toBe(200);
+    expect(up.body.contactOptions).toMatchObject({ showPhone: true, phones: ['+1 503 555 0100', '(503) 555-0101'], phone: '+1 503 555 0100' });
+    let sf = await kit.call('GET', `${STORE}/stores/${up.body.slug}`, s.token);
+    expect(sf.body.contact).toMatchObject({ phone: '+1 503 555 0100', phones: ['+1 503 555 0100', '(503) 555-0101'] });
+
+    // hidden: kept for the seller, gone from the storefront
+    const off = await patch({ showPhone: false, phones: ['+1 503 555 0100', '(503) 555-0101'] });
+    expect(off.body.contactOptions.phones).toHaveLength(2);
+    sf = await kit.call('GET', `${STORE}/stores/${up.body.slug}`, s.token);
+    expect(sf.body.contact.phones).toEqual([]);
+    expect(sf.body.contact.phone).toBeUndefined();
+  });
+
   it('store names already used by another seller are refused', async () => {
     const a = await approvedSeller(kit);
     const b = await approvedSeller(kit);

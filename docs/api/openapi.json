@@ -209499,7 +209499,18 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "The first of phones"
+          },
+          "phones": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Up to 3 numbers customers can call or text, in display order; at least one while showPhone is on. When sent it replaces the list (phone alone sets a one-number list)"
           },
           "replyTarget": {
             "type": "string",
@@ -212061,13 +212072,22 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "The first of phones"
+          },
+          "phones": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Every number the seller shows, in order (empty when it shows none)"
           }
         },
         "required": [
           "canMessage",
           "productQuestions",
-          "replyTarget"
+          "replyTarget",
+          "phones"
         ]
       },
       "sellers.StorefrontCategory": {

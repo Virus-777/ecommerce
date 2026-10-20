@@ -31,7 +31,7 @@ export function sellerPublicProfileOut(src: PublicProfileSource) {
     verification: { ...v, state: gqlEnum(v.state) },
     onTimeDispatchPct: (sf?.highlights as { onTimeDispatchPct?: number | null } | undefined)?.onTimeDispatchPct ?? null,
     approvedClaims: ((sf?.approvedClaims ?? []) as { kind: string; text: string }[]).map((c) => ({ kind: gqlEnum(c.kind), text: c.text })),
-    contact: (sf?.contact as { canMessage: boolean; productQuestions: boolean; replyTarget: string; phone?: string | null } | undefined) ?? { canMessage: true, productQuestions: true, replyTarget: 'within_24h', phone: null },
+    contact: (sf?.contact as { canMessage: boolean; productQuestions: boolean; replyTarget: string; phone?: string | null; phones: string[] } | undefined) ?? { canMessage: true, productQuestions: true, replyTarget: 'within_24h', phone: null, phones: [] },
     warranty: src.warranty !== undefined ? src.warranty : (sf?.warranty ?? null),
     collections: sf?.collections ?? [],
   };

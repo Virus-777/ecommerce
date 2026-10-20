@@ -43,6 +43,7 @@ interface Profile {
   msg: boolean;
   questions: boolean;
   phone: boolean;
+  phones: string[];
   replyTarget: 'within_24h' | 'within_12h';
 }
 
@@ -63,11 +64,17 @@ const REPLY_TARGETS = [
   { value: 'within_12h', label: 'Within 12 hours' },
 ];
 const INTRO_MAX = 400;
+const PHONES_MAX = 3;
 const TAGLINE_MAX = 80;
 const IMG_MAX_MB = 10;
 const TINTS = ['2', '6', '3', '4', '5', '1'];
 
-type Errors = Partial<Record<'name' | 'tagline' | 'location' | 'intro' | 'warranty' | 'logo' | 'banner' | 'brand', string>>;
+type Errors = Partial<Record<'name' | 'tagline' | 'location' | 'intro' | 'warranty' | 'logo' | 'banner' | 'brand' | 'phones', string>>;
+
+/** The numbers typed in, trimmed, empty rows left out */
+const filledPhones = (p: Profile) => p.phones.map((n) => n.trim()).filter(Boolean);
+/** Same rule as the API: an optional +, digits, spaces, dots, dashes and brackets; 7 to 15 digits */
+const phoneOk = (n: string) => /^\+?[\d\s().-]+$/.test(n) && n.replace(/\D/g, '').length >= 7 && n.replace(/\D/g, '').length <= 15;
 
 const brandClaimOf = (p: StoreProfile) =>
   [...p.claims].filter((c) => c.kind === 'brand_affiliation' && (c.state === 'pending' || c.state === 'approved')).sort((a, b) => b.submittedAt.localeCompare(a.submittedAt))[0];
@@ -87,6 +94,7 @@ function fromApi(p: StoreProfile, t?: ReturnTerms): Profile {
     msg: p.contactOptions.orderMessages,
     questions: p.contactOptions.productQuestions,
     phone: p.contactOptions.showPhone,
+    phones: p.contactOptions.phones?.length ? p.contactOptions.phones : p.contactOptions.phone ? [p.contactOptions.phone] : [],
     replyTarget: p.contactOptions.replyTarget,
   };
 }
@@ -99,6 +107,9 @@ function validate(p: Profile, saved: Profile, evidence: number, brandsLoaded: bo
   if (!p.location.trim()) e.location = 'Enter the city and state customers see.';
   if (!p.intro.trim()) e.intro = 'Write a short introduction for your storefront.';
   else if (p.intro.length > INTRO_MAX) e.intro = `Shorten the introduction to ${INTRO_MAX} characters or fewer.`;
+  const phones = filledPhones(p);
+  if (p.phone && !phones.length) e.phones = 'Add the number customers can call or text.';
+  else if (phones.some((n) => !phoneOk(n))) e.phones = 'Enter each number with 7 to 15 digits, e.g. +1 503 555 0100.';
   if (!p.warranty.trim()) e.warranty = 'Describe your warranty, or write "Manufacturer warranty only".';
   if (p.brand.trim() && p.brand.trim() !== saved.brand) {
     if (p.brand.trim().length > 120) e.brand = 'Keep the claim to 120 characters or fewer.';
@@ -217,8 +228,9 @@ export default function Store() {
       if (draft.location.trim() !== s.location) body.location = draft.location.trim();
       if (draft.intro.trim() !== s.intro) body.introduction = draft.intro.trim();
       if (draft.warranty.trim() !== s.warranty) body.warranty = draft.warranty.trim();
-      if (draft.msg !== s.msg || draft.questions !== s.questions || draft.phone !== s.phone || draft.replyTarget !== s.replyTarget)
-        body.contactOptions = { ...profile!.contactOptions, orderMessages: draft.msg, productQuestions: draft.questions, showPhone: draft.phone, replyTarget: draft.replyTarget };
+      const phones = filledPhones(draft);
+      if (draft.msg !== s.msg || draft.questions !== s.questions || draft.phone !== s.phone || phones.join('\n') !== s.phones.join('\n') || draft.replyTarget !== s.replyTarget)
+        body.contactOptions = { ...profile!.contactOptions, orderMessages: draft.msg, productQuestions: draft.questions, showPhone: draft.phone, phones, phone: phones[0] ?? null, replyTarget: draft.replyTarget };
       if (logo.assetId) body.logoId = logo.assetId;
       if (banner.assetId) body.bannerId = banner.assetId;
       let next = profile!;
@@ -325,6 +337,13 @@ export default function Store() {
   const toggleOffer = (id: string, on: boolean) => setEditing((e) => (e ? { ...e, offerIds: on ? [...e.offerIds, id] : e.offerIds.filter((x) => x !== id) } : e));
   const busy = save.isPending || logo.uploading || banner.uploading || evidence.uploading;
   const chosenBrand = brands.find((b) => b.id === p?.brandId);
+  const phoneRows = p?.phones.length ? p.phones : [''];
+  // Typing the first number also turns on "Show phone numbers" (a number saved with it off never reaches customers).
+  const setPhone = (i: number, v: string | null) => {
+    const phones = v === null ? phoneRows.filter((_, j) => j !== i) : phoneRows.map((n, j) => (j === i ? v : n));
+    setP((d) => (d ? { ...d, phones, phone: d.phone || (!filledPhones(d).length && phones.some((n) => n.trim() !== '')) } : d));
+    setNotice('');
+  };
 
   const logoTile = <LogoTile initials={initials(profile?.storeName ?? '')} tint="2" className="lg" src={logoSrc} />;
 
@@ -667,7 +686,27 @@ export default function Store() {
             <div className="stack gap-3">
               <Switch id="st-msg" label="Order messages (always on for buyers with an order)" checked={p.msg} aria-checked={p.msg} disabled={!canManage} onChange={(e) => set('msg', e.target.checked)} />
               <Switch id="st-q" label="Product questions from shoppers" checked={p.questions} aria-checked={p.questions} disabled={!canManage} onChange={(e) => set('questions', e.target.checked)} />
-              <Switch id="st-phone" label="Show a phone number for order questions" checked={p.phone} aria-checked={p.phone} disabled={!canManage} onChange={(e) => set('phone', e.target.checked)} />
+              <Switch id="st-phone" label="Show phone numbers for order questions" checked={p.phone} aria-checked={p.phone} disabled={!canManage} onChange={(e) => set('phone', e.target.checked)} />
+              <div className="stack gap-2">
+                {phoneRows.map((n, i) => (
+                  <div key={i} className="row gap-2 u-items-flex-end">
+                    <Field
+                      className="grow"
+                      label={i === 0 ? 'Phone number' : `Phone number ${i + 1}`}
+                      hint={i === 0 && !errors.phones ? (p.phone ? 'Shown on your storefront and product pages. Customers can call or text it.' : 'Hidden from customers until you turn on “Show phone numbers”.') : undefined}
+                      error={i === phoneRows.length - 1 ? errors.phones : undefined}
+                    >
+                      <TextInput id={`st-phone-${i}`} type="tel" autoComplete="tel" icon="phone" value={n} error={!!errors.phones && (!n.trim() ? filledPhones(p).length === 0 : !phoneOk(n.trim()))} placeholder="+1 503 555 0100" disabled={!canManage} onChange={(e) => setPhone(i, e.target.value)} />
+                    </Field>
+                    {canManage && phoneRows.length > 1 && <IconButton icon="trash-2" label={`Remove phone number ${i + 1}`} onClick={() => setPhone(i, null)} />}
+                  </div>
+                ))}
+                {canManage && phoneRows.length < PHONES_MAX && (
+                  <Button variant="ghost" size="sm" icon="plus" style={{ alignSelf: 'flex-start' }} onClick={() => set('phones', [...phoneRows, ''])}>
+                    Add another number
+                  </Button>
+                )}
+              </div>
               <Field label="Reply target shown to customers">
                 <Select id="st-target" options={REPLY_TARGETS} value={p.replyTarget} disabled={!canManage} onChange={(e) => set('replyTarget', e.target.value as Profile['replyTarget'])} />
               </Field>
@@ -744,6 +783,12 @@ export default function Store() {
                 {p.returnWindow}-day returns · {freeReturns ? 'free return shipping' : 'free return shipping on defective items'}
                 {p.warranty.trim() ? ` · ${p.warranty.trim()}` : ''}
               </div>
+              {p.phone &&
+                filledPhones(p).map((n) => (
+                  <span key={n} className="row gap-2 xs sub">
+                    <Icon name="phone" className="ic-sm" /> {n}
+                  </span>
+                ))}
               <Button variant="secondary" size="sm" block icon="message-square">
                 Message the seller
               </Button>

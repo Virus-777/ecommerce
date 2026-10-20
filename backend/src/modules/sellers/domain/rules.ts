@@ -168,7 +168,18 @@ export const isPoBox = (a: common.Address | null | undefined) => Boolean(a && (i
 
 export const sameStoreName = (a: string, b: string) => a.trim().toLowerCase().replace(/\s+/g, ' ') === b.trim().toLowerCase().replace(/\s+/g, ' ');
 
-export const locationOf = (a: common.Address | null | undefined) => (a ? `${a.city}, ${a.region}` : null);
+const phoneDigits = (s: string) => s.replace(/[^0-9]/g, '');
+
+/** A storefront's phone numbers: the list when given (else the single phone), trimmed, blanks and repeats (same digits) dropped */
+export function phoneList(c: { phone?: string | null; phones?: readonly string[] | null }): string[] {
+  const seen = new Set<string>();
+  return (c.phones ?? (c.phone ? [c.phone] : [])).map((n) => n.trim()).filter((n) => n && !seen.has(phoneDigits(n)) && seen.add(phoneDigits(n)));
+}
+
+/** Digits with an optional leading +, spaces, dots, dashes and brackets; 7 to 15 digits (E.164 allows at most 15) */
+export const isPhoneNumber = (s: string) => /^\+?[\d\s().-]+$/.test(s) && phoneDigits(s).length >= 7 && phoneDigits(s).length <= 15;
+
+export const locationOf =(a: common.Address | null | undefined) => (a ? `${a.city}, ${a.region}` : null);
 
 /** Does the free-text product plan mention one of the categories referred to Trust and Risk? */
 export function riskCategoriesIn(text: string | null | undefined, categories: readonly string[]): string[] {
