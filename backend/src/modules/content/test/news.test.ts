@@ -266,3 +266,48 @@ describe('the second person stays a second person', () => {
     expect(own.json().error?.code, own.body).toBe('SAME_REVIEWER');
   });
 });
+
+describe('app news sync (GET /news/changes)', () => {
+  const sync = async (since?: string) => (await h.store('GET', `/news/changes${since === undefined ? '' : `?since=${encodeURIComponent(since)}`}`)).json();
+
+  it('first sync: every listed post with its body, the list order, pins, categories and a token', async () => {
+    const list = (await h.store('GET', '/news?limit=100')).json().items.map((n: any) => n.id);
+    const s = await sync();
+    expect(s.listed).toEqual(list);
+    expect(s.items.map((p: any) => p.id).sort()).toEqual([...list].sort());
+    expect(s.items.every((p: any) => typeof p.body === 'string' && p.related.length === 0)).toBe(true);
+    expect(s.categories).toEqual((await h.store('GET', '/news/categories')).json());
+    expect(Number.isNaN(Date.parse(s.syncToken))).toBe(false);
+    // an unreadable token counts as none
+    expect((await sync('not-a-time')).items.length).toBe(list.length);
+  });
+
+  it('later syncs send only new or changed posts; pins and posts leaving the list come with listed and pinned', async () => {
+    const first = await sync();
+    h.clock.advance(MIN);
+    const fresh = await publishNew({ title: 'Support hours this week', archiveAt: inMs(h, 2 * DAY) });
+    const second = await sync(first.syncToken);
+    expect(second.items.map((p: any) => p.id)).toEqual([fresh]);
+    expect(second.items[0].body).toContain('Order by Dec 18');
+    expect(second.listed).toContain(fresh);
+
+    h.clock.advance(MIN);
+    expect((await h.admin('POST', `/news/${fresh}/pin`, { pinned: true })).statusCode).toBe(200);
+    const third = await sync(second.syncToken);
+    expect(third.items).toEqual([]);
+    expect(third.pinned).toContain(fresh);
+    expect(third.listed[0]).toBe(fresh);
+
+    // past its archive time: nothing was written, it simply isn't listed any more
+    h.clock.advance(3 * DAY);
+    const fourth = await sync(third.syncToken);
+    expect(fourth.items).toEqual([]);
+    expect(fourth.listed).not.toContain(fresh);
+    expect(fourth.pinned).not.toContain(fresh);
+  });
+
+  it('"changes" is not a post address', async () => {
+    const res = await h.admin('POST', '/news', post({ title: 'Changes to delivery', slug: 'changes' }), h.staff(writer));
+    expect(res.statusCode).toBe(400);
+  });
+});

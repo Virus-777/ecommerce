@@ -23086,6 +23086,85 @@
         "x-phase": 1
       }
     },
+    "/api/store/content/news/changes": {
+      "get": {
+        "operationId": "content.getNewsChanges",
+        "tags": [
+          "Store API · Content"
+        ],
+        "summary": "What changed in the news list since the app's last sync",
+        "description": "The app keeps the news on the device and syncs once per app start. items are the listed posts published or changed since the token (all of them without one); listed and pinned describe the whole list, so posts that left it (unpublished, removed, past their archive time) and pin changes reach the device without being sent again. The token is the server's time when this answer was built, so the device clock never matters; an unreadable token counts as none.\n\n**Screens:** store/news, store/news-post",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "syncToken from the previous answer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/content.NewsChanges"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "content",
+        "x-area": "store",
+        "x-auth": "visitor",
+        "x-screens": [
+          "store/news",
+          "store/news-post"
+        ],
+        "x-phase": 1
+      }
+    },
     "/api/store/content/news/{slug}": {
       "get": {
         "operationId": "content.getNewsPost",
@@ -109703,6 +109782,87 @@
         "x-phase": 1
       }
     },
+    "/api/store/search/popular-searches": {
+      "get": {
+        "operationId": "search.listPopularSearches",
+        "tags": [
+          "Store API · Search"
+        ],
+        "summary": "Popular search keywords across the store (shown as chips before the customer types)",
+        "description": "The most searched keywords of the last 30 days that found results (suggestion_terms of kind query, rebuilt hourly by search.refresh-suggestions), most searched first. A keyword needs at least popularSearchesMinCount searches to be listed.\n\n**Screens:** store/search",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "Default 8, at most 20"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/search.PopularSearch"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "search",
+        "x-area": "store",
+        "x-auth": "visitor",
+        "x-screens": [
+          "store/search"
+        ],
+        "x-phase": 1
+      }
+    },
     "/api/store/search/recent-searches": {
       "get": {
         "operationId": "search.listRecentSearches",
@@ -167291,6 +167451,52 @@
           "count"
         ]
       },
+      "content.NewsChanges": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/content.NewsPost"
+            },
+            "description": "Listed posts new or changed since `since` (every listed post without it), with their body; related is empty"
+          },
+          "listed": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Every listed post, in list order (pinned first, then newest): a saved post missing here left the list"
+          },
+          "pinned": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The pinned posts among listed"
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/content.NewsCategory"
+            },
+            "description": "As GET /news/categories"
+          },
+          "syncToken": {
+            "type": "string",
+            "description": "Send as since on the next sync"
+          }
+        },
+        "required": [
+          "items",
+          "listed",
+          "pinned",
+          "categories",
+          "syncToken"
+        ]
+      },
       "content.Curator": {
         "type": "object",
         "properties": {
@@ -205699,6 +205905,18 @@
           "id",
           "query",
           "searchedAt"
+        ]
+      },
+      "search.PopularSearch": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Normalized keyword, e.g. 'wireless headphones'"
+          }
+        },
+        "required": [
+          "query"
         ]
       },
       "search.Suggestions": {

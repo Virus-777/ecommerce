@@ -11,7 +11,7 @@ import { newId } from '../../../kernel/lib/ids.js';
 import { decodeCursor, encodeCursor, type PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as catalog from '../../../spec/catalog.js';
 import type * as common from '../../../spec/common.js';
-import type { AppliedFilter, CategoryContext, EmptyGuidance, Facet, FacetValue, ProductCard, RecentSearch, SearchContext, SearchHit, SortOption, StoreMatch, Suggestions } from '../../../spec/search.js';
+import type { AppliedFilter, CategoryContext, EmptyGuidance, Facet, FacetValue, PopularSearch, ProductCard, RecentSearch, SearchContext, SearchHit, SortOption, StoreMatch, Suggestions } from '../../../spec/search.js';
 import { chips, clearAll, fromRest, toQueryString, validateFilters, FilterError, type Chip, type Labels, type QueryState, type RestSearchParams } from '../domain/query.js';
 import { DEFAULT_FACTORS, FROM_PRICE_NOTE, OFFICIAL_BADGE, OFFICIAL_STORE_NAME, RANKING_NOTE, STORE_NOTE, weightsOf } from '../domain/ranking.js';
 import { attrKey, expandQuery, normalizeQuery, plural, queryGtin, synonymTerms, tokens, type SynonymSet } from '../domain/text.js';
@@ -939,6 +939,13 @@ export class SearchQueries extends SearchIndexer {
   }
 
   /* ---------------------------------------------------------------- suggestions */
+
+  /** Popular searches: the most searched keywords with results (query terms from search.refresh-suggestions) */
+  async popularSearches(limit = 8): Promise<PopularSearch[]> {
+    const n = Math.min(Math.max(limit, 1), 20);
+    const rows = await this.repo.topTerms('query', await this.setting('popularSearchesMinCount'), n);
+    return rows.map((r) => ({ query: r.term }));
+  }
 
   async suggestions(prefix: string, session: SearchSession | undefined, limit = 5): Promise<Suggestions> {
     const per = Math.min(Math.max(limit, 1), 10);

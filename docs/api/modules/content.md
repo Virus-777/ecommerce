@@ -39,6 +39,7 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | GET | `/api/store/content/news` | News list: pinned first, then newest | visitor | Page<NewsCard> |
 | GET | `/api/store/content/news/categories` | Visible news categories that have posts, in order | visitor | `NewsCategory[]` |
 | GET | `/api/store/content/news/summary` | How many posts are listed and when the newest was published | visitor | `NewsSummary` |
+| GET | `/api/store/content/news/changes` | What changed in the news list since the app's last sync | visitor | `NewsChanges` |
 | GET | `/api/store/content/news/{slug}` | One news post | visitor | `NewsPost` |
 | GET | `/api/store/content/help/articles/{slug}` | A help article with effective and updated dates and related articles | visitor | `HelpArticle` |
 | POST | `/api/store/content/help/articles/{id}/feedback` | Was this helpful? | shopper | `{ helpful: bool, comment: text? }` → 204 No content |
@@ -658,6 +659,16 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 |---|---|
 | count | `int` Listed (published, not archived) posts |
 | latestPublishedAt | `datetime?` |
+
+### NewsChanges
+
+| Field | Type |
+|---|---|
+| items | `NewsPost[]` Listed posts new or changed since `since` (every listed post without it), with their body; related is empty |
+| listed | `uuid[]` Every listed post, in list order (pinned first, then newest): a saved post missing here left the list |
+| pinned | `uuid[]` The pinned posts among listed |
+| categories | `NewsCategory[]` As GET /news/categories |
+| syncToken | `string` Send as since on the next sync |
 
 ### Curator
 

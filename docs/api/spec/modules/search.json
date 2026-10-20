@@ -15,6 +15,7 @@
     "Store match card (sellers are not mixed into product results)",
     "Empty-result guidance: remove one filter (with counts), nearby categories, tips, popular products",
     "Recently searched (per customer or guest session) with removal and clear all",
+    "Popular searches: the most searched keywords with results across the store",
     "Search synonyms, reindexing, zero-result query reporting, ranking policy"
   ],
   "notOwns": [
@@ -204,6 +205,7 @@
     "StoreSuggestion": { "sellerId": "uuid", "name": "string", "slug": "string", "logo": "MediaRef?", "verified": "bool", "productCount": "int", "summary": { "type": "string", "desc": "e.g. 'Seller store · 86 products in audio'" } },
     "ProductSuggestion": { "productId": "uuid", "slug": "string", "title": "string", "image": "MediaRef?", "fromPrice": "Money?", "sellerName": "string?" },
     "RecentSearch": { "id": "uuid", "query": "string", "filtersLabel": "string?", "searchedAt": "datetime" },
+    "PopularSearch": { "query": { "type": "string", "desc": "Normalized keyword, e.g. 'wireless headphones'" } },
     "Suggestions": {
       "query": "string",
       "queries": "QuerySuggestion[]",
@@ -406,6 +408,7 @@
       "screens": ["store/search", "store/search-empty", "store/category", "store/official", "store/seller", "store/brand"]
     },
     { "id": "getSuggestions", "area": "store", "method": "GET", "path": "/suggestions", "summary": "Suggestions while typing: queries, categories, brands, stores, products and recent searches", "desc": "Tolerates misspellings. Store suggestions link to the seller's store page. Recent searches are included only when a customer or guest session is sent and recent searches are turned on in the profile.", "auth": "visitor", "query": { "q": "string", "limit": { "type": "int?", "desc": "Per group, default 5" } }, "response": "Suggestions", "screens": ["store/search", "store/home"] },
+    { "id": "listPopularSearches", "area": "store", "method": "GET", "path": "/popular-searches", "summary": "Popular search keywords across the store (shown as chips before the customer types)", "desc": "The most searched keywords of the last 30 days that found results (suggestion_terms of kind query, rebuilt hourly by search.refresh-suggestions), most searched first. A keyword needs at least popularSearchesMinCount searches to be listed.", "auth": "visitor", "query": { "limit": { "type": "int?", "desc": "Default 8, at most 20" } }, "response": "PopularSearch[]", "screens": ["store/search"] },
     { "id": "listRecentSearches", "area": "store", "method": "GET", "path": "/recent-searches", "summary": "Recent searches for this customer or guest session (max 10)", "auth": "shopper", "response": "RecentSearch[]", "screens": ["store/search", "store/home"], "desc": "Signed-in customers: searches are saved to the account only while customers.MarketingPreferences.recentSearches is on (read with customers.getMarketingConsent); with it off nothing is saved and the list is empty. Guest sessions keep their own list until sign-in." },
     { "id": "deleteRecentSearch", "area": "store", "method": "DELETE", "path": "/recent-searches/{id}", "summary": "Remove one recent search", "auth": "shopper", "params": { "id": "uuid" }, "response": null, "screens": ["store/search"] },
     { "id": "clearRecentSearches", "area": "store", "method": "DELETE", "path": "/recent-searches", "summary": "Clear all recent searches", "auth": "shopper", "response": null, "screens": ["store/search"] },
@@ -479,6 +482,7 @@
     { "key": "typoSimilarityThreshold", "type": "number", "default": 0.35, "desc": "Trigram similarity for misspelling tolerance", "min": 0, "max": 1 },
     { "key": "autoCorrectBelowResults", "type": "int", "default": 3, "desc": "Apply a confident correction when the original query has fewer results", "min": 0 },
     { "key": "recentSearchesMax", "type": "int", "default": 10, "desc": "Recent searches kept per customer or guest", "min": 0 },
+    { "key": "popularSearchesMinCount", "type": "int", "default": 3, "desc": "Searches with results in the last 30 days before a keyword is listed in popular searches", "min": 1 },
     { "key": "recentSearchRetentionDays", "type": "duration", "default": 90, "desc": "Recent searches older than this are deleted", "unit": "days", "min": 1 },
     { "key": "newArrivalsWindowDays", "type": "duration", "default": 30, "desc": "'New arrivals' = first listed within this window", "unit": "days", "min": 1 },
     { "key": "bestSellingMinOrders", "type": "int", "default": 500, "desc": "Platform orders in 30 days before best-selling sort is offered", "min": 0 },

@@ -15,6 +15,7 @@ Finding products: a product index built from catalog, offers, inventory and revi
 - Store match card (sellers are not mixed into product results)
 - Empty-result guidance: remove one filter (with counts), nearby categories, tips, popular products
 - Recently searched (per customer or guest session) with removal and clear all
+- Popular searches: the most searched keywords with results across the store
 - Search synonyms, reindexing, zero-result query reporting, ranking policy
 
 **Not here:**
@@ -32,6 +33,7 @@ Finding products: a product index built from catalog, offers, inventory and revi
 | GET | `/api/store/search/products` | Search results or category listing (product cards with sponsored slots marked) | visitor | Page<SearchHit> |
 | GET | `/api/store/search/facets` | Everything around the results for the same query: total, correction, applied filters, facets with counts, sorts, store match, category context, empty guidance | visitor | `SearchContext` |
 | GET | `/api/store/search/suggestions` | Suggestions while typing: queries, categories, brands, stores, products and recent searches | visitor | `Suggestions` |
+| GET | `/api/store/search/popular-searches` | Popular search keywords across the store (shown as chips before the customer types) | visitor | `PopularSearch[]` |
 | GET | `/api/store/search/recent-searches` | Recent searches for this customer or guest session (max 10) | shopper | `RecentSearch[]` |
 | DELETE | `/api/store/search/recent-searches/{id}` | Remove one recent search | shopper | 204 No content |
 | DELETE | `/api/store/search/recent-searches` | Clear all recent searches | shopper | 204 No content |
@@ -367,6 +369,12 @@ Finding products: a product index built from catalog, offers, inventory and revi
 | query | `string` |
 | filtersLabel | `string?` |
 | searchedAt | `datetime` |
+
+### PopularSearch
+
+| Field | Type |
+|---|---|
+| query | `string` Normalized keyword, e.g. 'wireless headphones' |
 
 ### Suggestions
 
@@ -829,6 +837,7 @@ Indexes: `pk (product_id, day)`, `(day)`
 | typoSimilarityThreshold | `0.35` | number, 0–1 | Trigram similarity for misspelling tolerance |
 | autoCorrectBelowResults | `3` | int, 0–… | Apply a confident correction when the original query has fewer results |
 | recentSearchesMax | `10` | int, 0–… | Recent searches kept per customer or guest |
+| popularSearchesMinCount | `3` | int, 1–… | Searches with results in the last 30 days before a keyword is listed in popular searches |
 | recentSearchRetentionDays | `90` | duration, days, 1–… | Recent searches older than this are deleted |
 | newArrivalsWindowDays | `30` | duration, days, 1–… | 'New arrivals' = first listed within this window |
 | bestSellingMinOrders | `500` | int, 0–… | Platform orders in 30 days before best-selling sort is offered |

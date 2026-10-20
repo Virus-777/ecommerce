@@ -14,6 +14,8 @@ export const storeRoutes = (service: SearchService) =>
     getSearchContext: async ({ query, principal }) => service.restContext(query, principal),
     /** GET /suggestions: Suggestions while typing: queries, categories, brands, stores, products and recent searches */
     getSuggestions: async ({ query, principal }) => service.suggestions(query.q, await service.sessionFor(principal), query.limit),
+    /** GET /popular-searches: Popular search keywords across the store (shown as chips before the customer types) */
+    listPopularSearches: async ({ query }) => service.popularSearches(query.limit),
     /** GET /recent-searches: Recent searches for this customer or guest session (max 10) */
     listRecentSearches: async ({ scope }) => service.recentForScope(scope),
     /** DELETE /recent-searches/{id}: Remove one recent search */

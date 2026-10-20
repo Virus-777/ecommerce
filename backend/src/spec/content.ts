@@ -1114,6 +1114,31 @@ export const NewsSummary: z.ZodType<NewsSummary> = z.object({
   latestPublishedAt: z.iso.datetime({ offset: true }).nullish(),
 }).register(common.apiTypes, { id: "content.NewsSummary" });
 
+export interface NewsChanges {
+  /** Listed posts new or changed since `since` (every listed post without it), with their body; related is empty */
+  items: NewsPost[];
+  /** Every listed post, in list order (pinned first, then newest): a saved post missing here left the list */
+  listed: string[];
+  /** The pinned posts among listed */
+  pinned: string[];
+  /** As GET /news/categories */
+  categories: NewsCategory[];
+  /** Send as since on the next sync */
+  syncToken: string;
+}
+
+export const NewsChanges: z.ZodType<NewsChanges> = z.object({
+  get items() {
+    return z.array(NewsPost);
+  },
+  listed: z.array(z.uuid()).describe("Every listed post, in list order (pinned first, then newest): a saved post missing here left the list"),
+  pinned: z.array(z.uuid()).describe("The pinned posts among listed"),
+  get categories() {
+    return z.array(NewsCategory);
+  },
+  syncToken: z.string().describe("Send as since on the next sync"),
+}).register(common.apiTypes, { id: "content.NewsChanges" });
+
 export interface Curator {
   name: string;
   avatar?: common.MediaRef | null;
@@ -2399,6 +2424,23 @@ export const endpoints = defineEndpoints({
     response: () => NewsSummary,
     status: 200,
     screens: ["account/overview","store/news"],
+    phase: 1,
+  },
+  getNewsChanges: {
+    area: "store",
+    method: "GET",
+    path: "/news/changes",
+    auth: "visitor",
+    scope: "public",
+    summary: "What changed in the news list since the app's last sync",
+    desc: "The app keeps the news on the device and syncs once per app start. items are the listed posts published or changed since the token (all of them without one); listed and pinned describe the whole list, so posts that left it (unpublished, removed, past their archive time) and pin changes reach the device without being sent again. The token is the server's time when this answer was built, so the device clock never matters; an unreadable token counts as none.",
+    query: () =>
+      z.object({
+        since: z.string().describe("syncToken from the previous answer").optional(),
+      }),
+    response: () => NewsChanges,
+    status: 200,
+    screens: ["store/news","store/news-post"],
     phase: 1,
   },
   getNewsPost: {

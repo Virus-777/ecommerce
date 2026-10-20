@@ -10,7 +10,7 @@ import { AppError } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { pageOf, type PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
-import type { LinkRef, NewsAdmin, NewsAdminSummary, NewsCard, NewsCategory, NewsCategoryRef, NewsInput, NewsPost, NewsStatusCounts, NewsSummary, Version } from '../../../spec/content.js';
+import type { LinkRef, NewsAdmin, NewsAdminSummary, NewsCard, NewsCategory, NewsCategoryRef, NewsChanges, NewsInput, NewsPost, NewsStatusCounts, NewsSummary, Version } from '../../../spec/content.js';
 import { isValidSlug, plainText, sanitizeHtml } from '../domain/rules.js';
 import { contentPublicationMachine } from '../domain/state-machines.js';
 import type { NewsCategoryRow, NewsRow, VersionRow } from '../ports.js';
@@ -40,7 +40,7 @@ const CATEGORY_NAME_MAX = 30;
 /** Published posts pinned at once; pinning another unpins the one pinned longest ago */
 const MAX_PINNED = 3;
 /** Store paths under /news that are not posts */
-const RESERVED_SLUGS = new Set(['categories', 'summary', 'counts']);
+const RESERVED_SLUGS = new Set(['categories', 'summary', 'counts', 'changes']);
 const HOME_NEWS = 3;
 
 const newsMediaIds = (s: NewsSnap | null | undefined) => (s?.cover?.id ? [{ id: s.cover.id, path: 'cover' }] : []);
@@ -699,6 +699,58 @@ export class ContentNews extends ContentPolicies {
     const rows = await this.listedNews();
     const latest = rows.reduce<Date | null>((m, r) => (r.published_at && (!m || r.published_at > m) ? r.published_at : m), null);
     return { count: rows.length, latestPublishedAt: iso(latest) };
+  }
+
+  /**
+   * The app's news sync: the listed posts published or changed since `since` (an earlier syncToken; all of them
+   * without one), with their bodies, plus the whole list's order and pins and the categories. The token is the time
+   * taken before reading, so a write landing meanwhile is sent again next time rather than missed.
+   */
+  async getNewsChanges(since?: string | null): Promise<NewsChanges> {
+    const now = this.now();
+    const from = since ? new Date(since) : null;
+    const after = from && !Number.isNaN(from.getTime()) ? from : null;
+    const listed = await this.listedNews(now);
+    const changed = after ? listed.filter((r) => r.updated_at >= after || (r.published_at !== null && r.published_at >= after)) : listed;
+    const [items, categories] = await Promise.all([this.newsPosts(changed), this.listNewsCategories()]);
+    return {
+      items,
+      listed: listed.map((r) => r.id),
+      pinned: listed.filter((r) => r.pinned).map((r) => r.id),
+      categories,
+      syncToken: now.toISOString(),
+    };
+  }
+
+  /** Listed posts as the store renders them, one read per kind; no related posts (the app picks those itself) */
+  private async newsPosts(rows: NewsRow[]): Promise<NewsPost[]> {
+    if (!rows.length) return [];
+    const [versions, cats] = await Promise.all([this.repo.getVersions(rows.map((r) => r.live_version_id).filter((x): x is string => Boolean(x))), this.repo.listNewsCategories()]);
+    const byId = new Map(versions.map((v) => [v.id, v]));
+    const catById = new Map(cats.map((c) => [c.id, c]));
+    const covers = await this.refsMap(versions.map((v) => this.newsSnapOf(v)?.cover?.id));
+    return rows.flatMap((r) => {
+      const v = byId.get(r.live_version_id ?? '');
+      const s = this.newsSnapOf(v);
+      if (!v || !s) return [];
+      return [{
+        id: r.id,
+        slug: s.slug,
+        url: this.newsUrl(s.slug),
+        title: s.title,
+        summary: s.summary,
+        category: this.categoryRef(catById.get(s.categoryId), s.categoryId),
+        cover: s.cover?.id ? (covers.get(s.cover.id) ?? null) : null,
+        pinned: r.pinned,
+        publishedAt: iso(r.published_at),
+        updatedAt: (v.published_at ?? v.created_at).toISOString(),
+        body: sanitizeHtml(s.body),
+        cta: s.cta ?? null,
+        archived: false,
+        related: [],
+        version: v.number,
+      }];
+    });
   }
 
   /** A published post by its slug or an old one (archived posts still open) */

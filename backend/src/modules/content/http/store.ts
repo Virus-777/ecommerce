@@ -27,6 +27,8 @@ export const storeRoutes = (service: ContentService) =>
     listNewsCategories: async () => service.listNewsCategories(),
     /** GET /news/summary: How many posts are listed and when the newest was published */
     getNewsSummary: async () => service.getNewsSummary(),
+    /** GET /news/changes: What changed in the news list since the app's last sync */
+    getNewsChanges: async ({ query }) => service.getNewsChanges(query.since),
     /** GET /news/{slug}: One news post */
     getNewsPost: async ({ params }) => service.getNewsPost(params.slug),
     /** GET /pages/{slug}/products: More products for rule-based collections (New arrivals, Best sellers) */

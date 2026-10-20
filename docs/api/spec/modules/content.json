@@ -259,6 +259,13 @@
     },
     "NewsStatusCounts": { "all": "int", "draft": "int", "inReview": "int", "scheduled": "int", "published": "int", "archived": { "type": "int", "desc": "Past their archive time, unpublished or removed" } },
     "NewsSummary": { "count": { "type": "int", "desc": "Listed (published, not archived) posts" }, "latestPublishedAt": "datetime?" },
+    "NewsChanges": {
+      "items": { "type": "NewsPost[]", "desc": "Listed posts new or changed since `since` (every listed post without it), with their body; related is empty" },
+      "listed": { "type": "uuid[]", "desc": "Every listed post, in list order (pinned first, then newest): a saved post missing here left the list" },
+      "pinned": { "type": "uuid[]", "desc": "The pinned posts among listed" },
+      "categories": { "type": "NewsCategory[]", "desc": "As GET /news/categories" },
+      "syncToken": { "type": "string", "desc": "Send as since on the next sync" }
+    },
     "Curator": { "name": "string", "avatar": "MediaRef?", "updatedAt": "datetime", "sectionCount": "int", "productCount": "int" },
     "Version": {
       "id": "uuid", "entity": "enum(homepage|page|article|news)", "entityId": "uuid", "number": "int",
@@ -457,6 +464,7 @@
     { "id": "listNews", "area": "store", "method": "GET", "path": "/news", "summary": "News list: pinned first, then newest", "desc": "Published posts that are not archived. category is a category slug (old slugs still work). Cursor paging: the phone lazy-loads, the website pages.", "auth": "visitor", "paging": true, "query": { "category": "string?" }, "response": "NewsCard", "screens": ["store/news"] },
     { "id": "listNewsCategories", "area": "store", "method": "GET", "path": "/news/categories", "summary": "Visible news categories that have posts, in order", "auth": "visitor", "response": "NewsCategory[]", "screens": ["store/news"] },
     { "id": "getNewsSummary", "area": "store", "method": "GET", "path": "/news/summary", "summary": "How many posts are listed and when the newest was published", "desc": "For the 'new' dot: the app compares latestPublishedAt with the last post the customer opened.", "auth": "visitor", "response": "NewsSummary", "screens": ["account/overview", "store/news"] },
+    { "id": "getNewsChanges", "area": "store", "method": "GET", "path": "/news/changes", "summary": "What changed in the news list since the app's last sync", "desc": "The app keeps the news on the device and syncs once per app start. items are the listed posts published or changed since the token (all of them without one); listed and pinned describe the whole list, so posts that left it (unpublished, removed, past their archive time) and pin changes reach the device without being sent again. The token is the server's time when this answer was built, so the device clock never matters; an unreadable token counts as none.", "auth": "visitor", "query": { "since": { "type": "string?", "desc": "syncToken from the previous answer" } }, "response": "NewsChanges", "screens": ["store/news", "store/news-post"] },
     { "id": "getNewsPost", "area": "store", "method": "GET", "path": "/news/{slug}", "summary": "One news post", "desc": "404 unless published (archived posts still open, with archived true). An old slug answers the post; its slug field is the current one.", "auth": "visitor", "params": { "slug": "string" }, "response": "NewsPost", "errors": ["NOT_FOUND"], "screens": ["store/news-post"] },
     { "id": "getHelpArticle", "area": "store", "method": "GET", "path": "/help/articles/{slug}", "summary": "A help article with effective and updated dates and related articles", "auth": "visitor", "params": { "slug": "string" }, "response": "HelpArticle", "errors": ["NOT_FOUND"], "screens": ["help/article"] },
     { "id": "rateHelpArticle", "area": "store", "method": "POST", "path": "/help/articles/{id}/feedback", "summary": "Was this helpful?", "auth": "shopper", "params": { "id": "uuid" }, "body": { "helpful": "bool", "comment": "text?" }, "response": null, "status": 204, "errors": ["RATE_LIMITED"], "screens": ["help/article"] },

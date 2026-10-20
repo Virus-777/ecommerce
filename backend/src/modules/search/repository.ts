@@ -421,6 +421,11 @@ export class SearchRepository {
     return this.#t.terms.find({ kind, ...(targetIds ? { target_id: oneOf(targetIds) } : {}) }, { sort: { weight: -1 } });
   }
 
+  /** The heaviest terms of a kind with at least [minWeight] (popular searches: query terms weighted by searches) */
+  topTerms(kind: TermKind, minWeight: number, limit: number): Promise<TermRow[]> {
+    return this.#t.terms.find({ kind, weight: { $gte: minWeight } }, { sort: { weight: -1, term: 1 }, limit });
+  }
+
   /* ---------------------------------------------------------------- synonyms */
   listSynonyms(f: { q?: string; active?: boolean }): Promise<SynonymRow[]> {
     const p = f.q?.trim().toLowerCase();

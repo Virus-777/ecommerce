@@ -633,6 +633,15 @@ export const RecentSearch: z.ZodType<RecentSearch> = z.object({
   searchedAt: z.iso.datetime({ offset: true }),
 }).register(common.apiTypes, { id: "search.RecentSearch" });
 
+export interface PopularSearch {
+  /** Normalized keyword, e.g. 'wireless headphones' */
+  query: string;
+}
+
+export const PopularSearch: z.ZodType<PopularSearch> = z.object({
+  query: z.string().describe("Normalized keyword, e.g. 'wireless headphones'"),
+}).register(common.apiTypes, { id: "search.PopularSearch" });
+
 export interface Suggestions {
   query: string;
   queries: QuerySuggestion[];
@@ -1277,6 +1286,23 @@ export const endpoints = defineEndpoints({
     screens: ["store/search","store/home"],
     phase: 1,
   },
+  listPopularSearches: {
+    area: "store",
+    method: "GET",
+    path: "/popular-searches",
+    auth: "visitor",
+    scope: "public",
+    summary: "Popular search keywords across the store (shown as chips before the customer types)",
+    desc: "The most searched keywords of the last 30 days that found results (suggestion_terms of kind query, rebuilt hourly by search.refresh-suggestions), most searched first. A keyword needs at least popularSearchesMinCount searches to be listed.",
+    query: () =>
+      z.object({
+        limit: z.coerce.number().int().describe("Default 8, at most 20").optional(),
+      }),
+    response: () => z.array(PopularSearch),
+    status: 200,
+    screens: ["store/search"],
+    phase: 1,
+  },
   listRecentSearches: {
     area: "store",
     method: "GET",
@@ -1765,6 +1791,12 @@ export const spec = defineModuleSpec({
       "desc": "Recent searches kept per customer or guest",
       "type": "int",
       "min": 0
+    },
+    "popularSearchesMinCount": {
+      "default": 3,
+      "desc": "Searches with results in the last 30 days before a keyword is listed in popular searches",
+      "type": "int",
+      "min": 1
     },
     "recentSearchRetentionDays": {
       "default": 90,

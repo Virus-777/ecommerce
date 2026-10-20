@@ -43,6 +43,22 @@ describe('suggestions while typing', () => {
   });
 });
 
+describe('popular searches', () => {
+  it('most searched keywords with results first; fewer than popularSearchesMinCount searches are left out', async () => {
+    for (let i = 0; i < 6; i++) await k.call('GET', `${STORE}/facets?q=bookshelf+speaker`);
+    for (let i = 0; i < 2; i++) await k.call('GET', `${STORE}/facets?q=wireless`);
+    for (let i = 0; i < 4; i++) await k.call('GET', `${STORE}/facets?q=nothing+like+this`);
+    await k.job('search.refresh-suggestions');
+    const r = await k.call('GET', `${STORE}/popular-searches`);
+    expect(r.status).toBe(200);
+    const list = r.body.map((p: any) => p.query);
+    expect(list.slice(0, 2)).toEqual(['bookshelf speaker', 'wireless headphones']);
+    expect(list).not.toContain('wireless');
+    expect(list).not.toContain('nothing like this');
+    expect((await k.call('GET', `${STORE}/popular-searches?limit=1`)).body).toEqual([{ query: 'bookshelf speaker' }]);
+  });
+});
+
 describe('recent searches', () => {
   it('a guest session keeps its own list: newest first, no repeats, remove one, clear all', async () => {
     const guest = callers.visitor();
