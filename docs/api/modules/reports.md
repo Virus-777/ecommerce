@@ -604,7 +604,8 @@ Indexes: `(requested_by_id, created_at desc)`, `(state, created_at)`, `(state, e
 | cancelled_minor | bigint |
 | refunded_minor | bigint |
 | last_refund_at | timestamptz? |
-| buying_cost_minor | bigint? (Official Store, from inventory.getUnitCost) |
+| buying_cost_minor | bigint? (unit cost × quantity at placed_at: Official Store items from inventory.getUnitCost, seller items from the seller's own offer cost, offers.unitCostsAt; null while unknown. Seller costs are private: only that seller's reports read them) |
+| fee_minor | bigint? (marketplace fee on the item net of fee refunds, from finance.itemFeesChangedSince; null until finance has booked the fee, always null on Official Store items) |
 | accepted_at | timestamptz? (order acceptance; rows recorded before pass 4 hold the placement time) |
 | group_id | uuid? (seller group of the order; payments.payment.captured is matched on it) |
 | fulfilled_by | text? (official_warehouse|seller|marketly_service) (the group's PlacedGroup.fulfilledBy from orders.order.placed; null for rows recorded before it was kept) |
@@ -659,6 +660,37 @@ Indexes: `(seller_id, requested_at)`, `(product_id, requested_at)`, `(requested_
 | owed_minor | bigint |
 | ad_charges_minor | bigint |
 | service_fees_minor | bigint (Fulfilled by Marketly fees charged less reversals) |
+| fee_gross_minor | bigint (marketplace fees charged that day, ledger marketplace_fee; from finance.ledgerDailyTotals like the six columns after it) |
+| fee_refunds_minor | bigint (fees given back, ledger fee_refund) |
+| refunds_minor | bigint (refunds taken from the seller, ledger refund and refund_after_payout) |
+| shipping_charged_minor | bigint (shipping credited to the seller, ledger shipping_charge) |
+| label_charges_minor | bigint (shipping labels charged to the seller less voids, ledger label_charge) |
+| adjustments_minor | bigint (signed: credits positive, debits negative; ledger adjustment and seller_credit) |
+| chargebacks_minor | bigint (payment disputes lost, ledger chargeback) |
+
+Indexes: `unique(seller_id, day)`, `(day)`
+
+**fact_company_daily**: Company money per market day from finance.companyDailyTotals: Official Store trading by kind (source trading), platform costs by kind (platform_cost) and coupon funding on marketplace seller items by funder (discount_funding)
+
+| Column | Type |
+|---|---|
+| day | date |
+| source | text (trading|platform_cost|discount_funding) |
+| kind | text |
+| amount_minor | bigint (signed as finance gives it) |
+
+Indexes: `unique(day, source, kind)`
+
+**fact_seller_balances_daily**: End-of-day seller balances from finance.sellerBalancesByDay (today: as of the last pull). A seller with nothing in any bucket that day has no row
+
+| Column | Type |
+|---|---|
+| seller_id | uuid |
+| day | date |
+| pending_minor | bigint |
+| available_minor | bigint |
+| held_minor | bigint |
+| owed_minor | bigint (owed by the seller: a negative available balance as a positive amount) |
 
 Indexes: `unique(seller_id, day)`, `(day)`
 
@@ -870,7 +902,8 @@ Indexes: `pk (kind, ref_id)`
 |---|---|---|
 | `reports.run-exports` | every 1 min | Run queued export jobs in batches: call the owner module's exportRows(dataset, filters, principal, cursor) until nextCursor is empty (report results come from runReport), drop columns the requester may not see, write the file to media; publish reports.export.ready |
 | `reports.expire-exports` | hourly | Expire ready exports after exportLinkHours and delete files |
-| `reports.pull-daily` | daily 02:30 market time | Pull figures that have no event: search.zeroResultStats (unavailable searches), finance fee income per seller and day (finance.marketplaceIncomeByDay), advertising displays/clicks/dismissals and attributed purchases (advertising.dailyPerformance), inventory unit costs for Official Store items |
+| `reports.pull-daily` | daily 02:30 market time | Pull figures that have no event: search.zeroResultStats (unavailable searches), finance fee income per seller and day (finance.marketplaceIncomeByDay) and the finance facts of the last 3 days (as reports.pull-finance-recent), advertising displays/clicks/dismissals and attributed purchases (advertising.dailyPerformance), inventory unit costs for Official Store items |
+| `reports.pull-finance-recent` | every 15 min | Pull today and yesterday from finance: ledger totals into fact_marketplace_finance_daily (finance.ledgerDailyTotals; fee income the same day), company money into fact_company_daily (finance.companyDailyTotals), end-of-day balances into fact_seller_balances_daily (finance.sellerBalancesByDay), and the item fees changed since the last run into fact_order_items.fee_minor (finance.itemFeesChangedSince; its cursor in read_model_checkpoints). Every pull sets values (safe to run twice) |
 | `reports.run-schedules` | every 15 min | Phase 2: run due schedules: re-check each staff recipient's permission, create one export job per remaining recipient (requested in their name) and publish reports.scheduled_report.ready (notifications sends the emails) |
 | `reports.check-lag` | every 5 min | Mark read models stale when their lag exceeds readModelMaxLagMinutes |
 

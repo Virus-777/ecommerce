@@ -233,7 +233,8 @@ const fact_order_items = new Schema(
     cancelled_minor: { type: Number, required: true, validate: integer },
     refunded_minor: { type: Number, required: true, validate: integer },
     last_refund_at: { type: Date, default: null },
-    buying_cost_minor: { type: Number, default: null, validate: integer }, // Official Store, from inventory.getUnitCost
+    buying_cost_minor: { type: Number, default: null, validate: integer }, // unit cost × quantity at placed_at: Official Store items from inventory.getUnitCost, seller items from the seller's own offer cost, offers.un
+    fee_minor: { type: Number, default: null, validate: integer }, // marketplace fee on the item net of fee refunds, from finance.itemFeesChangedSince; null until finance has booked the fee, always null on Off
     accepted_at: { type: Date, default: null }, // order acceptance; rows recorded before pass 4 hold the placement time
     group_id: { type: String, default: null }, // seller group of the order; payments.payment.captured is matched on it
     fulfilled_by: { type: String, default: null, enum: ["official_warehouse","seller","marketly_service",null] }, // the group's PlacedGroup.fulfilledBy from orders.order.placed; null for rows recorded before it was kept
@@ -308,6 +309,13 @@ const fact_marketplace_finance_daily = new Schema(
     owed_minor: { type: Number, required: true, validate: integer },
     ad_charges_minor: { type: Number, required: true, validate: integer },
     service_fees_minor: { type: Number, required: true, validate: integer }, // Fulfilled by Marketly fees charged less reversals
+    fee_gross_minor: { type: Number, required: true, validate: integer }, // marketplace fees charged that day, ledger marketplace_fee; from finance.ledgerDailyTotals like the six columns after it
+    fee_refunds_minor: { type: Number, required: true, validate: integer }, // fees given back, ledger fee_refund
+    refunds_minor: { type: Number, required: true, validate: integer }, // refunds taken from the seller, ledger refund and refund_after_payout
+    shipping_charged_minor: { type: Number, required: true, validate: integer }, // shipping credited to the seller, ledger shipping_charge
+    label_charges_minor: { type: Number, required: true, validate: integer }, // shipping labels charged to the seller less voids, ledger label_charge
+    adjustments_minor: { type: Number, required: true, validate: integer }, // signed: credits positive, debits negative; ledger adjustment and seller_credit
+    chargebacks_minor: { type: Number, required: true, validate: integer }, // payment disputes lost, ledger chargeback
     /** lock-by-write counter (kernel/mongo/table.ts) */
     _lock: Number,
   },
@@ -315,6 +323,37 @@ const fact_marketplace_finance_daily = new Schema(
 );
 fact_marketplace_finance_daily.index({"seller_id":1,"day":1}, {"name":"fact_marketplace_finance_daily_seller_id_day_385469","unique":true});
 fact_marketplace_finance_daily.index({"day":1}, {"name":"fact_marketplace_finance_daily_day_ac3205"});
+
+/** Company money per market day from finance.companyDailyTotals: Official Store trading by kind (source trading), platform costs by kind (platform_cost) and coupon funding on marketplace seller items by funder (discount_funding) */
+const fact_company_daily = new Schema(
+  {
+    day: { type: String, required: true, match: DATE },
+    source: { type: String, required: true, enum: ["trading","platform_cost","discount_funding"] },
+    kind: { type: String, required: true },
+    amount_minor: { type: Number, required: true, validate: integer }, // signed as finance gives it
+    /** lock-by-write counter (kernel/mongo/table.ts) */
+    _lock: Number,
+  },
+  collectionOptions("reports.fact_company_daily", { generatedId: true }),
+);
+fact_company_daily.index({"day":1,"source":1,"kind":1}, {"name":"fact_company_daily_day_source_kind_0dc040","unique":true});
+
+/** End-of-day seller balances from finance.sellerBalancesByDay (today: as of the last pull). A seller with nothing in any bucket that day has no row */
+const fact_seller_balances_daily = new Schema(
+  {
+    seller_id: { type: String, required: true },
+    day: { type: String, required: true, match: DATE },
+    pending_minor: { type: Number, required: true, validate: integer },
+    available_minor: { type: Number, required: true, validate: integer },
+    held_minor: { type: Number, required: true, validate: integer },
+    owed_minor: { type: Number, required: true, validate: integer }, // owed by the seller: a negative available balance as a positive amount
+    /** lock-by-write counter (kernel/mongo/table.ts) */
+    _lock: Number,
+  },
+  collectionOptions("reports.fact_seller_balances_daily", { generatedId: true }),
+);
+fact_seller_balances_daily.index({"seller_id":1,"day":1}, {"name":"fact_seller_balances_daily_seller_id_day_385469","unique":true});
+fact_seller_balances_daily.index({"day":1}, {"name":"fact_seller_balances_daily_day_ac3205"});
 
 /** Per seller and day: dispatch, tracking, cancellations, response time, cases, delivery issues */
 const fact_service_daily = new Schema(
@@ -479,6 +518,8 @@ export const schemas = {
   fact_refunds: fact_refunds,
   fact_returns: fact_returns,
   fact_marketplace_finance_daily: fact_marketplace_finance_daily,
+  fact_company_daily: fact_company_daily,
+  fact_seller_balances_daily: fact_seller_balances_daily,
   fact_service_daily: fact_service_daily,
   fact_marketly_fulfillment_daily: fact_marketly_fulfillment_daily,
   fact_discovery_daily: fact_discovery_daily,

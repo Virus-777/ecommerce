@@ -247,6 +247,21 @@ export async function harness() {
     return group;
   };
 
+  /** orders.order.accepted as orders publishes it: reports records the facts, finance (real) books the sale and fee */
+  const accepted = (d: orders.OrderDetail) => {
+    const g = d.groups[0]!;
+    app.kernel.events.publish('orders', 'orders.order.accepted', {
+      orderId: d.id,
+      ref: d.ref,
+      customerId: null,
+      contactEmail: 'ben@example.com',
+      total: usd(1),
+      groups: [{ groupId: g.id, ownerType: g.seller.ownerType, sellerId: g.seller.id ?? null, fulfilledBy: g.fulfilledBy, dispatchBy: d.placedAt, itemIds: g.items.map((i) => i.id), total: usd(1) }],
+      items: g.items.map((i) => ({ orderItemId: i.id, offerId: i.offer.offerId, stockItemId: i.stockItemId, quantity: i.quantity })),
+      acceptedAt: d.placedAt,
+    });
+  };
+
   const publish = (source: string, name: string, payload: unknown) => app.kernel.events.publish(source, name, payload);
   const drain = () => app.kernel.events.drain();
 
@@ -257,7 +272,7 @@ export async function harness() {
     visitor: () => callers.visitor(),
   };
 
-  return { app, service, clock, audits, files, staff, denied, ordersById, sellerCounts, rows, settings, income, adPerf, zeroResults, offerProducts, offerSkus, discountedOffers, products, unitCosts, exportRowsCalls, companyCosts, caseStats, replyStats, responseApis, call, gql, person, order, placed, publish, drain, tokens };
+  return { app, service, clock, audits, files, staff, denied, ordersById, sellerCounts, rows, settings, income, adPerf, zeroResults, offerProducts, offerSkus, discountedOffers, products, unitCosts, exportRowsCalls, companyCosts, caseStats, replyStats, responseApis, call, gql, person, order, placed, accepted, publish, drain, tokens };
 }
 
 export type Harness = Awaited<ReturnType<typeof harness>>;

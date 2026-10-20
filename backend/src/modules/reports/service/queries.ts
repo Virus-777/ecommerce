@@ -628,10 +628,13 @@ export class Queries {
     // Fulfilled by Marketly fees show while fulfillment-service runs, or when the range holds fees charged while it ran
     const serviceFees = this.core.running('fulfillment-service') || Boolean(fin.service_fees_minor) || Boolean(prevFin?.service_fees_minor);
     const unavailable = [...(this.core.running('finance') ? [] : ['marketplace.fee_income', 'marketplace.held', 'marketplace.payouts_paid', 'marketplace.amounts_owed']), ...(this.core.running('advertising') ? [] : ['marketplace.ad_income']), ...(serviceFees ? [] : ['marketplace.service_fees'])];
-    const pulled = await this.core.repo.getCheckpoint('pull:marketplace_finance');
+    const recent = await this.core.repo.getCheckpoint('pull:finance_recent');
+    const nightly = await this.core.repo.getCheckpoint('pull:marketplace_finance');
     const callouts: Callout[] = [MARKETPLACE_CALLOUT];
-    const through = pulled?.last_event_id?.replace(/^pull:/, '');
-    callouts.push({ kind: 'info', title: 'Fee income is updated daily', body: through ? `Fee income from finance is included through ${through}; later days are added overnight.` : 'Fee income from finance is added overnight; recent days may be missing.' });
+    // reports.pull-finance-recent brings fee income every 15 minutes; the nightly pull re-reads the last three days
+    const through = nightly?.last_event_id?.replace(/^pull:/, '');
+    if (recent?.last_event_at) callouts.push({ kind: 'info', title: 'Fee income is updated every 15 minutes', body: `Fee income from finance is included up to ${recent.last_event_at.toISOString()}; the last three days are read again overnight.` });
+    else callouts.push({ kind: 'info', title: 'Fee income is updated daily', body: through ? `Fee income from finance is included through ${through}; later days are added overnight.` : 'Fee income from finance is added overnight; recent days may be missing.' });
     return {
       kpis: [
         this.kpi('marketplace.seller_sales', this.gross(sales, cfg), c, prevSales ? this.gross(prevSales, cfg) : null),

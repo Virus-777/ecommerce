@@ -15,6 +15,7 @@ import type { ReadModelStatus } from '../../../spec/reports.js';
 import { isOfficialSeller, OFFICIAL_KEY, READ_MODELS, readModelDef } from '../domain/catalogue.js';
 import { addDays, customerKey, marketDay, splitRefund } from '../domain/rules.js';
 import type { OrderItemFact } from '../ports.js';
+import { LEDGER_COLUMN_DEFAULTS } from '../repository.js';
 import { invalid, notFound, type Caller, type ReportsCore } from './core.js';
 
 /** The envelope fields a consumer uses: the event id and when it happened */
@@ -27,10 +28,12 @@ const MINUTE = 60_000;
 
 /** What a rebuild reads per read model; the ones kept from events only cannot be rebuilt until the kernel keeps an event log */
 const REBUILDS: Record<string, string | null> = {
-  order_items: 'Order facts are refreshed from orders',
+  order_items: 'Order facts are refreshed from orders, and every item fee is pulled again from finance',
   customers: 'Buyers are recomputed from the order facts',
   discovery: 'Units ordered are recomputed from the order facts; views and stock-out minutes stay as received',
-  marketplace_finance: 'The last 90 days are pulled again from finance and advertising',
+  marketplace_finance: 'The last 400 days are pulled again from finance and advertising',
+  company_finance: 'The last 400 days are pulled again from finance',
+  seller_balances: 'The last 400 days of end-of-day balances are rebuilt again from the finance ledger',
   search_misses: 'Searches without results are pulled again from search for yesterday',
   campaigns: 'The last 90 days are pulled again from advertising',
   refunds: null,
@@ -42,6 +45,33 @@ const REBUILDS: Record<string, string | null> = {
 const isMarketly = (p: { fulfilledBy?: string | null; sellerId?: string | null }) => p.fulfilledBy === 'marketly_service' && !isOfficialSeller(p.sellerId);
 const EVENT_ONLY_NOTE ='Kept from events only: there is no event log to replay yet, so it cannot be rebuilt';
 const DAY = 86_400_000;
+/** How far back a rebuild pulls the finance facts (the longest range a report covers) */
+const REBUILD_DAYS = 400;
+/** Days per finance pull while rebuilding, so one answer stays small */
+const PULL_CHUNK_DAYS = 31;
+/** The item fee pull starts this long before the last change it saw: a fee written in a transaction that committed late is still read */
+const FEE_PULL_OVERLAP_MS = 60 * 60_000;
+
+/**
+ * Seller ledger entry types → fact_marketplace_finance_daily columns (finance.ledgerDailyTotals). Ledger amounts are
+ * signed from the seller's side (a fee is negative); each column holds a positive amount of what its name says, so
+ * sign -1 flips the ledger's sign. adjustments_minor stays signed (credits positive, debits negative).
+ * Not here, on purpose: sale, seller_discount and cancellation (order-date figures come from fact_order_items);
+ * ad_charge, service_fee and charge_credit (ad_charges_minor and service_fees_minor come from the advertising and
+ * fulfillment-service events); payout and payout_returned (payouts_* come from the finance.payout events); hold and
+ * hold_release (they move money between buckets); owed_offset (a debt settled, not earnings).
+ */
+const LEDGER_COLUMNS: Record<string, { column: keyof typeof LEDGER_COLUMN_DEFAULTS; sign: 1 | -1 }> = {
+  marketplace_fee: { column: 'fee_gross_minor', sign: -1 },
+  fee_refund: { column: 'fee_refunds_minor', sign: 1 },
+  refund: { column: 'refunds_minor', sign: -1 },
+  refund_after_payout: { column: 'refunds_minor', sign: -1 },
+  shipping_charge: { column: 'shipping_charged_minor', sign: 1 },
+  label_charge: { column: 'label_charges_minor', sign: -1 },
+  adjustment: { column: 'adjustments_minor', sign: 1 },
+  seller_credit: { column: 'adjustments_minor', sign: 1 },
+  chargeback: { column: 'chargebacks_minor', sign: -1 },
+};
 
 export class ReadModels {
   /** Store signals per session: [window start, count] */
@@ -153,6 +183,7 @@ export class ReadModels {
           refunded_minor: 0,
           last_refund_at: null,
           buying_cost_minor: cost,
+          fee_minor: null,
         });
       }
     }
@@ -589,6 +620,7 @@ export class ReadModels {
   }
 
   async pullFinance(from: string, to: string) {
+    await this.pullFinanceTotals(from, to);
     const tz = await this.tz();
     for (const s of await this.repo.sellerSalesByDay(from, to, tz)) {
       await this.repo.bumpDaily('fact_marketplace_finance_daily', { seller_id: s.sellerId, day: s.day }, {}, { seller_sales_minor: s.sales, platform_discount_minor: s.platformDiscount, seller_discount_minor: s.sellerDiscount });
@@ -599,6 +631,81 @@ export class ReadModels {
     if (!income) return;
     for (const r of income) await this.repo.bumpDaily('fact_marketplace_finance_daily', { seller_id: r.sellerId, day: r.date }, {}, { fee_income_minor: r.netFeeIncome.amount });
     await this.markPulled('marketplace_finance', to);
+  }
+
+  /**
+   * Job reports.pull-finance-recent (every 15 min): today and yesterday from finance into the three finance facts,
+   * and the item fees changed since the last run. Fee income shows the same day instead of after the nightly pull.
+   */
+  async pullFinanceRecent() {
+    const today = marketDay(this.core.now(), await this.tz());
+    if (!(await this.pullFinanceTotals(addDays(today, -1), today))) return;
+    await this.pullItemFees();
+    await this.repo.upsertCheckpoint('pull:finance_recent', { last_event_id: today, last_event_at: this.core.now(), state: 'live' });
+  }
+
+  /**
+   * The finance facts of market days from..to, set (never added) so a pull can run twice: ledger totals per seller
+   * and day into fact_marketplace_finance_daily (LEDGER_COLUMNS, and fee_income_minor as fees less fee refunds),
+   * company money into fact_company_daily, end-of-day balances into fact_seller_balances_daily. Long ranges go in
+   * chunks of PULL_CHUNK_DAYS. False when finance is off or did not answer.
+   */
+  async pullFinanceTotals(from: string, to: string): Promise<boolean> {
+    const finance = this.core.api('finance');
+    if (!finance) return false;
+    for (let start = from; start <= to; start = addDays(start, PULL_CHUNK_DAYS)) {
+      const end = addDays(start, PULL_CHUNK_DAYS - 1) < to ? addDays(start, PULL_CHUNK_DAYS - 1) : to;
+      const range = { from: start, to: end };
+      const [ledger, company, balances] = await Promise.all([
+        this.core.soft('finance.ledgerDailyTotals', () => finance.ledgerDailyTotals(range)),
+        this.core.soft('finance.companyDailyTotals', () => finance.companyDailyTotals(range)),
+        this.core.soft('finance.sellerBalancesByDay', () => finance.sellerBalancesByDay(range)),
+      ]);
+      if (!ledger || !company || !balances) return false;
+      const perSellerDay = new Map<string, Record<string, number>>();
+      for (const r of ledger) {
+        const map = LEDGER_COLUMNS[r.type];
+        if (!map) continue;
+        const key = `${r.sellerId}|${r.day}`;
+        const cols = perSellerDay.get(key) ?? { ...LEDGER_COLUMN_DEFAULTS };
+        cols[map.column] = (cols[map.column] ?? 0) + map.sign * r.amount.amount;
+        perSellerDay.set(key, cols);
+      }
+      for (const [key, cols] of perSellerDay) {
+        const [sellerId, day] = key.split('|') as [string, string];
+        await this.repo.bumpDaily('fact_marketplace_finance_daily', { seller_id: sellerId, day }, {}, { ...cols, fee_income_minor: (cols.fee_gross_minor ?? 0) - (cols.fee_refunds_minor ?? 0) });
+      }
+      for (let day = start; day <= end; day = addDays(day, 1)) {
+        await this.repo.replaceDay('fact_company_daily', day, company.filter((c) => c.day === day).map((c) => ({ day, source: c.source, kind: c.kind, amount_minor: c.amount.amount })));
+        await this.repo.replaceDay('fact_seller_balances_daily', day, balances.filter((b) => b.day === day).map((b) => ({ seller_id: b.sellerId, day, pending_minor: b.pending.amount, available_minor: b.available.amount, held_minor: b.held.amount, owed_minor: b.owed.amount })));
+      }
+    }
+    await this.markPulled('company_finance', to);
+    await this.markPulled('seller_balances', to);
+    return true;
+  }
+
+  /**
+   * fact_order_items.fee_minor (fee less fee refunds) for the fee charges changed since the last pull, page by page
+   * (finance.itemFeesChangedSince). `full` reads every charge (a rebuild). The last change seen is kept in the
+   * checkpoint cursor:item_fees; the next pull starts a little before it (FEE_PULL_OVERLAP_MS).
+   */
+  async pullItemFees(o: { full?: boolean } = {}) {
+    const finance = this.core.api('finance');
+    if (!finance) return;
+    const cp = await this.repo.getCheckpoint('cursor:item_fees');
+    const since = o.full || !cp?.last_event_at ? new Date(0) : new Date(cp.last_event_at.getTime() - FEE_PULL_OVERLAP_MS);
+    let after: string | undefined;
+    let last: { cursor: string; at: Date } | undefined;
+    for (;;) {
+      const page = await this.core.soft('finance.itemFeesChangedSince', () => finance.itemFeesChangedSince({ since: since.toISOString(), ...(after ? { after } : {}), limit: 500 }));
+      if (!page?.length) break;
+      for (const f of page) await this.repo.updateOrderItems({ itemIds: [f.orderItemId] }, { fee_minor: f.fee.amount - f.refundedFee.amount });
+      after = page.at(-1)!.cursor;
+      last = { cursor: after, at: new Date(page.at(-1)!.changedAt) };
+      if (page.length < 500) break;
+    }
+    if (last && (!cp?.last_event_at || last.at > cp.last_event_at)) await this.repo.upsertCheckpoint('cursor:item_fees', { last_event_id: last.cursor, last_event_at: last.at, state: 'live' });
   }
 
   async pullSearches(day: string) {
@@ -733,6 +840,8 @@ export class ReadModels {
             after = ids.at(-1)!;
             await progress(Math.min(99, Math.round((done / total) * 100)));
           }
+          // every item fee again (fee_minor), whatever the cursor says
+          await this.pullItemFees({ full: true });
           break;
         }
         case 'customers':
@@ -742,7 +851,11 @@ export class ReadModels {
           for (const r of await this.repo.purchasesByDay(addDays(today, -400), today, tz)) await this.repo.bumpDaily('fact_discovery_daily', { product_id: r.productId, day: r.day }, {}, { purchases: r.units });
           break;
         case 'marketplace_finance':
-          await this.pullFinance(addDays(today, -90), today);
+          await this.pullFinance(addDays(today, -REBUILD_DAYS), today);
+          break;
+        case 'company_finance':
+        case 'seller_balances':
+          await this.pullFinanceTotals(addDays(today, -REBUILD_DAYS), today);
           break;
         case 'search_misses':
           await this.pullSearches(addDays(today, -1));

@@ -892,8 +892,10 @@ export interface ReportsDb {
     cancelled_minor: number;
     refunded_minor: number;
     last_refund_at: Date | null;
-    /** Official Store, from inventory.getUnitCost */
+    /** unit cost × quantity at placed_at: Official Store items from inventory.getUnitCost, seller items from the seller's own offer cost, offers.unitCostsAt; null while unknown. Seller costs are private: only that seller's reports read them */
     buying_cost_minor: number | null;
+    /** marketplace fee on the item net of fee refunds, from finance.itemFeesChangedSince; null until finance has booked the fee, always null on Official Store items */
+    fee_minor: number | null;
     /** order acceptance; rows recorded before pass 4 hold the placement time */
     accepted_at: Date | null;
     /** seller group of the order; payments.payment.captured is matched on it */
@@ -941,6 +943,38 @@ export interface ReportsDb {
     ad_charges_minor: number;
     /** Fulfilled by Marketly fees charged less reversals */
     service_fees_minor: number;
+    /** marketplace fees charged that day, ledger marketplace_fee; from finance.ledgerDailyTotals like the six columns after it */
+    fee_gross_minor: number;
+    /** fees given back, ledger fee_refund */
+    fee_refunds_minor: number;
+    /** refunds taken from the seller, ledger refund and refund_after_payout */
+    refunds_minor: number;
+    /** shipping credited to the seller, ledger shipping_charge */
+    shipping_charged_minor: number;
+    /** shipping labels charged to the seller less voids, ledger label_charge */
+    label_charges_minor: number;
+    /** signed: credits positive, debits negative; ledger adjustment and seller_credit */
+    adjustments_minor: number;
+    /** payment disputes lost, ledger chargeback */
+    chargebacks_minor: number;
+  };
+  /** Company money per market day from finance.companyDailyTotals: Official Store trading by kind (source trading), platform costs by kind (platform_cost) and coupon funding on marketplace seller items by funder (discount_funding) */
+  fact_company_daily: {
+    day: string;
+    source: 'trading' | 'platform_cost' | 'discount_funding';
+    kind: string;
+    /** signed as finance gives it */
+    amount_minor: number;
+  };
+  /** End-of-day seller balances from finance.sellerBalancesByDay (today: as of the last pull). A seller with nothing in any bucket that day has no row */
+  fact_seller_balances_daily: {
+    seller_id: string;
+    day: string;
+    pending_minor: number;
+    available_minor: number;
+    held_minor: number;
+    /** owed by the seller: a negative available balance as a positive amount */
+    owed_minor: number;
   };
   /** Per seller and day: dispatch, tracking, cancellations, response time, cases, delivery issues */
   fact_service_daily: {
@@ -1874,7 +1908,11 @@ export const spec = defineModuleSpec({
     },
     "reports.pull-daily": {
       "schedule": "daily 02:30 market time",
-      "does": "Pull figures that have no event: search.zeroResultStats (unavailable searches), finance fee income per seller and day (finance.marketplaceIncomeByDay), advertising displays/clicks/dismissals and attributed purchases (advertising.dailyPerformance), inventory unit costs for Official Store items"
+      "does": "Pull figures that have no event: search.zeroResultStats (unavailable searches), finance fee income per seller and day (finance.marketplaceIncomeByDay) and the finance facts of the last 3 days (as reports.pull-finance-recent), advertising displays/clicks/dismissals and attributed purchases (advertising.dailyPerformance), inventory unit costs for Official Store items"
+    },
+    "reports.pull-finance-recent": {
+      "schedule": "every 15 min",
+      "does": "Pull today and yesterday from finance: ledger totals into fact_marketplace_finance_daily (finance.ledgerDailyTotals; fee income the same day), company money into fact_company_daily (finance.companyDailyTotals), end-of-day balances into fact_seller_balances_daily (finance.sellerBalancesByDay), and the item fees changed since the last run into fact_order_items.fee_minor (finance.itemFeesChangedSince; its cursor in read_model_checkpoints). Every pull sets values (safe to run twice)"
     },
     "reports.run-schedules": {
       "schedule": "every 15 min",
@@ -3303,6 +3341,7 @@ export const spec = defineModuleSpec({
         "refunded_minor",
         "last_refund_at",
         "buying_cost_minor",
+        "fee_minor",
         "accepted_at",
         "group_id",
         "fulfilled_by"
@@ -3318,6 +3357,7 @@ export const spec = defineModuleSpec({
         "cancelled_by",
         "last_refund_at",
         "buying_cost_minor",
+        "fee_minor",
         "accepted_at",
         "group_id",
         "fulfilled_by"
@@ -3503,6 +3543,14 @@ export const spec = defineModuleSpec({
               ]
             },
             "buying_cost_minor": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "fee_minor": {
               "bsonType": [
                 "int",
                 "long",
@@ -3845,7 +3893,14 @@ export const spec = defineModuleSpec({
         "payouts_failed",
         "owed_minor",
         "ad_charges_minor",
-        "service_fees_minor"
+        "service_fees_minor",
+        "fee_gross_minor",
+        "fee_refunds_minor",
+        "refunds_minor",
+        "shipping_charged_minor",
+        "label_charges_minor",
+        "adjustments_minor",
+        "chargebacks_minor"
       ],
       "nullable": [],
       "decimal": [],
@@ -3868,7 +3923,14 @@ export const spec = defineModuleSpec({
             "payouts_failed",
             "owed_minor",
             "ad_charges_minor",
-            "service_fees_minor"
+            "service_fees_minor",
+            "fee_gross_minor",
+            "fee_refunds_minor",
+            "refunds_minor",
+            "shipping_charged_minor",
+            "label_charges_minor",
+            "adjustments_minor",
+            "chargebacks_minor"
           ],
           "properties": {
             "_id": {},
@@ -3955,6 +4017,55 @@ export const spec = defineModuleSpec({
                 "long",
                 "double"
               ]
+            },
+            "fee_gross_minor": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "fee_refunds_minor": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "refunds_minor": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "shipping_charged_minor": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "label_charges_minor": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "adjustments_minor": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "chargebacks_minor": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
             }
           },
           "additionalProperties": false
@@ -3971,6 +4082,172 @@ export const spec = defineModuleSpec({
         },
         {
           "name": "fact_marketplace_finance_daily_day_ac3205",
+          "key": {
+            "day": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "fact_company_daily": {
+      "idField": null,
+      "key": [],
+      "columns": [
+        "day",
+        "source",
+        "kind",
+        "amount_minor"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "day",
+            "source",
+            "kind",
+            "amount_minor"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "day": {
+              "bsonType": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "source": {
+              "bsonType": "string",
+              "enum": [
+                "trading",
+                "platform_cost",
+                "discount_funding"
+              ]
+            },
+            "kind": {
+              "bsonType": "string"
+            },
+            "amount_minor": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "fact_company_daily_day_source_kind_0dc040",
+          "key": {
+            "day": 1,
+            "source": 1,
+            "kind": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "fact_seller_balances_daily": {
+      "idField": null,
+      "key": [],
+      "columns": [
+        "seller_id",
+        "day",
+        "pending_minor",
+        "available_minor",
+        "held_minor",
+        "owed_minor"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "seller_id",
+            "day",
+            "pending_minor",
+            "available_minor",
+            "held_minor",
+            "owed_minor"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "seller_id": {
+              "bsonType": "string"
+            },
+            "day": {
+              "bsonType": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "pending_minor": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "available_minor": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "held_minor": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "owed_minor": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "fact_seller_balances_daily_seller_id_day_385469",
+          "key": {
+            "seller_id": 1,
+            "day": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "fact_seller_balances_daily_day_ac3205",
           "key": {
             "day": 1
           }

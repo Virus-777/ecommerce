@@ -6,12 +6,17 @@ import type { CheckpointRow, DailyFilter, DailyTable, DatasetRow, GroupRow, JobR
 
 type Doc = Record<string, unknown>;
 
+/** The fact_marketplace_finance_daily columns filled from finance.ledgerDailyTotals (zero until pulled) */
+export const LEDGER_COLUMN_DEFAULTS = { fee_gross_minor: 0, fee_refunds_minor: 0, refunds_minor: 0, shipping_charged_minor: 0, label_charges_minor: 0, adjustments_minor: 0, chargebacks_minor: 0 };
+
 /** Key columns and counter defaults of the daily fact tables */
 const DAILY: Record<DailyTable, { key: string[]; defaults: Record<string, unknown> }> = {
   fact_marketplace_finance_daily: {
     key: ['seller_id', 'day'],
-    defaults: { seller_sales_minor: 0, fee_income_minor: 0, platform_discount_minor: 0, seller_discount_minor: 0, held_minor: 0, payouts_paid_minor: 0, payouts_failed: 0, owed_minor: 0, ad_charges_minor: 0, service_fees_minor: 0 },
+    defaults: { seller_sales_minor: 0, fee_income_minor: 0, platform_discount_minor: 0, seller_discount_minor: 0, held_minor: 0, payouts_paid_minor: 0, payouts_failed: 0, owed_minor: 0, ad_charges_minor: 0, service_fees_minor: 0, ...LEDGER_COLUMN_DEFAULTS },
   },
+  fact_company_daily: { key: ['day', 'source', 'kind'], defaults: { amount_minor: 0 } },
+  fact_seller_balances_daily: { key: ['seller_id', 'day'], defaults: { pending_minor: 0, available_minor: 0, held_minor: 0, owed_minor: 0 } },
   fact_marketly_fulfillment_daily: { key: ['seller_id', 'day'], defaults: { dispatched: 0, dispatched_on_time: 0, overdue: 0, delivery_exceptions: 0 } },
   fact_service_daily: {
     key: ['seller_id', 'day'],
@@ -33,6 +38,10 @@ const lit = (v: unknown) => ({ $literal: v });
  */
 const bucketOf = (date: unknown, unit: string, timezone: string) => ({
   $dateToString: { format: '%Y-%m-%d', timezone, date: { $dateTrunc: { date, unit, timezone, ...(unit === 'week' ? { startOfWeek: 'monday' } : {}) } } },
+});
+/** The first day (YYYY-MM-DD) of the day, week (from Monday) or month a `day` column falls in */
+const dayBucket = (unit: string) => ({
+  $dateToString: { format: '%Y-%m-%d', date: { $dateTrunc: { date: { $dateFromString: { dateString: '$day', format: '%Y-%m-%d' } }, unit, ...(unit === 'week' ? { startOfWeek: 'monday' } : {}) } } },
 });
 /** The market day of an instant ((<instant> at time zone tz)::date) */
 const dayOf = (field: string, timezone: string) => ({ $dateToString: { format: '%Y-%m-%d', date: `$${field}`, timezone } });
@@ -577,11 +586,62 @@ export class ReportsRepository {
     if (Object.keys(update).length) await this.#service.updateOne({ seller_id: sellerId, day }, [{ $set: update }]);
   }
 
+  /**
+   * Replaces one day of a pulled fact table with what the source gave: each row's values set (upserted on its key),
+   * and the day's rows the source no longer gives deleted (a seller whose balances went to zero). Safe to run twice.
+   */
+  async replaceDay(table: 'fact_company_daily' | 'fact_seller_balances_daily', day: string, rows: Record<string, unknown>[]): Promise<void> {
+    const def = DAILY[table];
+    const t = this.#t(table);
+    for (const row of rows) await this.bumpDaily(table, Object.fromEntries(def.key.map((k) => [k, String(row[k])])), {}, Object.fromEntries(Object.entries(row).filter(([k]) => !def.key.includes(k))));
+    const keep = rows.map((r) => ({ $and: def.key.filter((k) => k !== 'day').map((k) => ({ [k]: r[k] })) }));
+    await t.deleteMany({ day, ...(keep.length ? { $nor: keep } : {}) });
+  }
+
+  /** fact_company_daily summed per (bucket or nothing, source, kind) over market days */
+  async companySums(from: string, to: string, group: 'bucket' | 'none', bucket: 'day' | 'week' | 'month' = 'day'): Promise<{ key: string | null; source: string; kind: string; amount: number }[]> {
+    const t = this.#t('fact_company_daily');
+    const key = group === 'bucket' ? dayBucket(bucket) : null;
+    const rows = await t.aggregate<{ _id: { k: string | null; s: string; kind: string }; amount: number }>([
+      { $match: t.filter({ day: { $gte: from, $lte: to } }) },
+      { $group: { _id: { k: key, s: '$source', kind: '$kind' }, amount: { $sum: '$amount_minor' } } },
+    ]);
+    return rows.map((r) => ({ key: r._id.k ?? null, source: r._id.s, kind: r._id.kind, amount: r.amount }));
+  }
+
+  /**
+   * Seller balances summed per day for the given days: owed to sellers (pending + available of each seller, never
+   * below zero), held, owed by sellers and how many sellers owe (fact_seller_balances_daily)
+   */
+  async balanceTotals(days: string[], sellerId?: string): Promise<{ day: string; owed: number; held: number; negative: number; negativeCount: number }[]> {
+    if (!days.length) return [];
+    const t = this.#t('fact_seller_balances_daily');
+    const rows = await t.aggregate<{ _id: string; owed: number; held: number; negative: number; negativeCount: number }>([
+      { $match: t.filter({ day: { $in: days }, ...(sellerId ? { seller_id: sellerId } : {}) }) },
+      {
+        $group: {
+          _id: '$day',
+          owed: { $sum: { $max: [0, { $add: ['$pending_minor', '$available_minor'] }] } },
+          held: { $sum: '$held_minor' },
+          negative: { $sum: '$owed_minor' },
+          negativeCount: { $sum: { $cond: [{ $gt: ['$owed_minor', 0] }, 1, 0] } },
+        },
+      },
+    ]);
+    return rows.map((r) => ({ day: r._id, owed: r.owed, held: r.held, negative: r.negative, negativeCount: r.negativeCount }));
+  }
+
+  /** Each seller's balance row of a day */
+  sellerBalancesOn(day: string, sellerIds: string[]): Promise<Row<'fact_seller_balances_daily'>[]> {
+    if (!sellerIds.length) return Promise.resolve([]);
+    return this.#t<Row<'fact_seller_balances_daily'>>('fact_seller_balances_daily').find({ day, seller_id: { $in: sellerIds } });
+  }
+
   async dailySums(table: DailyTable, f: DailyFilter, columns: string[], group: 'bucket' | 'seller_id' | 'product_id' | 'campaign' | 'query_norm' | 'none', bucket: 'day' | 'week' | 'month' = 'day'): Promise<({ key: string | null } & Record<string, number>)[]> {
     const daily = this.#t(table);
     const key =
       group === 'bucket'
-        ? { $dateToString: { format: '%Y-%m-%d', date: { $dateTrunc: { date: { $dateFromString: { dateString: '$day', format: '%Y-%m-%d' } }, unit: bucket, ...(bucket === 'week' ? { startOfWeek: 'monday' } : {}) } } } }
+        ? dayBucket(bucket)
         : group === 'campaign'
           ? { $concat: ['$campaign_kind', ':', '$campaign_id'] }
           : group === 'none'

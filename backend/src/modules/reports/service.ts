@@ -277,6 +277,11 @@ export class ReportsService implements ReportsPublicApi {
     return this.readModels.pullDaily();
   }
 
+  /** Job reports.pull-finance-recent (every 15 min): today and yesterday into the finance facts, and the item fees changed since the last run */
+  async pullFinanceRecent(): Promise<void> {
+    return this.readModels.pullFinanceRecent();
+  }
+
   /**
    * Job reports.run-schedules (every 15 min): Phase 2: run due schedules into export files; when a file is ready
    * the export runner publishes reports.scheduled_report.ready (notifications sends the emails)
