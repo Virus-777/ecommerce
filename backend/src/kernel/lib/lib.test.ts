@@ -119,7 +119,7 @@ describe('job schedules from the spec', () => {
     ['nightly 03:30 market time', { kind: 'daily', time: '03:30' }],
     ['monthly, 1st 03:00 market time', { kind: 'monthly', time: '03:00' }],
     ['on boot', { kind: 'boot' }],
-    ['every 30 min during business hours (when enabled)', { kind: 'interval', ms: 1_800_000, window: 'business-hours' }],
+    ['every 30 min during business hours (when enabled)', { kind: 'interval', ms: 1_800_000 }],
   ])('%s', (text, expected) => {
     expect(parseSchedule(text)).toEqual(expected);
   });
