@@ -1,6 +1,7 @@
 // API access for the product detail page and its sub-pages (offers, reviews, questions):
 // catalog product, purchase box, rating summary, category trail, add to cart, Buy now.
 // Product routes carry the id (/p/:slug/:id); the slug is cosmetic (BACKEND-REQUESTS G1).
+import { date } from '@marketly/web-shared/lib/dates';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
@@ -165,7 +166,7 @@ export const orderWithin = (minutes?: number | null) => {
 
 const TZ = 'America/Los_Angeles';
 /** "Oct 2, 2026" in the market time zone. */
-export const fmtDate = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: TZ }) : '');
+export const fmtDate = (iso?: string | null) => (iso ? date(iso) : '');
 /** "Oct 19, 11:59 PM PT". */
 export const fmtDateTime = (iso?: string | null) =>
   iso ? `${new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: TZ })} PT` : '';

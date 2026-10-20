@@ -1,6 +1,7 @@
 // Shared pieces of the Seller Center catalog, offer and inventory screens (Products, CatalogMatch,
 // ProductNew, Offer, Inventory, BulkUpdate): load/skeleton states, labels for API enums, money input
 // helpers, dates, CSV and export downloads, the seller-visible settings.
+import { shortDate } from '@marketly/web-shared/lib/dates';
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ApiError, call, errorMessage, useApi, type components } from '@marketly/web-shared/api';
@@ -170,7 +171,7 @@ const TZ = { timeZone: 'America/Los_Angeles' } as const;
 export const fmtWhen = (iso?: string | null) =>
   iso ? new Date(iso).toLocaleString('en-US', { ...TZ, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
 /** "Oct 6" */
-export const fmtDay = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString('en-US', { ...TZ, month: 'short', day: 'numeric' }) : '');
+export const fmtDay = (iso?: string | null) => (iso ? shortDate(iso) : '');
 /** "Oct 6, 2026, 2:18 PM PT" */
 export const fmtFull = (iso?: string | null) =>
   iso ? `${new Date(iso).toLocaleString('en-US', { ...TZ, month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })} PT` : '';

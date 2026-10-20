@@ -1,3 +1,4 @@
+import { date } from '@marketly/web-shared/lib/dates';
 import { useState, type MouseEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
@@ -38,7 +39,7 @@ const jump = (id: string) => document.getElementById(id)?.scrollIntoView({ behav
 
 const REPLY: Record<string, string> = { within_24h: 'Usually within 24 hours', within_48h: 'Usually within 2 days', within_12h: 'Usually within 12 hours' };
 const monthYear = (d: string) => new Date(`${d.slice(0, 10)}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
-const dayLabel = (d: string) => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'America/Los_Angeles' });
+const dayLabel = (d: string) => date(d);
 const pct = (n: number | null | undefined) => (n == null ? '—' : `${Math.round(n)}%`);
 
 export default function Seller() {

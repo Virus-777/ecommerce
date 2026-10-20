@@ -1,6 +1,7 @@
 // Seller orders and shipping (design: pages/seller/seller-orders*.html, seller-order*.html, seller-shipping.html).
 // API types, the SellerOrderDetail screen query, Pacific-time formatting and the small helpers the Orders,
 // Order and Shipping screens share. Data: docs/api/modules/orders.md (seller fulfilment), shipping.md, messaging.md.
+import { fromZonedInput } from '@marketly/web-shared/lib/dates';
 import { useEffect, useRef, useState } from 'react';
 import type { components } from '@marketly/web-shared/api';
 import { href } from '@marketly/web-shared/routes';
@@ -59,16 +60,9 @@ export function addDays(key: string, n: number): string {
 }
 
 /** Minutes PT is behind UTC at an instant (420 in summer, 480 in winter). */
-function ptOffset(at: Date): number {
-  const name = at.toLocaleString('en-US', { timeZone: TZ, timeZoneName: 'shortOffset' }).split(' ').pop() ?? 'GMT-8';
-  const m = /GMT([+-])(\d+)(?::(\d+))?/.exec(name);
-  return m ? (m[1] === '-' ? 1 : -1) * (Number(m[2]) * 60 + Number(m[3] ?? 0)) : 480;
-}
-
 /** The instant of a PT wall-clock time on a market day, as ISO. */
 export function ptInstant(key: string, hh = 0, mm = 0): string {
-  const guess = new Date(`${key}T${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00Z`);
-  return new Date(guess.getTime() + ptOffset(guess) * 60_000).toISOString();
+  return fromZonedInput(`${key}T${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`, TZ) ?? '';
 }
 
 /** "today, Oct 8, 5:00 PM PT" / "tomorrow, Oct 9, …" / "Wed, Oct 14, 5:00 PM PT" */

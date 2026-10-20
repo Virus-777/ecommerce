@@ -1,3 +1,4 @@
+import { weekdayDate } from '@marketly/web-shared/lib/dates';
 import { ApiError, type components } from '@marketly/web-shared/api';
 
 // API types and helpers for the Marketing screen (promotions: seller discounts and platform campaign
@@ -83,7 +84,7 @@ export function parsePT(text: string, o: { endOfDay?: boolean } = {}): string | 
 const dtf = (o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('en-US', { timeZone: MARKET_TZ, ...o });
 
 /** ISO → "Sat, Oct 10" */
-export const weekdayPT = (iso?: string | null): string => (iso ? dtf({ weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(iso)) : '');
+export const weekdayPT = (iso?: string | null): string => (iso ? weekdayDate(iso) : '');
 
 /** ISO → "Thu, Oct 8, 11:05 AM" */
 export const stampPT = (iso?: string | null): string => (iso ? dtf({ weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(iso)) : '');

@@ -1,5 +1,6 @@
 // Types and labels for admin/cases and admin/case (design: pages/admin/admin-cases.html, admin-case.html),
 // mapped from GET /api/admin/support/cases, /cases/stats, /categories, /assignees and the AdminCase screen query.
+import { fromZonedInput } from '@marketly/web-shared/lib/dates';
 import type { components } from '@marketly/web-shared/api';
 import type { Tone } from '@marketly/web-shared/ui';
 
@@ -72,11 +73,7 @@ export const ESCALATE_TO: Array<{ value: 'returns' | 'finance' | 'trust' | 'sell
 
 /** 11:59 PM Pacific on a calendar day (YYYY-MM-DD), as an ISO instant. */
 export function pacificEndOfDay(day: string): string {
-  const noon = new Date(`${day}T12:00:00Z`);
-  const la = new Date(noon.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
-  const utc = new Date(noon.toLocaleString('en-US', { timeZone: 'UTC' }));
-  const offsetMs = utc.getTime() - la.getTime();
-  return new Date(new Date(`${day}T23:59:00Z`).getTime() + offsetMs).toISOString();
+  return fromZonedInput(`${day}T23:59`) ?? '';
 }
 
 /** Parses a dollar amount typed by staff ("$114.54") into minor units; NaN when invalid. */

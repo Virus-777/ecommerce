@@ -1,3 +1,4 @@
+import { fromZonedInput, zonedInput } from '@marketly/web-shared/lib/dates';
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
@@ -163,22 +164,10 @@ function validate(f: Form): Errors {
   return e;
 }
 
-/** Offset of a time zone from UTC at an instant, in minutes. */
-function tzOffset(tz: string, at: Date): number {
-  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(at).map((x) => [x.type, x.value]));
-  const asUtc = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour), Number(p.minute), Number(p.second));
-  return (asUtc - at.getTime()) / 60000;
-}
 /** "2026-10-16T00:00" in tz → ISO instant. */
-function wallToIso(wall: string, tz: string): string {
-  const guess = new Date(`${wall}:00Z`);
-  return new Date(guess.getTime() - tzOffset(tz, guess) * 60000).toISOString();
-}
+const wallToIso = (wall: string, tz: string): string => fromZonedInput(wall, tz) ?? '';
 /** ISO instant → "2026-10-16T00:00" wall time in tz. */
-function isoToWall(iso: string, tz: string): string {
-  const d = new Date(iso);
-  return new Date(d.getTime() + tzOffset(tz, d) * 60000).toISOString().slice(0, 16);
-}
+const isoToWall = (iso: string, tz: string): string => zonedInput(iso, tz);
 
 function period(f: Form, withYear: boolean) {
   const tz = TIME_ZONES.find((t) => t.value === f.tz)?.short ?? f.tz;

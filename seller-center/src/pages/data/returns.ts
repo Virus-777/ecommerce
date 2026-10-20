@@ -1,3 +1,4 @@
+import { date, shortDate } from '@marketly/web-shared/lib/dates';
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ApiError, useApi, type components } from '@marketly/web-shared/api';
@@ -43,14 +44,12 @@ export const RETURN_PERIODS: Array<{ value: 'last_30_days' | 'last_90_days' | 't
 
 const TZ = 'America/Los_Angeles';
 const fmt = (o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('en-US', { timeZone: TZ, ...o });
-const DATE = fmt({ month: 'short', day: 'numeric' });
 const DATE_TIME = fmt({ month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 const LONG = fmt({ weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 const FULL = fmt({ month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
-const DAY_YEAR = fmt({ month: 'short', day: 'numeric', year: 'numeric' });
 
 /** "Oct 4" */
-export const fmtDate = (iso?: string | null) => (iso ? DATE.format(new Date(iso)) : '');
+export const fmtDate = (iso?: string | null) => (iso ? shortDate(iso) : '');
 /** "Oct 4, 7:02 PM" */
 export const fmtDateTime = (iso?: string | null) => (iso ? DATE_TIME.format(new Date(iso)) : '');
 /** "Fri, Oct 9, 4:00 PM PT" */
@@ -58,7 +57,7 @@ export const fmtDue = (iso?: string | null) => (iso ? `${LONG.format(new Date(is
 /** "Oct 5, 2026, 4:12 PM PT" */
 export const fmtFull = (iso?: string | null) => (iso ? `${FULL.format(new Date(iso))} PT` : '');
 /** "Sep 26, 2026" */
-export const fmtDay = (iso?: string | null) => (iso ? DAY_YEAR.format(new Date(iso)) : '');
+export const fmtDay = (iso?: string | null) => (iso ? date(iso) : '');
 
 /** "1 day 6 h left" / "Overdue 6 h" */
 export function timeLeft(iso: string, now = Date.now()): string {

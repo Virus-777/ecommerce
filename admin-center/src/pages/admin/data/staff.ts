@@ -1,3 +1,4 @@
+import { fromZonedInput } from '@marketly/web-shared/lib/dates';
 import type { components } from '@marketly/web-shared/api';
 import type { IconName } from '@marketly/web-shared/ui';
 
@@ -126,10 +127,5 @@ export const todayKey = () => new Date().toLocaleDateString('en-CA', { timeZone:
 /** An effective date (YYYY-MM-DD) as the instant the API takes: a minute from now for today, else the start of that Pacific day. */
 export function effectiveInstant(day: string): string {
   if (day <= todayKey()) return new Date(Date.now() + 60_000).toISOString();
-  const probe = new Date(`${day}T12:00:00Z`);
-  const tz = probe.toLocaleString('en-US', { timeZone: 'America/Los_Angeles', timeZoneName: 'shortOffset' });
-  const m = /GMT([+-]\d+)/.exec(tz);
-  const off = m ? Number(m[1]) : -8;
-  const sign = off < 0 ? '-' : '+';
-  return new Date(`${day}T00:00:00${sign}${String(Math.abs(off)).padStart(2, '0')}:00`).toISOString();
+  return fromZonedInput(`${day}T00:00`) ?? new Date(Date.now() + 60_000).toISOString();
 }

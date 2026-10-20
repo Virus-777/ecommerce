@@ -1,3 +1,4 @@
+import { date } from '@marketly/web-shared/lib/dates';
 import { Link } from 'react-router';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { href } from '@marketly/web-shared/routes';
@@ -14,7 +15,7 @@ import type { NewsCard } from './news';
 /** "Oct 6, 2026" in the market time zone. */
 export const newsDate = (iso: string | null | undefined) => {
   const d = iso ? new Date(iso) : null;
-  return d && !Number.isNaN(d.getTime()) ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'America/Los_Angeles' }) : '';
+  return iso && d && !Number.isNaN(d.getTime()) ? date(iso) : '';
 };
 
 export const newsHref = (slug: string) => href('store/news-post', '', { slug });

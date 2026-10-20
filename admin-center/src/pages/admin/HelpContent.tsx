@@ -1,3 +1,4 @@
+import { fromZonedInput, zonedInput } from '@marketly/web-shared/lib/dates';
 import { Fragment, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
@@ -82,20 +83,8 @@ function diffWords(a: string, b: string) {
   return out;
 }
 
-/** Offset of a time zone from UTC at an instant, in minutes. */
-function tzOffset(tz: string, at: Date): number {
-  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(at).map((x) => [x.type, x.value]));
-  return (Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour), Number(p.minute), Number(p.second)) - at.getTime()) / 60000;
-}
-const wallToIso = (wall: string) => {
-  const g = new Date(`${wall}:00Z`);
-  return new Date(g.getTime() - tzOffset(TZ, g) * 60000).toISOString();
-};
-const isoToWall = (iso?: string | null) => {
-  if (!iso) return '';
-  const d = new Date(iso);
-  return new Date(d.getTime() + tzOffset(TZ, d) * 60000).toISOString().slice(0, 16);
-};
+const wallToIso = (wall: string) => fromZonedInput(wall, TZ) ?? '';
+const isoToWall = (iso?: string | null) => zonedInput(iso, TZ);
 const nextVersion = (v?: string | null) => {
   const [maj, min] = (v ?? '0.9').split('.').map(Number);
   return `${maj || 0}.${(min ?? 0) + 1}`;
