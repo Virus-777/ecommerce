@@ -1,11 +1,12 @@
 // Shared pieces of the Seller Center catalog, offer and inventory screens (Products, CatalogMatch,
 // ProductNew, Offer, Inventory, BulkUpdate): load/skeleton states, labels for API enums, money input
 // helpers, dates, CSV and export downloads, the seller-visible settings.
+import { waitForExport as waitForJob } from '@marketly/web-shared/lib/exports';
 import { parseCents, CONDITION_LABEL, type Condition } from '@marketly/web-shared/lib/format';
 import { shortDate } from '@marketly/web-shared/lib/dates';
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ApiError, call, errorMessage, useApi, type components } from '@marketly/web-shared/api';
+import { call, errorMessage, useApi, type components } from '@marketly/web-shared/api';
 import { Alert, Button, type IconName } from '@marketly/web-shared/ui';
 
 export type Money = components['schemas']['Money'];
@@ -180,18 +181,7 @@ export function openDownload(url: string, fileName?: string | null) {
   a.click();
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 
 /** Polls an export job (reports) until it is ready, then returns it; throws when it fails or takes too long. */
-export async function waitForExport(first: ExportJob, poll: (id: string) => Promise<ExportJob>, timeoutMs = 60_000): Promise<ExportJob> {
-  let job = first;
-  const until = Date.now() + timeoutMs;
-  while (job.state === 'queued' || job.state === 'running') {
-    if (Date.now() > until) throw new ApiError(504, 'EXPORT_TIMEOUT', 'The export is taking longer than usual. Try again in a moment.');
-    await sleep(1200);
-    job = await poll(job.id);
-  }
-  if (job.state !== 'ready' || !job.downloadUrl) throw new ApiError(422, 'EXPORT_FAILED', job.error || 'The export failed. Try again.');
-  return job;
-}
+export const waitForExport = (first: ExportJob, poll: (id: string) => Promise<ExportJob>, timeoutMs = 60_000): Promise<ExportJob> => waitForJob(first, poll, { timeoutMs, everyMs: 1200 });

@@ -1,6 +1,7 @@
 // Seller orders and shipping (design: pages/seller/seller-orders*.html, seller-order*.html, seller-shipping.html).
 // API types, the SellerOrderDetail screen query, Pacific-time formatting and the small helpers the Orders,
 // Order and Shipping screens share. Data: docs/api/modules/orders.md (seller fulfilment), shipping.md, messaging.md.
+import { download as downloadFile, waitForExport as waitForJob } from '@marketly/web-shared/lib/exports';
 import { fromZonedInput } from '@marketly/web-shared/lib/dates';
 import { useEffect, useRef, useState } from 'react';
 import type { components } from '@marketly/web-shared/api';
@@ -194,27 +195,11 @@ export function trackingProblem(carrier: TrackingCarrier | undefined, raw: strin
 /* ------------------------------------------------------------------ files */
 
 /** Opens a signed download link (packing slips, labels, exports: the API serves them as attachments). */
-export function openDownload(url: string, fileName?: string | null) {
-  const a = document.createElement('a');
-  a.href = url;
-  a.rel = 'noopener';
-  if (fileName) a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-}
+export const openDownload = (url: string, fileName?: string | null) => downloadFile(url, fileName);
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Polls an export job until its file is ready (exports run as background jobs; up to ~3 minutes). */
-export async function waitForExport(read: () => Promise<ExportJob>, first: ExportJob): Promise<ExportJob> {
-  let job = first;
-  for (let i = 0; i < 60 && (job.state === 'queued' || job.state === 'running'); i++) {
-    await sleep(3000);
-    job = await read();
-  }
-  return job;
-}
+export const waitForExport = (read: () => Promise<ExportJob>, first: ExportJob): Promise<ExportJob> => waitForJob(first, () => read(), { timeoutMs: 3 * 60_000, everyMs: 3000 });
 
 /* ------------------------------------------------------------------ SellerOrderDetail screen query */
 
