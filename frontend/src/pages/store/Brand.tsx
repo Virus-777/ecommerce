@@ -5,7 +5,7 @@ import NotFound from './NotFound';
 import { ApiError, call, useApi } from '@marketly/web-shared/api';
 import { num } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Breadcrumbs, Chip, ChipRow, EmptyState, Icon } from '@marketly/web-shared/ui';
+import { Breadcrumbs, Chip, ChipRow, EmptyState, Icon, sameOriginFile } from '@marketly/web-shared/ui';
 import { initialsOf, tintOf, useBrand } from '@/api/catalog';
 import { ApiProductCard, CardGridSkeleton, ListingPager, LoadError, LogoPic, Pic, SkLines } from '@/api/cards';
 import { SortSelect, useListingParams } from '@/api/listing';
@@ -75,7 +75,7 @@ export default function Brand() {
         <section className="shop-hero" aria-labelledby="br-h">
           <div className="ban tint-2" aria-hidden="true">
             {b?.banner ? (
-              <img src={b.banner.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              <img src={sameOriginFile(b.banner.url)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => (e.currentTarget.style.display = 'none')} />
             ) : (
               <>
                 <Icon name="tag" />

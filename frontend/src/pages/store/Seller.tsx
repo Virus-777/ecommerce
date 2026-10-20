@@ -13,7 +13,7 @@ import { Photo } from './data/review-parts';
 import { ApiError, call, useApi } from '@marketly/web-shared/api';
 import { dollars, num, percentOff } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Badge, Button, Chip, ChipRow, CopyButton, EmptyState, Icon, KeyValue, Price, SearchInput, SellerBadge, Stars, Stat, Tabs } from '@marketly/web-shared/ui';
+import { Alert, Badge, Button, Chip, ChipRow, CopyButton, EmptyState, Icon, KeyValue, Price, SearchInput, SellerBadge, Stars, Stat, Tabs, sameOriginFile } from '@marketly/web-shared/ui';
 import { initialsOf, tintOf } from '@/api/catalog';
 import { ApiProductCard, CardGridSkeleton, ListingPager, LoadError, LogoPic, SkLines } from '@/api/cards';
 import { SortSelect, useListingParams } from '@/api/listing';
@@ -166,7 +166,7 @@ export default function Seller() {
         )}
         <section className="shop-hero" aria-labelledby="sl-h">
           <div className="ban tint-2">
-            {s?.banner && <img src={s.banner.url} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />}
+            {s?.banner && <img src={sameOriginFile(s.banner.url)} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => (e.currentTarget.style.display = 'none')} />}
             {s?.tagline && (
               <span className="shop-ban-t" style={s.banner ? { position: 'relative' } : undefined}>
                 {s.tagline}

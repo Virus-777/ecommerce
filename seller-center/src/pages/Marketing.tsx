@@ -8,7 +8,7 @@ import { cx } from '@marketly/web-shared/lib/cx';
 import { formatMoney } from '@marketly/web-shared/lib/format';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Badge, Button, Card, Checkbox, EmptyState, Field, Icon, Img, KeyValue, Meter, PageHeader, Price, Select, Stat, StatusBadge, SummaryRow, TableWrap, Tabs, TextInput, announce } from '@marketly/web-shared/ui';
+import { Alert, Badge, Button, Card, Checkbox, EmptyState, Field, Icon, Img, KeyValue, Meter, PageHeader, Price, Select, Stat, StatusBadge, SummaryRow, TableWrap, Tabs, TextInput, announce, sameOriginFile } from '@marketly/web-shared/ui';
 import { useSellerSession } from '@/app/session';
 import {
   DISCOUNT_TYPES,
@@ -410,7 +410,7 @@ function InvitationView({ inv }: { inv: Invitation }) {
           <div className="card-body">
             {c.banner?.url ? (
               <div className="imgph wide tint-3" style={{ aspectRatio: '5/1' }}>
-                <img src={c.banner.url} alt={c.banner.alt ?? ''} />
+                <img src={sameOriginFile(c.banner.url)} alt={c.banner.alt ?? ''} onError={(e) => (e.currentTarget.style.display = 'none')} />
               </div>
             ) : (
               <div className="imgph wide tint-3" style={{ aspectRatio: '5/1' }}>

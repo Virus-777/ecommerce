@@ -44,11 +44,18 @@ export function Avatar({ name, size, className }: { name: string; size?: string;
   );
 }
 
-/** Seller/brand logo tile (.logo-tile) with initials. size: xs | sm | md (default large). */
-export function LogoTile({ initials: text, tint, size, className }: { initials: string; tint?: Tint | string; size?: 'xs' | 'sm' | 'md'; className?: string }) {
+const LOGO_FILL = { width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' } as const;
+
+/**
+ * Seller/brand logo tile (.logo-tile): the logo image when there is one (a same-origin /files link), else, or when it
+ * fails to load, the initials. size: xs | sm | md (default large).
+ */
+export function LogoTile({ initials: text, tint, size, className, src }: { initials: string; tint?: Tint | string; size?: 'xs' | 'sm' | 'md'; className?: string; src?: string | null }) {
+  const [failed, setFailed] = useState<string | null>(null);
+  const shown = src && src !== failed ? sameOriginFile(src) : undefined;
   return (
     <span className={cx('logo-tile', size, tintClass(tint), className)} aria-hidden="true">
-      {text}
+      {shown ? <img src={shown} alt="" style={LOGO_FILL} onError={() => setFailed(src ?? null)} /> : text}
     </span>
   );
 }
