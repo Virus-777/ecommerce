@@ -2,6 +2,7 @@
  * Stated meanings: metric definitions (owner, versions, suggestions), the report catalogue by business
  * group, saved views and (phase 2) scheduled report emails.
  */
+import { stringList } from '../../../kernel/lib/text.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type * as common from '../../../spec/common.js';
@@ -28,8 +29,6 @@ import { invalid, notFound, type Caller, type ReportsCore } from './core.js';
 
 /** Seeded definitions take effect from the start of the launch year */
 const SEED_EFFECTIVE_FROM = '2026-01-01';
-
-const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 
 /** What a published version records (owner as id, resolved when shown) */
 type Snapshot = Omit<MetricDefinition, 'owner'> & { ownerId: string | null };
@@ -246,7 +245,7 @@ export class Definitions {
   async retireMetric(key: string, body: { reason: string }, by: Caller): Promise<MetricDefinition> {
     const reason = body.reason.trim();
     if (!reason) throw invalid([{ path: 'reason', message: 'Say why the metric is retired' }]);
-    const users = (await this.core.repo.listReports({ active: true })).filter((r) => strings(r.metrics).includes(key));
+    const users = (await this.core.repo.listReports({ active: true })).filter((r) => stringList(r.metrics).includes(key));
     const { before, after } = await this.core.repo.transaction(async (tx) => {
       const before = await tx.getMetric(key, { forUpdate: true });
       if (!before) throw notFound('Metric');
@@ -356,12 +355,12 @@ export class Definitions {
       title: r.title,
       group: r.group_key,
       description: r.description,
-      metrics: strings(r.metrics),
-      dimensions: strings(r.dimensions),
+      metrics: stringList(r.metrics),
+      dimensions: stringList(r.dimensions),
       filters: (Array.isArray(r.filters) ? r.filters : []) as never,
       permission: r.permission,
       audience: r.audience as ReportDefinition['audience'],
-      layout: strings(r.layout),
+      layout: stringList(r.layout),
       phase: r.phase,
     };
   }
@@ -403,7 +402,7 @@ export class Definitions {
 
   async reportDefinition(key: string, by: Caller): Promise<{ report: ReportDefinition; definitions: MetricDefinition[] }> {
     const r = await this.staffReport(key, by);
-    return { report: this.reportView(r), definitions: await this.inUse(strings(r.metrics)) };
+    return { report: this.reportView(r), definitions: await this.inUse(stringList(r.metrics)) };
   }
 
   /* ---------------------------------------------------------------- saved views */
@@ -437,12 +436,12 @@ export class Definitions {
   /* ---------------------------------------------------------------- schedules (phase 2) */
 
   private async scheduleViews(rows: ScheduleRow[]): Promise<ReportSchedule[]> {
-    const refs = await this.core.staffRefs([...rows.map((r) => r.owner_staff_id), ...rows.flatMap((r) => strings(r.recipients))]);
+    const refs = await this.core.staffRefs([...rows.map((r) => r.owner_staff_id), ...rows.flatMap((r) => stringList(r.recipients))]);
     return rows.map((r) => ({
       id: r.id,
       reportKey: r.report_key,
       savedViewId: r.saved_view_id,
-      recipients: strings(r.recipients).map((id) => refs.get(id) ?? { staffId: id, name: 'Staff member', role: 'Staff' }),
+      recipients: stringList(r.recipients).map((id) => refs.get(id) ?? { staffId: id, name: 'Staff member', role: 'Staff' }),
       frequency: r.frequency as ReportSchedule['frequency'],
       dayOfWeek: r.day_of_week,
       time: r.time,
@@ -560,13 +559,13 @@ function rowView(r: MetricRow): Omit<MetricDefinition, 'owner' | 'changeNote'> {
     definition: r.definition,
     formula: r.formula,
     unit: r.unit as MetricDefinition['unit'],
-    includes: strings(r.includes),
-    excludes: strings(r.excludes),
-    dateBasisOptions: strings(r.date_basis_options),
+    includes: stringList(r.includes),
+    excludes: stringList(r.excludes),
+    dateBasisOptions: stringList(r.date_basis_options),
     defaultDateBasis: r.default_date_basis as MetricDefinition['defaultDateBasis'],
     currencyRule: r.currency_rule,
     timeZone: r.time_zone,
-    relatedKeys: strings(r.related_keys),
+    relatedKeys: stringList(r.related_keys),
     audience: r.audience as MetricDefinition['audience'],
     launchMeasure: r.launch_measure,
     status: r.status as MetricDefinition['status'],

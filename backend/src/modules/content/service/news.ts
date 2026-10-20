@@ -4,12 +4,14 @@
  * The homepage `news` section reads homeNews(). News is a short list, so lists are filtered, sorted and paged in
  * memory (pageOf), like campaign pages.
  */
+import { stringList } from '../../../kernel/lib/text.js';
+import { slugify } from '../../../kernel/lib/text.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { pageOf, type PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type { LinkRef, NewsAdmin, NewsAdminSummary, NewsCard, NewsCategory, NewsCategoryRef, NewsInput, NewsPost, NewsStatusCounts, NewsSummary, Version } from '../../../spec/content.js';
-import { isValidSlug, plainText, sanitizeHtml, slugify } from '../domain/rules.js';
+import { isValidSlug, plainText, sanitizeHtml } from '../domain/rules.js';
 import { contentPublicationMachine } from '../domain/state-machines.js';
 import type { NewsCategoryRow, NewsRow, VersionRow } from '../ports.js';
 import { actorFromKey, invalid, iso, notFound, requireText, SYSTEM, unique, type By, type DraftReview } from './base.js';
@@ -41,7 +43,6 @@ const MAX_PINNED = 3;
 const RESERVED_SLUGS = new Set(['categories', 'summary', 'counts']);
 const HOME_NEWS = 3;
 
-const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 const newsMediaIds = (s: NewsSnap | null | undefined) => (s?.cover?.id ? [{ id: s.cover.id, path: 'cover' }] : []);
 
 export class ContentNews extends ContentPolicies {
@@ -120,7 +121,7 @@ export class ContentNews extends ContentPolicies {
     const row = await this.repo.transaction(async (tx) => {
       const updated = await tx.updateNewsCategory(id, {
         ...(name ? { name } : {}),
-        ...(slug !== before.slug ? { slug, previous_slugs: unique([...strings(before.previous_slugs), before.slug]) as never } : {}),
+        ...(slug !== before.slug ? { slug, previous_slugs: unique([...stringList(before.previous_slugs), before.slug]) as never } : {}),
         ...(body.icon !== undefined ? { icon: body.icon?.trim() || null } : {}),
         ...(body.visible != null ? { visible: body.visible } : {}),
       });
@@ -588,7 +589,7 @@ export class ContentNews extends ContentPolicies {
         liveId = locked.draft_version_id;
         fields = { ...this.newsColumns(snap), owner_staff_id: snap.ownerStaffId ?? locked.owner_staff_id };
         // a published post that changes its address keeps the old one working
-        if (locked.live_version_id && snap.slug !== locked.slug) fields.previous_slugs = unique([...strings(locked.previous_slugs), locked.slug]) as never;
+        if (locked.live_version_id && snap.slug !== locked.slug) fields.previous_slugs = unique([...stringList(locked.previous_slugs), locked.slug]) as never;
       }
       if (!liveId) throw invalid('draft', 'The post has nothing to publish');
       return tx.updateNews(id, {

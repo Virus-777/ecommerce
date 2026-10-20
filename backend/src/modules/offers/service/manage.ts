@@ -2,6 +2,7 @@
  * Creating and editing offers (seller and Official Store) and their lifecycle: publish, pause, resume,
  * end, delete drafts, and the staff actions remove, hold, release and reinstate.
  */
+import { stringList } from '../../../kernel/lib/text.js';
 import { isIsoDate } from '../../../kernel/lib/dates.js';
 import { format as formatMoney } from '../../../kernel/lib/money.js';
 import { AppError, isAppError } from '../../../kernel/errors/index.js';
@@ -10,7 +11,7 @@ import type * as catalog from '../../../spec/catalog.js';
 import type * as common from '../../../spec/common.js';
 import type { CompareAtInput, HoldOfferRequest, OfferInput, OfferUpdate, OfficialOfferInput, RemoveOfferRequest, ReturnTerms, ReturnTermsInput, StatusReason, WarrantyInput } from '../../../spec/offers.js';
 import { activityLabel, conditionLabel, needsConditionNotes, returnTermsOf, warrantyTerms, type Condition } from '../domain/rules.js';
-import { money, offerTitle, strings, variantLabel } from '../mappers.js';
+import { money, offerTitle, variantLabel } from '../mappers.js';
 import type { OfferRec } from '../ports.js';
 import { invalidField, notFound, Part, SYSTEM, type By } from './core.js';
 
@@ -722,7 +723,7 @@ export class ManagePart extends Part {
       if (patch.missing_items_stale === false) {
         this.core.publish(
           'offers.offer.missing_items_reviewed',
-          { offerId: after.id, productId: after.product_id, ownerType: after.owner_type as 'official' | 'seller', sellerId: after.seller_id, missingItems: strings(after.missing_items), changed: JSON.stringify(strings(after.missing_items)) !== JSON.stringify(strings(row.missing_items)), reviewedBy: by.actor },
+          { offerId: after.id, productId: after.product_id, ownerType: after.owner_type as 'official' | 'seller', sellerId: after.seller_id, missingItems: stringList(after.missing_items), changed: JSON.stringify(stringList(after.missing_items)) !== JSON.stringify(stringList(row.missing_items)), reviewedBy: by.actor },
           by,
         );
       }

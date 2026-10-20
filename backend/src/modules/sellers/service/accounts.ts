@@ -2,6 +2,7 @@
  * The seller account: snapshots for other modules, account / setup / launch review, business details,
  * payout account and readiness, agreements, closure, the Verified label and the admin seller views.
  */
+import { stringList } from '../../../kernel/lib/text.js';
 import type { Principal } from '../../../kernel/auth/index.js';
 import { AppError, isNotImplemented } from '../../../kernel/errors/index.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
@@ -905,7 +906,7 @@ export class AccountsPart extends Part {
       if (b) payouts = { pending: b.pending, available: b.available, held: b.held, holds: b.holds, nextPayout: b.nextPayout ?? null };
     } else unavailable.push('payouts');
     const changeRows = await this.repo.find('change_requests', { seller_id: s.id }, { orderBy: [['submitted_at', 'desc']], limit: 50 });
-    const crRefs = await this.core.mediaRefs(changeRows.flatMap((c) => map.strings(c.evidence_media_ids)));
+    const crRefs = await this.core.mediaRefs(changeRows.flatMap((c) => stringList(c.evidence_media_ids)));
     const notes = await this.repo.find('seller_notes', { seller_id: s.id }, { orderBy: [['created_at', 'desc']] });
     return {
       account: await this.account(s, null, unavailable, { staff: true }),

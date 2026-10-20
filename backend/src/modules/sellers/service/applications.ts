@@ -3,6 +3,8 @@
  * verification checks (provider + webhook), Trust and Risk referral, information requests, the review
  * decision, appeals on rejection, and invitations to apply during the invite-only launch.
  */
+import { stringList } from '../../../kernel/lib/text.js';
+import { slugify } from '../../../kernel/lib/text.js';
 import { createHash, createHmac } from 'node:crypto';
 import type { Principal } from '../../../kernel/auth/index.js';
 import { AppError } from '../../../kernel/errors/index.js';
@@ -46,7 +48,6 @@ import {
   percentComplete,
   reapplyFrom,
   riskCategoriesIn,
-  slugify,
   taxIdDigits,
   validTaxId,
   type ApplicationSections,
@@ -196,7 +197,7 @@ export class ApplicationsPart extends Part {
     const now = this.now();
     const sec = this.sections(a);
     const missing = missingFields(sec);
-    const done = map.strings(a.completed_steps);
+    const done = stringList(a.completed_steps);
     const accepted = await this.repo.find('agreement_acceptances', { application_id: a.id }, { orderBy: [['accepted_at', 'asc']] });
     const seller = a.seller_id ? await this.repo.get('sellers', a.seller_id) : undefined;
     const request = await this.latestRequest(a.id);
@@ -486,7 +487,7 @@ export class ApplicationsPart extends Part {
   }
 
   private async uniqueSlug(name: string, repo: SellersRepository) {
-    const base = slugify(name);
+    const base = slugify(name, { max: 60, fallback: 'store' });
     if (!(await repo.slugTaken(base))) return base;
     for (let i = 2; i < 50; i++) if (!(await repo.slugTaken(`${base}-${i}`))) return `${base}-${i}`;
     return `${base}-${newId().slice(-6)}`;

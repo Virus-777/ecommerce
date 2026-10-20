@@ -1,3 +1,4 @@
+import { stringList } from '../../kernel/lib/text.js';
 import type { EventPayload } from '../../kernel/events/index.js';
 import { newId } from '../../kernel/lib/ids.js';
 import type * as common from '../../spec/common.js';
@@ -6,7 +7,6 @@ import type * as identity from '../../spec/identity.js';
 import type { AdminDashboard, ExportDataset, ExportJob, MetricDefinition, ReportQuery, ReportResult, ReportsPublicApi, SellerDashboard } from '../../spec/reports.js';
 import { nextRun, periodLabel } from './domain/rules.js';
 
-const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 import { ReportsCore, SYSTEM, type Caller, type ReportsServiceDeps } from './service/core.js';
 import { Definitions, staffId } from './service/definitions.js';
 import { Exports, REPORT_DATASET } from './service/exports.js';
@@ -299,7 +299,7 @@ export class ReportsService implements ReportsPublicApi {
       if (!claimed || !report || !report.active) continue;
       // staff only (decision D2): every recipient is re-checked now; each one gets an export in their own name, so
       // the download link works for them and nobody else (getExport is requester-only)
-      const recipients = strings(s.recipients);
+      const recipients = stringList(s.recipients);
       const { allowed, denied } = await this.defs.recipientsAllowed(recipients, report.permission);
       const format = s.format === 'xlsx' ? 'xlsx' : 'csv';
       const jobs: { staffId: string; exportId: string }[] = [];

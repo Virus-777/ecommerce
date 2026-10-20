@@ -7,19 +7,6 @@ import type { Attribute, ImageRule } from '../../../spec/catalog.js';
 
 /* ------------------------------------------------------------------ text */
 
-export function slugify(s: string): string {
-  const slug = s
-    .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/&/g, ' and ')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 80)
-    .replace(/-+$/g, '');
-  return slug || 'item';
-}
-
 /** Lower-case, accents and punctuation removed, single spaces: for name and title comparisons */
 export const normalize = (s: string | null | undefined) =>
   (s ?? '')

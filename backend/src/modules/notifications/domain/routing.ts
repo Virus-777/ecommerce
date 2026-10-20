@@ -21,6 +21,7 @@
  * notice: no new order, dispatch reminder, overdue dispatch or cancellation request (fulfillment-service tells
  * the seller with its seller.fulfillment.* topics through notify).
  */
+import { isUuid } from '../../../kernel/lib/ids.js';
 import type { EventName, EventPayload } from '../../../kernel/events/index.js';
 import { OFFICIAL_STORE_ID, OFFICIAL_STORE_NAME, type Money } from '../../../spec/common.js';
 import type { NoticeLink } from '../../../spec/notifications.js';
@@ -163,8 +164,6 @@ function paidAmount(p: { amount: Money; creditAmount?: Money | null }, f: Fmt): 
 
 /** A conversation whose seller side is the Official Store (staff answer it; never a seller workspace) */
 const officialStoreConversation = (p: { sellerId?: string | null; officialStore?: boolean }) => p.officialStore === true || p.sellerId === OFFICIAL_STORE_ID;
-
-const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
 /** Escalation targets of support cases (support's staffEscalate `to`) */
 const CASE_TEAMS: Record<string, string> = {

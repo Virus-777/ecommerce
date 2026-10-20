@@ -1,4 +1,5 @@
 /** Row (snake_case) → API type (camelCase) mapping, in one place per type. */
+import { stringList } from '../../kernel/lib/text.js';
 import type * as common from '../../spec/common.js';
 import type {
   AgreementAcceptance,
@@ -84,7 +85,6 @@ export const actorIdOf = (s: string | null | undefined) => actorOf(s)?.id ?? nul
 
 export type Refs = (id: string | null | undefined) => common.MediaRef | null;
 export const refList = (refs: Refs, ids: unknown): common.MediaRef[] => (Array.isArray(ids) ? ids.map((i) => refs(String(i))).filter((r): r is common.MediaRef => Boolean(r)) : []);
-export const strings = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : []);
 
 /* ------------------------------------------------------------------ seller account pieces */
 
@@ -183,10 +183,10 @@ export function restriction(r: RestrictionRec, extra: { appeals?: Appeal[]; refs
     reasonCode: r.reason_code as Restriction['reasonCode'],
     reason: r.reason,
     ruleRef: r.rule_ref,
-    affectedActivities: strings(r.affected_activities) as Restriction['affectedActivities'],
+    affectedActivities: stringList(r.affected_activities) as Restriction['affectedActivities'],
     scope: normalizeScope(r.scope as RestrictionScope),
     affectedSummary: r.affected_summary,
-    stillWorks: strings(r.still_works),
+    stillWorks: stringList(r.still_works),
     toResolve: r.to_resolve,
     appealRoute: r.appeal_route as unknown as Restriction['appealRoute'],
     reviewDate: r.review_date,
@@ -270,7 +270,7 @@ export const claim = (c: ClaimRec, refs: Refs): PublicClaim => ({
 });
 
 export const collection = (c: CollectionRec, refs: Refs): FeaturedCollection => {
-  const offerIds = strings(c.offer_ids);
+  const offerIds = stringList(c.offer_ids);
   return { id: c.id, title: c.title, image: refs(c.image_media_id), offerIds, offerCount: offerIds.length, position: c.position, visible: c.visible };
 };
 
@@ -282,7 +282,7 @@ export const member = (m: MemberRec): SellerMember => ({
   name: m.name,
   email: m.email,
   role: m.role as SellerMember['role'],
-  permissions: strings(m.permissions),
+  permissions: stringList(m.permissions),
   isOwner: m.is_owner,
   status: m.status as SellerMember['status'],
   lastActiveAt: iso(m.last_active_at),

@@ -165,18 +165,6 @@ export const validTaxId = (type: 'ein' | 'ssn', s: string) => taxIdDigits(s).len
 
 export const isPoBox = (a: common.Address | null | undefined) => Boolean(a && /\bp\.?\s*o\.?\s*box\b|\bpost office box\b/i.test(`${a.line1} ${a.line2 ?? ''}`));
 
-export function slugify(name: string): string {
-  const s = name
-    .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/&/g, ' and ')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 60);
-  return s || 'store';
-}
-
 export const sameStoreName = (a: string, b: string) => a.trim().toLowerCase().replace(/\s+/g, ' ') === b.trim().toLowerCase().replace(/\s+/g, ' ');
 
 export const locationOf = (a: common.Address | null | undefined) => (a ? `${a.city}, ${a.region}` : null);

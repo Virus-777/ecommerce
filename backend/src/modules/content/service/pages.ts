@@ -2,13 +2,14 @@
  * Campaign pages, curated collections, the About page and landing pages: drafts and versions,
  * review, schedule, publish, unpublish, correction or removal, and the store reads.
  */
+import { slugify } from '../../../kernel/lib/text.js';
 import { isTimeZone } from '../../../kernel/lib/dates.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { pageOf, toPageRequest, type PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type { AboutFacts, BannerBlock, CampaignPageCard, Check, CollectionCard, LinkedPromotion, PageAdmin, PageBlock, PageDraftInput, PageSummary, ProductSource, ProductTile, RemovalInfo, StorePage, Version } from '../../../spec/content.js';
-import { isValidSlug, sanitizeHtml, slugify } from '../domain/rules.js';
+import { isValidSlug, sanitizeHtml } from '../domain/rules.js';
 import { contentPublicationMachine } from '../domain/state-machines.js';
 import type { PageRow, VersionRow } from '../ports.js';
 import { dateOrNull, invalid, unique, iso, notFound, requireText, SYSTEM, type By, type DraftReview } from './base.js';

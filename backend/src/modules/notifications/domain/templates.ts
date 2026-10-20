@@ -1,6 +1,7 @@
 /**
  * Template rendering (Mustache-style {{variables}} with HTML escaping), validation and footers. Pure.
  */
+import { escapeHtml } from '../../../kernel/lib/text.js';
 import type { TemplateContent, TemplateValidation, ValidationIssue } from '../../../spec/notifications.js';
 import { topicVariables, variablesIn, type Channel, type TopicDef } from './catalog.js';
 
@@ -21,8 +22,6 @@ const show = (v: unknown): string => {
   if (typeof v === 'object') return '';
   return String(v);
 };
-
-export const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
 /** Plain-text render: missing variables become empty */
 export const renderText = (template: string | null | undefined, ctx: unknown): string =>

@@ -2,6 +2,7 @@
  * Authorized exports for every module (plan ch. 18): the dataset registry, export jobs with
  * permission-filtered columns, files written through media, expiring single-user links, audit.
  */
+import { stringList } from '../../../kernel/lib/text.js';
 import { createHash } from 'node:crypto';
 import { AppError, isAppError } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
@@ -44,7 +45,6 @@ export interface ExportRequest {
 /** where the request came from: the admin or seller export endpoint, or another module's public API call */
 export type Via = 'admin' | 'seller' | 'api';
 
-const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 const EXT: Record<ExportFormat, string> = { csv: 'csv', xlsx: 'xlsx', jsonl: 'jsonl' };
 
 export class Exports {
@@ -130,7 +130,7 @@ export class Exports {
       permission: e.permission,
       columns: columnsOf(e.columns),
       audience: e.audience,
-      screens: strings(e.screens),
+      screens: stringList(e.screens),
       available: e.available,
       phase: e.phase,
     };
@@ -142,7 +142,7 @@ export class Exports {
     const out: ExportDataset[] = [];
     for (const s of cfg.exportDatasets) {
       const e = (await this.entry(s.key))!;
-      if (q.screen && !strings(e.screens).includes(q.screen)) continue;
+      if (q.screen && !stringList(e.screens).includes(q.screen)) continue;
       if (!q.all) {
         if (!e.available || e.audience !== 'staff') continue;
         if (!(await this.mayExport(e, by))) continue;
@@ -258,7 +258,7 @@ export class Exports {
       sellerId: r.seller_id,
       state: r.state as ExportJob['state'],
       rowCount: r.row_count,
-      columnsExcluded: strings(r.columns_excluded),
+      columnsExcluded: stringList(r.columns_excluded),
       fileName: done ? fileNameOf(r) : null,
       sha256: r.sha256,
       downloadUrl: downloadUrl ?? null,
@@ -330,7 +330,7 @@ export class Exports {
     try {
       const cfg = await this.core.cfg();
       const { columns, rows } = await this.produce(started, cfg.maxExportRows);
-      const excluded = strings(started.columns_excluded);
+      const excluded = stringList(started.columns_excluded);
       const kept = columns.filter((c) => !excluded.includes(c.key));
       const body = renderFile(started.format as ExportFormat, kept, rows);
       const media = this.core.api('media');

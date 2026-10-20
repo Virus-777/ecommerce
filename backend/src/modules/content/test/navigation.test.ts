@@ -1,5 +1,6 @@
+import { slugify } from '../../../kernel/lib/text.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { diffHtml, isSafeUrl, nextMinorVersion, sanitizeHtml, scheduleLabel, slugify } from '../domain/rules.js';
+import { diffHtml, isSafeUrl, nextMinorVersion, sanitizeHtml, scheduleLabel } from '../domain/rules.js';
 import { auth, callers, DAY, harness, inMs, type Harness } from './helpers.js';
 
 describe('content rules', () => {

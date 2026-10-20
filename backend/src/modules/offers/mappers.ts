@@ -1,6 +1,7 @@
 /**
  * Row (snake_case) → API type (camelCase) mapping, one place per type.
  */
+import { stringList } from '../../kernel/lib/text.js';
 import type * as common from '../../spec/common.js';
 import { OFFICIAL_STORE_NAME } from '../../spec/common.js';
 import type { ServiceTerms } from '../../spec/fulfillment-service.js';
@@ -159,8 +160,6 @@ export function compareAtOf(r: OfferRec, sellerName: string, lookbackDays: numbe
   return { amount: money(r.compare_at_amount, r.currency), basis, verified: true, explanation: compareAtExplanation(basis, r.owner_type === 'official' ? `the ${OFFICIAL_NAME}` : sellerName, lookbackDays) };
 }
 
-export const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
-
 export function eligibilityOf(r: OfferRec, e: EligibilityRec | undefined): FeaturedEligibility {
   if (e) return { eligible: e.eligible, reasons: (Array.isArray(e.reasons) ? e.reasons : []) as unknown as IneligibilityReason[], evaluatedAt: isoReq(e.evaluated_at) };
   const reasons = r.status === 'active' ? [] : [reason(r.status === 'out_of_stock' ? 'out_of_stock' : 'offer_not_active')];
@@ -189,7 +188,7 @@ export function offerTitle(productTitle: string, options: Record<string, string>
 }
 
 export function toOffer(r: OfferRec, x: { sellerName: string; eligibility?: EligibilityRec; lookbackDays: number; fulfilment?: Fulfilment; now?: Date }): Offer {
-  const missing = strings(r.missing_items);
+  const missing = stringList(r.missing_items);
   const f = x.fulfilment ?? ownFulfilment(r);
   const held = serviceHeld(r, f);
   const eligibility = eligibilityOf(r, x.eligibility);
@@ -203,7 +202,7 @@ export function toOffer(r: OfferRec, x: { sellerName: string; eligibility?: Elig
     title: r.title,
     condition: r.condition as Offer['condition'],
     conditionNotes: r.condition_notes,
-    includedItems: strings(r.included_items),
+    includedItems: stringList(r.included_items),
     missingItems: missing,
     complete: missing.length === 0,
     missingItemsStale: Boolean(r.missing_items_stale),
@@ -300,7 +299,7 @@ export function featuredRule(r: RuleRec): FeaturedRule {
     version: r.version,
     effectiveFrom: isoReq(r.effective_from),
     text: r.text,
-    steps: strings(r.steps),
+    steps: stringList(r.steps),
     parameters: r.parameters as unknown as FeaturedRule['parameters'],
     publishedBy: actorFromText(r.published_by) ?? { kind: 'system', id: null },
     publishedAt: isoReq(r.published_at),

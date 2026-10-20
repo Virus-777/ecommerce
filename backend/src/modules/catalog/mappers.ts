@@ -1,4 +1,5 @@
 /** Rows (snake_case) to API types (camelCase), in one place per type. */
+import { stringList } from '../../kernel/lib/text.js';
 import type * as common from '../../spec/common.js';
 import type {
   Attribute,
@@ -29,7 +30,6 @@ export function groupBy<T>(items: readonly T[], key: (t: T) => string): Map<stri
   return out;
 }
 
-export const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x) => x != null).map(String) : []);
 export const stringMap = (v: unknown): Record<string, string> =>
   v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v as Record<string, unknown>).filter(([, x]) => x != null).map(([k, x]) => [k, String(x)])) : {};
 
@@ -40,7 +40,7 @@ export function toAttribute(r: AttributeRow): Attribute {
     name: r.name,
     kind: r.kind as Attribute['kind'],
     unit: r.unit,
-    options: strings(r.options),
+    options: stringList(r.options),
     required: r.required,
     filterable: r.filterable,
     variantDefining: r.variant_defining,
@@ -157,7 +157,7 @@ export function toCheck(r: CheckRow, dismissals: CheckDismissalRow[] = []): Prod
     kind: r.kind as ProductCheck['kind'],
     result: r.result,
     message: r.message,
-    details: strings(r.details),
+    details: stringList(r.details),
     evidence: evidenceOf(r.evidence).map((e) => ({
       label: e.label,
       field: e.field ?? null,
@@ -195,7 +195,7 @@ export function toCorrection(r: CorrectionRow, refs: Map<string, common.MediaRef
     field: r.field,
     current: r.current,
     proposed: r.proposed,
-    evidence: strings(r.evidence_media_ids).flatMap((id) => (refs.has(id) ? [refs.get(id)!] : [])),
+    evidence: stringList(r.evidence_media_ids).flatMap((id) => (refs.has(id) ? [refs.get(id)!] : [])),
     state: r.state as CorrectionSuggestion['state'],
     decisionReason: r.decision_reason,
     createdAt: r.created_at.toISOString(),

@@ -122,8 +122,6 @@ export const queryGtin = (q: string | null | undefined) => (q && /^[\d\s-]{8,18}
 
 /* ------------------------------------------------------------------ misc */
 
-export const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
-
 /** '3 colors' style plural of an option name */
 export function plural(n: number, noun: string): string {
   const w = noun.toLowerCase();

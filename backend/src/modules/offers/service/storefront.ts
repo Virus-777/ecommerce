@@ -3,6 +3,7 @@
  * the all-offers comparison, the purchase box, featured offers, cart revalidation (scenario 2: report,
  * never substitute) and the frozen snapshot for order items.
  */
+import { stringList } from '../../../kernel/lib/text.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
 import type * as catalog from '../../../spec/catalog.js';
 import type * as common from '../../../spec/common.js';
@@ -23,7 +24,7 @@ import type {
   VariantAvailability,
 } from '../../../spec/offers.js';
 import { CONDITION_LABEL, conditionGroup, discountPct, dispatchLabel, formatMoney, TAX_NOTE, type ConditionGroup } from '../domain/rules.js';
-import { compareAtOf, FULFILLED_BY_MARKETLY_LABEL, groupBy, isoReq, money, OFFICIAL_NAME, returnTermsOf, SERVICE_INELIGIBLE, serviceHeld, shownStatus, strings, variantLabel, warrantyOf, type Fulfilment } from '../mappers.js';
+import { compareAtOf, FULFILLED_BY_MARKETLY_LABEL, groupBy, isoReq, money, OFFICIAL_NAME, returnTermsOf, SERVICE_INELIGIBLE, serviceHeld, shownStatus, variantLabel, warrantyOf, type Fulfilment } from '../mappers.js';
 import type { EligibilityRec, OfferRec } from '../ports.js';
 import { notFound, Part } from './core.js';
 import { DEFAULT_PARCEL } from './manage.js';
@@ -214,7 +215,7 @@ export class StorefrontPart extends Part {
     const reasons = held ? [SERVICE_INELIGIBLE, ...stored] : stored;
     const eligible = reasons.length === 0 && f.delivery.shipsToLocation && status === 'active';
     const note = !eligible ? (reasons[0]?.message ?? (!f.delivery.shipsToLocation ? 'Does not ship to this location' : null)) : null;
-    const missing = strings(r.missing_items);
+    const missing = stringList(r.missing_items);
     const { expectedRestockDate: _restock, ...availability } = f.availability;
     return {
       offerId: r.id,
@@ -625,7 +626,7 @@ export class StorefrontPart extends Part {
       title: await this.core.ensureTitle(r),
       condition: r.condition,
       conditionNotes: r.condition_notes,
-      missingItems: strings(r.missing_items),
+      missingItems: stringList(r.missing_items),
       price: money(r.price_amount, r.currency),
       compareAt: compareAt?.amount ?? null,
       dispatch: { ...fulfilment.shipping.dispatch, label: dispatchLabel(fulfilment.shipping.dispatch.businessDays) },

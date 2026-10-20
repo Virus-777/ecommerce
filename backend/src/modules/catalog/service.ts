@@ -1,3 +1,4 @@
+import { stringList } from '../../kernel/lib/text.js';
 import { SYSTEM_ACTOR } from '../../kernel/auth/index.js';
 import { AppError } from '../../kernel/errors/index.js';
 import type { EventPayload } from '../../kernel/events/index.js';
@@ -6,7 +7,7 @@ import type * as common from '../../spec/common.js';
 import type * as identity from '../../spec/identity.js';
 import type { Attribute, Brand, CatalogPublicApi, Category, CategoryPath, Product, ProductAdmin, ProductRecord, ProductSnapshot, ProductSummary, VariantParcel, VariantRef } from '../../spec/catalog.js';
 import { isUuid } from '../../kernel/lib/ids.js';
-import { stringMap, strings } from './mappers.js';
+import { stringMap } from './mappers.js';
 import { currentListPrice } from './service/products.js';
 import type { OfferIndexRow } from './ports.js';
 import { CatalogAdmin } from './service/admin.js';
@@ -67,7 +68,7 @@ export class CatalogService extends CatalogAdmin implements CatalogPublicApi {
     const variant = await this.repo.getVariant(variantId);
     const product = variant && (await this.repo.getProduct(variant.product_id));
     if (!variant || !product) throw new AppError('NOT_FOUND', 'Variant not found');
-    const imageId = strings(variant.media_ids)[0] ?? strings(product.media_ids)[0];
+    const imageId = stringList(variant.media_ids)[0] ?? stringList(product.media_ids)[0];
     const [brand, refs] = await Promise.all([product.brand_id ? this.repo.getBrand(product.brand_id) : undefined, this.refsMap([imageId])]);
     const image = imageId ? refs.get(imageId) : undefined;
     return {
@@ -336,7 +337,7 @@ export class CatalogService extends CatalogAdmin implements CatalogPublicApi {
     const flaggedBySeller = new Map<string, { productIds: string[]; images: number }>();
     for (const row of await this.repo.getProducts([...byProduct.keys()])) {
       const change = byProduct.get(row.id)!;
-      const before = strings(row.recrop_media_ids);
+      const before = stringList(row.recrop_media_ids);
       const added = [...change.add].filter((id) => !before.includes(id));
       const after = [...before.filter((id) => !change.remove.has(id)), ...added];
       if (after.length === before.length && !added.length) continue;

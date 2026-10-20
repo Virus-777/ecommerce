@@ -3,13 +3,14 @@
  * affected offers stop selling), launch review, catalog publication / approval / merges / edits,
  * stock changes, trust enforcement and campaign changes. Consumers are idempotent and ignore unknown records.
  */
+import { stringList } from '../../../kernel/lib/text.js';
 import { isAppError } from '../../../kernel/errors/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
 import type * as common from '../../../spec/common.js';
 import type { StatusReason } from '../../../spec/offers.js';
 import { activityLabel, inScope, type ScopeLike } from '../domain/rules.js';
-import { enforcementIdOf, offerTitle, SERVICE_HOLD, strings } from '../mappers.js';
+import { enforcementIdOf, offerTitle, SERVICE_HOLD } from '../mappers.js';
 import type { OfferRec } from '../ports.js';
 import { DuplicateKeyError } from '../repository.js';
 import { Part, SYSTEM, type By, type ProductCache, type TransitionSpec } from './core.js';
@@ -290,8 +291,8 @@ export class EnforcementPart extends Part {
     const lower = (list: readonly string[]) => list.map((x) => x.toLowerCase());
     const rows = await this.repo.find('offers', { product_id: e.productId, status: { op: '<>', value: 'removed' } });
     for (const r of rows) {
-      const missing = strings(r.missing_items);
-      const included = strings(r.included_items);
+      const missing = stringList(r.missing_items);
+      const included = stringList(r.included_items);
       const stale = missing.filter((m) => !lower(box).includes(m.toLowerCase()));
       const newBoxItems = box.filter((b) => !lower([...included, ...missing]).includes(b.toLowerCase()));
       const title = offerTitle(p.product.title, p.product.variants.find((v) => v.id === r.variant_id)?.options);
