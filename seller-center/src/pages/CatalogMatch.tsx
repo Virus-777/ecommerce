@@ -112,7 +112,7 @@ export default function CatalogMatch() {
         title="Find the product in the catalog"
         sub="If the product already exists, add your offer to it so customers compare sellers on one page."
       />
-      <Steps items={[<><span className="sr-only">Step 1 of 3: </span>Find the product</>, 'Create your offer', 'Publish']} current={0} />
+      <Steps items={['Find the product', 'Create your offer', 'Publish']} current={0} />
       <div className="sa-split">
         <div className="stack gap-4">
           <div className="card pad stack gap-3">

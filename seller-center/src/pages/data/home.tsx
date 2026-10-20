@@ -31,7 +31,9 @@ export function screenHref(screen?: string | null, state?: string | null, params
   const needs = [...s.path.matchAll(/:(\w+)/g)].map((m) => m[1]);
   if (needs.some((p) => !params?.[p])) return undefined;
   const views = s.views.map((v) => v.slug);
-  const view = id === 'seller/orders' ? ORDER_VIEWS[state ?? ''] : state && views.includes(state) ? state : undefined;
+  // views are kebab-case slugs; the API sends snake_case states (information_required → information-required)
+  const slug = state?.toLowerCase().replace(/_/g, '-');
+  const view = id === 'seller/orders' ? ORDER_VIEWS[state ?? ''] : slug && views.includes(slug) ? slug : undefined;
   return href(id, view ?? '', params);
 }
 

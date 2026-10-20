@@ -439,7 +439,7 @@ function OfferForm({ product, detail, profiles, fees, rules }: { product: Seller
         title={editing ? 'Edit your offer' : 'Create your offer'}
         sub="You set the terms of your offer. Product content is shared by every seller."
       />
-      <Steps items={['Find the product', <><span className="sr-only">Step 2 of 3: </span>{editing ? 'Edit your offer' : 'Create your offer'}</>, 'Publish']} current={shownResult === 'published' || status === 'active' ? 3 : 1} />
+      <Steps items={['Find the product', editing ? 'Edit your offer' : 'Create your offer', 'Publish']} current={shownResult === 'published' || status === 'active' ? 3 : 1} />
       {shownResult === 'published' && (
         <Alert tone="success" title="Your offer is live">
           {variationLabel}, {CONDITION_LABEL[f.condition]} at {money(priceMinor)} · {f.qty} available. {Number(f.qty) === 0 ? 'It shows to customers once you add stock. ' : ''}

@@ -75,7 +75,10 @@ export const deadlineTone = (d?: { state: string } | null): 'ok' | 'warning' | '
   return s === 'overdue' ? 'danger' : s === 'due_soon' ? 'warning' : 'ok';
 };
 /** Row edge: red when overdue, amber when due soon. */
-export const rowEdge = (d?: Deadline | null): 'flagged' | 'warn' | undefined => (d?.state === 'overdue' ? 'flagged' : d?.state === 'due_soon' ? 'warn' : undefined);
+export const rowEdge = (d?: Deadline | null): 'flagged' | 'warn' | undefined => {
+  const s = d?.state.toLowerCase();
+  return s === 'overdue' ? 'flagged' : s === 'due_soon' ? 'warn' : undefined;
+};
 
 export const money = (m?: MoneyValue | null) => formatMoney(m);
 /** "−$27.90" (the amount shown as a deduction) */
