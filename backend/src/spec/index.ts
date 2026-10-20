@@ -4,6 +4,7 @@
 import { spec as access } from './access.js';
 import { spec as advertising } from './advertising.js';
 import { spec as audit } from './audit.js';
+import { spec as backups } from './backups.js';
 import { spec as cart } from './cart.js';
 import { spec as catalog } from './catalog.js';
 import { spec as checkout } from './checkout.js';
@@ -39,6 +40,7 @@ export const specs = {
   "access": access,
   "advertising": advertising,
   "audit": audit,
+  "backups": backups,
   "cart": cart,
   "catalog": catalog,
   "checkout": checkout,

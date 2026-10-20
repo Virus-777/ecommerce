@@ -149,6 +149,19 @@ describe('approval requests', () => {
     expect(second.approvals.map((a) => a.by.id)).toEqual([manager, manager2]);
   });
 
+  it("always needs the approver's password for an action declaring stepUp always (a backup restore), whatever the amount", async () => {
+    const admin = await f.staff('Pat Admin', ['platform_administrator']);
+    const req = await f.svc.requestApproval({ action: 'backups.restore', target: { type: 'backup_restore', id: newId() }, summary: 'Restore backup 2026-10-15_0230', reason: 'Disk failure', requestedBy: f.principal(owner) });
+    expect(req).toMatchObject({ status: 'pending', requesterCountsAsFirst: true, requiredApprovals: 1 });
+    expect(req.eligibleApprovers.map((s) => s.accountId)).toContain(admin);
+    const noPassword = await f.call('POST', `/approval-requests/${req.id}/approve`, f.token(admin), {});
+    expect(noPassword.status).toBe(403);
+    expect(noPassword.body.error).toMatchObject({ code: 'STEP_UP_REQUIRED', details: { kind: 'reauth', purpose: 'approval' } });
+    const ok = await f.call('POST', `/approval-requests/${req.id}/approve`, f.token(admin), { reauthToken: APPROVAL_REAUTH });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    expect(ok.body.status).toBe('approved');
+  });
+
   it('lets the Business Owner approve alone above every limit', async () => {
     const run = await f.svc.requestApproval({ action: 'finance.payouts.release', target: { type: 'payout_run', id: newId() }, amount: usd(400_000), summary: 'Big run', reason: 'Quarter end', requestedBy: f.principal(manager) });
     expect(run.eligibleApprovers.map((s) => s.accountId)).toEqual([owner]);

@@ -10,7 +10,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Readable } from 'node:stream';
 import type { FileLink } from '../../../kernel/auth/file-links.js';
 import { AppError, isAppError } from '../../../kernel/errors/index.js';
-import type { FileRoute } from '../../../kernel/http/files.js';
+import { parseRange, type FileRoute } from '../../../kernel/http/files.js';
 import type { Clock } from '../../../kernel/lib/clock.js';
 import { InvalidObjectKeyError, type OpenedObject, type OwnerFilter, type StorageProvider } from '../ports.js';
 import type { MediaService, UploadArea } from '../service.js';
@@ -40,33 +40,10 @@ export async function receiveContent(
 /** GET /files/{bucket}/{key} for media's storage (registered with ctx.http.files when storage is served by the API) */
 export function fileServer(service: MediaService, clock: Clock): FileRoute {
   return {
+    buckets: [service.providers.storage.buckets.public, service.providers.storage.buckets.private],
     permanentBuckets: [service.providers.storage.buckets.public],
     serve: (file, request, reply) => serveFile(service.providers.storage, file, request, reply, clock.now()),
   };
-}
-
-type Range = { start: number; end: number };
-
-/** One byte range of a file of `size` bytes; null = serve it whole (no header, malformed, several ranges) */
-export function parseRange(header: string | undefined, size: number): Range | 'unsatisfiable' | null {
-  const m = header ? /^bytes=(\d*)-(\d*)$/.exec(header.trim()) : null;
-  if (!m || (m[1] === '' && m[2] === '')) return null;
-  let start: number;
-  let end: number;
-  if (m[1] === '') {
-    const suffix = Number(m[2]);
-    if (suffix === 0) return 'unsatisfiable';
-    start = Math.max(0, size - suffix);
-    end = size - 1;
-  } else {
-    start = Number(m[1]);
-    if (start >= size) return 'unsatisfiable';
-    end = m[2] === '' ? size - 1 : Number(m[2]);
-    if (end < start) return null; // invalid: ignored
-    end = Math.min(end, size - 1);
-  }
-  if (start >= size || size === 0) return 'unsatisfiable';
-  return { start, end };
 }
 
 const matchesEtag = (header: string, etag: string) => header.split(',').some((t) => ['*', etag, `W/${etag}`].includes(t.trim()));

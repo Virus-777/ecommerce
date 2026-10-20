@@ -97,14 +97,32 @@ ${machines.map((m) => `\n${doc(`${m.name}: ${m.field}${m.notes ? `. ${m.notes}` 
 `;
   };
 
+  /** A stub's parameters, each named _name: they are unused until the method is built (tsc noUnusedParameters) */
+  const unusedParams = (params: string) => {
+    const out: string[] = [];
+    let depth = 0;
+    let start = 0;
+    for (let i = 0; i <= params.length; i++) {
+      const c = params[i];
+      if (c === '{' || c === '<' || c === '(' || c === '[') depth++;
+      else if (c === '}' || (c === '>' && params[i - 1] !== '=') || c === ')' || c === ']') depth--;
+      else if ((c === ',' && depth === 0) || i === params.length) {
+        const one = params.slice(start, i).trim();
+        if (one) out.push(one.replace(/^(\.\.\.)?([A-Za-z]\w*)/, '$1_$2'));
+        start = i + 1;
+      }
+    }
+    return out.join(', ');
+  };
+
   files['service.ts'] = () => {
     const methods = (title: string, list: string[]) => (list.length ? `\n  /* ---------------- ${title} */\n\n${list.join('\n\n')}\n` : '');
     const stub = (what: string) => `{\n    throw notImplemented(${JSON.stringify(what)});\n  }`;
     const api = (mod.publicApi ?? []).map((f) => {
       const s = translateSignature(f.signature, types, `${n}.publicApi.${f.name}`);
-      return `${doc(f.desc, '  ')}  async ${f.name}${s.generics}(${s.params}): Promise<${s.returns}> ${stub(`${n}.${f.name}`)}`;
+      return `${doc(f.desc, '  ')}  async ${f.name}${s.generics}(${unusedParams(s.params)}): Promise<${s.returns}> ${stub(`${n}.${f.name}`)}`;
     });
-    const consumers = consumes.map((c) => `${doc(`${c.name}: ${c.does}`, '  ')}  async ${handlerName(c.name)}(event: EventPayload<${JSON.stringify(c.name)}>): Promise<void> ${stub(`${n} consumer of ${c.name}`)}`);
+    const consumers = consumes.map((c) => `${doc(`${c.name}: ${c.does}`, '  ')}  async ${handlerName(c.name)}(_event: EventPayload<${JSON.stringify(c.name)}>): Promise<void> ${stub(`${n} consumer of ${c.name}`)}`);
     const jobMethods = jobs.map((j) => `${doc(`Job ${j.name} (${j.schedule}): ${j.does}`, '  ')}  async ${jobMethod(j.name)}(): Promise<void> ${stub(`job ${j.name}`)}`);
     const ownTypes = Object.keys(mod.types ?? {}).filter((t) => api.some((x) => new RegExp(`\\b${t}\\b`).test(x)));
     const specImports = [...types.imports].filter((m) => m !== n).sort();
@@ -137,7 +155,7 @@ import type { ${P}Service } from '../service.js';
  * ${common.areas[area]!.title}: ${common.areas[area]!.prefix.replace('{module}', n)}/…  (docs/api/modules/${n}.md)
  * One handler per endpoint of this area in the spec; the compiler rejects missing or extra ones.
  */
-export const ${area}Routes = (service: ${P}Service) =>
+export const ${area}Routes = (_service: ${P}Service) =>
   routes(endpoints, '${area}', {
 ${mod.endpoints
   .filter((e) => e.area === area)
@@ -156,7 +174,7 @@ import type { ${P}Service } from '../service.js';
  * A field without a resolver answers NOT_IMPLEMENTED; fields of this module's own types without
  * @source resolve from the parent object.${sourceFields.length ? `\n *\n * Fields to resolve:\n${sourceFields.map((s) => ` *   ${s.field} → service.${s.fn}`).join('\n')}` : ''}
  */
-export const resolvers = (service: ${P}Service): ModuleResolvers => ({});
+export const resolvers = (_service: ${P}Service): ModuleResolvers => ({});
 `;
   }
 

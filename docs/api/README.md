@@ -1,6 +1,6 @@
 # Marketly API design
 
-Generated from `docs/api/spec/` by `node docs/api/tools/build.mjs`. 33 modules, 1,342 endpoints.
+Generated from `docs/api/spec/` by `node docs/api/tools/build.mjs`. 34 modules, 1,352 endpoints.
 
 - **GraphQL read layer:** [graphql/README.md](graphql/README.md), composed schemas `graphql/schema.{store,seller,admin}.graphql`, screen queries in `graphql/operations/`
 - **OpenAPI 3.1:** [openapi.json](openapi.json) (open in Swagger UI, Redoc or Postman)
@@ -13,7 +13,7 @@ Generated from `docs/api/spec/` by `node docs/api/tools/build.mjs`. 33 modules, 
 |---|---|---|---|---|
 | Store API | `/api/store/{module}` | Customers and guests on the website and the Android app | Every request carries a token: a visitor token (guests, issued when the app opens) or a customer access token. | 270 |
 | Seller API | `/api/seller/{module}` | Seller owners and seller staff in Seller Center (website + Android app) | Seller member session. Every request acts for one seller account; seller member permissions apply. | 273 |
-| Admin API | `/api/admin/{module}` | Internal staff in the Admin Center and Operations Center | Staff session. Role permissions and approval limits apply. | 769 |
+| Admin API | `/api/admin/{module}` | Internal staff in the Admin Center and Operations Center | Staff session. Role permissions and approval limits apply. | 779 |
 | Public API | `/api/public/{module}` | Anyone (sign-in, registration, public settings) | Visitor token of any app. Refresh and sign-out take the refresh token; the bootstrap endpoint takes an app proof. | 21 |
 | Webhooks | `/webhooks/{module}` | Payment, carrier and email providers | Provider signature header, verified per provider | 9 |
 
@@ -28,7 +28,7 @@ Every endpoint needs a token ([../03-auth-middleware.md](../03-auth-middleware.m
 | Store API | `customer` | Signed-in customer | 102 |
 | Store API | `account` | Any signed-in account, any realm (self-service security endpoints) | 11 |
 | Seller API | `seller` | Seller member acting for the seller in the token; optional `permission` narrows it | 273 |
-| Admin API | `staff` | Staff member (email and password sign-in); optional `permission` narrows it | 769 |
+| Admin API | `staff` | Staff member (email and password sign-in); optional `permission` narrows it | 779 |
 | Public API | `visitor` | Any valid token of the app: a visitor token (before sign-in) or a signed-in access token | 18 |
 | Public API | `refresh` | Refresh token only (website: the cookie of the app named by audience in the body; Android: refreshToken in the body) | 2 |
 | Public API | `bootstrap` | No token: an app proof (Play Integrity or bot challenge). Only POST /api/public/identity/app-sessions | 1 |
@@ -40,6 +40,7 @@ Every endpoint needs a token ([../03-auth-middleware.md](../03-auth-middleware.m
 |---|---|---|---|---|
 | [access](modules/access.md) | 1 | What staff may do and how much they may approve: staff roles, the permission registry, role assignments, leads and backups per work area, approval limits per role, approval requests with a second reviewer, and cover while someone is away. Granting access never grants financial authority. | identity | 33 |
 | [audit](modules/audit.md) | 1 | The tamper-evident action history: who did what, in which role, to which record, why, what changed (before and after), which approvals applied and the request id. Every module writes to it through record(); staff read it with filters and authorized exports; retention is a governed setting. | - | 11 |
+| [backups](modules/backups.md) | 1 | Backups of the whole system (database, uploaded files, settings and keys) from the Admin Center: the list of backups on the server, a backup now, downloads, uploads and restores with two-person approval. The server's root backup service (deploy/linux ops.sh) does the work; this module asks it through request files and reports what it did. | access, identity | 10 |
 | [identity](modules/identity.md) | 1 | Who someone is and how they prove it: accounts for customers, seller members and staff, credentials, email verification, sessions and refresh tokens for the website and the Android app, password recovery, 2-step verification, signed-in devices, guest sessions and the security activity log. | - | 46 |
 | [media](modules/media.md) | 1 | Every uploaded or generated file: images, video and documents. Uploads and signed download links, scanning and processing, renditions, alt text, ownership (seller, staff, customer, platform), image standard checks, where each file is used, and the rules for deleting, removing and retaining files (files in use or kept as evidence cannot be deleted). | - | 32 |
 | [notifications](modules/notifications.md) | 1 | Who is told what, on which channel: notification topics for customers, sellers and staff, routing from platform events to recipients (staff by role, with backups), templates with versions and preview, in-app inboxes for the store, Seller Center and Admin Center, email delivery with retries and suppression, seller and staff channel preferences, promotional broadcasts under consent, and Android push devices (phase 3). | identity | 52 |
@@ -110,7 +111,7 @@ Each module needs only modules in earlier layers (required dependencies; optiona
 |---|---|
 | 0 | [audit](modules/audit.md), [identity](modules/identity.md), [inventory](modules/inventory.md), [media](modules/media.md), [reports](modules/reports.md) |
 | 1 | [access](modules/access.md), [catalog](modules/catalog.md), [customers](modules/customers.md), [notifications](modules/notifications.md), [purchasing](modules/purchasing.md) |
-| 2 | [advertising](modules/advertising.md), [content](modules/content.md), [sellers](modules/sellers.md), [settings](modules/settings.md), [trust](modules/trust.md), [workqueues](modules/workqueues.md) |
+| 2 | [advertising](modules/advertising.md), [backups](modules/backups.md), [content](modules/content.md), [sellers](modules/sellers.md), [settings](modules/settings.md), [trust](modules/trust.md), [workqueues](modules/workqueues.md) |
 | 3 | [offers](modules/offers.md) |
 | 4 | [cart](modules/cart.md), [orders](modules/orders.md), [promotions](modules/promotions.md), [search](modules/search.md), [wishlist](modules/wishlist.md) |
 | 5 | [messaging](modules/messaging.md), [payments](modules/payments.md), [reviews](modules/reviews.md), [shipping](modules/shipping.md), [support](modules/support.md), [warehouse](modules/warehouse.md) |

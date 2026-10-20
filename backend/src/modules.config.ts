@@ -10,6 +10,7 @@ export const enabledModules: string[] = [
   // Platform
   'access',
   'audit',
+  'backups',
   'identity',
   'media',
   'notifications',

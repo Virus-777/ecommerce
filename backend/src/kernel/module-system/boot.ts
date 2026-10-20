@@ -186,9 +186,13 @@ export async function bootModules(defs: ModuleDefinition[], k: KernelServices): 
         routes: (...s: RouteSet[]) => sets.push(...s),
         webhookVerifier: (v: WebhookVerifier) => webhookVerifiers.set(name, v),
         files: (route: FileRoute) => {
-          const other = result.fileRoutes.find((r) => r.module !== name);
-          if (other) throw new Error(`${name} serves /files, which ${other.module} already serves`);
-          result.fileRoutes = [{ ...route, module: name }];
+          // several modules may serve files, each its own buckets
+          for (const other of result.fileRoutes.filter((r) => r.module !== name)) {
+            if (!route.buckets || !other.buckets) throw new Error(`${name} and ${other.module} both serve /files: each must name its buckets`);
+            const shared = route.buckets.find((b) => other.buckets!.includes(b));
+            if (shared) throw new Error(`${name} serves files of bucket ${shared}, which ${other.module} already serves`);
+          }
+          result.fileRoutes = [...result.fileRoutes.filter((r) => r.module !== name), { ...route, module: name }];
         },
         sessionCookie: (...ids: string[]) => {
           for (const id of ids) {

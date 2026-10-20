@@ -71,7 +71,7 @@ export async function accessFixture(): Promise<Fixture> {
   const audits: audit.RecordInput[] = [];
   const app = await buildTestApp({
     // the modules whose approval actions and permissions these tests use must be running (the registry lists running modules)
-    modules: withDependencies(['access', 'identity', 'audit', 'settings', 'finance', 'returns', 'support', 'warehouse', 'workqueues', 'purchasing']),
+    modules: withDependencies(['access', 'identity', 'audit', 'settings', 'finance', 'returns', 'support', 'warehouse', 'workqueues', 'purchasing', 'backups']),
     clock,
     config: { rateLimits: false },
     apiStubs: {

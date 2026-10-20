@@ -43,6 +43,7 @@ One JSON file per backend module: `docs/api/spec/modules/<module>.json`.
   "approvalActions": [                     // actions that can need an approval request (access module checks limits)
     { "key": "finance.payouts.release", "desc": "Release a payout run", "limit": "money",   // money | units | percent | none
       "secondReviewer": "above-limit",     // always | above-limit | never
+      "stepUp": "always",                  // optional: approving always needs the approver's password again (purpose approval)
       "approvers": "Finance Manager; Business Owner above $50,000 (example)" }
   ],
   "jobs": [ { "name": "catalog.reindex-stale", "schedule": "every 10 min", "does": "…" } ],   // schedule: "every N min|hours", "hourly", "daily|nightly HH:MM market time", "weekly", "monthly", "on boot"; anything else fails boot

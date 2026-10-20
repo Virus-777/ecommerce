@@ -60,7 +60,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     kind: 'owner',
     workArea: 'Business',
     description: 'Sets approval limits and is the final approver above every limit.',
-    permissions: ['*.view', 'access.limits.approve', 'access.limits.propose', 'access.approvals.view-all', 'audit.entries.*', 'audit.retention.manage', STAFF_UPLOADS, ...QUEUES],
+    permissions: ['*.view', 'access.limits.approve', 'access.limits.propose', 'access.approvals.view-all', 'audit.entries.*', 'audit.retention.manage', 'backups.*', STAFF_UPLOADS, ...QUEUES],
     limits: {}, // permitted without limit for every registered action (added by the registry sync)
   },
   {
@@ -88,10 +88,14 @@ export const SYSTEM_ROLES: SeedRole[] = [
       'audit.entries.view',
       // may propose shortening the retention period (the Business Owner approves audit.retention.change)
       'audit.retention.manage',
+      // backups: sees them and backs up now; approves a Business Owner's restore (downloads and restores are the owner's)
+      'backups.view',
+      'backups.create',
       ...QUEUES,
     ],
     limits: {
       'access.roles.sensitive-grant': PERMITTED,
+      'backups.restore': PERMITTED,
       'settings.changes.apply': { authority: 'permitted_with_second_review', secondReviewerRoleKeys: [PLATFORM_ADMINISTRATOR, BUSINESS_OWNER] },
       'settings.changes.apply-owner': RECOMMEND,
       'audit.retention.change': RECOMMEND,
@@ -385,6 +389,8 @@ export const DEFAULT_ELIGIBLE: Record<string, string[]> = {
   'advertising.rules.change': [BUSINESS_OWNER],
   'advertising.charges.void': ['advertising_manager', 'finance_manager'],
   'audit.retention.change': [BUSINESS_OWNER],
+  // a restore is asked by a Business Owner and approved by a Platform Administrator or another Business Owner
+  'backups.restore': [PLATFORM_ADMINISTRATOR, BUSINESS_OWNER],
   'catalog.products.publication-override': ['catalog_manager', 'trust_and_risk_manager'],
   'content.policies.approve': [BUSINESS_OWNER],
   'content.policies.short-notice': [BUSINESS_OWNER],
@@ -436,6 +442,7 @@ export const MODULE_AREAS: Record<string, string> = {
   access: 'Staff and access',
   identity: 'Staff and access',
   audit: 'Audit',
+  backups: 'Settings',
   settings: 'Settings',
   notifications: 'Notifications',
   reports: 'Reports',
