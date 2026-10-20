@@ -155,6 +155,16 @@ export function base(q: EngineQuery, omit?: FacetOmit): Stage[] {
   ];
 }
 
+/** Just base()'s first stage: it alone decides which documents pass (counts need nothing more) */
+const matchOnly = (q: EngineQuery, omit?: FacetOmit): Stage[] => base(q, omit).slice(0, 1);
+
+/**
+ * One count over the documents that pass base(q, omit): its stages after base, and what they read: document fields
+ * only (base's $match), the matching offers m (+ the $filter), or the card offer eo too (all of base)
+ */
+type CountPart = { omit?: FacetOmit; reads: 'doc' | 'offers' | 'card'; stages: Stage[] };
+const STAGES_FOR: Record<CountPart['reads'], number> = { doc: 1, offers: 2, card: 3 };
+
 /** Text relevance 0..1: the summed weights r of the query's stems found in the document, as r / (r + 1) */
 function textRelevance(q: EngineQuery): unknown {
   if (!q.text?.groups.length) return 0;
@@ -240,6 +250,30 @@ export function createMongoSearchEngine(store: ModuleStore, terms: TermLookup): 
     };
   }
 
+  /**
+   * Runs counts over base(q, omit): counts that read the same documents the same way (their omitted filter isn't set,
+   * the usual case, and they read as far into base) share one pass ($facet); the passes run at once, so the database
+   * spreads them over its threads, and a pass reading document fields only skips the offer stages.
+   */
+  async function countParts(q: EngineQuery, parts: Record<string, CountPart>): Promise<Record<string, Doc[]>> {
+    const passes = new Map<string, { pipeline: Stage[]; names: string[] }>();
+    for (const [name, part] of Object.entries(parts)) {
+      const pipeline = base(q, part.omit).slice(0, STAGES_FOR[part.reads]);
+      const key = JSON.stringify(pipeline, (_k, v: unknown) => (v instanceof RegExp ? v.toString() : v));
+      const pass = passes.get(key) ?? { pipeline, names: [] };
+      pass.names.push(name);
+      passes.set(key, pass);
+    }
+    const out: Record<string, Doc[]> = {};
+    await Promise.all(
+      [...passes.values()].map(async (pass) => {
+        const [r] = await agg<Record<string, Doc[]>>([...pass.pipeline, { $facet: Object.fromEntries(pass.names.map((n) => [n, parts[n]!.stages])) }]);
+        for (const n of pass.names) out[n] = r?.[n] ?? [];
+      }),
+    );
+    return out;
+  }
+
   /** Candidate words for a misspelled word: title words and suggestion term words with its first letter */
   async function candidateWords(word: string): Promise<string[]> {
     const first = word.charAt(0);
@@ -253,21 +287,21 @@ export function createMongoSearchEngine(store: ModuleStore, terms: TermLookup): 
 
     async search(q, sort, weights, window) {
       const pipeline = base(q);
-      if (window.limit <= 0) return { hits: [], total: await count(pipeline) };
+      if (window.limit <= 0) return { hits: [], total: await count(matchOnly(q)) };
       // the count and the page at once (a page of nothing is cheap)
       const [total, found] = await Promise.all([
-        count(pipeline),
+        count(matchOnly(q)),
         agg([...pipeline, ...scoreStages(q, weights), { $sort: ORDER[sort] }, { $skip: window.offset }, { $limit: window.limit }, { $project: { terms: 0, m: 0, offers: 0 } }]),
       ]);
       return { hits: total ? found.map(toHit) : [], total };
     },
 
-    count: (q) => count(base(q)),
+    count: (q) => count(matchOnly(q)),
 
     async summary(q) {
       const pipeline = base(q);
       const [total, [s]] = await Promise.all([
-        count(pipeline),
+        count(matchOnly(q)),
         agg<{ sellers: string[]; official: boolean | null }>([
           ...pipeline,
           { $unwind: '$m' },
@@ -277,68 +311,81 @@ export function createMongoSearchEngine(store: ModuleStore, terms: TermLookup): 
       return { total, sellers: s?.sellers.length ?? 0, official: Boolean(s?.official) };
     },
 
+    async priceRangeCounts(q, ranges) {
+      if (!ranges.length) return [];
+      // the documents with an offer passing the other filters (price left out) and priced within each range: the
+      // same as counting with each range as the price filter, in one pass
+      const within = (r: { min: number | null; max: number | null }) => ({
+        $anyElementTrue: [{ $map: { input: '$m', as: 'o', in: { $and: [...(r.min !== null ? [{ $gte: ['$$o.price', r.min] }] : []), ...(r.max !== null ? [{ $lte: ['$$o.price', r.max] }] : [])] } } }],
+      });
+      const [row] = await agg<Record<string, number>>([...base(q, 'price'), { $group: Object.fromEntries([['_id', null], ...ranges.map((r, i) => [`r${i}`, { $sum: { $cond: [within(r), 1, 0] } }])]) }]);
+      return ranges.map((_, i) => Number(row?.[`r${i}`] ?? 0));
+    },
+
     async facets(q, attributeKeys) {
       const f = q.filters;
+      const brandIds = (await termRows.distinct<string>('target_id', { kind: 'brand', target_id: { $ne: null } })).filter(Boolean);
 
       /** Products per value of an offer field, over the offers that pass the other filters */
-      const offerFacet = (omit: 'seller' | 'condition', field: string) =>
-        agg<{ _id: string | null; n: number }>([...base(q, omit), { $unwind: '$m' }, { $group: { _id: { v: `$m.${field}`, p: '$_id' } } }, { $group: { _id: '$_id.v', n: { $sum: 1 } } }]);
-      type AttrRow = { _id: { k: string; v: string }; n: number };
-      const attrQuery = (keys: string[], omit?: FacetOmit): Promise<AttrRow[]> =>
-        keys.length
-          ? agg<AttrRow>([
-              ...base(q, omit),
-              { $project: { a: { $objectToArray: { $ifNull: ['$attributes', {}] } } } },
-              { $unwind: '$a' },
-              { $match: { 'a.k': { $in: keys }, 'a.v': { $type: 'array' } } },
-              { $unwind: '$a.v' },
-              { $group: { _id: { k: '$a.k', v: '$a.v', p: '$_id' } } },
-              { $group: { _id: { k: '$_id.k', v: '$_id.v' }, n: { $sum: 1 } } },
-            ])
-          : Promise.resolve([]);
+      const perOffer = (field: string): Stage[] => [{ $unwind: '$m' }, { $group: { _id: { v: `$m.${field}`, p: '$_id' } } }, { $group: { _id: '$_id.v', n: { $sum: 1 } } }];
+      const attrStages = (keys: string[]): Stage[] => [
+        { $project: { a: { $objectToArray: { $ifNull: ['$attributes', {}] } } } },
+        { $unwind: '$a' },
+        { $match: { 'a.k': { $in: keys }, 'a.v': { $type: 'array' } } },
+        { $unwind: '$a.v' },
+        { $group: { _id: { k: '$a.k', v: '$a.v', p: '$_id' } } },
+        { $group: { _id: { k: '$_id.k', v: '$_id.v' }, n: { $sum: 1 } } },
+      ];
       const filtered = new Set((f.attributes ?? []).map((a) => a.key));
+      const unfilteredKeys = attributeKeys.filter((k) => !filtered.has(k));
 
-      // every count is its own read of the index: they run at once
-      const [categoryRows, brands, sellerRows, conditionRows, official, [ratingRow], [availRow], [deliveryRow], [priceRow], ...attrRows] = await Promise.all([
-        agg<{ _id: string; n: number }>([...base(q, 'category'), { $unwind: '$category_path_ids' }, { $group: { _id: '$category_path_ids', n: { $sum: 1 } } }]),
-        termRows.distinct<string>('target_id', { kind: 'brand', target_id: { $ne: null } }).then((ids) =>
-          agg<{ _id: string; name: string | null; n: number }>([
-            ...base(q, 'brand'),
-            { $match: { brand_id: { $in: ids.filter(Boolean) } } },
-            { $group: { _id: '$brand_id', name: { $max: '$brand_name' }, n: { $sum: 1 } } },
-            { $sort: { n: -1, name: 1 } },
-          ]),
-        ),
-        offerFacet('seller', 'seller_id'),
-        offerFacet('condition', 'condition'),
-        count([...base(q, 'seller'), { $match: { 'm.official': true } }]),
-        agg<Record<string, number>>([
-          ...base(q, 'rating'),
-          { $group: Object.fromEntries([['_id', null], ...[1, 2, 3, 4, 5].map((n) => [`r${n}`, { $sum: { $cond: [{ $gte: ['$rating', n] }, 1, 0] } }])]) },
-        ]),
-        agg<{ in_stock: number; total: number }>([...base(q, 'availability'), { $group: { _id: null, in_stock: { $sum: { $cond: ['$eo.in_stock', 1, 0] } }, total: { $sum: 1 } } }]),
+      // each count over the documents that pass the other filters (its own left out), and what it reads (CountPart)
+      const parts: Record<string, CountPart> = {
+        categories: { omit: 'category', reads: 'doc', stages: [{ $unwind: '$category_path_ids' }, { $group: { _id: '$category_path_ids', n: { $sum: 1 } } }] },
+        brands: { omit: 'brand', reads: 'doc', stages: [{ $match: { brand_id: { $in: brandIds } } }, { $group: { _id: '$brand_id', name: { $max: '$brand_name' }, n: { $sum: 1 } } }, { $sort: { n: -1, name: 1 } }] },
+        sellers: { omit: 'seller', reads: 'offers', stages: perOffer('seller_id') },
+        official: { omit: 'seller', reads: 'offers', stages: [{ $match: { 'm.official': true } }, { $count: 'n' }] },
+        conditions: { omit: 'condition', reads: 'offers', stages: perOffer('condition') },
+        ratings: { omit: 'rating', reads: 'doc', stages: [{ $group: Object.fromEntries([['_id', null], ...[1, 2, 3, 4, 5].map((n) => [`r${n}`, { $sum: { $cond: [{ $gte: ['$rating', n] }, 1, 0] } }])]) }] },
+        availability: { omit: 'availability', reads: 'card', stages: [{ $group: { _id: null, in_stock: { $sum: { $cond: ['$eo.in_stock', 1, 0] } }, total: { $sum: 1 } } }] },
         // free delivery and ships today count products with such an offer among those passing the other filters (m)
-        agg<{ free: number; today: number }>([
-          ...base(q, 'delivery'),
-          {
-            $group: {
-              _id: null,
-              free: { $sum: { $cond: [{ $in: [true, '$m.free_delivery'] }, 1, 0] } },
-              today: {
-                $sum: {
-                  $cond: [{ $and: [{ $in: [0, '$m.dispatch_days'] }, { $or: [{ $eq: [{ $ifNull: ['$same_day_cutoff', null] }, null] }, { $gt: ['$same_day_cutoff', q.marketTime] }] }] }, 1, 0],
+        delivery: {
+          omit: 'delivery',
+          reads: 'offers',
+          stages: [
+            {
+              $group: {
+                _id: null,
+                free: { $sum: { $cond: [{ $in: [true, '$m.free_delivery'] }, 1, 0] } },
+                today: {
+                  $sum: {
+                    $cond: [{ $and: [{ $in: [0, '$m.dispatch_days'] }, { $or: [{ $eq: [{ $ifNull: ['$same_day_cutoff', null] }, null] }, { $gt: ['$same_day_cutoff', q.marketTime] }] }] }, 1, 0],
+                  },
                 },
               },
             },
-          },
-        ]),
-        agg<{ min: number | null; max: number | null }>([...base(q, 'price'), { $group: { _id: null, min: { $min: '$eo.price' }, max: { $max: '$eo.price' } } }]),
+          ],
+        },
+        price: { omit: 'price', reads: 'card', stages: [{ $group: { _id: null, min: { $min: '$eo.price' }, max: { $max: '$eo.price' } } }] },
         // attributes: the unfiltered ones together, each filtered one without its own filter
-        attrQuery(attributeKeys.filter((k) => !filtered.has(k))),
-        ...attributeKeys.filter((k) => filtered.has(k)).map((k) => attrQuery([k], `attr:${k}`)),
-      ]);
+        ...(unfilteredKeys.length ? { attr: { reads: 'doc' as const, stages: attrStages(unfilteredKeys) } } : {}),
+        ...Object.fromEntries(attributeKeys.filter((k) => filtered.has(k)).map((k) => [`attr:${k}`, { omit: `attr:${k}` as FacetOmit, reads: 'doc' as const, stages: attrStages([k]) }])),
+      };
+      const rows = await countParts(q, parts);
+      type Row = Record<string, any>;
+      const one = (name: string): Row | undefined => rows[name]?.[0];
 
-      const categories = new Map(categoryRows.map((r) => [r._id, r.n]));
+      const categories = new Map((rows.categories as Row[]).map((r) => [r._id, r.n]));
+      type AttrRow = { _id: { k: string; v: string }; n: number };
+      const attrRows = Object.keys(rows).filter((n) => n === 'attr' || n.startsWith('attr:')).map((n) => rows[n] as AttrRow[]);
+      const sellerRows = rows.sellers as { _id: string | null; n: number }[];
+      const conditionRows = rows.conditions as { _id: string | null; n: number }[];
+      const brands = rows.brands as { _id: string; name: string | null; n: number }[];
+      const official = Number(one('official')?.n ?? 0);
+      const ratingRow = one('ratings');
+      const availRow = one('availability');
+      const deliveryRow = one('delivery');
+      const priceRow = one('price');
       const attributes = new Map<string, Map<string, number>>();
       for (const r of attrRows.flat() as AttrRow[]) {
         const m = attributes.get(r._id.k) ?? new Map<string, number>();

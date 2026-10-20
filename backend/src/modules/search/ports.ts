@@ -125,6 +125,11 @@ export interface SearchEngine {
   /** Total, distinct sellers and whether the Official Store is among them */
   summary(q: EngineQuery): Promise<{ total: number; sellers: number; official: boolean }>;
   facets(q: EngineQuery, attributeKeys: string[]): Promise<FacetCounts>;
+  /**
+   * For each price range (minor units, null = open), how many results the query gives with that range as its price
+   * filter (its own price filter left out). Optional: without it the service counts each range with count().
+   */
+  priceRangeCounts?(q: EngineQuery, ranges: readonly { min: number | null; max: number | null }[]): Promise<number[]>;
   /** Most similar known word (titles, brands, categories, popular queries) above the threshold, null when the word is known */
   correctWord(word: string, threshold: number): Promise<string | null>;
   /** Whether a known word (titles, brands, categories, popular queries) starts with this text */

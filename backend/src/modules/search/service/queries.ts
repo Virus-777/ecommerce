@@ -474,14 +474,14 @@ export class SearchQueries extends SearchIndexer {
       { min: bounds.at(-1)!, max: null, label: `${amount(bounds.at(-1)!)} and above` },
     ];
     const { priceMin: _min, priceMax: _max, ...others } = f;
-    const values = await Promise.all(
-      ranges.map(async (r): Promise<FacetValue> => {
-        const filters = { ...others, ...(r.min !== null ? { priceMin: r.min } : {}), ...(r.max !== null ? { priceMax: r.max } : {}) };
-        const { total } = await this.engine.summary({ ...p.engineQuery, filters });
-        const selected = (f.priceMin ?? null) === r.min && (f.priceMax ?? null) === r.max;
-        return { value: `${r.min ?? ''}-${r.max ?? ''}`, label: r.label, count: total, selected, priceMin: r.min, priceMax: r.max };
-      }),
-    );
+    // one pass for every range when the engine can; otherwise a count with each range as the price filter
+    const counts = this.engine.priceRangeCounts
+      ? await this.engine.priceRangeCounts(p.engineQuery, ranges)
+      : await Promise.all(ranges.map((r) => this.engine.count({ ...p.engineQuery, filters: { ...others, ...(r.min !== null ? { priceMin: r.min } : {}), ...(r.max !== null ? { priceMax: r.max } : {}) } })));
+    const values = ranges.map((r, i): FacetValue => {
+      const selected = (f.priceMin ?? null) === r.min && (f.priceMax ?? null) === r.max;
+      return { value: `${r.min ?? ''}-${r.max ?? ''}`, label: r.label, count: counts[i] ?? 0, selected, priceMin: r.min, priceMax: r.max };
+    });
     return values.filter((v) => v.count > 0 || v.selected);
   }
 
@@ -923,9 +923,9 @@ export class SearchQueries extends SearchIndexer {
   async resultSet(query: SearchQuery & { exact?: boolean; postalCode?: string; searchId?: string }, mode: Mode, page: PageRequest, session?: SearchSession): Promise<SearchResultSet> {
     const p = await this.prepare(query, mode, { strictSort: true });
     const window = windowOf(page);
-    const { cards, total } = await this.results(p, window);
     const searchId = query.searchId || newId();
-    const context = await this.context(p, searchId);
+    // the results and everything around them (facets, store match…) don't depend on each other: read them at once
+    const [{ cards, total }, context] = await Promise.all([this.results(p, window), this.context(p, searchId)]);
     if (window.offset === 0 && !query.searchId && mode.kind === 'search') await this.record(p, context, session);
     return {
       context,
