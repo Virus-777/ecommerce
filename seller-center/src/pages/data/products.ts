@@ -27,6 +27,8 @@ export interface ProductRow {
   icon: IconName;
   tint: string;
   price: Money | null;
+  /** The seller's unit cost in force today (private; null when none is set or there is no offer). */
+  unitCost: Money | null;
   stock: number | null;
   stockState?: StockState;
   condition: string;
@@ -81,6 +83,7 @@ export function rowFromOffer(r: SellerOfferRow): ProductRow {
     icon: iconFor(o.productTitle),
     tint: '2',
     price: o.price,
+    unitCost: r.unitCost ?? null,
     stock: r.stock.available,
     stockState: r.stock.state,
     condition: conditionLabel(o.condition),
@@ -138,6 +141,7 @@ export function rowFromProduct(p: ProductAdmin): ProductRow {
     icon: iconFor(pr.title, ...(pr.categoryPath ?? [])),
     tint: '3',
     price: null,
+    unitCost: null,
     stock: null,
     condition: 'New',
     review,
