@@ -1,6 +1,6 @@
 // API helpers shared by the admin seller screens (Sellers list, Seller 360, Seller application review).
 // Data: GET /api/admin/sellers/sellers (+ /stats, /{id}), /applications (+ /{id}), the AdminSeller screen query.
-import { useEffect, useRef, useState } from 'react';
+export { useDebounced, useInView } from '@marketly/web-shared/lib/hooks';
 import type { components } from '@marketly/web-shared/api';
 import type { Tint } from '@marketly/web-shared/data/fixtures';
 import { formatMoney, type MoneyValue, initials, tileTint } from '@marketly/web-shared/lib/format';
@@ -104,33 +104,6 @@ export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 export const CLOSED_GROUP = new Set(['DELIVERED', 'CANCELLED', 'COMPLETED', 'REFUNDED', 'RETURNED', 'CLOSED', 'SHIPPED', 'IN_TRANSIT']);
 /** Return statuses that are finished. */
 export const CLOSED_RETURN = new Set(['REJECTED', 'REFUNDED', 'CLOSED', 'CANCELLED', 'WITHDRAWN', 'COMPLETED', 'EXPIRED']);
-
-/** Input value that follows `value` after `ms` without changes. */
-export function useDebounced<T>(value: T, ms = 300): T {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setV(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return v;
-}
-
-/** Calls `onVisible` when the returned element scrolls into view (phone "load more"). */
-export function useInView<T extends HTMLElement>(onVisible: () => void, enabled: boolean) {
-  const ref = useRef<T | null>(null);
-  const cb = useRef(onVisible);
-  cb.current = onVisible;
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || !enabled || typeof IntersectionObserver === 'undefined') return;
-    const io = new IntersectionObserver((es) => {
-      if (es.some((e) => e.isIntersecting)) cb.current();
-    });
-    io.observe(el);
-    return () => io.disconnect();
-  }, [enabled]);
-  return ref;
-}
 
 /** Today + n days as YYYY-MM-DD in Pacific time (date inputs). */
 export const isoDay = (daysFromToday: number) => new Date(Date.now() + daysFromToday * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });

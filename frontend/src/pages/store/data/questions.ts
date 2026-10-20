@@ -1,8 +1,8 @@
 // API access for product questions and answers (store/questions and the Q&A block of store/product):
 // questions with answers (server-side search, answered/awaiting filter and sort, page numbers or cursor), asking a question,
 // answering another shopper's question and editing that answer, and who answered (role labels).
+export { useDebounced } from '@marketly/web-shared/lib/hooks';
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
 import { call, useApi, type components } from '@marketly/web-shared/api';
 import type { IconName, Tone } from '@marketly/web-shared/ui';
 import { OFFICIAL_STORE_ID } from './product';
@@ -100,12 +100,3 @@ export function useEditMyAnswer() {
   });
 }
 
-/** The value after it stopped changing for `ms` (search as you type). */
-export function useDebounced<T>(value: T, ms = 300): T {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setV(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return v;
-}

@@ -1,9 +1,10 @@
 // Seller orders and shipping (design: pages/seller/seller-orders*.html, seller-order*.html, seller-shipping.html).
 // API types, the SellerOrderDetail screen query, Pacific-time formatting and the small helpers the Orders,
 // Order and Shipping screens share. Data: docs/api/modules/orders.md (seller fulfilment), shipping.md, messaging.md.
+export { useDebounced, useInView } from '@marketly/web-shared/lib/hooks';
 import { download as downloadFile, waitForExport as waitForJob } from '@marketly/web-shared/lib/exports';
 import { fromZonedInput } from '@marketly/web-shared/lib/dates';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { components } from '@marketly/web-shared/api';
 import { href } from '@marketly/web-shared/routes';
 import SELLER_ORDER_DETAIL_TEXT from '@marketly/web-shared/api/graphql/seller/SellerOrderDetail.graphql?raw';
@@ -88,31 +89,6 @@ export function useNow(ms = 30_000): number {
     return () => clearInterval(t);
   }, [ms]);
   return now;
-}
-
-/** The value, settled for `ms` before it changes (search boxes). */
-export function useDebounced<T>(value: T, ms = 300): T {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setV(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return v;
-}
-
-/** Calls `onVisible` when the element scrolls into view (phone "load more"). */
-export function useInView<T extends HTMLElement>(onVisible: () => void, active: boolean) {
-  const ref = useRef<T>(null);
-  const cb = useRef(onVisible);
-  cb.current = onVisible;
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || !active) return;
-    const io = new IntersectionObserver(([e]) => e.isIntersecting && cb.current());
-    io.observe(el);
-    return () => io.disconnect();
-  }, [active]);
-  return ref;
 }
 
 /* ------------------------------------------------------------------ orders */

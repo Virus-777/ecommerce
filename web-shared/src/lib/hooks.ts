@@ -112,3 +112,31 @@ export function useElementWidth<T extends HTMLElement>(): [RefObject<T | null>, 
   }, []);
   return [ref, width];
 }
+
+/** `value` once it has stopped changing for `ms` (search boxes: one request after typing, not one per key). */
+export function useDebounced<T>(value: T, ms = 300): T {
+  const [v, setV] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setV(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return v;
+}
+
+/**
+ * Calls onVisible when the element comes within 200px of the viewport (the next page of a phone list loads before
+ * the reader reaches the end). Does nothing where the browser has no IntersectionObserver.
+ */
+export function useInView<T extends HTMLElement>(onVisible: () => void, enabled: boolean): RefObject<T | null> {
+  const ref = useRef<T | null>(null);
+  const cb = useRef(onVisible);
+  cb.current = onVisible;
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || !enabled || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && cb.current(), { rootMargin: '200px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [enabled]);
+  return ref;
+}

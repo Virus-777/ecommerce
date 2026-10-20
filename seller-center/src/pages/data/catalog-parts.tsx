@@ -1,10 +1,10 @@
 // Shared pieces of the Seller Center catalog, offer and inventory screens (Products, CatalogMatch,
 // ProductNew, Offer, Inventory, BulkUpdate): load/skeleton states, labels for API enums, money input
 // helpers, dates, CSV and export downloads, the seller-visible settings.
+export { useDebounced, useInView } from '@marketly/web-shared/lib/hooks';
 import { waitForExport as waitForJob } from '@marketly/web-shared/lib/exports';
 import { parseCents, CONDITION_LABEL, type Condition } from '@marketly/web-shared/lib/format';
 import { shortDate } from '@marketly/web-shared/lib/dates';
-import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { call, errorMessage, useApi, type components } from '@marketly/web-shared/api';
 import { Alert, Button, type IconName } from '@marketly/web-shared/ui';
@@ -73,31 +73,6 @@ export function FormSkeleton({ cards = 3 }: { cards?: number }) {
       ))}
     </div>
   );
-}
-
-/** The value, settled for `ms` before it changes (search boxes). */
-export function useDebounced<T>(value: T, ms = 300) {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setV(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return v;
-}
-
-/** Calls `onVisible` when the returned element scrolls into view (phone lists load the next page). */
-export function useInView<T extends HTMLElement>(onVisible: () => void, enabled: boolean) {
-  const ref = useRef<T | null>(null);
-  const cb = useRef(onVisible);
-  cb.current = onVisible;
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || !enabled || typeof IntersectionObserver === 'undefined') return;
-    const io = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && cb.current(), { rootMargin: '200px' });
-    io.observe(el);
-    return () => io.disconnect();
-  }, [enabled]);
-  return ref;
 }
 
 /* ---------------- labels for API enums ---------------- */

@@ -1,5 +1,6 @@
+import { useDebounced } from '@marketly/web-shared/lib/hooks';
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { call, useApi } from '@marketly/web-shared/api';
 import { useSession } from '@/app/session';
@@ -18,15 +19,6 @@ import { iconFor, LoadError, SkLines, SkRows } from './data/states';
 // target of the API's topic breadcrumbs): there is no topic page.
 
 const CONTACT_ICON: Record<'email' | 'phone' | 'messages', IconName> = { email: 'mail', phone: 'phone', messages: 'message-circle' };
-
-const useDebounced =(v: string, ms = 300) => {
-  const [d, setD] = useState(v);
-  useEffect(() => {
-    const t = setTimeout(() => setD(v), ms);
-    return () => clearTimeout(t);
-  }, [v, ms]);
-  return d;
-};
 
 export default function Center() {
   const { api } = useApi();

@@ -1,4 +1,5 @@
-import { useEffect, useState, type MouseEvent } from 'react';
+import { useDebounced } from '@marketly/web-shared/lib/hooks';
+import { type MouseEvent } from 'react';
 import { Link } from 'react-router';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { call, useApi } from '@marketly/web-shared/api';
@@ -13,15 +14,6 @@ import { productHref } from './search';
 // The search suggestions panel under the header search field (design: store-search--suggestions-open):
 // GET /api/store/search/suggestions while typing, GET /api/store/search/recent-searches when the field
 // is empty, and removing recent searches (DELETE …/recent-searches[/{id}]).
-
-function useDebounced<T>(value: T, ms: number): T {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setV(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return v;
-}
 
 const searchHref = (q: string, extra?: Record<string, string>) => href('store/search', '', undefined, { q, ...extra });
 

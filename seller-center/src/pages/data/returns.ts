@@ -1,5 +1,5 @@
+export { useDebounced, useInView } from '@marketly/web-shared/lib/hooks';
 import { date, shortDate } from '@marketly/web-shared/lib/dates';
-import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ApiError, useApi, type components } from '@marketly/web-shared/api';
 import SELLER_RETURN_DETAIL from '@marketly/web-shared/api/graphql/seller/SellerReturnDetail.graphql?raw';
@@ -88,30 +88,6 @@ export const toMinor = (s: string): number => parseCents(s) ?? NaN;
 export const human = (s?: string | null) => humanize(s);
 
 /* ------------------------------------------------------------------ hooks */
-
-export function useDebounced<T>(value: T, ms = 300): T {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setV(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return v;
-}
-
-/** Calls onVisible when the element scrolls into view (phone lazy loading). */
-export function useInView<T extends HTMLElement>(onVisible: () => void, enabled: boolean) {
-  const ref = useRef<T | null>(null);
-  const cb = useRef(onVisible);
-  cb.current = onVisible;
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || !enabled || typeof IntersectionObserver === 'undefined') return;
-    const io = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && cb.current(), { rootMargin: '200px' });
-    io.observe(el);
-    return () => io.disconnect();
-  }, [enabled]);
-  return ref;
-}
 
 /* ------------------------------------------------------------------ return case (GraphQL SellerReturnDetail) */
 
