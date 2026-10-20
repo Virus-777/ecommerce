@@ -1,7 +1,8 @@
 # Plan: faster MongoDB search for tens of thousands of products
 
-Status: plan, not built (2026-10-20). Scope: the MongoDB search engine (`backend/src/modules/search/mongo-engine.ts`),
-the search copy it reads (`search_documents`, `search_offers`) and a few service steps in `service/queries.ts`.
+Status (2026-10-20): **steps 1–4 built** on branch `perf/search-speed` (see §8 for results and what differed from the
+plan); step 5 not started. Scope: the MongoDB search engine (`backend/src/modules/search/mongo-engine.ts`), the
+search copy it reads (`search_documents`, `search_offers`) and a few service steps in `service/queries.ts`.
 No API changes: the store website and the Android app keep calling the same endpoints and get the same answers.
 
 ## 1. What is slow, measured
@@ -136,3 +137,43 @@ fallback. The ranking formula doesn't change, so OpenSearch's twin ranking scrip
 ## 7. Size
 
 Steps 1–4: about 3–4 days of work including tests. Step 5 only if the benchmark says so.
+
+## 8. Results (steps 1–4, 2026-10-20)
+
+`npm run bench:search`, same machine. The machine's speed varies by up to about 2× between runs (other work on it),
+so compare within a column; step 3 was also checked side by side on one catalog.
+
+| Request (50,000 products) | Before | After steps 1–4 |
+|---|---|---|
+| Specific search | 7 ms | 14 ms (noise level) |
+| Two words | 57 ms | 19 ms |
+| Broad word ("wireless") | 700 ms | 61 ms |
+| Very common word ("battery") | 4,824 ms | 359 ms |
+| Broad word, price low to high | 730 ms | 62 ms |
+| Typo ("wirelss") | 826 ms | 154 ms |
+| Category page: product list | 6,627 ms | 596 ms |
+| Category page: filter counts | 19,230 ms | 1,205 ms |
+| Broad word: filter counts | 1,293 ms | 80 ms |
+| Category with a price filter, by price | 6,164 ms | 247 ms |
+| Suggestions while typing | 638 ms | 14 ms |
+
+The benchmark's category holds all 50,000 products (the worst case); a real category page is proportionally faster.
+
+What differed from the plan:
+
+- **Step 3** went further than planned: since step 2, base()'s first `$match` alone decides which documents pass, so
+  every count reads only that stage. Filter counts that read the same documents the same way share a pass; passes
+  that read document fields only (category, brand, rating, attributes) skip the offer work, and the passes run at once
+  (one big combined pass was slower: it runs on one thread). Spelling correction keeps its count-first order — that
+  count is now cheap. GraphQL search reads results and filter counts at once, but still always computes the filter
+  counts (computing them only when selected was left out: the saving is small now).
+- **Step 4** needed no word-list collection: typo candidates are gathered as distinct words in the database.
+  Behaviour change, as planned: with enough prefix matches, a title that is only similar to the typed text no longer
+  outranks them.
+- **Found, not changed:** the "In stock" filter count counts products whose card offer is in stock. The card prefers
+  the featured offer even when it is out of stock, so the count can be below what selecting "In stock" returns.
+  Fixing it means changing the facet in both engines.
+
+What is left at 50,000 products in one category: choosing each product's card offer (~0.3 s) and scoring and
+sorting every product for the "Recommended" order (~0.3 s). Step 5's stored card offer and stored ranking factors
+address both, if needed.
