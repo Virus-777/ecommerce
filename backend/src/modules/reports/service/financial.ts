@@ -86,7 +86,9 @@ const sumOf = (rows: CompanyRow[], source: string, kind?: string) => rows.filter
  *
  * finance books `buying_cost` when stock is received from a supplier: that is stock bought, not the cost of what was
  * sold, so it shows as trading.stock_bought and is not taken off the margin. finance's `discount` lines are shown but
- * not taken off either, because the sales above are already after customer discounts.
+ * not taken off either, because the sales above are already after customer discounts. finance's `cost_of_goods` lines
+ * (the cost it books with each Official Store sale, for GET /api/admin/finance/trading) are ignored here on purpose:
+ * the cost of goods sold comes from the order facts above, and taking finance's too would count it twice.
  * `sales` is the shown Official Store sales figure (Queries.gross: tax included when prices include it).
  */
 function tradingFigures(sales: number, s: SalesAgg, rows: CompanyRow[]): Figures {

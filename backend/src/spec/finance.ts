@@ -1252,6 +1252,7 @@ export const FinanceOverview: z.ZodType<FinanceOverview> = z.object({
 export interface TradingDay {
   date: string;
   sales: common.Money;
+  /** Sales less the cost of goods sold of the day */
   margin: common.Money;
 }
 
@@ -1333,11 +1334,21 @@ export const TradingTargetProgress: z.ZodType<TradingTargetProgress> = z.object(
 
 export interface TradingSummary {
   range: common.DateRange;
-  /** e.g. weighted average buying cost at receipt */
+  /** How costOfGoodsSold is valued, e.g. weighted average buying cost when the order was accepted */
   costBasis: string;
+  /** Official Store item sales before discounts, less cancellations, by booking day */
   productSales: common.Money;
+  /** Unit cost (inventory weighted average buying cost) × quantity of the items sold, booked when the order is accepted and reversed in proportion on cancellation. Items with no unit cost add nothing: see uncostedSales */
+  costOfGoodsSold: common.Money;
+  /** The part of productSales whose items had no unit cost when sold (inventory off or no cost recorded): counted in the margin with no cost */
+  uncostedSales: common.Money;
+  /** Buying cost of goods received from suppliers and other buying costs booked (purchasing receipts). Stock bought, not the cost of what was sold: never taken off the margin */
+  stockBought: common.Money;
+  /** Deprecated: equals costOfGoodsSold (until 2026-10-21 it was the stock bought). Read costOfGoodsSold or stockBought */
   buyingCost: common.Money;
+  /** productSales − costOfGoodsSold */
   grossMargin: common.Money;
+  /** grossMargin as % of productSales */
   grossMarginPct: number;
   /** Company-funded discounts on Official Store items */
   discounts: common.Money;
@@ -1345,6 +1356,7 @@ export interface TradingSummary {
   returnsCost: common.Money;
   writeOffs: common.Money;
   chargebackLosses: common.Money;
+  /** grossMargin − discounts − shippingExpense − returnsCost − writeOffs − chargebackLosses + supplier credits */
   netMargin: common.Money;
   returnsPctOfSales: number;
   /** Change of returnsPctOfSales vs the prior period of the same length, in percentage points (negative = fewer returns) */
@@ -1359,8 +1371,17 @@ export const TradingSummary: z.ZodType<TradingSummary> = z.object({
   get range() {
     return common.DateRange;
   },
-  costBasis: z.string().describe("e.g. weighted average buying cost at receipt"),
+  costBasis: z.string().describe("How costOfGoodsSold is valued, e.g. weighted average buying cost when the order was accepted"),
   get productSales() {
+    return common.Money;
+  },
+  get costOfGoodsSold() {
+    return common.Money;
+  },
+  get uncostedSales() {
+    return common.Money;
+  },
+  get stockBought() {
     return common.Money;
   },
   get buyingCost() {
@@ -1369,7 +1390,7 @@ export const TradingSummary: z.ZodType<TradingSummary> = z.object({
   get grossMargin() {
     return common.Money;
   },
-  grossMarginPct: z.number(),
+  grossMarginPct: z.number().describe("grossMargin as % of productSales"),
   get discounts() {
     return common.Money;
   },
@@ -2111,17 +2132,17 @@ export interface FinancePublicApi {
   withdrawSellerCredit(input: { creditId?: string, idempotencyKey?: string, reason: string }): Promise<SellerCredit>;
   /** Another module reports a money difference it found in its own books for the daily check (wallet: a customer balance that differs from its ledger sum). Creates an open reconciliation item on today's day for check store_credit (finance.reconciliation.mismatch_found); the same key returns the existing item, and a later report with expected = actual matches it (finance.reconciliation.item_closed) Used by: wallet. */
   recordExternalDifference(input: { check: 'store_credit', subject: string, description: string, expected: common.Money, actual: common.Money, reference?: Reference, key: string }): Promise<ReconItem>;
-  /** Company trading costs for the Official Store margin Used by: purchasing, inventory, shipping, warehouse. */
+  /** Company trading costs for the Official Store. buying_cost is stock bought (goods received from a supplier): getTrading shows it as stockBought and never takes it off the margin, which uses the cost of goods sold booked when an order is accepted Used by: purchasing, inventory, shipping, warehouse. */
   recordCompanyCost(input: { kind: 'buying_cost' | 'shipping_expense' | 'return_loss' | 'write_off' | 'supplier_credit', amount: common.Money, reference: Reference, at: string }): Promise<void>;
   /** Whether a seller can be paid (verified destination, no full hold) Used by: sellers. */
   hasPayoutBlock(sellerId: string): Promise<{ blocked: boolean, reasons: string[] }>;
   /** Fee income per seller per market day (commission and fees charged, fee refunds, net, ad income), from fee_charges and ledger_entries. Company revenue only; seller sales are not income. Used by: reports. */
   marketplaceIncomeByDay(range: common.DateRange, sellerId?: string): Promise<DailySellerIncome[]>;
-  /** Official Store trading costs per market day and kind (buying cost, Official Store discounts, shipping expense, return losses, write-offs, chargeback losses, supplier credits), from what recordCompanyCost and the order and claim events record in trading_entries. Costs are positive; reversals are negative; supplier credits are positive amounts that lower cost. Used by: reports. */
+  /** Official Store trading costs per market day and kind (buying cost = stock bought, Official Store discounts, shipping expense, return losses, write-offs, chargeback losses, supplier credits), from what recordCompanyCost and the order and claim events record in trading_entries. Costs are positive; reversals are negative; supplier credits are positive amounts that lower cost. The cost of goods sold (trading_entries kind cost_of_goods) is not a booked cost and is left out. Used by: reports. */
   companyCostsByDay(range: common.DateRange): Promise<DailyCompanyCost[]>;
   /** Seller ledger entries summed per seller, market day of at and entry type (amounts signed as in the ledger, e.g. marketplace_fee negative), for the reports finance facts (docs/09 §3.2). One aggregation on the (type, at) index, or (seller_id, at) for one seller Used by: reports. */
   ledgerDailyTotals(range: { from: string, to: string, sellerId?: string }): Promise<{ sellerId: string, day: string, type: string, amount: common.Money, count: number }[]>;
-  /** Company money per market day: Official Store trading_entries by kind as stored (sale, buying_cost, discount, shipping_expense, return, write_off, chargeback_loss, supplier_credit), platform_costs by kind (signed: costs positive, recoveries negative) and coupon discount_funding by funder (kind platform or seller, reversals negative) on marketplace seller items only: funding on Official Store items is already in the trading discount Used by: reports. */
+  /** Company money per market day: Official Store trading_entries by kind as stored (sale, cost_of_goods, buying_cost, discount, shipping_expense, return, write_off, chargeback_loss, supplier_credit; buying_cost is stock bought, cost_of_goods the cost of the items sold), platform_costs by kind (signed: costs positive, recoveries negative) and coupon discount_funding by funder (kind platform or seller, reversals negative) on marketplace seller items only: funding on Official Store items is already in the trading discount Used by: reports. */
   companyDailyTotals(range: { from: string, to: string }): Promise<{ day: string, source: 'trading' | 'platform_cost' | 'discount_funding', kind: string, amount: common.Money }[]>;
   /** Fee charges (fee_charges) whose fee, refunded fee or status changed at or after since, oldest change first, keyset-paged by (changed_at, id): pass the cursor of the last row as after for the next page; at most limit (1-1000) rows Used by: reports. */
   itemFeesChangedSince(input: { since: string, after?: string, limit: number }): Promise<{ orderItemId: string, sellerId: string, fee: common.Money, refundedFee: common.Money, changedAt: string, cursor: string }[]>;
@@ -2411,11 +2432,11 @@ export interface FinanceDb {
     pdf_media_id: string | null;
     csv_media_id: string | null;
   };
-  /** Company trading facts for the Official Store (never part of seller payouts). Marketplace (platform) facts live in captures, discount_funding, platform_costs and store_credit_liability, never here */
+  /** Company trading facts for the Official Store (never part of seller payouts). cost_of_goods is the unit cost × quantity of an item sold, booked with its sale (ref_kind order_item) and reversed with a cancellation (ref_kind cancellation); ref_kind cost_pending marks a sale booked before cost_of_goods existed whose cost is still to be filled. buying_cost is stock bought (goods received), never the cost of what was sold. Marketplace (platform) facts live in captures, discount_funding, platform_costs and store_credit_liability, never here */
   trading_entries: {
     id: string;
     at: Date;
-    kind: 'sale' | 'buying_cost' | 'discount' | 'shipping_expense' | 'return' | 'write_off' | 'chargeback_loss' | 'supplier_credit';
+    kind: 'sale' | 'cost_of_goods' | 'buying_cost' | 'discount' | 'shipping_expense' | 'return' | 'write_off' | 'chargeback_loss' | 'supplier_credit';
     amount: number;
     currency: string;
     order_id: string | null;
@@ -2852,7 +2873,8 @@ export const endpoints = defineEndpoints({
     auth: "staff",
     permission: "finance.trading.view",
     scope: "staff",
-    summary: "Company trading: product sales, buying cost, discounts, shipping, returns and margin",
+    summary: "Company trading: product sales, cost of goods sold, stock bought, discounts, shipping, returns and margin",
+    desc: "The margin uses the cost of goods sold (booked when an order is accepted), never the stock bought: a goods receipt raises stockBought and leaves the margin alone.",
     query: () =>
       z.object({
         from: z.iso.date(),
@@ -4186,8 +4208,8 @@ export const spec = defineModuleSpec({
       "finance.reconciliation.item_closed": { when: "A reconciliation item is matched (automatically or by a later event), explained or corrected", payload: () => FinanceReconciliationItemClosedEvent },
     },
     consumes: {
-      "orders.order.accepted": "Create pending earnings lots and fee charges per seller item (sale, shipping charged, seller-funded discount, fee); Official Store items go to trading_entries",
-      "orders.item.cancelled": "Reverse the lot; apply the cancellation fee treatment. Before dispatch the shipping stays with the seller while the rest of the package ships; once every item of the package is cancelled, the shipping credited with each of its sales (the customer's and Marketly's) is reversed, once per lot. After dispatch the item's refunded shipping is reversed with it",
+      "orders.order.accepted": "Create pending earnings lots and fee charges per seller item (sale, shipping charged, seller-funded discount, fee); Official Store items go to trading_entries (sale, discount, shipping charged and, when inventory knows the unit cost, cost_of_goods)",
+      "orders.item.cancelled": "Reverse the lot; apply the cancellation fee treatment. Before dispatch the shipping stays with the seller while the rest of the package ships; once every item of the package is cancelled, the shipping credited with each of its sales (the customer's and Marketly's) is reversed, once per lot. After dispatch the item's refunded shipping is reversed with it. Official Store items: the sale, discount and shipping trading entries are reversed, and the cost_of_goods in proportion to the item amount cancelled",
       "orders.item.delivered": "Start the availability clock for the item's lot",
       "payments.payment.captured": "Record collected money for reconciliation (payments vs orders): card amount plus creditAmount (store credit) per capture, including captures with amount 0 for orders or groups paid entirely by store credit; the daily check compares card captures plus credit with the order total less cancelled items, so mixed and credit-only payments are not mismatches",
       "returns.refund.approved": "Store the funding split (seller, platform, shared) for the refund",
@@ -6752,6 +6774,7 @@ export const spec = defineModuleSpec({
               "bsonType": "string",
               "enum": [
                 "sale",
+                "cost_of_goods",
                 "buying_cost",
                 "discount",
                 "shipping_expense",

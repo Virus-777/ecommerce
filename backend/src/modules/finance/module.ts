@@ -38,6 +38,9 @@ export default defineModule({
       await service.core.ensureRules();
       await service.reports.registerDatasets();
     });
+    // the cost of goods of Official Store sales booked before cost_of_goods existed (migrations.ts); in the background,
+    // so a long first fill never holds up the start
+    ctx.afterBoot(() => void service.ledger.fillPendingCosts().catch((err) => ctx.log.warn({ err }, 'finance: cost of goods not filled; retried at the next start')));
     // the Commission and fees and the Payouts and holds sections of the settings page (G76)
     ctx.afterBoot(() => service.registerSettingsSections());
 

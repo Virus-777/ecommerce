@@ -149,14 +149,15 @@ export class ReportsPart extends Part {
 
   /**
    * Official Store trading costs per market day and kind (reports: Purchasing cost, Discounts and shipping expense,
-   * Returns cost). trading_entries keeps return losses as kind 'return'; the API calls them return_loss.
+   * Returns cost). trading_entries keeps return losses as kind 'return'; the API calls them return_loss. The cost of
+   * goods sold (cost_of_goods) is no booked cost: reports takes it from its own order facts.
    */
   async companyCostsByDay(range: common.DateRange): Promise<DailyCompanyCost[]> {
     const r = this.range(range.from, range.to);
     const tz = this.core.tz();
     const out = new Map<string, DailyCompanyCost>();
     for (const row of await this.tradingRows(r.from, r.to)) {
-      if (row.kind === 'sale') continue;
+      if (row.kind === 'sale' || row.kind === 'cost_of_goods') continue;
       const kind = (row.kind === 'return' ? 'return_loss' : row.kind) as DailyCompanyCost['kind'];
       const date = marketDate(row.at, tz);
       const key = `${date}|${kind}|${row.currency}`;
@@ -267,17 +268,28 @@ export class ReportsPart extends Part {
 
   /* ---------------------------------------------------------------- company trading */
 
+  /**
+   * The Official Store trading of a range, by booking day. The margin takes off the cost of goods sold (cost_of_goods,
+   * booked with each sale and reversed with cancellations), never buying_cost: purchasing books that when goods are
+   * received from a supplier, so it is stock bought (stockBought) and a goods receipt leaves the margin alone.
+   * A sale is costed when a cost_of_goods row sits beside it (same ref_kind, ref_id and order_item_id); the others
+   * are uncostedSales and count in the margin with no cost. A placeholder still waiting for its cost (ref_kind
+   * cost_pending) pairs with nothing, so its sale shows as uncosted until LedgerPart.fillPendingCosts fills it.
+   */
   async trading(q: { from: string; to: string }): Promise<TradingSummary> {
     const r = this.range(q.from, q.to);
     const tz = this.core.tz();
     const rows = await this.tradingRows(r.from, r.to); // Official Store trading only (marketplace facts have their own tables)
     const totals = (list: TradingRec[]) => {
       const s = (k: string) => list.filter((t) => t.kind === k).reduce((x, t) => x + t.amount, 0);
+      const pair = (t: TradingRec) => `${t.ref_kind}|${t.ref_id}|${t.order_item_id}`;
+      const costed = new Set(list.filter((t) => t.kind === 'cost_of_goods').map(pair));
+      const uncosted = list.filter((t) => t.kind === 'sale' && !costed.has(pair(t))).reduce((x, t) => x + t.amount, 0);
       const sales = s('sale');
-      const buying = s('buying_cost');
-      const gross = sales - buying;
+      const cogs = s('cost_of_goods');
+      const gross = sales - cogs;
       const net = gross - s('discount') - s('shipping_expense') - s('return') - s('write_off') - s('chargeback_loss') + s('supplier_credit');
-      return { sales, buying, gross, discounts: s('discount'), shipping: s('shipping_expense'), returns: s('return'), writeOffs: s('write_off'), chargebacks: s('chargeback_loss'), net };
+      return { sales, cogs, uncosted, stockBought: s('buying_cost'), gross, discounts: s('discount'), shipping: s('shipping_expense'), returns: s('return'), writeOffs: s('write_off'), chargebacks: s('chargeback_loss'), net };
     };
     const t = totals(rows);
     const priorFrom = addDays(q.from, -r.days);
@@ -290,7 +302,7 @@ export class ReportsPart extends Part {
       if (row.kind === 'sale') {
         d.sales += row.amount;
         d.margin += row.amount;
-      } else if (row.kind === 'buying_cost') d.margin -= row.amount;
+      } else if (row.kind === 'cost_of_goods') d.margin -= row.amount;
     }
     // targets prorated by days of each month in the range (whole store)
     let target = 0;
@@ -314,9 +326,12 @@ export class ReportsPart extends Part {
     const marginTarget = marginWeight ? round2(marginWeighted / marginWeight) : null;
     return {
       range: { from: q.from, to: q.to },
-      costBasis: 'weighted average buying cost at receipt',
+      costBasis: 'weighted average buying cost when the order was accepted',
       productSales: this.money(t.sales),
-      buyingCost: this.money(t.buying),
+      costOfGoodsSold: this.money(t.cogs),
+      uncostedSales: this.money(t.uncosted),
+      stockBought: this.money(t.stockBought),
+      buyingCost: this.money(t.cogs), // deprecated: the old name of costOfGoodsSold
       grossMargin: this.money(t.gross),
       grossMarginPct: grossPct,
       discounts: this.money(t.discounts),

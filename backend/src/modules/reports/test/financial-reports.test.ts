@@ -303,8 +303,8 @@ describe('trading.pnl', () => {
     expect(v('trading.returns_cost')).toBe(t.body.returnsCost.amount);
     expect(v('trading.write_offs')).toBe(t.body.writeOffs.amount);
     expect(v('trading.chargeback_losses')).toBe(t.body.chargebackLosses.amount);
-    // finance's buying cost is the stock received from suppliers: here that is Stock bought
-    expect(v('trading.stock_bought')).toBe(t.body.buyingCost.amount);
+    // finance's buying cost is the stock received from suppliers: Stock bought on both
+    expect(v('trading.stock_bought')).toBe(t.body.stockBought.amount);
     // supplier credits: what finance's net margin adds back after its other lines
     const supplierCredits = body.table.totals.supplier_credits.amount;
     expect(supplierCredits).toBe(t.body.netMargin.amount - (t.body.grossMargin.amount - t.body.discounts.amount - t.body.shippingExpense.amount - t.body.returnsCost.amount - t.body.writeOffs.amount - t.body.chargebackLosses.amount));

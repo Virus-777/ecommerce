@@ -399,12 +399,12 @@ const statements = new Schema(
 statements.index({"ref":1}, {"name":"statements_ref_8cef23","unique":true});
 statements.index({"seller_id":1,"period_to":-1}, {"name":"statements_seller_id_period_to_caf887"});
 
-/** Company trading facts for the Official Store (never part of seller payouts). Marketplace (platform) facts live in captures, discount_funding, platform_costs and store_credit_liability, never here */
+/** Company trading facts for the Official Store (never part of seller payouts). cost_of_goods is the unit cost × quantity of an item sold, booked with its sale (ref_kind order_item) and reversed with a cancellation (ref_kind cancellation); ref_kind cost_pending marks a sale booked before cost_of_goods existed whose cost is still to be filled. buying_cost is stock bought (goods received), never the cost of what was sold. Marketplace (platform) facts live in captures, discount_funding, platform_costs and store_credit_liability, never here */
 const trading_entries = new Schema(
   {
     _id: { type: String, required: true }, // id
     at: { type: Date, required: true },
-    kind: { type: String, required: true, enum: ["sale","buying_cost","discount","shipping_expense","return","write_off","chargeback_loss","supplier_credit"] },
+    kind: { type: String, required: true, enum: ["sale","cost_of_goods","buying_cost","discount","shipping_expense","return","write_off","chargeback_loss","supplier_credit"] },
     amount: { type: Number, required: true, validate: integer },
     currency: { type: String, required: true },
     order_id: { type: String, default: null },
