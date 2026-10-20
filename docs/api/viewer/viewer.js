@@ -122,7 +122,7 @@
         ${e.params ? `<div class="blk"><h4>Path parameters</h4>${tyBlock(e.params, m.name)}</div>` : ''}
         ${e.query || e.paging ? `<div class="blk"><h4>Query</h4>${tyBlock({ ...(e.query ?? {}), ...(e.paging ? { cursor: 'string?', page: 'int?', limit: 'int?' } : {}) }, m.name)}</div>` : ''}
         ${e.body !== undefined ? `<div class="blk"><h4>Request body</h4>${tyBlock(e.body, m.name)}</div>` : ''}
-        <div class="blk"><h4>Response ${status}</h4>${e.response === undefined ? '<div class="ty"><span class="d">not specified</span></div>' : tyBlock(e.response, m.name, e.paging)}</div>
+        <div class="blk"><h4>Response ${status}</h4>${e.response === undefined ? '<div class="ty"><span class="d">not specified</span></div>' : e.response === 'event-stream' ? '<div class="ty">text/event-stream <span class="d">Server-Sent Events, the response stays open</span></div>' : tyBlock(e.response, m.name, e.paging)}</div>
         ${errCodes.length ? `<div class="blk"><h4>Errors</h4>${table(['Code', 'Status', 'Meaning'], errCodes.map((c) => [`<code>${esc(c)}</code>`, errs[c]?.status ?? '', esc(errs[c]?.meaning ?? '')]))}</div>` : ''}
       </div>
     </details>`;

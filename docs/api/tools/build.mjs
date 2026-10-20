@@ -166,6 +166,10 @@ const SETTING_TYPES = ['int', 'number', 'bool', 'string', 'money', 'duration', '
 const SETTING_APPROVALS = ['none', 'second_reviewer', 'business_owner'];
 /** A request body of raw bytes (any content type) instead of JSON */
 const BINARY_BODY = 'binary';
+/** A response that stays open and carries Server-Sent Events (text/event-stream) instead of one JSON body */
+const EVENT_STREAM = 'event-stream';
+/** OpenAPI text of an event-stream response (the backend's kernel/http/event-stream.ts EVENT_STREAM_TEXT is the same) */
+const EVENT_STREAM_TEXT = 'A stream of Server-Sent Events (text/event-stream, UTF-8): the response stays open and the server writes each event as it happens. The endpoint description names the event types.';
 const fullPath = (m, ep) => common.areas[ep.area].prefix.replace('{module}', m.name) + ep.path;
 const seenRoutes = new Map();
 for (const [name, c] of Object.entries(common.constants ?? {})) {
@@ -267,7 +271,14 @@ for (const m of modules) {
       if (!['PUT', 'POST'].includes(ep.method)) err(E, 'a binary body needs PUT or POST');
       if (ep.idempotent) err(E, 'a binary body cannot be idempotent (the request hash covers JSON bodies)');
     } else if (ep.body !== undefined) typeToSchema(ep.body, m, `${E} body`);
-    if (ep.response !== undefined && ep.response !== null) typeToSchema(ep.response, m, `${E} response`);
+    if (ep.response === EVENT_STREAM) {
+      // a long-lived GET: nothing to page, replay or upload
+      if (ep.method !== 'GET') err(E, 'an event-stream response needs GET');
+      if (ep.paging) err(E, 'an event-stream response cannot be paged');
+      if (ep.idempotent) err(E, 'an event-stream response cannot be idempotent');
+      if (ep.body !== undefined) err(E, 'an event-stream endpoint takes no body');
+      if (ep.status !== undefined && ep.status !== 200) err(E, 'an event-stream response answers 200');
+    } else if (ep.response !== undefined && ep.response !== null) typeToSchema(ep.response, m, `${E} response`);
     const key = `${ep.method} ${fullPath(m, ep).replace(/\{\w+\}/g, '{}')}`;
     if (seenRoutes.has(key)) err(E, `route ${key} is also defined by ${seenRoutes.get(key)}`);
     seenRoutes.set(key, `${m.name}.${ep.id}`);
@@ -322,9 +333,16 @@ for (const m of modules) {
       ...(ep.idempotent ? [{ name: 'Idempotency-Key', in: 'header', required: true, description: common.headers['Idempotency-Key'], schema: { type: 'string' } }] : []),
     ];
     const status = String(ep.status ?? (ep.response === null ? 204 : 200));
-    let respSchema = ep.response === null || ep.response === undefined ? null : typeToSchema(ep.response, m, '').schema;
+    const stream = ep.response === EVENT_STREAM;
+    let respSchema = ep.response === null || ep.response === undefined || stream ? null : typeToSchema(ep.response, m, '').schema;
     if (respSchema && ep.paging) respSchema = pageSchema(respSchema);
-    const responses = { [status]: respSchema ? { description: 'Success', content: { 'application/json': { schema: respSchema } } } : { description: 'Success, no content' } };
+    const responses = {
+      [status]: stream
+        ? { description: EVENT_STREAM_TEXT, content: { 'text/event-stream': { schema: { type: 'string' } } } }
+        : respSchema
+          ? { description: 'Success', content: { 'application/json': { schema: respSchema } } }
+          : { description: 'Success, no content' },
+    };
     const codes = new Set(['VALIDATION_FAILED', ...authErrors(ep), ...(ep.params ? ['NOT_FOUND'] : []), ...(ep.errors ?? [])]);
     for (const code of codes) {
       const def = allErrorCodes(m)[code];
@@ -376,7 +394,7 @@ writeFileSync(join(apiDir, 'openapi.json'), JSON.stringify(clean(openapi), null,
 
 /* ------------------------------------------------------------------ Markdown */
 const fmtType = (t) => (typeof t === 'string' ? `\`${t}\`` : isDescriptor(t) ?`\`${t.type}\`${t.desc ? ` ${t.desc}` : ''}` : `\`${JSON.stringify(t)}\``);
-const fmtShape = (t, status) => (t === undefined ? '' : t === null ? `${status ?? 204} No content` : t === BINARY_BODY ? 'raw bytes' : typeof t === 'string' ? `\`${t}\`` : `\`{ ${Object.entries(t).map(([k, v]) => `${k}: ${typeof v === 'string' ? v : v.type ?? 'object'}`).join(', ')} }\``);
+const fmtShape = (t, status) => (t === undefined ? '' : t === null ? `${status ?? 204} No content` : t === BINARY_BODY ? 'raw bytes' : t === EVENT_STREAM ? 'Server-Sent Events' : typeof t === 'string' ? `\`${t}\`` : `\`{ ${Object.entries(t).map(([k, v]) => `${k}: ${typeof v === 'string' ? v : v.type ?? 'object'}`).join(', ')} }\``);
 mkdirSync(join(apiDir, 'modules'), { recursive: true });
 const consumersOf = (event) => modules.filter((x) => x.events?.consumes?.some((c) => c.name === event)).map((x) => x.name);
 

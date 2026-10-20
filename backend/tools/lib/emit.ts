@@ -139,7 +139,9 @@ export function emitModule(mod: ModuleSpec, common: CommonSpec, byName: Map<stri
     if (ep.sellerContext) lines.push(`sellerContext: ${str(ep.sellerContext)}`);
     lines.push(`scope: ${str(scopeOf(ep))}`);
     if (ep.rateLimit) lines.push(`rateLimit: ${str(ep.rateLimit)}`);
-    const sensitive = ep.response == null ? [] : sensitivePaths(ctx.parse(ep.response as never, `${where} response`), common, byName, mod);
+    // "event-stream": Server-Sent Events instead of one JSON body (kernel/http/event-stream.ts)
+    const stream = ep.response === 'event-stream';
+    const sensitive = ep.response == null || stream ? [] : sensitivePaths(ctx.parse(ep.response as never, `${where} response`), common, byName, mod);
     if (sensitive.length) lines.push(`sensitive: ${JSON.stringify(ep.paging ? sensitive.map((s) => ({ ...s, path: ['items', '*', ...s.path] })) : sensitive)}`);
     lines.push(`summary: ${str(ep.summary)}`);
     if (ep.desc) lines.push(`desc: ${str(ep.desc)}`);
@@ -148,7 +150,8 @@ export function emitModule(mod: ModuleSpec, common: CommonSpec, byName: Map<stri
     if (ep.paging) lines.push('paging: true');
     if (ep.body === 'binary') lines.push('bodyFormat: "binary"', 'body: () => z.instanceof(Uint8Array)');
     else if (ep.body !== undefined) lines.push(`body: () => ${schemaOf(ctx, ep.body, `${where} body`)}`);
-    lines.push(ep.response == null ? 'response: null' : `response: () => ${schemaOf(ctx, ep.response, `${where} response`)}`);
+    if (stream) lines.push('responseFormat: "event-stream"', 'response: null');
+    else lines.push(ep.response == null ? 'response: null' : `response: () => ${schemaOf(ctx, ep.response, `${where} response`)}`);
     lines.push(`status: ${ep.status ?? (ep.response === null ? 204 : 200)}`);
     if (ep.errors?.length) lines.push(`errors: ${JSON.stringify(ep.errors)}`);
     if (ep.idempotent) lines.push('idempotent: true');
