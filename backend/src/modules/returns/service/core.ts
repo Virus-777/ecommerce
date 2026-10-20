@@ -4,6 +4,7 @@
  */
 import type { Principal } from '../../../kernel/auth/index.js';
 import { AppError, isAppError, isNotImplemented } from '../../../kernel/errors/index.js';
+import { illegalTransition } from '../../../kernel/errors/index.js';
 import type { EventMap } from '../../../kernel/events/index.js';
 import { BusinessDays } from '../../../kernel/lib/business-days.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
@@ -77,7 +78,7 @@ export const invalid = (issues: { path: string; message: string }[], message = '
 export const invalidField = (path: string, message: string) => invalid([{ path, message }], message);
 export const notFound = (what = 'Return') => new AppError('NOT_FOUND', `${what} not found`);
 export const unavailable = (what: string) => new AppError('SERVICE_UNAVAILABLE', `${what} is unavailable right now`, undefined, 503);
-export const illegal = (message: string, details?: Record<string, unknown>) => new AppError('ILLEGAL_TRANSITION', message, details);
+export const illegal = illegalTransition;
 
 /** Who is looking: the store shopper (customer or guest session), a seller, or staff */
 export type Visibility = { area: 'admin' } | { area: 'seller'; sellerId: string } | { area: 'store'; customerId?: string | null; guestSessionId?: string | null };

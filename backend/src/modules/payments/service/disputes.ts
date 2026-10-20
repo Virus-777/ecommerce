@@ -187,7 +187,7 @@ export class Disputes {
     const d0 = await this.get(disputeId);
     if (d0.status !== 'opened') {
       if (body.submit) paymentDisputeMachine.next(d0.status as never, 'submit_evidence');
-      throw illegal('Evidence can be changed only while the dispute is open', { status: d0.status });
+      throw illegal('Evidence can be changed only while the dispute is open', { from: d0.status });
     }
     if (d0.evidence_due_at && d0.evidence_due_at.getTime() < this.core.now().getTime()) throw this.core.error('EVIDENCE_WINDOW_CLOSED');
     const text = body.text?.trim() ?? '';
@@ -219,7 +219,7 @@ export class Disputes {
     const batch = new Batch();
     const after = await this.repo.transaction(async (tx) => {
       const d = (await tx.get('disputes', disputeId, { forUpdate: true }))!;
-      if (d.status !== 'opened') throw illegal('Evidence can be changed only while the dispute is open', { status: d.status });
+      if (d.status !== 'opened') throw illegal('Evidence can be changed only while the dispute is open', { from: d.status });
       const evidence: Partial<StoredEvidence> = { text, fileIds, files };
       if (!body.submit) {
         await this.log(tx, d.id, 'Evidence saved', null, by.actor);

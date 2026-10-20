@@ -78,3 +78,15 @@ export const notImplemented = (what: string, details: Record<string, unknown> = 
 export const isAppError = (e: unknown): e is AppError => e instanceof AppError;
 
 export const isNotImplemented = (e: unknown): boolean => isAppError(e) && e.code === 'NOT_IMPLEMENTED';
+
+/** The details every ILLEGAL_TRANSITION carries (common.json: details.from, details.event); the state machine adds the rest */
+export interface TransitionDetails {
+  machine?: string;
+  from?: string;
+  event?: string;
+  to?: string;
+  allowed?: readonly string[];
+}
+
+/** ILLEGAL_TRANSITION (409): the record's status does not allow this action */
+export const illegalTransition = (message: string, details: TransitionDetails = {}) => new AppError('ILLEGAL_TRANSITION', message, details);

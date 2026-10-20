@@ -715,10 +715,10 @@ export class Refunds {
 
   async requestDestination(refundId: string, message: string | null | undefined, by: By): Promise<Refund> {
     const r = await this.get(refundId);
-    if (r.status !== 'failed') throw illegal('Only a failed refund can be sent somewhere else', { status: r.status });
+    if (r.status !== 'failed') throw illegal('Only a failed refund can be sent somewhere else', { from: r.status });
     const after = await this.repo.transaction(async (tx) => {
       const x = (await tx.get('refunds', refundId, { forUpdate: true }))!;
-      if (x.status !== 'failed') throw illegal('Only a failed refund can be sent somewhere else', { status: x.status });
+      if (x.status !== 'failed') throw illegal('Only a failed refund can be sent somewhere else', { from: x.status });
       await this.log(tx, x.id, 'failed', 'failed', `Asked the customer for a new destination${message?.trim() ? `: ${message.trim()}` : ''}`, by.actor);
       return tx.update('refunds', x.id, { next_attempt_at: null, updated_at: this.core.now() });
     });
@@ -786,7 +786,7 @@ export class Refunds {
     const r = await this.ownRefund(refundId, scope);
     const chosen = [body.savedMethodId ? 1 : 0, body.providerToken ? 1 : 0, body.storeCredit ? 1 : 0].reduce((a, b) => a + b, 0);
     if (chosen !== 1) throw invalid([{ path: 'body', message: 'Choose one: a saved card, a new card or store credit' }]);
-    if (r.status !== 'failed') throw illegal('A new destination can be chosen only after a refund failed', { status: r.status });
+    if (r.status !== 'failed') throw illegal('A new destination can be chosen only after a refund failed', { from: r.status });
     const intent = (await this.repo.get('intents', r.intent_id))!;
     const cfg = await this.core.cfg();
     let destination: RefundDestination | null = null;
