@@ -228,7 +228,7 @@ describe('inbound shipments', () => {
     await k.publish('access', 'access.approval.decided', decided);
     const after = await k.call('GET', S(`/inbound/${c}`), { token: s.token });
     expect(after.body.state).toBe('closed');
-    expect(after.body.discrepancy.decision).toContain('Reimbursed 900.00 USD');
+    expect(after.body.discrepancy.decision).toContain('Reimbursed $900.00');
     // delivered twice: one reimbursement
     await k.publish('access', 'access.approval.decided', decided);
     expect((await k.call('GET', S(`/inbound/${c}`), { token: s.token })).body.fees.filter((f: any) => f.type === 'reimbursement')).toHaveLength(1);

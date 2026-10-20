@@ -5,6 +5,7 @@
  * fulfillment-service.reimbursements.approve) or leave it. Also the ledger following inventory's own adjustments
  * of seller units at the service location (inventory.adjustment.recorded, serviceManaged).
  */
+import { format as formatMoney } from '../../../kernel/lib/money.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
@@ -22,7 +23,7 @@ export const DIFFERENCE_TARGET = 'stock_difference';
 type Decision = 'adjust_ledger' | 'reimburse' | 'no_change';
 
 const levelsOf = (q: StockQuantities | undefined): Levels => ({ incoming: q?.incoming ?? 0, available: q?.available ?? 0, reserved: q?.reserved ?? 0, damagedHeld: q?.damagedHeld ?? 0, returned: q?.returned ?? 0 });
-const fmt = (m: common.Money) => `${(m.amount / 100).toFixed(2)} ${m.currency}`;
+const fmt = (m: common.Money) => formatMoney(m);
 
 export class DifferencesPart extends Part {
   /* ---------------------------------------------------------------- reconcile job */

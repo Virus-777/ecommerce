@@ -6,6 +6,7 @@
  * Unsellable seller-owned stock; the SKU and the enrollment activate), discrepancies the seller accepts or claims,
  * staff decisions (adjust stock, reimburse within limits, reject) and the daily overdue sweep.
  */
+import { format as formatMoney } from '../../../kernel/lib/money.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
@@ -24,7 +25,7 @@ export const DISCREPANCY_TARGET = 'inbound_discrepancy';
 const LINE_STATES = ['approved', 'active', 'inactive'];
 const OPEN = ['draft', 'submitted', 'in_transit', 'arrived', 'receiving', 'received'];
 
-const fmt = (m: common.Money) => `${(m.amount / 100).toFixed(2)} ${m.currency}`;
+const fmt = (m: common.Money) => formatMoney(m);
 
 export class InboundPart extends Part {
   /* ---------------------------------------------------------------- reads */

@@ -2,6 +2,7 @@
  * What happens without a person: consumers of other modules' events (returns, payments, shipping, orders,
  * sellers) and the jobs (SLA timers, seller deadline, offer expiry, auto-close).
  */
+import { format as formatMoney } from '../../../kernel/lib/money.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
 import { caseMachine, caseOfferMachine, remedyMachine } from '../domain/state-machines.js';
@@ -155,7 +156,7 @@ export class Automation {
     const c = await this.core.repo.get('cases', caseId);
     if (!c) return;
     const granted = e.status === 'granted';
-    const amount = `${(e.amount.amount / 100).toFixed(2)} ${e.amount.currency}`;
+    const amount = formatMoney(e.amount);
     await this.core.write(c.id, SYS, async (tx, a) => {
       if (!(await tx.claim(`wallet.goodwill.decided:${e.grantId}`))) return;
       const pending = a.remedies.filter((r) => r.kind === 'goodwill_credit' && r.status === 'pending_approval').sort((x, y) => x.created_at.getTime() - y.created_at.getTime());

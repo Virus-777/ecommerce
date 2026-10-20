@@ -2,7 +2,7 @@
  * Pure order rules (no I/O): status derivation, labels, money splits, refund previews, deadlines.
  * Everything here works on plain values so it can be tested and reused by every view.
  */
-import { allocate, format as formatMoney, money } from '../../../kernel/lib/money.js';
+import { allocate, format as formatMoney, money, sum } from '../../../kernel/lib/money.js';
 import { dateInZone, zonedTimeToUtc } from '../../../kernel/lib/clock.js';
 import type * as common from '../../../spec/common.js';
 import type { DiscountAllocation, OrderDisplayStatus, RefundPreviewLine } from '../../../spec/orders.js';
@@ -293,7 +293,8 @@ export function refundLines(lines: readonly PreviewLineInput[], currency: string
   });
 }
 
-export const sumMoney = (list: readonly common.Money[], currency: string) => money(list.reduce((s, m) => s + m.amount, 0), currency);
+/** Money of one currency added up (the kernel refuses mixed currencies) */
+export const sumMoney = (list: readonly common.Money[], currency: string) => sum([...list], currency);
 
 export const fmt = (amount: number, currency: string) => formatMoney(money(amount, currency));
 

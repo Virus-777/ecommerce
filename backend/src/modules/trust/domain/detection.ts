@@ -3,6 +3,7 @@
  * The service feeds signals from consumed events; trust.run-detection evaluates every active rule and raises or
  * extends a report per hit (de-duplicated by the hit's key).
  */
+import { format as formatMoney, money as moneyOf } from '../../../kernel/lib/money.js';
 import type { ReportType, SubjectType } from './rules.js';
 
 export interface SignalRec {
@@ -224,7 +225,7 @@ export function evaluate(key: string, t: Record<string, unknown>, signals: Signa
           dedupeKey: `offers.price_far_below_authorized:${s.subject_id}`,
           title: 'Offer priced far below other offers',
           subjects: offerSubjects(s),
-          evidence: `Offer price ${(price / 100).toFixed(2)} is ${Math.round((price / ref) * 100)}% of the reference price ${(ref / 100).toFixed(2)} (rule: below ${pct}%)`,
+          evidence: `Offer price ${formatMoney(moneyOf(price, String(s.features.currency ?? 'USD')))} is ${Math.round((price / ref) * 100)}% of the reference price ${formatMoney(moneyOf(ref, String(s.features.currency ?? 'USD')))} (rule: below ${pct}%)`,
           signalIds: [s.id],
         });
       }

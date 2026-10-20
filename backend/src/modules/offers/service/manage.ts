@@ -2,6 +2,7 @@
  * Creating and editing offers (seller and Official Store) and their lifecycle: publish, pause, resume,
  * end, delete drafts, and the staff actions remove, hold, release and reinstate.
  */
+import { format as formatMoney } from '../../../kernel/lib/money.js';
 import { AppError, isAppError } from '../../../kernel/errors/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type * as catalog from '../../../spec/catalog.js';
@@ -116,7 +117,7 @@ export class ManagePart extends Part {
     if (!Number.isInteger(price.amount) || price.amount <= 0) throw invalidField(`${path}.amount`, 'Enter a price above zero');
     const mins = ((await this.core.setting('minimumPriceByCategory')) ?? {}) as Record<string, number>;
     const min = categoryId ? Number(mins[categoryId] ?? 0) : 0;
-    if (min > 0 && price.amount < min) throw this.core.error('PRICE_BELOW_MINIMUM', `The minimum price in this category is ${(min / 100).toFixed(2)}`, { minimum: this.core.money(min) });
+    if (min > 0 && price.amount < min) throw this.core.error('PRICE_BELOW_MINIMUM', `The minimum price in this category is ${formatMoney(this.core.money(min))}`, { minimum: this.core.money(min) });
   }
 
   async checkPurchaseLimit(limit: number | null | undefined) {

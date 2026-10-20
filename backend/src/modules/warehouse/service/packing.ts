@@ -2,6 +2,7 @@
  * Packing stations: packages with an item checklist by scan, box and weight, carrier services that keep the
  * customer's promise, labels bought through shipping, packing slips, and the hand-over to shipping.
  */
+import { format as formatMoney } from '../../../kernel/lib/money.js';
 import { AppError, isAppError } from '../../../kernel/errors/index.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
@@ -378,7 +379,7 @@ export class Packing {
     const priceOf = (orderItemId: string) => order?.groups.flatMap((g) => g.items).find((i) => i.id === orderItemId)?.unitPrice;
     const a = f.ship_to;
     const service = f.fulfilled_by === 'marketly_service';
-    const fmt = (m: common.Money) => `$${(m.amount / 100).toFixed(2)}`;
+    const fmt = (m: common.Money) => formatMoney(m);
     const body: PdfLine[] = [
       { text: 'Packing slip', bold: true, size: 14 },
       { text: `Order ${f.order_ref} - Package ${p.index_in_order} of ${p.of_in_order}` },

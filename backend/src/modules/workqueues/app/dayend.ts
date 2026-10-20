@@ -5,6 +5,7 @@
  * workqueues.day_end.prepared as a reminder while the review is still open), or marked missed at the end
  * of the market day (then listed on the next day's review). The close job also snapshots daily_counts.
  */
+import { format as formatMoney, money as moneyOf } from '../../../kernel/lib/money.js';
 import { AppError } from '../../../kernel/errors/index.js';
 import { zonedTimeToUtc } from '../../../kernel/lib/clock.js';
 import { newId } from '../../../kernel/lib/ids.js';
@@ -74,7 +75,7 @@ export class DayEnd {
     items.push({
       key: 'failed_payouts',
       title: 'Failed payouts',
-      summary: finance ? `${payouts.length} failed payout${payouts.length === 1 ? '' : 's'} open${payouts.length ? ` ($${(payoutTotal / 100).toFixed(2)})` : ''}${payoutsOverdue ? `, ${payoutsOverdue} overdue` : ''}` : 'Finance is not running',
+      summary: finance ? `${payouts.length} failed payout${payouts.length === 1 ? '' : 's'} open${payouts.length ? ` (${formatMoney(moneyOf(payoutTotal, core.ctx.config.market.currency))})` : ''}${payoutsOverdue ? `, ${payoutsOverdue} overdue` : ''}` : 'Finance is not running',
       owner: await leadOf('finance.payout_failures'),
       link: { screen: 'admin/payouts', state: 'failed' },
       source: finance ? 'finance' : 'unavailable',

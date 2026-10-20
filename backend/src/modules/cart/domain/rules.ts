@@ -301,8 +301,6 @@ export const normalizeCode = (code: string) => code.trim().toUpperCase();
 
 export const addDays = (d: Date, days: number) => new Date(d.getTime() + days * 86_400_000);
 
-export const sumMoney = (items: Money[], currency: string): Money => money(items.reduce((a, m) => a + m.amount, 0), currency);
-
 /** Rows grouped by a key, groups in the order of their first row (Map.groupBy, which the ES2023 lib lacks) */
 export function groupBy<T>(rows: readonly T[], key: (row: T) => string): Map<string, T[]> {
   const out = new Map<string, T[]>();

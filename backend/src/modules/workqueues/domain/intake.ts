@@ -22,6 +22,7 @@
  * Subjects typed in pass 3 (product, dispute, conversation, return_parcel) were 'other' before: closes
  * match both, so items opened before the upgrade still close.
  */
+import { format as formatMoney } from '../../../kernel/lib/money.js';
 import type { EventName, EventPayload } from '../../../kernel/events/index.js';
 import type { Money } from '../../../spec/common.js';
 import type { spec, WorkSubject } from '../../../spec/workqueues.js';
@@ -464,7 +465,7 @@ export const INTAKE: IntakeTable = {
           {
             queueKey: 'finance.payment_checks',
             title: `Reconciliation mismatch: ${human(p.check)}`,
-            summary: `Difference of ${(p.difference.amount / 100).toFixed(2)} ${p.difference.currency}`,
+            summary: `Difference of ${formatMoney(p.difference)}`,
             subject: { type: 'reconciliation_check', id: p.itemId, label: human(p.check) },
             amount: { amount: Math.abs(p.difference.amount), currency: p.difference.currency },
             priority: Math.abs(p.difference.amount) > 100_000 ? 'high' : 'normal',
