@@ -4,7 +4,7 @@
  */
 import { allSpecs } from '../../kernel/module-system/loader.js';
 import type { MongoMigration } from '../../kernel/mongo/schema.js';
-import { BUSINESS_OWNER, MARKETING_OFFERS_VIEW, NEWS_MANAGE, NEWS_PUBLISH, PLATFORM_ADMINISTRATOR, STAFF_UPLOADS, SYSTEM_ROLES, viewCompanions } from './domain/seed.js';
+import { ANNOUNCEMENT_ROLES, ANNOUNCEMENTS_SEND, BUSINESS_OWNER, MARKETING_OFFERS_VIEW, NEWS_MANAGE, NEWS_PUBLISH, PLATFORM_ADMINISTRATOR, STAFF_UPLOADS, SYSTEM_ROLES, viewCompanions } from './domain/seed.js';
 
 /** Every staff permission key ending in `.view`, from every module's spec (enabled or not, like the registry) */
 export function staffViewKeys(): string[] {
@@ -109,4 +109,22 @@ export const newsKeys: MongoMigration = {
   },
 };
 
-export const mongoMigrations: readonly MongoMigration[] = [businessOwnerViewKeys, staffWorkUploads, platformAdminAccountActions, newsKeys];
+/**
+ * Announcements to sellers (notifications, live topics 2026-10-20): the seeded Seller Manager and Platform
+ * Administrator roles of an install seeded before the key get notifications.announcements.send once; new installs get
+ * it from the seed (ANNOUNCEMENTS_SEND in domain/seed.ts). It runs once, so a key the owner removes stays removed.
+ */
+export const announcementKeys: MongoMigration = {
+  id: '2026-10-20-announcement-keys',
+  async up(db) {
+    const roles = await db.collection('access.roles').find({ key: { $in: [...ANNOUNCEMENT_ROLES] }, system: true, archived_at: null }).toArray();
+    const now = new Date();
+    for (const role of roles) {
+      await db
+        .collection('access.role_permissions')
+        .updateOne({ role_id: role._id, permission_key: ANNOUNCEMENTS_SEND }, { $setOnInsert: { granted_by: 'system', granted_at: now } }, { upsert: true });
+    }
+  },
+};
+
+export const mongoMigrations: readonly MongoMigration[] = [businessOwnerViewKeys, staffWorkUploads, platformAdminAccountActions, newsKeys, announcementKeys];
