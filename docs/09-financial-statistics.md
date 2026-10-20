@@ -157,6 +157,10 @@ the existing shape `{ key, label, amount?: Money, sharePct?, ... }`. A waterfall
    is received from a supplier, so they show as `trading.stock_bought` and are not taken off the margin. The other
    lines are finance's trading lines by booking day, the same as `GET /api/admin/finance/trading` (test); discounts
    are shown but not taken off again (sales are after discounts). `platform.official_net_margin` is this net margin.
+   Also 2026-10-21: `GET /api/admin/finance/trading` tells the same story. finance books a `cost_of_goods` trading
+   entry with each Official Store sale (inventory unit cost × quantity, reversed in proportion on cancellation);
+   its grossMargin = productSales − costOfGoodsSold, `stockBought` holds the goods receipts, `uncostedSales` the
+   sales with no cost, and `buyingCost` is deprecated (= costOfGoodsSold). `trading.pnl` ignores `cost_of_goods`.
 
 `seller.order_trend` and `seller.product_sales` are unchanged apart from the comparison twins.
 
