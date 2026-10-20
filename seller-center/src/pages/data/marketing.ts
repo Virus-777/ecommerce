@@ -26,10 +26,11 @@ export const retryUnlessLater = (count: number, e: unknown): boolean => !isLater
 
 /* ------------------------------------------------------------------ money and numbers */
 
-export const usd = (dollarsValue: number, currency = 'USD'): Money => ({ amount: Math.round(dollarsValue * 100), currency });
+export const fromDollars = (dollarsValue: number, currency = 'USD'): Money => ({ amount: Math.round(dollarsValue * 100), currency });
 
 /** 1500 → "15%", 3333 → "33.33%" */
-export const pct = (bps: number): string => `${Number((bps / 100).toFixed(2))}%`;
+/** Basis points as a percent: 1500 → "15%" */
+export const bpsPercent = (bps: number): string => `${Number((bps / 100).toFixed(2))}%`;
 
 /** "12.50" → true (positive amount with at most two decimals) */
 export const isAmount = (v: string) => /^\d+(\.\d{1,2})?$/.test(v.trim()) && Number(v) > 0;
@@ -166,11 +167,11 @@ export function discountRule(d: Pick<DiscountDraft, 'type' | 'amt' | 'min'>, cur
     case 'Percentage off':
       return ok ? { kind: 'markdown', discount: { kind: 'markdown', percentOffBps: Math.round(a * 100) } } : null;
     case 'Fixed amount off':
-      return ok ? { kind: 'markdown', discount: { kind: 'markdown', amountOff: usd(a, currency) } } : null;
+      return ok ? { kind: 'markdown', discount: { kind: 'markdown', amountOff: fromDollars(a, currency) } } : null;
     case 'Minimum spend':
-      return ok && isAmount(d.min) ? { kind: 'min_spend', discount: { kind: 'min_spend', amountOff: usd(a, currency), minSpend: usd(Number(d.min), currency), minSpendScope: 'seller_package' } } : null;
+      return ok && isAmount(d.min) ? { kind: 'min_spend', discount: { kind: 'min_spend', amountOff: fromDollars(a, currency), minSpend: fromDollars(Number(d.min), currency), minSpendScope: 'seller_package' } } : null;
     case 'Free shipping':
-      return ok ? { kind: 'free_shipping', discount: { kind: 'free_shipping', freeShipping: true, minSpend: usd(a, currency) } } : null;
+      return ok ? { kind: 'free_shipping', discount: { kind: 'free_shipping', freeShipping: true, minSpend: fromDollars(a, currency) } } : null;
   }
 }
 

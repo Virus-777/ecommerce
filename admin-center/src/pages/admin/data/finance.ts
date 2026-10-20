@@ -69,7 +69,8 @@ export function feeRulePairs(r: FeeRuleSet): Array<[string, string]> {
 }
 
 /** A rate in basis points as the design prints it ("8", "12.5"). */
-export const pct = (bps: number) => String(Math.round(bps) / 100);
+/** Basis points as a percent number without the sign: 1500 → "15" */
+export const bpsNumber = (bps: number) => String(Math.round(bps) / 100);
 
 export const refundEdge = (r: Refund): Edge => (r.status === 'failed' ? 'flagged' : r.outcomeUnknown ? 'warn' : '');
 

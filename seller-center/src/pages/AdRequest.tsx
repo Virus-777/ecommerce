@@ -9,7 +9,7 @@ import { useScrollRegion, useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, Breadcrumbs, Button, Card, Checkbox, EmptyState, Field, Icon, ImageCropper, Img, KeyValue, OptionCard, StatusBadge, TableWrap, TextInput, announce } from '@marketly/web-shared/ui';
 import { useSellerSession } from '@/app/session';
-import { adStatus, isAmount, isLaterPhase, parsePT, retryUnlessLater, stampPT, usd, type SellerAdCampaign } from './data/marketing';
+import { adStatus, isAmount, isLaterPhase, parsePT, retryUnlessLater, stampPT, fromDollars, type SellerAdCampaign } from './data/marketing';
 
 // Design: pages/seller/seller-ad-request.html (set up) · view "in-review" (the request after "Submit for approval",
 // opened with ?view=in-review&id=<campaign id>). Data: advertising GET /api/seller/advertising/promotable-offers,
@@ -66,7 +66,7 @@ function validate(d: Draft, minDaily: number | null) {
   if (!isAmount(d.daily)) e.daily = 'Enter a daily limit in dollars, like 20.00.';
   else if (minDaily !== null && Number(d.daily) * 100 < minDaily) e.daily = `A fixed placement costs ${money({ amount: minDaily, currency: 'USD' })} a day. Set the daily limit to at least that.`;
   if (!isAmount(d.total)) e.total = 'Enter a total limit in dollars, like 500.00.';
-  else if (isAmount(d.daily) && Number(d.total) < Number(d.daily)) e.total = `The total limit can't be less than the daily limit (${money(usd(Number(d.daily)))}).`;
+  else if (isAmount(d.daily) && Number(d.total) < Number(d.daily)) e.total = `The total limit can't be less than the daily limit (${money(fromDollars(Number(d.daily)))}).`;
   if (!d.headline.trim()) e.headline = 'Enter a short headline.';
   else if (d.headline.trim().length > 40) e.headline = `Use 40 characters or fewer (now ${d.headline.trim().length}).`;
   return e;
@@ -443,8 +443,8 @@ function SetUp({ id }: { id: string | null }) {
         pages: PAGES.filter((p) => d.pages[p.value]).map((p) => p.value),
         startsAt: parsePT(d.start)!,
         endsAt: parsePT(d.end, { endOfDay: true })!,
-        dailyLimit: usd(Number(d.daily)),
-        totalLimit: usd(Number(d.total)),
+        dailyLimit: fromDollars(Number(d.daily)),
+        totalLimit: fromDollars(Number(d.total)),
         billing: d.billing,
         creativeIds,
         headline: d.headline.trim(),
@@ -698,7 +698,7 @@ function SetUp({ id }: { id: string | null }) {
                 ['Products', d.type === 'sponsored_store' ? 'Store page' : `${picked.length} selected`],
                 ['Pages', PAGES.filter((p) => d.pages[p.value]).map((p) => p.short).join(', ') || '—'],
                 ['Runs', n ? `${dayOnly(s)} – ${dayOnly(e)} (${n} days)` : '—'],
-                ['Most you can spend', money(usd(most))],
+                ['Most you can spend', money(fromDollars(most))],
                 ['Billing', billingLabel(d.billing)],
               ]}
             />

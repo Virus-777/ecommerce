@@ -27,7 +27,7 @@ type TabKey = 'pos' | 'suppliers' | 'reorder';
 const PAGE_SIZE = 20;
 
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
-const usd = (dollars: number) => ({ amount: Math.round(dollars * 100), currency: 'USD' });
+const fromDollars = (dollars: number) => ({ amount: Math.round(dollars * 100), currency: 'USD' });
 
 /* ---------- Draft editing ---------- */
 
@@ -342,8 +342,8 @@ export default function Purchasing() {
   const commit = useMutation({
     mutationFn: async (mode: 'save' | 'send') => {
       const f = form!;
-      const lines = f.lines.map((l) => ({ stockItemId: l.stockItemId, quantity: Number(l.qty), unitCost: usd(Number(l.unit)) }));
-      const common = { lines, freight: usd(Number(f.freight)), expectedDate: f.expected || null };
+      const lines = f.lines.map((l) => ({ stockItemId: l.stockItemId, quantity: Number(l.qty), unitCost: fromDollars(Number(l.unit)) }));
+      const common = { lines, freight: fromDollars(Number(f.freight)), expectedDate: f.expected || null };
       let saved: PurchaseOrder;
       if (isNew || !po) {
         if (!shipTo) throw new Error('No company stock location to ship to.');
