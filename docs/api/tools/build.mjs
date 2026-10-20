@@ -563,6 +563,46 @@ idx.push(
   '5. Send one `Idempotency-Key` per user action on idempotent endpoints, the same on every retry.',
   '6. Show or log the `X-Request-Id` of a failed response when reporting a problem.',
 );
+// endpoints whose response is "event-stream" (FORMAT.md): today the two notification inbox streams
+const streamPaths = modules.flatMap((m) => m.endpoints.filter((e) => e.response === EVENT_STREAM).map((e) => `\`${e.method} ${fullPath(m, e)}\``));
+if (streamPaths.length) idx.push(
+  '',
+  '## Live notifications (Server-Sent Events)',
+  '',
+  `Seller Center and Admin Center receive new inbox notices as they happen: ${streamPaths.join(' and ')}. Each answers \`text/event-stream\` (UTF-8) and stays open. Customers have no stream (the Android app polls the inbox).`,
+  '',
+  '**Request.** `Authorization: Bearer <access token>` like every call: read the stream with `fetch` and a reader (not `EventSource`, which cannot send the header; never put a token in the URL). Optional `Last-Event-ID: <notice id>`, the id of the last notice received. Refusals (401, 403, 503) come before the stream opens, as normal JSON errors.',
+  '',
+  '**Wire format.**',
+  '',
+  '```',
+  'retry: 5000',
+  '',
+  'id: <noticeId>          catch-up notices first, then live ones',
+  'event: notice',
+  'data: <Notice JSON>     exactly one item of GET …/notifications/inbox for this caller',
+  '',
+  'event: ready',
+  'data: {"at":"<ISO time>","caughtUp":<int>}',
+  '',
+  ': ping                  a comment every 25 s (keeps proxies and firewalls from closing the line)',
+  '',
+  'event: end',
+  'data: {"reason":"signed_out" | "session_idle" | "restart" | "max_age"}',
+  '```',
+  '',
+  '- **Catch-up:** with `Last-Event-ID`, the inbox notices created after that notice, only from the last 15 minutes, at most 20, oldest first, then `ready`. An unknown id, or no header: just `ready`.',
+  '- **Who gets a notice:** exactly who sees it in GET /inbox. Staff: the notices routed to them (role, backup, direct), with their own `routedTo`. Sellers: workspace notices whose topic the member receives, and notices addressed to the member. A notice is sent only after it is saved.',
+  '- **`end`**, after which the server closes the response: `signed_out` (session or account revoked, or the staff session expired: stop; the next normal request leads to sign-in), `session_idle` (the staff session went idle: stop), `restart` (the server is shutting down: reconnect after `retry`), `max_age` (seller streams end after 60 minutes so permissions are read again: reconnect at once). Staff streams have no maximum age.',
+  '- **Staff activity:** an open stream is not activity. The connect request counts once, like any request; after that the server re-checks the session at every heartbeat without touching it, so the idle sign-out (identity setting `staffIdleMinutes`) still applies.',
+  '',
+  '**Client rules.**',
+  '',
+  '1. One stream per browser per app: the tab holding the Web Lock `marketly-live:<audience>` (`navigator.locks.request`) opens the stream and relays every event to the other tabs over `BroadcastChannel(\'marketly-live:<audience>\')`; when it closes, another tab takes the lock. Without Web Locks every tab opens its own stream.',
+  '2. When the connection drops (without `end`), reconnect with backoff 1 s, 2 s, 5 s, 10 s, then every 30 s, plus up to 1 s of jitter, sending `Last-Event-ID` = the last notice id.',
+  '3. Tokens: Seller Center may refresh the session as usual before connecting. Admin Center must never refresh just for the stream (a refresh is staff activity and would defeat the idle sign-out): it uses the current access token while it is valid; once it has expired, it waits (checking every 30 s) until normal app activity has refreshed it, then reconnects.',
+  '4. On `ready` and on every `notice`, refetch the inbox and its counts (the bell).',
+);
 if (Object.keys(common.constants ?? {}).length) idx.push('', '## Constants', '', 'Reserved values every module may use (exported from `backend/src/spec/common.ts`).', '', '| Name | Value | Meaning |', '|---|---|---|', ...Object.entries(common.constants).map(([n, c]) => `| \`${n}\` | \`${JSON.stringify(c.value)}\` | ${c.desc} |`));
 writeFileSync(join(apiDir, 'README.md'), `${idx.join('\n')}\n`);
 
