@@ -77,15 +77,15 @@
     },
     "ReportGroup": { "key": "string", "label": "string", "owner": { "type": "StaffRef?", "desc": "Named owner of the group; null until someone is named" }, "ownerRole": { "type": "string", "desc": "Role expected to own it, e.g. Finance Manager (shown while no person is named)" }, "reports": "ReportDefinition[]" },
     "ReportQuery": {
-      "preset": "enum(today|last_7_days|last_14_days|last_30_days|last_90_days|month_to_date|custom)?",
+      "preset": { "type": "enum(today|last_7_days|last_14_days|last_30_days|last_90_days|month_to_date|quarter_to_date|year_to_date|last_12_months|custom)?", "desc": "Days ending today in market time; quarter_to_date from the first day of the calendar quarter, year_to_date from 1 January, last_12_months from the day after the same date last year (at most maxRangeDays)" },
       "range": "DateRange?",
       "dateBasis": "enum(placement|payment|shipment|completion)?",
       "soldBy": "enum(all|official|marketplace)?",
       "sellerId": "uuid?", "categoryId": "uuid?", "productId": "uuid?",
       "currency": { "type": "string?", "desc": "USD only at launch" },
       "timeZone": "string?",
-      "granularity": "enum(day|week|month)?",
-      "compare": "enum(none|previous_period)?",
+      "granularity": { "type": "enum(day|week|month)?", "desc": "Series buckets (weeks start on Monday). Default: day up to 31 days, week up to 92, month beyond" },
+      "compare": { "type": "enum(none|previous_period|same_period_last_year)?", "desc": "previous_period: the same number of days just before the range; same_period_last_year: the same calendar dates one year earlier (29 February becomes 28 February). Gives KPI deltas, meta.compareRange and a <key>:compare twin of every series" },
       "filters": { "type": "json?", "desc": "Report-specific filters from FilterSpec" }
     },
     "KpiValue": {
@@ -93,9 +93,9 @@
       "delta": { "type": "json?", "desc": "{ value, unit: pct|pts, direction: up|down, good: bool } vs the comparison period" },
       "note": "string?"
     },
-    "Series": { "key": "string", "label": "string", "points": { "type": "json[]", "desc": "{ x: date, y: number }" } },
+    "Series": { "key": { "type": "string", "desc": "With a comparison, every series has a twin keyed <key>:compare" }, "label": "string", "points": { "type": "json[]", "desc": "{ x: date (first day of the bucket), y: number, label } . On a <key>:compare twin x and label are the current period's bucket at the same position (so both draw on one axis), y is the comparison period's value (null when the comparison has no bucket there) and compareX is the comparison bucket's own first day" } },
     "ReportResult": {
-      "meta": { "type": "json", "desc": "{ reportKey, title, range, dateBasis, currency, timeZone, taxIncluded, freshAsOf, mayStillChange, definitionsVersion, compareRange?, scope: platform|seller }" },
+      "meta": { "type": "json", "desc": "{ reportKey, title, range, dateBasis, dateBasisLabel, currency, timeZone, taxIncluded, freshAsOf, mayStillChange, definitionsVersion, compare?: previous_period|same_period_last_year, compareRange? (the dates the :compare twins hold), granularity, scope: platform|seller }" },
       "kpis": "KpiValue[]",
       "series": "Series[]",
       "split": { "type": "json[]?", "desc": "{ label, amount: Money, sharePct } e.g. Official Store vs marketplace sellers" },

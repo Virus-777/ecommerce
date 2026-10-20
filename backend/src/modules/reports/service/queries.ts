@@ -19,6 +19,7 @@ import {
   marketDay,
   pct,
   presetRange,
+  lastYearRange,
   previousRange,
   type Basis,
   type DayRange,
@@ -35,7 +36,10 @@ export type Period = 'today' | 'last_7_days' | 'last_14_days' | 'last_30_days';
 export interface ResolvedQuery {
   preset: NonNullable<ReportQuery['preset']>;
   range: DayRange;
+  /** The comparison period's dates (KPI deltas and the :compare series twins), null without a comparison */
   compare: DayRange | null;
+  /** Which comparison was asked for (meta.compare) */
+  compareKind?: 'previous_period' | 'same_period_last_year';
   basis: Basis;
   soldBy: 'all' | 'official' | 'marketplace';
   sellerId?: string;
@@ -72,6 +76,8 @@ interface Part {
   callouts: Callout[];
   unavailable: string[];
   models: string[];
+  /** meta.freshAsOf when the figures come from a pull rather than the read models' events */
+  freshAsOf?: string;
 }
 
 const BASIS_COLUMN: Record<Basis, SalesFilter['basis']> = { placement: 'placed_at', payment: 'paid_at', shipment: 'shipped_at', completion: 'completed_at' };
@@ -108,6 +114,22 @@ const COST_REPORTS: Record<string, { metric: string; kind: string; label: string
   ],
 };
 
+/**
+ * The <key>:compare twin of each series: the comparison period's values at the same bucket positions, with the
+ * current period's x and label so both draw on one axis (compareX keeps the comparison bucket's own date). A
+ * position the comparison period does not have (a range with one more week, a series it did not produce) is null.
+ */
+export function twinsOf(current: Series[], compared: Series[]): Series[] {
+  return current.map((s) => {
+    const other = compared.find((c) => c.key === s.key)?.points as { x: string; y: number | null }[] | undefined;
+    return {
+      key: `${s.key}:compare`,
+      label: `${s.label} (comparison)`,
+      points: (s.points as { x: string; label?: string }[]).map((p, i) => ({ x: p.x, y: other?.[i]?.y ?? null, label: p.label ?? p.x, compareX: other?.[i]?.x ?? null })),
+    };
+  });
+}
+
 export class Queries {
   constructor(
     private readonly core: ReportsCore,
@@ -142,7 +164,8 @@ export class Queries {
     return {
       preset,
       range,
-      compare: query.compare === 'previous_period' ? previousRange(range) : null,
+      compare: query.compare === 'previous_period' ? previousRange(range) : query.compare === 'same_period_last_year' ? lastYearRange(range) : null,
+      ...(query.compare && query.compare !== 'none' ? { compareKind: query.compare } : {}),
       basis: opts.seller ? 'placement' : (query.dateBasis ?? opts.defaultBasis ?? cfg.defaultBasis),
       soldBy: opts.seller ? 'marketplace' : (query.soldBy ?? 'all'),
       ...(query.sellerId ? { sellerId: query.sellerId } : {}),
@@ -160,6 +183,8 @@ export class Queries {
   async run(report: ReportRow, rq: ResolvedQuery, scope: ReportScope): Promise<ReportResult> {
     const cfg = await this.core.cfg();
     const part = await this.compute(report.key, rq, scope, cfg);
+    // the comparison period's series, drawn on the current period's axis (the same report run over compareRange)
+    const series = rq.compare ? [...part.series, ...twinsOf(part.series, (await this.compute(report.key, { ...rq, range: rq.compare, compare: null }, scope, cfg)).series)] : part.series;
     const metricKeys = Array.isArray(report.metrics) ? (report.metrics as string[]) : [];
     const definitions = await this.defs.inUse(metricKeys);
     const today = marketDay(this.core.now(), cfg.timeZone);
@@ -175,15 +200,15 @@ export class Queries {
         currency: rq.currency,
         timeZone: rq.timeZone,
         taxIncluded: cfg.taxIncluded,
-        freshAsOf: await this.freshAsOf(part.models),
+        freshAsOf: part.freshAsOf ?? (await this.freshAsOf(part.models)),
         mayStillChange: rq.range.to >= addDays(today, -30),
         definitionsVersion: Object.fromEntries(definitions.map((d) => [d.key, d.version])),
-        ...(rq.compare ? { compareRange: rq.compare } : {}),
+        ...(rq.compare ? { compare: rq.compareKind ?? 'previous_period', compareRange: rq.compare } : {}),
         granularity: rq.granularity,
         scope: scope.kind,
       },
       kpis: part.kpis,
-      series: part.series,
+      series,
       split: part.split ?? null,
       table: part.table ?? null,
       breakdowns: part.breakdowns ?? null,

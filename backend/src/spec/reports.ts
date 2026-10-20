@@ -244,7 +244,8 @@ export const ReportGroup: z.ZodType<ReportGroup> = z.object({
 }).register(common.apiTypes, { id: "reports.ReportGroup" });
 
 export interface ReportQuery {
-  preset?: "today" | "last_7_days" | "last_14_days" | "last_30_days" | "last_90_days" | "month_to_date" | "custom" | null;
+  /** Days ending today in market time; quarter_to_date from the first day of the calendar quarter, year_to_date from 1 January, last_12_months from the day after the same date last year (at most maxRangeDays) */
+  preset?: "today" | "last_7_days" | "last_14_days" | "last_30_days" | "last_90_days" | "month_to_date" | "quarter_to_date" | "year_to_date" | "last_12_months" | "custom" | null;
   range?: common.DateRange | null;
   dateBasis?: "placement" | "payment" | "shipment" | "completion" | null;
   soldBy?: "all" | "official" | "marketplace" | null;
@@ -254,14 +255,16 @@ export interface ReportQuery {
   /** USD only at launch */
   currency?: string | null;
   timeZone?: string | null;
+  /** Series buckets (weeks start on Monday). Default: day up to 31 days, week up to 92, month beyond */
   granularity?: "day" | "week" | "month" | null;
-  compare?: "none" | "previous_period" | null;
+  /** previous_period: the same number of days just before the range; same_period_last_year: the same calendar dates one year earlier (29 February becomes 28 February). Gives KPI deltas, meta.compareRange and a <key>:compare twin of every series */
+  compare?: "none" | "previous_period" | "same_period_last_year" | null;
   /** Report-specific filters from FilterSpec */
   filters?: unknown | null;
 }
 
 export const ReportQuery: z.ZodType<ReportQuery> = z.object({
-  preset: z.enum(["today", "last_7_days", "last_14_days", "last_30_days", "last_90_days", "month_to_date", "custom"]).nullish(),
+  preset: z.enum(["today", "last_7_days", "last_14_days", "last_30_days", "last_90_days", "month_to_date", "quarter_to_date", "year_to_date", "last_12_months", "custom"]).describe("Days ending today in market time; quarter_to_date from the first day of the calendar quarter, year_to_date from 1 January, last_12_months from the day after the same date last year (at most maxRangeDays)").nullish(),
   get range() {
     return common.DateRange.nullish();
   },
@@ -272,8 +275,8 @@ export const ReportQuery: z.ZodType<ReportQuery> = z.object({
   productId: z.uuid().nullish(),
   currency: z.string().describe("USD only at launch").nullish(),
   timeZone: z.string().nullish(),
-  granularity: z.enum(["day", "week", "month"]).nullish(),
-  compare: z.enum(["none", "previous_period"]).nullish(),
+  granularity: z.enum(["day", "week", "month"]).describe("Series buckets (weeks start on Monday). Default: day up to 31 days, week up to 92, month beyond").nullish(),
+  compare: z.enum(["none", "previous_period", "same_period_last_year"]).describe("previous_period: the same number of days just before the range; same_period_last_year: the same calendar dates one year earlier (29 February becomes 28 February). Gives KPI deltas, meta.compareRange and a <key>:compare twin of every series").nullish(),
   filters: z.unknown().describe("Report-specific filters from FilterSpec").nullish(),
 }).register(common.apiTypes, { id: "reports.ReportQuery" });
 
@@ -301,20 +304,21 @@ export const KpiValue: z.ZodType<KpiValue> = z.object({
 }).register(common.apiTypes, { id: "reports.KpiValue" });
 
 export interface Series {
+  /** With a comparison, every series has a twin keyed <key>:compare */
   key: string;
   label: string;
-  /** { x: date, y: number } */
+  /** { x: date (first day of the bucket), y: number, label } . On a <key>:compare twin x and label are the current period's bucket at the same position (so both draw on one axis), y is the comparison period's value (null when the comparison has no bucket there) and compareX is the comparison bucket's own first day */
   points: unknown[];
 }
 
 export const Series: z.ZodType<Series> = z.object({
-  key: z.string(),
+  key: z.string().describe("With a comparison, every series has a twin keyed <key>:compare"),
   label: z.string(),
-  points: z.array(z.unknown()).describe("{ x: date, y: number }"),
+  points: z.array(z.unknown()).describe("{ x: date (first day of the bucket), y: number, label } . On a <key>:compare twin x and label are the current period's bucket at the same position (so both draw on one axis), y is the comparison period's value (null when the comparison has no bucket there) and compareX is the comparison bucket's own first day"),
 }).register(common.apiTypes, { id: "reports.Series" });
 
 export interface ReportResult {
-  /** { reportKey, title, range, dateBasis, currency, timeZone, taxIncluded, freshAsOf, mayStillChange, definitionsVersion, compareRange?, scope: platform|seller } */
+  /** { reportKey, title, range, dateBasis, dateBasisLabel, currency, timeZone, taxIncluded, freshAsOf, mayStillChange, definitionsVersion, compare?: previous_period|same_period_last_year, compareRange? (the dates the :compare twins hold), granularity, scope: platform|seller } */
   meta?: unknown;
   kpis: KpiValue[];
   series: Series[];
@@ -331,7 +335,7 @@ export interface ReportResult {
 }
 
 export const ReportResult: z.ZodType<ReportResult> = z.object({
-  meta: z.unknown().describe("{ reportKey, title, range, dateBasis, currency, timeZone, taxIncluded, freshAsOf, mayStillChange, definitionsVersion, compareRange?, scope: platform|seller }"),
+  meta: z.unknown().describe("{ reportKey, title, range, dateBasis, dateBasisLabel, currency, timeZone, taxIncluded, freshAsOf, mayStillChange, definitionsVersion, compare?: previous_period|same_period_last_year, compareRange? (the dates the :compare twins hold), granularity, scope: platform|seller }"),
   get kpis() {
     return z.array(KpiValue);
   },

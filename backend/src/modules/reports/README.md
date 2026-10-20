@@ -191,7 +191,7 @@ Business reporting with stated meanings: metric definitions with a named owner a
 
 | Field | Type |
 |---|---|
-| preset | `enum(today|last_7_days|last_14_days|last_30_days|last_90_days|month_to_date|custom)?` |
+| preset | `enum(today|last_7_days|last_14_days|last_30_days|last_90_days|month_to_date|quarter_to_date|year_to_date|last_12_months|custom)?` Days ending today in market time; quarter_to_date from the first day of the calendar quarter, year_to_date from 1 January, last_12_months from the day after the same date last year (at most maxRangeDays) |
 | range | `DateRange?` |
 | dateBasis | `enum(placement|payment|shipment|completion)?` |
 | soldBy | `enum(all|official|marketplace)?` |
@@ -200,8 +200,8 @@ Business reporting with stated meanings: metric definitions with a named owner a
 | productId | `uuid?` |
 | currency | `string?` USD only at launch |
 | timeZone | `string?` |
-| granularity | `enum(day|week|month)?` |
-| compare | `enum(none|previous_period)?` |
+| granularity | `enum(day|week|month)?` Series buckets (weeks start on Monday). Default: day up to 31 days, week up to 92, month beyond |
+| compare | `enum(none|previous_period|same_period_last_year)?` previous_period: the same number of days just before the range; same_period_last_year: the same calendar dates one year earlier (29 February becomes 28 February). Gives KPI deltas, meta.compareRange and a <key>:compare twin of every series |
 | filters | `json?` Report-specific filters from FilterSpec |
 
 ### KpiValue
@@ -220,15 +220,15 @@ Business reporting with stated meanings: metric definitions with a named owner a
 
 | Field | Type |
 |---|---|
-| key | `string` |
+| key | `string` With a comparison, every series has a twin keyed <key>:compare |
 | label | `string` |
-| points | `json[]` { x: date, y: number } |
+| points | `json[]` { x: date (first day of the bucket), y: number, label } . On a <key>:compare twin x and label are the current period's bucket at the same position (so both draw on one axis), y is the comparison period's value (null when the comparison has no bucket there) and compareX is the comparison bucket's own first day |
 
 ### ReportResult
 
 | Field | Type |
 |---|---|
-| meta | `json` { reportKey, title, range, dateBasis, currency, timeZone, taxIncluded, freshAsOf, mayStillChange, definitionsVersion, compareRange?, scope: platform|seller } |
+| meta | `json` { reportKey, title, range, dateBasis, dateBasisLabel, currency, timeZone, taxIncluded, freshAsOf, mayStillChange, definitionsVersion, compare?: previous_period|same_period_last_year, compareRange? (the dates the :compare twins hold), granularity, scope: platform|seller } |
 | kpis | `KpiValue[]` |
 | series | `Series[]` |
 | split | `json[]?` { label, amount: Money, sharePct } e.g. Official Store vs marketplace sellers |
