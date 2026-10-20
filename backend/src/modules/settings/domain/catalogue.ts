@@ -90,8 +90,8 @@ export const BUILT_INS: BuiltIn[] = [
     sellerVisible: true,
     exampleValue: true,
   },
-  { key: 'market.currency', section: 'market', label: 'Currency', description: 'ISO 4217 currency. Fixed for launch (one currency, plan ch. 1).', valueType: 'string', default: 'USD', editable: false, approval: 'business_owner', minLeadDays: 30 },
-  { key: 'market.timeZone', section: 'market', label: 'Time zone', description: 'IANA time zone used for deadlines, reports and campaign schedules. Changing it after launch needs a migration plan.', valueType: 'string', default: 'America/Los_Angeles', approval: 'business_owner', minLeadDays: 30 },
+  { key: 'market.currency', section: 'market', label: 'Currency', description: 'ISO 4217 currency, set on the server (MARKET_CURRENCY). Fixed for launch (one currency, plan ch. 1).', valueType: 'string', default: 'USD', editable: false, approval: 'business_owner', minLeadDays: 30 },
+  { key: 'market.timeZone', section: 'market', label: 'Time zone', description: 'IANA time zone used for deadlines, reports and campaign schedules, set on the server (MARKET_TIME_ZONE). Changing it after launch needs a migration plan.', valueType: 'string', default: 'America/Los_Angeles', editable: false, approval: 'business_owner', minLeadDays: 30 },
   { key: 'market.locale', section: 'market', label: 'Language and formats', description: 'Locale for formatting dates, numbers and money.', valueType: 'string', default: 'en-US', approval: 'second_reviewer' },
   { key: 'market.legalName', section: 'market', label: 'Legal name', description: 'Legal name of the operating company, shown in the footer, policies and receipts.', valueType: 'string', default: 'Marketly, Inc.', approval: 'business_owner', exampleValue: true },
   {

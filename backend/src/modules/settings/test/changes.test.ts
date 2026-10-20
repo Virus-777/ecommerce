@@ -96,8 +96,9 @@ describe('drafts', () => {
     const negative = await draft(h, { items: [{ key: 'support.maxAttachments', value: -1 }], effectiveAt: inDays(h, 1) });
     expect(negative.json().error.code).toBe('VALIDATION_FAILED');
 
-    const tz = await draft(h, { items: [{ key: 'market.timeZone', value: 'Mars/Olympus' }], effectiveAt: inDays(h, 40) });
-    expect(tz.json().error.code).toBe('VALIDATION_FAILED');
+    // the time zone, like the currency, comes from the server configuration: read-only here
+    const tz = await draft(h, { items: [{ key: 'market.timeZone', value: 'Europe/Paris' }], effectiveAt: inDays(h, 40) });
+    expect(tz.json().error.code).toBe('SETTING_NOT_EDITABLE');
 
     const hours = await draft(h, { items: [{ key: 'support.businessHours', value: [{ weekday: 'mon', opens: '18:00', closes: '09:00' }] }], effectiveAt: inDays(h, 1) });
     expect(hours.json().error.code).toBe('VALIDATION_FAILED');
