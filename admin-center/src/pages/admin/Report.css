@@ -16,10 +16,6 @@
 .rpd-seg { max-width: 100%; overflow-x: auto; }
 .rpd-seg .seg { flex-wrap: nowrap; }
 .rpd-seg .seg button { white-space: nowrap; }
-
-/* Export dialog. */
-.rpd-cols { display: grid; gap: var(--sp-2); grid-template-columns: minmax(0, 1fr); }
-@container app (min-width: 768px) { .rpd-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .rpd-delivery { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: var(--sp-2); align-items: start; font-size: var(--fs-sm); }
 .rpd-delivery > svg.lucide { margin-top: 2px; }
 

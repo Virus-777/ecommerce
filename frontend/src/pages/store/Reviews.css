@@ -28,14 +28,6 @@
 .rv-bar.is-dim .meter > i { opacity: 0.35; }
 @container app (min-width: 1024px) { .rv-bar { min-height: 34px; } }
 
-/* "Customers say" topics */
-.rv-topic.is-positive svg.lucide { color: var(--success); }
-.rv-topic.is-mixed svg.lucide { color: var(--warning); }
-.rv-topic.is-negative svg.lucide { color: var(--danger); }
-.rv-topic.is-active svg.lucide { color: inherit; }
-.rv-n { font-size: var(--fs-xs); color: var(--text-3); font-variant-numeric: tabular-nums; }
-.chip.is-active .rv-n { color: inherit; opacity: 0.75; }
-
 /* Filter chips: divider and color swatch */
 .rv-sep { width: 1px; align-self: stretch; margin-block: var(--sp-1); background: var(--border); }
 .rv-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: var(--tint); border: 1px solid var(--border-strong); }
