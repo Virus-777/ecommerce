@@ -46,6 +46,8 @@ describe('money', () => {
   it('is integer minor units', () => {
     expect(() => money(1.5)).toThrow(AppError);
     expect(format(money(18900))).toBe('$189.00');
+    // a code Intl refuses reads as plain text instead of failing the request
+    expect(format({ amount: 18900, currency: 'not-a-code' })).toBe('189.00 not-a-code');
     expect(multiply(money(999), 0.125)).toEqual(money(125));
   });
 
