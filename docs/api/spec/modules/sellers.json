@@ -162,7 +162,7 @@
     "ReturnAddressInput": { "sameAsBusiness": "bool", "contactName": "string", "phone": "string", "address": "Address?" },
     "ApplicationDocument": {
       "id": "uuid", "kind": "enum(owner_id|business_registration|tax_form|bank_letter|proof_of_address|category_certificate|authorization_letter|other)",
-      "file": "MediaRef", "fileName": "string", "sizeBytes": "int", "uploadedAt": "datetime",
+      "file": { "type": "MediaRef?", "desc": "Null when the file is no longer available (deleted, or media could not answer)" }, "fileName": "string", "sizeBytes": "int", "uploadedAt": "datetime",
       "status": "enum(uploaded|accepted|rejected)", "note": "string?", "deleteAfter": { "type": "date?", "desc": "ID documents are deleted after the retention period" }
     },
     "VerificationCheck": {

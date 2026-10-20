@@ -473,8 +473,6 @@ export class Core {
     if (!unique.length) return out;
     const refs = await this.soft('media', 'file links', (m) => m.refs(unique, 'medium'));
     for (const r of refs ?? []) out.set(r.id, r);
-    const base = (this.ctx.config.publicUrls?.store ?? 'https://store.marketly.test').replace(/\/$/, '');
-    for (const id of unique) if (!out.has(id)) out.set(id, { id, url: `${base}/media/${id}` });
     return out;
   }
 }

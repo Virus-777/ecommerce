@@ -148,9 +148,7 @@ export class Core {
     }
   }
 
-  fallbackUrl = (id: string) => `${this.ctx.config.publicUrls.store.replace(/\/$/, '')}/media/unavailable/${id}`;
-
-  /** MediaRefs for files, looked up in one call; unknown files get a placeholder */
+  /** MediaRefs for files, looked up in one call; files media does not know (or media down) are null */
   async mediaRefs(ids: readonly (string | null | undefined)[]): Promise<Refs> {
     const wanted = [...new Set(ids.filter((i): i is string => isUuid(i)))];
     const map = new Map<string, common.MediaRef>();
@@ -161,7 +159,7 @@ export class Core {
         if (!isNotImplemented(err)) this.ctx.log.warn({ err }, 'sellers: media refs failed');
       }
     }
-    return (id) => (id ? (map.get(id) ?? (isUuid(id) ? { id, url: this.fallbackUrl(id) } : null)) : null);
+    return (id) => (id ? (map.get(id) ?? null) : null);
   }
 
   /** Staff display name (access), or null */

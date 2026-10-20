@@ -671,9 +671,13 @@ export default function SellerApplication() {
                   <Icon name={doc.kind === 'owner_id' ? 'id-card' : 'file-text'} />
                   <span className="grow">{doc.fileName}</span>
                   <span className="xs muted">{fileSize(doc.sizeBytes)}</span>
-                  <Button variant="ghost" size="sm" onClick={() => window.open(doc.file.url, '_blank', 'noopener')}>
-                    View
-                  </Button>
+                  {doc.file ? (
+                    <Button variant="ghost" size="sm" onClick={() => doc.file && window.open(doc.file.url, '_blank', 'noopener')}>
+                      View
+                    </Button>
+                  ) : (
+                    <span className="xs muted">File unavailable</span>
+                  )}
                 </div>
               ))}
               {missingDocs.map((r) => (

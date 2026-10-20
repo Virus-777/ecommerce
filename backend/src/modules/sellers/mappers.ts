@@ -329,10 +329,10 @@ export const riskReview = (r: RiskReviewRec | undefined): RiskReview =>
       }
     : { state: 'not_needed', flags: [] };
 
-export const document = (d: DocumentRec, refs: Refs, fallbackUrl: (id: string) => string): ApplicationDocument => ({
+export const document = (d: DocumentRec, refs: Refs): ApplicationDocument => ({
   id: d.id,
   kind: d.kind as ApplicationDocument['kind'],
-  file: refs(d.media_id) ?? { id: d.media_id, url: fallbackUrl(d.media_id) },
+  file: refs(d.media_id),
   fileName: d.file_name,
   sizeBytes: d.size_bytes,
   uploadedAt: isoReq(d.uploaded_at),

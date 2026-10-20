@@ -186,7 +186,7 @@ export class ApplicationsPart extends Part {
   async documents(a: ApplicationRec): Promise<ApplicationDocument[]> {
     const rows = await this.repo.find('application_documents', { application_id: a.id }, { orderBy: [['uploaded_at', 'asc']] });
     const refs = await this.core.mediaRefs(rows.map((d) => d.media_id));
-    return rows.map((d) => map.document(d, refs, this.core.fallbackUrl));
+    return rows.map((d) => map.document(d, refs));
   }
 
   private async latestRequest(appId: string): Promise<InfoRequestRec | undefined> {
@@ -461,7 +461,7 @@ export class ApplicationsPart extends Part {
       return d;
     });
     const refs = await this.core.mediaRefs([doc.media_id]);
-    return map.document(doc, refs, this.core.fallbackUrl);
+    return map.document(doc, refs);
   }
 
   async removeApplicationDocument(accountId: string, id: string, documentId: string, by: By) {

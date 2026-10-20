@@ -411,7 +411,7 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 |---|---|
 | id | `uuid` |
 | kind | `enum(owner_id|business_registration|tax_form|bank_letter|proof_of_address|category_certificate|authorization_letter|other)` |
-| file | `MediaRef` |
+| file | `MediaRef?` Null when the file is no longer available (deleted, or media could not answer) |
 | fileName | `string` |
 | sizeBytes | `int` |
 | uploadedAt | `datetime` |

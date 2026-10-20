@@ -540,7 +540,8 @@ export const ReturnAddressInput: z.ZodType<ReturnAddressInput> = z.object({
 export interface ApplicationDocument {
   id: string;
   kind: "owner_id" | "business_registration" | "tax_form" | "bank_letter" | "proof_of_address" | "category_certificate" | "authorization_letter" | "other";
-  file: common.MediaRef;
+  /** Null when the file is no longer available (deleted, or media could not answer) */
+  file?: common.MediaRef | null;
   fileName: string;
   sizeBytes: number;
   uploadedAt: string;
@@ -554,7 +555,7 @@ export const ApplicationDocument: z.ZodType<ApplicationDocument> = z.object({
   id: z.uuid(),
   kind: z.enum(["owner_id", "business_registration", "tax_form", "bank_letter", "proof_of_address", "category_certificate", "authorization_letter", "other"]),
   get file() {
-    return common.MediaRef;
+    return common.MediaRef.nullish();
   },
   fileName: z.string(),
   sizeBytes: z.number().int(),

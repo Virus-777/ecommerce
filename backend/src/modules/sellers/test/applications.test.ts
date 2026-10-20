@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { signWebhook } from '../../../testing/app.js';
-import { accountInput, ADMIN, approvedSeller, boot, customer, invitation, payoutInput, staff, STORE, submitted, type Kit } from './helpers.js';
+import { accountInput, ADMIN, approvedSeller, boot, customer, invitation, mediaGone, payoutInput, staff, STORE, submitted, type Kit } from './helpers.js';
 import { agreementDocument } from '../domain/catalogue.js';
 
 let kit: Kit;
@@ -116,6 +116,16 @@ describe('application', () => {
     expect(admin.body.approveBlockedBy).toEqual([]);
     expect(admin.body.requiredDocuments.find((d: any) => d.kind === 'owner_id').uploaded).toBe(true);
     expect(admin.body.application.verification.owners[0].verificationState).toBe('verified');
+  });
+
+  it('shows a document whose file is gone without a link, never an invented URL', async () => {
+    const s = await submitted(kit);
+    const [doc] = s.application.documents;
+    expect(doc.file.url).toBe(`https://media.example.com/${doc.file.id}`);
+    mediaGone.add(doc.file.id);
+    const admin = await kit.call('GET', `${ADMIN}/applications/${s.id}`, staff());
+    expect(admin.status).toBe(200);
+    expect(admin.body.application.documents.find((d: any) => d.id === doc.id)).toMatchObject({ file: null, fileName: doc.fileName });
   });
 
   it('refers product plans in risk categories to Trust and Risk and stores the assessment', async () => {
