@@ -210,9 +210,10 @@ function SeriesTrend({ res, loading, refreshing, title, sub, keys, fmt = fmtMone
   );
 }
 
-/** The `waterfall` breakdown. */
-function Waterfall({ res, loading, refreshing, title, sub }: Omit<ChartProps, 'rangeText' | 'grain'> & { title: string; sub: string }) {
+/** The `waterfall` breakdown, titled with its label in the report. */
+function Waterfall({ res, loading, refreshing, title: fallback, sub }: Omit<ChartProps, 'rangeText' | 'grain'> & { title: string; sub: string }) {
   const steps = waterfallOf(res);
+  const title = breakdownLabel(res, 'waterfall', fallback);
   return (
     <ChartFrame title={title} sub={sub} loading={loading} refreshing={refreshing} height={260} empty={!loading && steps.length === 0} table={waterfallTable(steps, fmtMoney)}>
       <WaterfallChart steps={steps} fmt={fmtMoney} axisFmt={fmtMoneyCompact} label={`${title}, ${sub}`} />
@@ -240,11 +241,11 @@ function PlatformCharts({ res, loading, refreshing, rangeText, grain }: ChartPro
         titleAs="h2"
         title={`Net income by ${grain}`}
         sub={`${rangeText} · fee income after refunds, and what is left after costs and platform-funded discounts`}
-        keys={[{ key: 'platform.net_income', label: 'Net income' }, { key: 'platform.fee_income_net', label: 'Fee income (net)' }]}
+        keys={['platform.net_income', 'platform.fee_income_net']}
         label={`Net income and net fee income by ${grain}, ${rangeText}`}
       />
       <div className="grid lg2 gap-4">
-        <Waterfall res={res} loading={loading} refreshing={refreshing} title="From fee income to company result" sub={rangeText} />
+        <Waterfall res={res} loading={loading} refreshing={refreshing} title="From fee income to the company result" sub={rangeText} />
         <ChartFrame title="Platform costs by kind" sub={rangeText} loading={loading} refreshing={refreshing} empty={!loading && costs.every((c) => c.value <= 0)} table={donutTable(costs, fmtMoney, 'Cost')}>
           <DonutChart slices={costs} fmt={fmtMoney} totalLabel="Costs" label={`Platform costs by kind, ${rangeText}`} />
         </ChartFrame>
@@ -256,10 +257,7 @@ function PlatformCharts({ res, loading, refreshing, rangeText, grain }: ChartPro
 }
 
 function SellerMoneyCharts({ res, loading, refreshing, rangeText, grain }: ChartProps) {
-  const payouts = seriesFromReport(res, [
-    { key: 'sellers.payouts_paid', label: 'Paid' },
-    { key: 'sellers.payouts_failed', label: 'Failed' },
-  ]);
+  const payouts = seriesFromReport(res, ['sellers.payouts_paid']);
   return (
     <>
       <SeriesTrend
@@ -269,12 +267,12 @@ function SellerMoneyCharts({ res, loading, refreshing, rangeText, grain }: Chart
         titleAs="h2"
         title="Money held for sellers"
         sub={`${rangeText} · end of each ${grain}`}
-        keys={[{ key: 'sellers.owed', label: 'Owed to sellers' }, { key: 'sellers.held', label: 'On hold' }]}
-        label={`Money owed to sellers and on hold at the end of each ${grain}, ${rangeText}`}
+        keys={['sellers.owed', 'sellers.held']}
+        label={`Money owed to sellers and held for them at the end of each ${grain}, ${rangeText}`}
       />
       <div className="grid lg2 gap-4">
-        <ChartFrame title={`Payouts by ${grain}`} sub={rangeText} loading={loading} refreshing={refreshing} empty={!loading && payouts.rows.length === 0} table={seriesTable(payouts.rows, payouts.series, fmtMoney, { compareLabel: payouts.compareLabel })}>
-          <BarsChart rows={payouts.rows} series={payouts.series} fmt={fmtMoney} axisFmt={fmtMoneyCompact} compareLabel={payouts.compareLabel} label={`Payouts paid and failed by ${grain}, ${rangeText}`} />
+        <ChartFrame title={`Payouts paid by ${grain}`} sub={rangeText} loading={loading} refreshing={refreshing} empty={!loading && payouts.rows.length === 0} table={seriesTable(payouts.rows, payouts.series, fmtMoney, { compareLabel: payouts.compareLabel })}>
+          <BarsChart rows={payouts.rows} series={payouts.series} fmt={fmtMoney} axisFmt={fmtMoneyCompact} compareLabel={payouts.compareLabel} label={`Payouts paid by ${grain}, ${rangeText}`} />
         </ChartFrame>
         <SeriesTrend
           res={res}
@@ -282,19 +280,19 @@ function SellerMoneyCharts({ res, loading, refreshing, rangeText, grain }: Chart
           refreshing={refreshing}
           title="Owed by sellers"
           sub={`${rangeText} · negative balances at the end of each ${grain}`}
-          keys={[{ key: 'sellers.negative', label: 'Owed by sellers' }]}
+          keys={['sellers.negative']}
           label={`Money sellers owe Marketly at the end of each ${grain}, ${rangeText}`}
         />
         <SeriesTrend
           res={res}
           loading={loading}
           refreshing={refreshing}
-          title="Sellers with a negative balance"
-          sub={`${rangeText} · end of each ${grain}`}
-          keys={[{ key: 'sellers.negative_count', label: 'Sellers' }]}
+          title="Sellers below zero and failed payouts"
+          sub={`${rangeText} · sellers at the end of each ${grain}, payouts in it`}
+          keys={['sellers.negative_count', 'sellers.payouts_failed']}
           fmt={fmtCount}
           axisFmt={fmtCountCompact}
-          label={`Sellers with a negative balance at the end of each ${grain}, ${rangeText}`}
+          label={`Sellers below zero and failed payouts by ${grain}, ${rangeText}`}
         />
         <Ranking rows={topSellersOf(res ? tableOf(res) : null)} loading={loading} refreshing={refreshing} title="Top 10 sellers by fee income" sub={rangeText} xLabel="Seller" />
       </div>
@@ -323,7 +321,7 @@ function TradingCharts({ res, loading, refreshing, rangeText, grain }: ChartProp
         titleAs="h2"
         title={`Sales and net margin by ${grain}`}
         sub={`${rangeText} · Official Store only`}
-        keys={[{ key: 'trading.official_sales', label: 'Sales' }, { key: 'trading.net_margin', label: 'Net margin' }]}
+        keys={['trading.official_sales', 'trading.net_margin']}
         label={`Official Store sales and net margin by ${grain}, ${rangeText}`}
       />
       <div className="grid lg2 gap-4">
