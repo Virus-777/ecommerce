@@ -1,26 +1,27 @@
 import { useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import { call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { formatMoney, num } from '@marketly/web-shared/lib/format';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Avatar, Button, Card, Deadline, Dialog, Field, Icon, KeyValue, Meter, PageHeader, SegmentedControl, ShareBar, Stat, StatusBadge, TableWrap, Tabs, Textarea, announce, type IconName } from '@marketly/web-shared/ui';
+import { Alert, Avatar, Button, Card, Deadline, Dialog, Field, Icon, KeyValue, Meter, PageHeader, PeriodControl, ShareBar, Stat, StatusBadge, TableWrap, Tabs, Textarea, announce, usePeriod, type IconName } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
-import { LoadError, SkeletonLines, date, dateTime, deadlineLabel, deadlineTone } from '@/app/parts';
+import { LoadError, SkeletonLines, date, dateTime, deadlineLabel, deadlineTone, shortDate } from '@/app/parts';
 import { exportNote, useDatasetExport } from './data/dataset-export';
 import { RefundApprovals, useRefundRequests } from './data/refund-approvals';
 import {
-  PERIODS, feeRulePairs, bpsNumber, periodRange, reconEdge, refundEdge, refundWhy,
-  type Dispute, type Edge, type FeeRules, type FinanceOverview, type Money, type Period, type ReconItem, type Refund,
+  feeRulePairs, bpsNumber, overviewDelta, reconEdge, refundEdge, refundWhy,
+  type Dispute, type Edge, type FeeRules, type FinanceOverview, type Money, type ReconItem, type Refund,
 } from './data/finance';
 
 // Design: pages/admin/admin-finance.html · views "disputes-and-chargebacks" and "refunds-failing"
 // are the tabs of the Finance queues card. "refunds-to-approve" has no design: the Finance approval queue for refunds
 // staff started (GET returns/refunds?status=under_review; approve / send back / revise), in data/refund-approvals.tsx.
-// Data: GET /api/admin/finance/overview (KPIs, money flow, discount funding), /finance/fee-rules, the open
+// Data: GET /api/admin/finance/overview (KPIs, money flow, discount funding) for the period of the period control
+// (URL state, docs/09 §4.3), and again for the comparison range to show the KPI changes; /finance/fee-rules, the open
 // reconciliation items (Unexplained amounts), /payments/disputes and /payments/refunds?failing=true; Export =
 // POST reports/exports (dataset finance.admin.overview for the shown range, payment-date basis; polled, then downloaded).
 
@@ -127,14 +128,18 @@ export default function Finance() {
   const { can } = useStaffSession();
   const [view] = useView<Tab>();
   const tab: Tab | '' = view === 'disputes-and-chargebacks' || view === 'refunds-failing' || view === 'refunds-to-approve' ? view : '';
-  const [period, setPeriod] = useState<Period>('mtd');
+  const period = usePeriod({ preset: 'month_to_date' });
+  const [params] = useSearchParams();
   const [done, setDone] = useState<{ tab: Tab | ''; title: string; body: string } | null>(null);
   const [pending, setPending] = useState<Pending>(null);
   const [note, setNote] = useState('');
   const [attempted, setAttempted] = useState(false);
   const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null);
 
-  const range = periodRange(period);
+  const range = period.range;
+  const before = period.compareRange;
+  // the period's URL parameters, kept by the queue tabs and passed to Financial statistics (which picks its grain)
+  const periodQuery = Object.fromEntries(['preset', 'from', 'to', 'compare'].flatMap((k) => (params.get(k) ? [[k, params.get(k)!]] : [])));
   const exporter = useDatasetExport('finance.admin.overview');
   const exported = exportNote(exporter.job);
   const canLedger = can('finance.ledger.view');
@@ -148,6 +153,12 @@ export default function Finance() {
     queryKey: ['finance', 'overview', range.from, range.to],
     queryFn: () => call(api.GET('/api/admin/finance/overview', { params: { query: { from: range.from, to: range.to } } })) as Promise<FinanceOverview>,
     enabled: canLedger,
+  });
+  // the comparison range, for the KPI changes (the overview endpoint takes one range and has no comparison)
+  const previous = useQuery({
+    queryKey: ['finance', 'overview', before?.from, before?.to],
+    queryFn: () => call(api.GET('/api/admin/finance/overview', { params: { query: { from: before!.from, to: before!.to } } })) as Promise<FinanceOverview>,
+    enabled: canLedger && !!before,
   });
   const fees = useQuery({ queryKey: ['finance', 'fee-rules'], queryFn: () => call(api.GET('/api/admin/finance/fee-rules')) as Promise<FeeRules>, enabled: canLedger });
   const recon = useQuery({
@@ -232,23 +243,27 @@ export default function Finance() {
   const openRefunds = refundRows.filter((r) => r.status === 'failed' || r.outcomeUnknown).length;
 
   const tabs = [
-    { label: 'Unexplained amounts', value: '', count: canRecon ? (recon.data?.total ?? reconRows.length) : undefined, to: href('admin/finance') },
-    { label: 'Disputes and chargebacks', value: 'disputes-and-chargebacks', count: canDisputes ? (disputes.data?.total ?? disputeRows.length) : undefined, to: href('admin/finance', 'disputes-and-chargebacks') },
-    { label: 'Refunds failing', value: 'refunds-failing', count: canRefundsView ? openRefunds : undefined, to: href('admin/finance', 'refunds-failing') },
-    { label: 'Refunds to approve', value: 'refunds-to-approve', count: canRefundRequests ? toApprove.data?.total : undefined, to: href('admin/finance', 'refunds-to-approve') },
+    { label: 'Unexplained amounts', value: '', count: canRecon ? (recon.data?.total ?? reconRows.length) : undefined, to: href('admin/finance', '', undefined, periodQuery) },
+    { label: 'Disputes and chargebacks', value: 'disputes-and-chargebacks', count: canDisputes ? (disputes.data?.total ?? disputeRows.length) : undefined, to: href('admin/finance', 'disputes-and-chargebacks', undefined, periodQuery) },
+    { label: 'Refunds failing', value: 'refunds-failing', count: canRefundsView ? openRefunds : undefined, to: href('admin/finance', 'refunds-failing', undefined, periodQuery) },
+    { label: 'Refunds to approve', value: 'refunds-to-approve', count: canRefundRequests ? toApprove.data?.total : undefined, to: href('admin/finance', 'refunds-to-approve', undefined, periodQuery) },
   ];
 
   const o = overview.data;
-  const kpis: Array<{ icon: IconName; label: string; value: string; note: string }> = o
+  const p = before ? previous.data : undefined;
+  // Owed to sellers and Holds are balances now, not figures of the range, so they get no change.
+  const kpis: Array<{ icon: IconName; label: string; value: string; note: string; change?: ReturnType<typeof overviewDelta> }> = o
     ? [
-        { icon: 'credit-card', label: 'Collected payments', value: formatMoney(o.collectedPayments), note: `${num(o.collectedCount)} accepted payments` },
-        { icon: 'badge-check', label: 'Company product sales', value: formatMoney(o.companySales), note: 'Official Store · company trading' },
-        { icon: 'landmark', label: 'Marketplace fee income', value: formatMoney(o.marketplaceFeeIncome), note: `on ${formatMoney(o.sellerSales)} seller sales` },
+        { icon: 'credit-card', label: 'Collected payments', value: formatMoney(o.collectedPayments), note: `${num(o.collectedCount)} accepted payments`, change: overviewDelta(o.collectedPayments, p?.collectedPayments) },
+        { icon: 'badge-check', label: 'Company product sales', value: formatMoney(o.companySales), note: 'Official Store · company trading', change: overviewDelta(o.companySales, p?.companySales) },
+        { icon: 'landmark', label: 'Marketplace fee income', value: formatMoney(o.marketplaceFeeIncome), note: `on ${formatMoney(o.sellerSales)} seller sales`, change: overviewDelta(o.marketplaceFeeIncome, p?.marketplaceFeeIncome) },
         { icon: 'wallet', label: 'Owed to sellers', value: formatMoney(o.owedToSellers), note: `Pending ${formatMoney(o.owedPending)} · available ${formatMoney(o.owedAvailable)}` },
-        { icon: 'undo-2', label: 'Refunds sent', value: formatMoney(o.refundsSent), note: `${num(o.refundsSentCount)} sent · ${num(o.refundsFailing)} failing` },
+        { icon: 'undo-2', label: 'Refunds sent', value: formatMoney(o.refundsSent), note: `${num(o.refundsSentCount)} sent · ${num(o.refundsFailing)} failing`, change: overviewDelta(o.refundsSent, p?.refundsSent, false) },
         { icon: 'hand-coins', label: 'Holds', value: formatMoney(o.holds), note: `${num(o.holdSellers)} ${o.holdSellers === 1 ? 'seller' : 'sellers'} · each with review date` },
       ]
     : [];
+  const vs = before ? `vs ${shortDate(before.from)} – ${date(before.to)}` : '';
+  const canStats = can('reports.marketplace-finance.view') || can('reports.trading.view');
 
   const flowTotal = o ? o.companySales.amount + o.sellerSales.amount + o.shippingCollected.amount : 0;
   const share = (m: Money) => (flowTotal ? Math.round((m.amount / flowTotal) * 100) : 0);
@@ -283,10 +298,9 @@ export default function Finance() {
       <PageHeader
         crumbs={[{ label: 'Admin', to: href('admin/dashboard') }, { label: 'Finance' }]}
         title="Payments and fees"
-        sub={`${range.label} · USD · Pacific Time · counted by payment date`}
+        sub="USD · Pacific Time · counted by payment date"
         actions={
           <>
-            <SegmentedControl items={PERIODS} active={period} onChange={setPeriod} />
             {canLedger && (
               <Button variant="secondary" size="sm" icon="download" disabled={exporter.busy} onClick={() => void exporter.run({ from: range.from, to: range.to, basis: 'payment_date' })}>
                 {exporter.busy ? 'Exporting…' : 'Export'}
@@ -295,6 +309,7 @@ export default function Finance() {
           </>
         }
       />
+      {canLedger && <PeriodControl period={period} noGrain idPrefix="fi" />}
       {!canLedger && (
         <Alert tone="info" title="You can’t see finance totals">
           Your role doesn’t include the finance ledger. Ask a Finance Manager if you need access.
@@ -320,7 +335,7 @@ export default function Finance() {
               ))
             : kpis.map((k) => (
                 <div key={k.label} className="card pad">
-                  <Stat icon={k.icon} label={k.label} value={k.value} note={k.note} />
+                  <Stat icon={k.icon} label={k.label} value={k.value} {...(k.change ? { delta: k.change.delta, dir: k.change.dir, good: k.change.good, note: vs } : { note: k.note })} />
                 </div>
               ))}
         </div>
@@ -578,7 +593,7 @@ export default function Finance() {
           </Card>
 
           {canLedger && (
-            <Card title="Where the money went" sub={`${PERIODS.find((p) => p.value === period)!.label} · one payment can cover several seller groups`} titleAs="h3">
+            <Card title="Where the money went" sub={`${period.label} · one payment can cover several seller groups`} titleAs="h3">
               {overview.isPending ? (
                 <SkeletonLines rows={4} />
               ) : o ? (
@@ -617,89 +632,101 @@ export default function Finance() {
             </Card>
           )}
         </div>
-        {canLedger && (
+        {(canLedger || canStats) && (
           <div className="stack gap-5">
-            <Card
-              title="Fee rules"
-              sub={rules ? `Effective ${rules.effectiveFrom ? date(rules.effectiveFrom) : 'now'} · seller agreement ${rules.agreementVersion}` : 'Active rule set'}
-              titleAs="h3"
-              actions={
-                can('finance.fees.manage') ? (
-                  <Button variant="ghost" size="sm" to={href('admin/settings')}>
-                    Edit in settings
-                  </Button>
-                ) : undefined
-              }
-            >
-              {fees.isPending ? (
-                <SkeletonLines rows={4} />
-              ) : fees.isError ? (
-                <LoadError error={fees.error} onRetry={() => void fees.refetch()} />
-              ) : rules ? (
-                <>
-                  <KeyValue pairs={feeRulePairs(rules)} />
-                  <div className="divider" />
-                  <span className="small strong">Category rates</span>
-                  <TableWrap label="Fee rules table">
-                    <table className="table">
-                      <thead>
-                        <tr>
-                          <th scope="col">Category</th>
-                          <th className="r col-pin" scope="col">
-                            Rate
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {rules.categoryRates.map((c) => (
-                          <tr key={c.categoryId}>
-                            <td>{c.categoryName}</td>
-                            <td className="r col-pin">{bpsNumber(c.rateBps)}%</td>
-                          </tr>
-                        ))}
-                        <tr>
-                          <td>{rules.categoryRates.length ? 'Every other category' : 'All categories'}</td>
-                          <td className="r col-pin">{bpsNumber(rules.defaultRateBps)}%</td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </TableWrap>
-                  <div className="panel small">
-                    <b>Illustration:</b> a $100.00 item sale with a {bpsNumber(rules.defaultRateBps)}% fee creates {formatMoney({ amount: rules.defaultRateBps, currency: 'USD' })} of fee income and{' '}
-                    {formatMoney({ amount: 10000 - rules.defaultRateBps, currency: 'USD' })} of seller earnings before other adjustments.
-                  </div>
-                  {fees.data!.upcoming.length > 0 && (
-                    <p className="ab-note">
-                      <Icon name="info" className="ic-sm" /> {fees.data!.upcoming.length === 1 ? 'A new fee rule version is' : `${fees.data!.upcoming.length} new fee rule versions are`} scheduled
-                      {fees.data!.upcoming[0].effectiveFrom ? ` from ${date(fees.data!.upcoming[0].effectiveFrom)}` : ''}.
-                    </p>
-                  )}
-                </>
-              ) : null}
-            </Card>
-            <Card title="Discount funding this period" sub="Recorded separately from sales" titleAs="h3">
-              {overview.isPending ? (
-                <SkeletonLines rows={3} />
-              ) : o ? (
-                <div className="ab-sumlist">
-                  {discounts.map((d) => (
-                    <div key={d.label}>
-                      <span>{d.label}</span>
-                      <span>{formatMoney(d.amount)}</span>
+            {canStats && (
+              <Card title="Financial statistics" titleAs="h3">
+                <p className="small sub">Platform income, seller balances and payouts, and the Official Store profit and loss over time, with charts and a comparison period.</p>
+                <Button variant="secondary" size="sm" icon="chart-line" to={href('admin/finance-statistics', '', undefined, periodQuery)}>
+                  Open financial statistics
+                </Button>
+              </Card>
+            )}
+            {canLedger && (
+              <>
+                <Card
+                  title="Fee rules"
+                  sub={rules ? `Effective ${rules.effectiveFrom ? date(rules.effectiveFrom) : 'now'} · seller agreement ${rules.agreementVersion}` : 'Active rule set'}
+                  titleAs="h3"
+                  actions={
+                    can('finance.fees.manage') ? (
+                      <Button variant="ghost" size="sm" to={href('admin/settings')}>
+                        Edit in settings
+                      </Button>
+                    ) : undefined
+                  }
+                >
+                  {fees.isPending ? (
+                    <SkeletonLines rows={4} />
+                  ) : fees.isError ? (
+                    <LoadError error={fees.error} onRetry={() => void fees.refetch()} />
+                  ) : rules ? (
+                    <>
+                      <KeyValue pairs={feeRulePairs(rules)} />
+                      <div className="divider" />
+                      <span className="small strong">Category rates</span>
+                      <TableWrap label="Fee rules table">
+                        <table className="table">
+                          <thead>
+                            <tr>
+                              <th scope="col">Category</th>
+                              <th className="r col-pin" scope="col">
+                                Rate
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {rules.categoryRates.map((c) => (
+                              <tr key={c.categoryId}>
+                                <td>{c.categoryName}</td>
+                                <td className="r col-pin">{bpsNumber(c.rateBps)}%</td>
+                              </tr>
+                            ))}
+                            <tr>
+                              <td>{rules.categoryRates.length ? 'Every other category' : 'All categories'}</td>
+                              <td className="r col-pin">{bpsNumber(rules.defaultRateBps)}%</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </TableWrap>
+                      <div className="panel small">
+                        <b>Illustration:</b> a $100.00 item sale with a {bpsNumber(rules.defaultRateBps)}% fee creates {formatMoney({ amount: rules.defaultRateBps, currency: 'USD' })} of fee income and{' '}
+                        {formatMoney({ amount: 10000 - rules.defaultRateBps, currency: 'USD' })} of seller earnings before other adjustments.
+                      </div>
+                      {fees.data!.upcoming.length > 0 && (
+                        <p className="ab-note">
+                          <Icon name="info" className="ic-sm" /> {fees.data!.upcoming.length === 1 ? 'A new fee rule version is' : `${fees.data!.upcoming.length} new fee rule versions are`} scheduled
+                          {fees.data!.upcoming[0].effectiveFrom ? ` from ${date(fees.data!.upcoming[0].effectiveFrom)}` : ''}.
+                        </p>
+                      )}
+                    </>
+                  ) : null}
+                </Card>
+                <Card title="Discount funding this period" sub="Recorded separately from sales" titleAs="h3">
+                  {overview.isPending ? (
+                    <SkeletonLines rows={3} />
+                  ) : o ? (
+                    <div className="ab-sumlist">
+                      {discounts.map((d) => (
+                        <div key={d.label}>
+                          <span>{d.label}</span>
+                          <span>{formatMoney(d.amount)}</span>
+                        </div>
+                      ))}
+                      <div>
+                        <span>Total discount cost</span>
+                        <span>
+                          <b>{formatMoney(o.discountFunding.total)}</b>
+                        </span>
+                      </div>
                     </div>
-                  ))}
-                  <div>
-                    <span>Total discount cost</span>
-                    <span>
-                      <b>{formatMoney(o.discountFunding.total)}</b>
-                    </span>
-                  </div>
-                </div>
-              ) : null}
-              <Link className="small strong" to={href('admin/promotions')}>
-                Campaign results <Icon name="arrow-right" className="ic-sm" />
-              </Link>
-            </Card>
+                  ) : null}
+                  <Link className="small strong" to={href('admin/promotions')}>
+                    Campaign results <Icon name="arrow-right" className="ic-sm" />
+                  </Link>
+                </Card>
+              </>
+            )}
           </div>
         )}
       </div>
