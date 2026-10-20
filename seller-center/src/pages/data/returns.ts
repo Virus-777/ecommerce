@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ApiError, useApi, type components } from '@marketly/web-shared/api';
 import SELLER_RETURN_DETAIL from '@marketly/web-shared/api/graphql/seller/SellerReturnDetail.graphql?raw';
-import { formatMoney, type MoneyValue } from '@marketly/web-shared/lib/format';
+import { formatMoney, type MoneyValue, parseCents } from '@marketly/web-shared/lib/format';
 
 
 // Seller returns and cases: list (GET /api/seller/returns/requests, …/counts, …/terms, …/exports) and the return
@@ -81,7 +81,7 @@ export const money = (m?: MoneyValue | null) => formatMoney(m);
 /** "−$27.90" (the amount shown as a deduction) */
 export const negMoney = (m?: MoneyValue | null) => (m ? `−${formatMoney({ ...m, amount: Math.abs(m.amount) })}` : '');
 /** "12.50" → 1250; NaN when it isn't a money amount */
-export const toMinor = (s: string): number => (/^\d+(\.\d{1,2})?$/.test(s.trim()) ? Math.round(Number(s.trim()) * 100) : NaN);
+export const toMinor = (s: string): number => parseCents(s) ?? NaN;
 export const human = (s?: string | null) => (s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase().replace(/_/g, ' ') : '');
 
 /* ------------------------------------------------------------------ hooks */

@@ -1,5 +1,6 @@
 // Types and labels for admin/cases and admin/case (design: pages/admin/admin-cases.html, admin-case.html),
 // mapped from GET /api/admin/support/cases, /cases/stats, /categories, /assignees and the AdminCase screen query.
+import { parseCents } from '@marketly/web-shared/lib/format';
 import { fromZonedInput } from '@marketly/web-shared/lib/dates';
 import type { components } from '@marketly/web-shared/api';
 import type { Tone } from '@marketly/web-shared/ui';
@@ -77,10 +78,7 @@ export function pacificEndOfDay(day: string): string {
 }
 
 /** Parses a dollar amount typed by staff ("$114.54") into minor units; NaN when invalid. */
-export const toMinor = (s: string): number => {
-  const n = Number(s.replace(/[$,\s]/g, ''));
-  return s.trim() && Number.isFinite(n) ? Math.round(n * 100) : NaN;
-};
+export const toMinor = (s: string): number => parseCents(s) ?? NaN;
 
 interface GqlMoney {
   amount: number;

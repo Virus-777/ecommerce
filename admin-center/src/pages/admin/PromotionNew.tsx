@@ -5,7 +5,7 @@ import { Link, useSearchParams } from 'react-router';
 import { ApiError, call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
-import { formatMoney, num } from '@marketly/web-shared/lib/format';
+import { formatMoney, num, parseCents } from '@marketly/web-shared/lib/format';
 import { useScrollRegion, useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, Badge, Button, Card, Checkbox, EmptyState, Field, Icon, Img, PageHeader, Price, Radio, Select, StatusBadge, Textarea, TextInput, announce, type IconName } from '@marketly/web-shared/ui';
@@ -132,7 +132,7 @@ const EMPTY: Form = {
 
 const toNum = (s: string) => Number(s.replace(/[$,\s]/g, ''));
 const isInt = (s: string) => /^\d[\d,]*$/.test(s.trim()) && toNum(s) > 0;
-const cents = (s: string) => Math.round(toNum(s) * 100);
+const cents = (s: string) => parseCents(s) ?? NaN;
 const usd = (amount: number) => ({ amount, currency: 'USD' });
 
 type Errors = Partial<Record<'name' | 'code' | 'start' | 'end' | 'cats' | 'value' | 'minSpend' | 'max' | 'budget' | 'cap' | 'perCustomer' | 'perOrder', string>>;

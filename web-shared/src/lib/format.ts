@@ -36,3 +36,13 @@ export const isoInText = (text?: string | null): string =>
     const d = new Date(m);
     return Number.isNaN(d.getTime()) ? m : `${PT_INSTANT.format(d)} PT`;
   });
+
+/**
+ * Money typed in a field → integer cents: "$1,234.50", "12.5" and "12" are read; more than two decimals, a minus sign
+ * or anything else is not money (null). Every money field in the three apps reads input this way.
+ */
+export function parseCents(text: string | null | undefined): number | null {
+  const t = (text ?? '').replace(/[$,\s]/g, '');
+  if (!/^\d+(\.\d{1,2})?$/.test(t) && !/^\.\d{1,2}$/.test(t)) return null;
+  return Math.round(Number(t) * 100);
+}

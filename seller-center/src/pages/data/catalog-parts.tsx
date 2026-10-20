@@ -1,6 +1,7 @@
 // Shared pieces of the Seller Center catalog, offer and inventory screens (Products, CatalogMatch,
 // ProductNew, Offer, Inventory, BulkUpdate): load/skeleton states, labels for API enums, money input
 // helpers, dates, CSV and export downloads, the seller-visible settings.
+import { parseCents } from '@marketly/web-shared/lib/format';
 import { shortDate } from '@marketly/web-shared/lib/dates';
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -156,10 +157,8 @@ export function iconFor(...words: Array<string | null | undefined>): IconName {
 
 /** "189", "189.00", "$1,189.5" → minor units; null when not a positive amount. */
 export function toMinor(s: string): number | null {
-  const t = s.replace(/[$,\s]/g, '');
-  if (!/^\d+(\.\d{1,2})?$/.test(t)) return null;
-  const n = Math.round(Number(t) * 100);
-  return n > 0 ? n : null;
+  const n = parseCents(s);
+  return n && n > 0 ? n : null;
 }
 /** 18900 → "189.00" (input value). */
 export const inputAmount = (m?: Money | null) => (m ? (m.amount / 100).toFixed(2) : '');
