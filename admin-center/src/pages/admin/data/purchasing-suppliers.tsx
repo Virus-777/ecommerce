@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { call, errorMessage, useApi, type components } from '@marketly/web-shared/api';
 import { formatMoney } from '@marketly/web-shared/lib/format';
-import { Alert, announce, Button, Checkbox, Dialog, EmptyState, Field, SearchInput, TextInput } from '@marketly/web-shared/ui';
+import { Alert, announce, Button, Checkbox, Dialog, EmptyState, Field, PhoneInput, SearchInput, TextInput } from '@marketly/web-shared/ui';
 import { SkeletonLines } from '@/app/parts';
 import type { Supplier, SupplierItem } from './purchasing';
 
@@ -131,7 +131,7 @@ export function SupplierDialog({ open, supplier, suppliers, onClose, onSaved }: 
           <TextInput id="sup-email" type="email" value={f.email} error={!!errors.email} onChange={(e) => set({ email: e.target.value })} />
         </Field>
         <Field label="Phone" optional>
-          <TextInput id="sup-phone" type="tel" value={f.phone} onChange={(e) => set({ phone: e.target.value })} />
+          <PhoneInput id="sup-phone" value={f.phone} onChange={(e) => set({ phone: e.target.value })} />
         </Field>
       </div>
       <Field label="Street address" optional>

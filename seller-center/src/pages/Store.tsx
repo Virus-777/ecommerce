@@ -5,7 +5,7 @@ import { SellerLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { initials } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Badge, Button, Card, Checkbox, Field, Icon, IconButton, ImageCropper, Img, PageHeader, SegmentedControl, Select, Stars, Switch, Tabs, Textarea, TextInput, type CropWording, type IconName, LogoTile } from '@marketly/web-shared/ui';
+import { Alert, Badge, Button, Card, Checkbox, Field, Icon, IconButton, ImageCropper, Img, PageHeader, PhoneInput, SegmentedControl, Select, Stars, Switch, Tabs, Textarea, TextInput, type CropWording, type IconName, LogoTile } from '@marketly/web-shared/ui';
 import { useSellerSession } from '@/app/session';
 import { fmtDay } from './data/finance';
 
@@ -109,7 +109,7 @@ function validate(p: Profile, saved: Profile, evidence: number, brandsLoaded: bo
   else if (p.intro.length > INTRO_MAX) e.intro = `Shorten the introduction to ${INTRO_MAX} characters or fewer.`;
   const phones = filledPhones(p);
   if (p.phone && !phones.length) e.phones = 'Add the number customers can call or text.';
-  else if (phones.some((n) => !phoneOk(n))) e.phones = 'Enter each number with 7 to 15 digits, e.g. +1 503 555 0100.';
+  else if (phones.some((n) => !phoneOk(n))) e.phones = 'Enter each number with 7 to 15 digits.';
   if (!p.warranty.trim()) e.warranty = 'Describe your warranty, or write "Manufacturer warranty only".';
   if (p.brand.trim() && p.brand.trim() !== saved.brand) {
     if (p.brand.trim().length > 120) e.brand = 'Keep the claim to 120 characters or fewer.';
@@ -696,7 +696,7 @@ export default function Store() {
                       hint={i === 0 && !errors.phones ? (p.phone ? 'Shown on your storefront and product pages. Customers can call or text it.' : 'Hidden from customers until you turn on “Show phone numbers”.') : undefined}
                       error={i === phoneRows.length - 1 ? errors.phones : undefined}
                     >
-                      <TextInput id={`st-phone-${i}`} type="tel" autoComplete="tel" icon="phone" value={n} error={!!errors.phones && (!n.trim() ? filledPhones(p).length === 0 : !phoneOk(n.trim()))} placeholder="+1 503 555 0100" disabled={!canManage} onChange={(e) => setPhone(i, e.target.value)} />
+                      <PhoneInput id={`st-phone-${i}`} autoComplete="tel" icon="phone" value={n} error={!!errors.phones && (!n.trim() ? filledPhones(p).length === 0 : !phoneOk(n.trim()))} disabled={!canManage} onChange={(e) => setPhone(i, e.target.value)} />
                     </Field>
                     {canManage && phoneRows.length > 1 && <IconButton icon="trash-2" label={`Remove phone number ${i + 1}`} onClick={() => setPhone(i, null)} />}
                   </div>

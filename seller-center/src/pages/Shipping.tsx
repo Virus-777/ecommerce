@@ -5,7 +5,7 @@ import { SellerLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { formatMoney, money, parseCents } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Badge, Button, Card, Checkbox, Dialog, Field, Icon, KeyValue, OptionCard, PageHeader, Select, Switch, TableWrap, TextInput, Timeline, announce, type TimelineEvent } from '@marketly/web-shared/ui';
+import { Alert, Badge, Button, Card, Checkbox, Dialog, Field, Icon, KeyValue, OptionCard, PageHeader, PhoneInput, Select, Switch, TableWrap, TextInput, Timeline, announce, type TimelineEvent } from '@marketly/web-shared/ui';
 import { useSellerSession } from '@/app/session';
 import { addDays, dayKey, dayRange, phoneText, ptDateTime, ptInstant, weekdayDay, type Carrier, type PlatformMethod, type ProfileMethod, type ReturnTerms, type ShippingSettings } from './data/orders';
 
@@ -744,7 +744,7 @@ function ShippingForm({ settings: st, methods, carriers }: { settings: ShippingS
         </Field>
         <div className="grid md2 gap-3">
           <Field label="Phone">
-            <TextInput id="sh-ad-phone" type="tel" value={addr.phone} onChange={(e) => setAddr({ ...addr, phone: e.target.value })} />
+            <PhoneInput id="sh-ad-phone" value={addr.phone} onChange={(e) => setAddr({ ...addr, phone: e.target.value })} />
           </Field>
           <Field label="Email" optional error={addrErrors.email}>
             <TextInput id="sh-ad-email" type="email" value={addr.email} error={!!addrErrors.email} onChange={(e) => setAddr({ ...addr, email: e.target.value })} />

@@ -4,7 +4,7 @@ import { Link } from 'react-router';
 import { AccountLayout } from '@/layouts';
 import { ApiError, call, errorMessage, useApi, type components } from '@marketly/web-shared/api';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, announce, Badge, Button, Card, Dialog, Field, Icon, Switch, Textarea, TextInput } from '@marketly/web-shared/ui';
+import { Alert, announce, Badge, Button, Card, Dialog, Field, Icon, PhoneInput, Switch, Textarea, TextInput } from '@marketly/web-shared/ui';
 import { WhatWeSend } from './data/notification-settings';
 import { NO_PASSWORD_NOTE, isPasswordNotSet } from './data/password';
 import { dateLong } from './data/when';
@@ -309,7 +309,7 @@ export default function Profile() {
               )}
             </div>
             <Field label="Mobile phone" hint="Used for delivery problems and 2-step verification." error={errors.phone}>
-              <TextInput id="pf-phone" type="tel" value={form.phone} error={!!errors.phone} onChange={(e) => set('phone', e.target.value)} autoComplete="tel" />
+              <PhoneInput id="pf-phone" value={form.phone} error={!!errors.phone} onChange={(e) => set('phone', e.target.value)} autoComplete="tel" />
             </Field>
           </div>
         )}

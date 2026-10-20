@@ -75,6 +75,8 @@ export interface MarketSettings {
   legalName: string;
   /** market.companyLine */
   companyLine: string;
+  /** market.phoneFormat: input mask for phone numbers, # = one digit, e.g. (###) ###-#### */
+  phoneFormat: string;
   /** market.defaultDeliveryLocation: where prices and delivery dates are estimated before a visitor gives an address */
   defaultDeliveryLocation?: DeliveryLocation | null;
   /** Public company facts (market.* keys) */
@@ -101,6 +103,7 @@ export const MarketSettings: z.ZodType<MarketSettings> = z.object({
   },
   legalName: z.string().describe("market.legalName"),
   companyLine: z.string().describe("market.companyLine"),
+  phoneFormat: z.string().describe("market.phoneFormat: input mask for phone numbers, # = one digit, e.g. (###) ###-####"),
   get defaultDeliveryLocation() {
     return DeliveryLocation.nullish();
   },
@@ -244,6 +247,8 @@ export interface PublicMarket {
   legalName: string;
   /** One-line company details for the footer and emails, e.g. Marketly, Inc. · Portland, OR */
   companyLine: string;
+  /** How phone number inputs are masked: # = one digit, other characters shown as typed, e.g. (###) ###-####. A number starting with + or longer than the pattern stays as typed */
+  phoneFormat: string;
   /** Where prices and delivery dates are estimated before a visitor gives an address (Deliver to … label); always given */
   defaultDeliveryLocation?: DeliveryLocation | null;
   /** Contact emails, postal address, founding year and headquarters for the About and contact pages; always given */
@@ -258,6 +263,7 @@ export const PublicMarket: z.ZodType<PublicMarket> = z.object({
   serviceRegionLabel: z.string(),
   legalName: z.string().describe("Legal name of the operating company, e.g. Marketly, Inc. (footer, policies, receipts)"),
   companyLine: z.string().describe("One-line company details for the footer and emails, e.g. Marketly, Inc. · Portland, OR"),
+  phoneFormat: z.string().describe("How phone number inputs are masked: # = one digit, other characters shown as typed, e.g. (###) ###-####. A number starting with + or longer than the pattern stays as typed"),
   get defaultDeliveryLocation() {
     return DeliveryLocation.nullish();
   },

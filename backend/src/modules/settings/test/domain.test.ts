@@ -58,6 +58,10 @@ describe('values', () => {
     expect(validateValue(def('support.closures'), [{ date: '2026-12-24', label: 'Christmas Eve', kind: 'reduced_hours' }])).toHaveLength(1);
     expect(validateValue(def('apps.maintenance'), { active: true, kind: 'maintenance', message: null })).toHaveLength(1);
     expect(validateValue(def('market.locale'), 'en-US')).toEqual([]);
+    expect(validateValue(def('market.phoneFormat'), '(###) ###-####')).toEqual([]);
+    expect(validateValue(def('market.phoneFormat'), '+1 ###-###-####')).toEqual([]);
+    expect(validateValue(def('market.phoneFormat'), '(###) ###')).toHaveLength(1); // fewer than 7 digits
+    expect(validateValue(def('market.phoneFormat'), 'XXX-XXX-XXXX')).not.toEqual([]);
     expect(validateValue(def('notifications.retryBackoffMinutes'), { a: 1 })).toHaveLength(1);
     // a value outside an enum's choices
     expect(validateValue(def('payments.captureMode'), 'daily')).toEqual([{ path: 'value', message: expect.stringContaining('on_acceptance, per_group_on_dispatch') }]);

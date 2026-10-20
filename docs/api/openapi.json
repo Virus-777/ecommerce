@@ -212646,6 +212646,10 @@
             "type": "string",
             "description": "market.companyLine"
           },
+          "phoneFormat": {
+            "type": "string",
+            "description": "market.phoneFormat: input mask for phone numbers, # = one digit, e.g. (###) ###-####"
+          },
           "defaultDeliveryLocation": {
             "anyOf": [
               {
@@ -212680,7 +212684,8 @@
           "closures",
           "support",
           "legalName",
-          "companyLine"
+          "companyLine",
+          "phoneFormat"
         ]
       },
       "settings.DeliveryLocation": {
@@ -212913,6 +212918,10 @@
             "type": "string",
             "description": "One-line company details for the footer and emails, e.g. Marketly, Inc. · Portland, OR"
           },
+          "phoneFormat": {
+            "type": "string",
+            "description": "How phone number inputs are masked: # = one digit, other characters shown as typed, e.g. (###) ###-####. A number starting with + or longer than the pattern stays as typed"
+          },
           "defaultDeliveryLocation": {
             "anyOf": [
               {
@@ -212943,7 +212952,8 @@
           "locale",
           "serviceRegionLabel",
           "legalName",
-          "companyLine"
+          "companyLine",
+          "phoneFormat"
         ]
       },
       "settings.PublicSupport": {

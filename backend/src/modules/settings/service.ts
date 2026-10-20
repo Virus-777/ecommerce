@@ -83,6 +83,7 @@ const MARKET_KEYS = [
   'market.locale',
   'market.legalName',
   'market.companyLine',
+  'market.phoneFormat',
   'market.defaultDeliveryLocation',
   'market.helpEmail',
   'market.sellersEmail',
@@ -321,6 +322,7 @@ export class SettingsService implements SettingsPublicApi {
       locale: (v['market.locale'] as string) ?? 'en-US',
       legalName: (v['market.legalName'] as string) ?? '',
       companyLine: (v['market.companyLine'] as string) ?? '',
+      phoneFormat: (v['market.phoneFormat'] as string) ?? '(###) ###-####',
       defaultDeliveryLocation: (v['market.defaultDeliveryLocation'] as DeliveryLocation | null) ?? null,
       company: {
         helpEmail: (v['market.helpEmail'] as string | null) ?? null,
@@ -494,6 +496,7 @@ export class SettingsService implements SettingsPublicApi {
     const market: PublicMarket = { country: m.country, currency: m.currency, timeZone: m.timeZone, locale: m.locale, serviceRegionLabel: m.serviceRegion?.label ?? m.country,
       legalName: m.legalName,
       companyLine: m.companyLine,
+      phoneFormat: m.phoneFormat,
       defaultDeliveryLocation: m.defaultDeliveryLocation ?? null,
       company: m.company ?? null,
     };

@@ -105,6 +105,7 @@ Market-level platform settings: country and service region, currency, time zone,
 | support | `SupportContacts` |
 | legalName | `string` market.legalName |
 | companyLine | `string` market.companyLine |
+| phoneFormat | `string` market.phoneFormat: input mask for phone numbers, # = one digit, e.g. (###) ###-#### |
 | defaultDeliveryLocation | `DeliveryLocation?` market.defaultDeliveryLocation: where prices and delivery dates are estimated before a visitor gives an address |
 | company | `CompanyFacts?` Public company facts (market.* keys) |
 
@@ -179,6 +180,7 @@ Market-level platform settings: country and service region, currency, time zone,
 | serviceRegionLabel | `string` |
 | legalName | `string` Legal name of the operating company, e.g. Marketly, Inc. (footer, policies, receipts) |
 | companyLine | `string` One-line company details for the footer and emails, e.g. Marketly, Inc. · Portland, OR |
+| phoneFormat | `string` How phone number inputs are masked: # = one digit, other characters shown as typed, e.g. (###) ###-####. A number starting with + or longer than the pattern stays as typed |
 | defaultDeliveryLocation | `DeliveryLocation?` Where prices and delivery dates are estimated before a visitor gives an address (Deliver to … label); always given |
 | company | `CompanyFacts?` Contact emails, postal address, founding year and headquarters for the About and contact pages; always given |
 
@@ -692,6 +694,8 @@ type StoreInfoMarket {
   legalName: String!
   "One-line company details for the footer and emails, e.g. Marketly, Inc. · Portland, OR"
   companyLine: String!
+  "How phone number inputs are masked: # = one digit, e.g. (###) ###-####. A number starting with + or longer than the pattern stays as typed"
+  phoneFormat: String!
   "Where prices and delivery dates are estimated before a visitor gives an address (Deliver to Portland, OR 97205)"
   defaultDeliveryLocation: StoreInfoDeliveryLocation
   "Contact emails, postal address, founding year and headquarters for the About and contact pages"

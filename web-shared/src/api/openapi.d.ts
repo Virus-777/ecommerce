@@ -44812,6 +44812,8 @@ export interface components {
             legalName: string;
             /** @description market.companyLine */
             companyLine: string;
+            /** @description market.phoneFormat: input mask for phone numbers, # = one digit, e.g. (###) ###-#### */
+            phoneFormat: string;
             /** @description market.defaultDeliveryLocation: where prices and delivery dates are estimated before a visitor gives an address */
             defaultDeliveryLocation?: components["schemas"]["settings.DeliveryLocation"] | null;
             /** @description Public company facts (market.* keys) */
@@ -44899,6 +44901,8 @@ export interface components {
             legalName: string;
             /** @description One-line company details for the footer and emails, e.g. Marketly, Inc. · Portland, OR */
             companyLine: string;
+            /** @description How phone number inputs are masked: # = one digit, other characters shown as typed, e.g. (###) ###-####. A number starting with + or longer than the pattern stays as typed */
+            phoneFormat: string;
             /** @description Where prices and delivery dates are estimated before a visitor gives an address (Deliver to … label); always given */
             defaultDeliveryLocation?: components["schemas"]["settings.DeliveryLocation"] | null;
             /** @description Contact emails, postal address, founding year and headquarters for the About and contact pages; always given */

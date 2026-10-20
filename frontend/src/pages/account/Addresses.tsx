@@ -5,7 +5,7 @@ import { AccountLayout } from '@/layouts';
 import { ApiError, call, errorMessage, useApi, type components } from '@marketly/web-shared/api';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, announce, Badge, Button, Checkbox, Dialog, Field, Icon, Select, Textarea, TextInput, type IconName } from '@marketly/web-shared/ui';
+import { Alert, announce, Badge, Button, Checkbox, Dialog, Field, Icon, PhoneInput, Select, Textarea, TextInput, type IconName } from '@marketly/web-shared/ui';
 import { AddressSuggestion, useAddressCheck, type AddressCheck } from '@/pages/store/data/address-check';
 
 // Design: pages/store/account-addresses.html · view "edit-address" = the add/edit dialog.
@@ -346,7 +346,7 @@ export default function Addresses() {
           </Field>
         </div>
         <Field label="Phone" hint="Carriers call only if there's a delivery problem." error={errors.phone}>
-          <TextInput id="ad-phone" type="tel" value={draft.phone} error={!!errors.phone} onChange={(e) => set('phone', e.target.value)} autoComplete="tel" />
+          <PhoneInput id="ad-phone" value={draft.phone} error={!!errors.phone} onChange={(e) => set('phone', e.target.value)} autoComplete="tel" />
         </Field>
         <Field label="Delivery instructions" optional error={errors.note}>
           <Textarea id="ad-note" value={draft.note} onChange={(e) => set('note', e.target.value)} />
