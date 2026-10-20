@@ -7,9 +7,9 @@ import { cx } from '@marketly/web-shared/lib/cx';
 import { useIsPhone } from '@marketly/web-shared/lib/hooks';
 import { formatMoney } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Badge, Button, Dialog, EmptyState, Field, Icon, LogoTile, Meter, Pager, SearchInput, Select, Stat, StatusBadge, TableWrap, Tabs, TextInput, announce } from '@marketly/web-shared/ui';
+import { Alert, Badge, Button, CopyButton, Dialog, EmptyState, Field, Icon, LogoTile, Meter, Pager, SearchInput, Select, Stat, StatusBadge, TableWrap, Tabs, TextInput, announce } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
-import { LoadError } from '@/app/parts';
+import { LoadError, date } from '@/app/parts';
 import { SELLER_STATUS, feedbackLabel, initialsOf, signedMoney, statusLabel, tintOf, useDebounced, useInView, type ApplicationRow, type SellerRow } from './data/seller';
 import { AppealsQueue, LaunchReviewQueue } from './data/seller-queues';
 
@@ -76,7 +76,9 @@ export default function Sellers() {
   const [email, setEmail] = useState('');
   const [business, setBusiness] = useState('');
   const [inviteTried, setInviteTried] = useState(false);
-  const [invited, setInvited] = useState('');
+  // The invitation just sent: its code comes back once (no email from the offline server), shown until Done
+  const [invited, setInvited] = useState<{ email: string; businessName: string; expiresAt: string; code: string } | null>(null);
+  const [showCode, setShowCode] = useState(false);
   const [exported, setExported] = useState('');
 
   const term = useDebounced(q.trim());
@@ -160,8 +162,9 @@ export default function Sellers() {
 
   const sendInvite = useMutation({
     mutationFn: () => call(api.POST('/api/admin/sellers/seller-invitations', { body: { email: email.trim(), businessName: business.trim() } })),
-    onSuccess: (inv) => {
-      setInvited(inv.email);
+    onSuccess: ({ invitation: inv, code }) => {
+      setInvited({ email: inv.email, businessName: inv.businessName, expiresAt: inv.expiresAt, code });
+      setShowCode(true);
       setInvite(false);
       setEmail('');
       setBusiness('');
@@ -252,7 +255,7 @@ export default function Sellers() {
 
       {invited && (
         <Alert tone="success" title="Invitation sent">
-          {invited} can now start a seller application. The link expires in 14 days.
+          {invited.email} can now start a seller application with the invitation code. The code works until {date(invited.expiresAt)}.
         </Alert>
       )}
       {exported && (
@@ -511,7 +514,7 @@ export default function Sellers() {
           </>
         }
       >
-        <p className="small sub">The seller gets a link to start an application. They still go through verification and review.</p>
+        <p className="small sub">You get an invitation code to give the business; they enter it when they apply. They still go through verification and review.</p>
         {sendInvite.isError && (
           <Alert tone="danger" title="We couldn’t send the invitation">
             {errorMessage(sendInvite.error)}
@@ -524,8 +527,39 @@ export default function Sellers() {
           <TextInput id="aa-sl-invite-biz" value={business} error={!!businessError} onChange={(e) => setBusiness(e.target.value)} />
         </Field>
         <span className="xs muted">
-          <Icon name="info" className="ic-sm" /> Invitations expire after 14 days.
+          <Icon name="info" className="ic-sm" /> The code works for the invitation lifetime set in Settings (7 days unless changed).
         </span>
+      </Dialog>
+
+      <Dialog
+        open={showCode && !!invited}
+        onClose={() => setShowCode(false)}
+        title={invited ? `${invited.businessName} is invited` : 'Invitation sent'}
+        size="sm"
+        dismissable={false}
+        foot={
+          <>
+            {invited && <CopyButton text={invited.code}>Copy code</CopyButton>}
+            <Button onClick={() => setShowCode(false)}>Done</Button>
+          </>
+        }
+      >
+        {invited && (
+          <>
+            <span className="small">
+              Give {invited.businessName} ({invited.email}) this invitation code; they enter it when they apply to sell. No email is sent from this server. The code works until {date(invited.expiresAt)}.
+            </span>
+            <Field label="Invitation code">
+              <span className="row gap-2 nowrap">
+                <TextInput id="aa-sl-invite-code" className="mono" readOnly value={invited.code} onFocus={(e) => e.currentTarget.select()} />
+                <CopyButton text={invited.code} label="Copy the invitation code" />
+              </span>
+            </Field>
+            <Alert tone="warning" title="The code is shown only once">
+              Copy it before you close this window. If it is lost, revoke the invitation and send a new one.
+            </Alert>
+          </>
+        )}
       </Dialog>
     </AdminLayout>
   );
