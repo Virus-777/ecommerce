@@ -379,7 +379,7 @@ export default function Sellers() {
                                 <td>
                                   {edge && <span className="sr-only">{edge === 'flagged' ? 'Urgent: ' : 'At risk: '}</span>}
                                   <Link className="row nowrap gap-2 link-inherit" to={sellerTo(r)}>
-                                    <LogoTile initials={initialsOf(r.storeName)} tint={tintOf(r.id)} size="sm" />
+                                    <LogoTile initials={initialsOf(r.storeName)} tint={tintOf(r.storeName)} size="sm" />
                                     <span className="stack gap-0">
                                       <span className="small strong">{r.storeName}</span>
                                       <span className="xs muted">{r.location ?? r.ref}</span>
@@ -453,7 +453,7 @@ export default function Sellers() {
                           <Link key={r.id} className={cx('aa-mcard', edge && `is-${edge}`)} to={sellerTo(r)}>
                             {edge && <span className="sr-only">{edge === 'flagged' ? 'Urgent: ' : 'At risk: '}</span>}
                             <span className="row nowrap gap-3">
-                              <LogoTile initials={initialsOf(r.storeName)} tint={tintOf(r.id)} size="sm" />
+                              <LogoTile initials={initialsOf(r.storeName)} tint={tintOf(r.storeName)} size="sm" />
                               <span className="stack gap-0 grow">
                                 <span className="small strong">{r.storeName}</span>
                                 <span className="xs muted">{r.location ?? r.ref}</span>

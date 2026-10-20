@@ -3,7 +3,7 @@
 import { Fragment, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { cx } from '@marketly/web-shared/lib/cx';
-import { formatMoney } from '@marketly/web-shared/lib/format';
+import { formatMoney, initials, tileTint } from '@marketly/web-shared/lib/format';
 import { useScrollRegion } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import type { components } from '@marketly/web-shared/api';
@@ -26,17 +26,9 @@ const CONDITION: Record<string, string> = {
 /** Cart conditions are enum values; checkout and confirmation already send the label. */
 export const conditionLabel = (c: string) => CONDITION[c] ?? c;
 
-const TINTS = ['1', '2', '3', '4', '5', '6'];
-/** A stable tile tint for a seller name (the API sends no brand colour). */
-export const tintFor = (name: string) => TINTS[[...name].reduce((s, ch) => s + ch.charCodeAt(0), 0) % TINTS.length];
-const initialsOf = (name: string) =>
-  name
-    .replace(/^Marketly /, '')
-    .split(/\s+/)
-    .map((w) => w[0])
-    .slice(0, 2)
-    .join('')
-    .toUpperCase();
+/** A stable tile tint for a seller name (the API sends no brand colour): the same on every screen */
+export const tintFor = (name: string) => tileTint(name);
+const initialsOf = (name: string) => initials(name);
 
 /** Product photo in an image tile (.imgph), with a neutral icon when the line has no image. */
 export function ItemImg({ image, className }: { image?: MediaRef | null; className?: string }) {

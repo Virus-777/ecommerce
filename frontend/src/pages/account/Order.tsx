@@ -1,7 +1,7 @@
 import { Link, useParams } from 'react-router';
 import { errorMessage } from '@marketly/web-shared/api';
 import { AccountLayout } from '@/layouts';
-import { formatMoney } from '@marketly/web-shared/lib/format';
+import { formatMoney, tileTint } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, Breadcrumbs, Button, Card, Icon, Img, LogoTile, SellerBadge, StatusBadge, SummaryRow, Track } from '@marketly/web-shared/ui';
 import {
@@ -288,7 +288,7 @@ function PackageCard({ order, g, index }: { order: OrderDetail; g: OrderGroup; i
     <section className={`card acct-pkgcard${tone ? ` t-${tone}` : ''}`}>
       <div className="card-head">
         <div className="row gap-3 nowrap min-w-0">
-          <LogoTile initials={sellerInitials(g.seller.name)} tint={String((index % 6) + 1)} />
+          <LogoTile initials={sellerInitials(g.seller.name)} tint={tileTint(g.seller.name)} />
           <div className="stack gap-1">
             <span className="row gap-2">
               <H className="h4">{g.packageLabel}</H>

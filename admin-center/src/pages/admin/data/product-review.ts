@@ -1,3 +1,4 @@
+import { initials } from '@marketly/web-shared/lib/format';
 import type { components } from '@marketly/web-shared/api';
 import type { IconName } from '@marketly/web-shared/ui';
 
@@ -129,10 +130,4 @@ export const LOG_LABEL: Record<string, string> = {
   variant_details_changed: 'Variant details changed',
 };
 
-export const initials = (name: string) =>
-  name
-    .split(/\s+/)
-    .filter((w) => /^[A-Za-z0-9]/.test(w))
-    .slice(0, 2)
-    .map((w) => w[0]!.toUpperCase())
-    .join('');
+export { initials };

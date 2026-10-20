@@ -6,7 +6,7 @@ import { ApiError, call, errorMessage, useApi } from '@marketly/web-shared/api';
 // web-shared exports no ./api/graphql/* subpath yet: import the screen query text by path.
 import ORDER_DETAIL from '../../../../web-shared/src/api/graphql/store/OrderDetail.graphql?raw';
 import { useView } from '@marketly/web-shared/lib/hooks';
-import { initials } from '@marketly/web-shared/lib/format';
+import { initials, tileTint } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, Button, Field, Icon, Img, LogoTile, SellerBadge, StatusBadge, SummaryRow, TextInput, announce } from '@marketly/web-shared/ui';
 import { AuthShell, DevOutboxHint, EMAIL_RE, authError, useHashToken } from './data/parts';
@@ -369,7 +369,7 @@ function Found({ orderRef }: { orderRef: string }) {
           <section className="card buy-pkg" key={g.id}>
             <div className="buy-pkg-head">
               <div className="row gap-2">
-                <LogoTile initials={g.seller.official ? 'M' : initials(g.seller.name)} tint={g.seller.official ? 'brand' : TINTS[i % TINTS.length]} />
+                <LogoTile initials={g.seller.official ? 'M' : initials(g.seller.name)} tint={g.seller.official ? 'brand' : tileTint(g.seller.name)} />
                 <div className="stack gap-0">
                   <span className="row gap-2">
                     <span className="strong">{g.seller.name}</span>

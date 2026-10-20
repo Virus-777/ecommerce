@@ -399,7 +399,7 @@ export default function Seller() {
         crumbs={[{ label: 'Sellers', to: href('admin/sellers') }, { label: a.storeName }]}
         title={
           <span className="row gap-3">
-            <LogoTile initials={initialsOf(a.storeName)} tint={tintOf(a.id)} />
+            <LogoTile initials={initialsOf(a.storeName)} tint={tintOf(a.storeName)} />
             <span>{a.storeName}</span>
           </span>
         }

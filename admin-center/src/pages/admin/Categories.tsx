@@ -616,7 +616,7 @@ function BrandsTab({ notify, addOpen, setAddOpen }: { notify: (n: Notice) => voi
                   <td>
                     {note.warn && <span className="sr-only">At risk: </span>}
                     <span className="row nowrap gap-3">
-                      <LogoTile initials={initialsOf(b.brand.name)} tint={tintOf(b.brand.id)} size="sm" />
+                      <LogoTile initials={initialsOf(b.brand.name)} tint={tintOf(b.brand.name)} size="sm" />
                       <span className="stack gap-0">
                         <span className="small strong">{b.brand.name}</span>
                         <span className={note.warn ? 'xs t-warning-text strong' : 'xs muted'}>{note.text}</span>
@@ -679,7 +679,7 @@ function BrandsTab({ notify, addOpen, setAddOpen }: { notify: (n: Notice) => voi
           <ul className="list pad">
             {claims.map((c) => (
               <li key={c.id}>
-                <LogoTile initials={initialsOf(c.storeName)} tint={tintOf(c.sellerId)} size="sm" />
+                <LogoTile initials={initialsOf(c.storeName)} tint={tintOf(c.storeName)} size="sm" />
                 <span className="grow stack gap-0">
                   <span className="small strong">{claimLine(c)}</span>
                   <span className="xs muted">
@@ -761,7 +761,7 @@ function BrandsTab({ notify, addOpen, setAddOpen }: { notify: (n: Notice) => voi
           <>
             {error && <Alert tone="danger" title={error} />}
             <div className="row nowrap gap-3">
-              <LogoTile initials={initialsOf(claim.storeName)} tint={tintOf(claim.sellerId)} size="sm" />
+              <LogoTile initials={initialsOf(claim.storeName)} tint={tintOf(claim.storeName)} size="sm" />
               <span className="stack gap-0">
                 <span className="small strong">{claimLine(claim)}</span>
                 <span className="xs muted">

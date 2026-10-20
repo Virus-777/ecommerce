@@ -4,7 +4,7 @@ import { Link } from 'react-router';
 import { call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
-import { formatMoney, initials, num } from '@marketly/web-shared/lib/format';
+import { formatMoney, initials, num, tileTint } from '@marketly/web-shared/lib/format';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, Badge, Button, Chip, Deadline, EmptyState, Field, Icon, LogoTile, PageHeader, Pager, SearchInput, Select, StatusBadge, TableWrap, announce } from '@marketly/web-shared/ui';
@@ -32,7 +32,6 @@ const sameFilters = (a: OrderFilters, b: OrderFilters) => FILTER_KEYS.every((k) 
 const EDGE_SR: Record<Exclude<Edge, ''>, string> = { flagged: 'Urgent: ', warn: 'At risk: ' };
 const edgeClass = (e: Edge) => (e === 'flagged' ? 'is-flagged' : e === 'warn' ? 'is-warn' : '');
 const EdgeSr = ({ edge }: { edge: Edge }) => (edge ? <span className="sr-only">{EDGE_SR[edge]}</span> : null);
-const tintOf = (name: string): string => String(((name.charCodeAt(0) || 0) % 6) + 1);
 
 function Flags({ flags }: { flags: OrderFlag[] }) {
   return (
@@ -488,7 +487,7 @@ export default function Orders() {
                       <span className="row gap-2">
                         {rowSellers(o).map((s) => (
                           <span key={s.id ?? s.name} className="row nowrap gap-1 xs">
-                            <LogoTile initials={initials(s.name)} tint={tintOf(s.name)} size="xs" />
+                            <LogoTile initials={initials(s.name)} tint={tileTint(s.name)} size="xs" />
                             {s.name}
                           </span>
                         ))}

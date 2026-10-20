@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { components } from '@marketly/web-shared/api';
 import type { Tint } from '@marketly/web-shared/data/fixtures';
-import { formatMoney, type MoneyValue } from '@marketly/web-shared/lib/format';
+import { formatMoney, type MoneyValue, initials, tileTint } from '@marketly/web-shared/lib/format';
 
 type S = components['schemas'];
 export type SellerRow = S['sellers.SellerRow'];
@@ -34,15 +34,8 @@ export const cap = (s: string) => {
 export const statusLabel = (s?: string | null) => (s ? (SELLER_STATUS[s.toLowerCase()] ?? cap(s)) : '');
 
 /** Store name -> logo tile initials and a stable tint (the API sends a logo image; the design shows tiles). */
-export const initialsOf = (name: string) =>
-  name
-    .replace(/[^A-Za-z0-9 ]/g, ' ')
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((w) => w.charAt(0).toUpperCase())
-    .slice(0, 2)
-    .join('') || '?';
-export const tintOf = (id: string): Tint => String((id.split('').reduce((n, c) => (n * 31 + c.charCodeAt(0)) >>> 0, 7) % 6) + 1) as Tint;
+export const initialsOf = (name: string) => initials(name);
+export const tintOf = (name: string): Tint => tileTint(name) as Tint;
 
 export const signedMoney = (m?: MoneyValue | null) => (!m ? '—' : m.amount < 0 ? `−${formatMoney({ ...m, amount: -m.amount })}` : formatMoney(m));
 

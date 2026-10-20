@@ -10,8 +10,18 @@ export const percentOff = (price: number, was?: number | null) =>
   was && was > price ? Math.round((1 - price / was) * 100) : 0;
 
 /** "Jordan Lee" -> "JL" */
+/** Two-letter initials for a logo tile: "Casa Verde Home" → "CV", "Pixel & Port" → "PP"; "?" for no name */
 export const initials = (name: string) =>
-  String(name).split(' ').map((w) => w[0]).slice(0, 2).join('');
+  String(name ?? '')
+    .replace(/&/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w[0]!.toUpperCase())
+    .slice(0, 2)
+    .join('') || '?';
+
+/** A stable tile tint ("1"–"6") for a name, so a store or brand keeps its colour on every screen of every app */
+export const tileTint = (name: string) => String((Array.from(String(name ?? '')).reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7) % 6) + 1);
 
 /** A money value as the API sends it: an integer amount in minor units (cents) plus the currency. */
 export interface MoneyValue {

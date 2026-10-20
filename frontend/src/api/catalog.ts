@@ -1,3 +1,4 @@
+import { initials, tileTint } from '@marketly/web-shared/lib/format';
 import { useQuery } from '@tanstack/react-query';
 import { call, useApi, type components } from '@marketly/web-shared/api';
 import type { IconName } from '@marketly/web-shared/ui';
@@ -100,14 +101,7 @@ export function useBrand(slug: string) {
 }
 
 /** Two-letter initials for a logo tile without a logo image. */
-export const initialsOf = (name: string) =>
-  name
-    .replace(/&/g, ' ')
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((w) => w[0]!.toUpperCase())
-    .slice(0, 2)
-    .join('');
+export const initialsOf = (name: string) => initials(name);
 
 /** Stable placeholder tint (1–6) for a name, so a brand or store keeps its colour across pages. */
-export const tintOf = (name: string) => String((Array.from(name).reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7) % 6) + 1);
+export const tintOf = (name: string) => tileTint(name);

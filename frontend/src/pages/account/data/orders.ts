@@ -1,7 +1,7 @@
 // Orders, tracking, cancellations and returns for My account: GraphQL screen queries (OrderList,
 // OrderDetail, ReturnDetail, AccountOverview), their result types, and the date, money and status
 // helpers the account order screens share. See web-shared/docs/API.md.
-import { slugify as slugText, humanize } from '@marketly/web-shared/lib/format';
+import { slugify as slugText, humanize, initials } from '@marketly/web-shared/lib/format';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { useSession } from '@/app/session';
@@ -487,11 +487,4 @@ export const shortPackageLabel = (label: string) => label.replace(/^Package 1 of
 export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** First letters of a seller name for its logo tile ("Casa Verde Home" -> "CV"). */
-export const sellerInitials = (name: string) =>
-  name
-    .replace(/&/g, ' ')
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((w) => w[0]!.toUpperCase())
-    .slice(0, 2)
-    .join('');
+export const sellerInitials = (name: string) => initials(name);

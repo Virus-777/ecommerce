@@ -1,5 +1,6 @@
 // Messaging helpers for the account screens (conversations with sellers, the Official Store and Marketly
 // Support). Data comes from /api/store/messaging/*; these map it onto the design's tiles and links.
+import { initials, tileTint } from '@marketly/web-shared/lib/format';
 import type { components } from '@marketly/web-shared/api';
 import { href } from '@marketly/web-shared/routes';
 import { productHref } from './orders';
@@ -18,18 +19,8 @@ export const ATTACHMENT_TYPES = 'image/jpeg,image/png,image/webp,image/heic,appl
 
 /** Logo tile for a seller or counterparty: initials and a stable tint ('brand' for Marketly). */
 export function sellerTile(name: string, marketly = false): { initials: string; tint: string } {
-  const initials =
-    name
-      .replace(/&/g, ' ')
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((w) => w[0]!.toUpperCase())
-      .join('') || '?';
-  if (marketly) return { initials: initials.slice(0, 1), tint: 'brand' };
-  let h = 0;
-  for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return { initials, tint: String((h % 6) + 1) };
+  if (marketly) return { initials: 'M', tint: 'brand' };
+  return { initials: initials(name), tint: tileTint(name) };
 }
 
 export const isMarketly = (c: Counterparty) => c.kind === 'official_store' || c.kind === 'marketplace_support';
