@@ -12,6 +12,7 @@ import {
   AUDIENCE_LABEL, changed, CHANNEL_LABEL, editorContent, EMAIL_FIELDS, emailContent, GROUPS, INAPP_FIELDS, inappContent, MONO_VARS, sampleOf,
   type Channel, type EditorContent, type Template, type TemplateContent, type TemplateDetail, type TemplateVersion, type Topic, type TopicMatrix,
 } from './data/notifications';
+import { ANNOUNCE_PERMISSION } from './data/seller-announcements';
 
 // Design: pages/admin/admin-notifications.html · view "edit-template" = template editor (?view=edit-template&topic=<topic key>;
 // without a topic it opens "customer.shipment.dispatched", the design's example). The editor edits the topic's email and
@@ -82,6 +83,12 @@ export default function Notifications() {
   const canRoute = me.can('notifications.routing.manage');
   const canEdit = me.can('notifications.templates.edit');
   const canPublish = me.can('notifications.templates.publish');
+  // Announcements to sellers are sent from Sellers › Announcements (the Seller Manager has no access to templates).
+  const announcementsLink = me.can(ANNOUNCE_PERMISSION) ? (
+    <Button variant="secondary" size="sm" icon="megaphone" to={href('admin/sellers', '', undefined, { filter: 'announcements' })}>
+      Announcements to sellers
+    </Button>
+  ) : undefined;
   const [notice, setNotice] = useState<Notice | null>(null);
   const flash = (n: Notice) => {
     setNotice(n);
@@ -265,7 +272,7 @@ export default function Notifications() {
   if (!canView) {
     return (
       <AdminLayout active="notifications">
-        <PageHeader crumbs={[{ label: 'Reports and settings' }, { label: 'Notifications' }]} title="Notification templates" />
+        <PageHeader crumbs={[{ label: 'Reports and settings' }, { label: 'Notifications' }]} title="Notification templates" actions={announcementsLink} />
         <Alert tone="info" title="You don’t have access to notification templates">
           Viewing templates needs the “View templates” permission. Ask a Platform Administrator.
         </Alert>
@@ -520,6 +527,7 @@ export default function Notifications() {
         crumbs={[{ label: 'Reports and settings' }, { label: 'Notifications' }]}
         title="Notification templates"
         sub="Who is told what, on which channel. Every notice links to the order, case or action it is about."
+        actions={announcementsLink}
       />
       {notice && (
         <Alert tone={notice.tone} title={notice.title}>
