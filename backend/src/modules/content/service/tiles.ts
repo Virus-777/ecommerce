@@ -79,10 +79,10 @@ export class ContentTiles extends ContentBase {
     return cats.get(categoryId)?.slug;
   }
 
-  /** Every catalog category by id (flattened tree), empty when catalog is off */
-  protected async categoryIndex(): Promise<Map<string, catalog.Category>> {
+  /** Every catalog category by id (flattened tree), empty when catalog is off; shoppers' tree unless `includeHidden` */
+  protected async categoryIndex(opts: { includeHidden?: boolean } = {}): Promise<Map<string, catalog.Category>> {
     const catalogApi = this.ctx.tryUse('catalog');
-    const tree = await this.soft('catalog.listCategories', catalogApi && (() => catalogApi.listCategories({ includeHidden: false })), [] as catalog.Category[]);
+    const tree = await this.soft('catalog.listCategories', catalogApi && (() => catalogApi.listCategories({ includeHidden: Boolean(opts.includeHidden) })), [] as catalog.Category[]);
     const out = new Map<string, catalog.Category>();
     const walk = (list: catalog.Category[]) => {
       for (const c of list) {

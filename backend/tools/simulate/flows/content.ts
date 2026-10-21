@@ -20,6 +20,7 @@
  * policy with a current version, a help category or article with the same slug or title, the About page, a homepage
  * section with the same kind and heading). The texts are samples (see content-data.ts).
  */
+import { defaultDepartmentItems } from '../../../src/modules/content/domain/rules.js';
 import { ABOUT_PAGE, CONTENT_TZ, HELP_ARTICLES, HELP_CATEGORIES, POLICIES, PROMISE_ITEMS, STORE_POLICY_KEYS } from '../content-data.js';
 import { CATEGORIES } from '../data.js';
 import type { Session } from '../http.js';
@@ -292,7 +293,7 @@ async function aboutPage(sim: Sim, writer: Staff, reviewer: Staff, visitor: Sess
 /* ---------------------------------------------------------------- homepage */
 
 /**
- * Homepage sections from what the earlier flows made: category shortcuts (the category tree), featured products
+ * Homepage sections from what the earlier flows made: departments (the department pages and the category tree), featured products
  * (this run's products), new arrivals and best sellers (rules), featured sellers (this run's sellers) and the
  * promise strip. A section with the same kind and heading is kept as it is. Published only when this run added a
  * section, or when the homepage was never published (a draft someone else is preparing is left alone).
@@ -309,7 +310,9 @@ async function homepage(sim: Sim, writer: Staff, reviewer: Staff, visitor: Sessi
   const sellerIds = w.sellers.map((s) => s.sellerId);
   // the sections in page order; one whose data is missing is left out
   const wanted: ({ kind: string; heading: string } & Record<string, unknown>)[] = [];
-  if (categoryIds.length) wanted.push({ kind: 'category_shortcuts', heading: 'Shop by category', categoryIds });
+  // the ten department pages, then the top categories (hidden until staff show them)
+  const categoryItems = categoryIds.map((categoryId, i) => ({ title: CATEGORIES.flatMap((c) => [c.name, ...c.children]).find((n) => w.categories.get(n) === categoryId)!, tint: (i % 6) + 1, destination: { kind: 'category', categoryId }, visible: false }));
+  wanted.push({ kind: 'departments', heading: 'Departments', departments: [...defaultDepartmentItems(() => '').map(({ id: _id, ...d }) => d), ...categoryItems.slice(0, 14)] });
   if (productIds.length) {
     wanted.push(
       { kind: 'featured_products', heading: 'Featured products', subheading: 'Picked by the Marketly team', productSource: { mode: 'manual', productIds } },

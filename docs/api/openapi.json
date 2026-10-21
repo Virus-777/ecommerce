@@ -166250,6 +166250,177 @@
           "name"
         ]
       },
+      "content.DepartmentDestination": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "department",
+              "category",
+              "path",
+              "url"
+            ],
+            "description": "department: a built-in department page in the app; category: a catalog category (/c/{slug}); path: any store path; url: an outside web address"
+          },
+          "department": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "phones",
+              "farm_machines",
+              "software",
+              "welfare",
+              "food",
+              "booking",
+              "blogs",
+              "companies",
+              "play",
+              "rewards"
+            ],
+            "description": "kind department: which page (/phones, /farm-machines, /software, /welfare, /food, /booking, /blogs, /companies, /play, /rewards)"
+          },
+          "categoryId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "kind category"
+          },
+          "path": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "kind path: a store path starting with /, e.g. /deals or /pages/home-week"
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri",
+            "description": "kind url: an http(s) address, opened in the browser"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "content.DepartmentItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Kept across edits; the server sets it for new items"
+          },
+          "title": {
+            "type": "string",
+            "description": "e.g. Food delivery (at most 40 characters)"
+          },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Shorter text under the tile; defaults to the title (at most 24 characters)"
+          },
+          "icon": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Icon name from the design system (Lucide), e.g. smartphone; used when there is no image"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MediaRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Picture that fills the circle instead of the icon (content_image upload)"
+          },
+          "tint": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Placeholder tint 1–6 behind the icon"
+          },
+          "destination": {
+            "$ref": "#/components/schemas/content.DepartmentDestination"
+          },
+          "visible": {
+            "type": "boolean",
+            "description": "Hidden items stay in the list for staff and are left out of the store"
+          }
+        },
+        "required": [
+          "title",
+          "destination",
+          "visible"
+        ]
+      },
+      "content.DepartmentTile": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Text under the tile; null means the title"
+          },
+          "icon": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Icon name from the design system (Lucide), e.g. smartphone"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MediaRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tint": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Placeholder tint 1–6"
+          },
+          "link": {
+            "$ref": "#/components/schemas/content.LinkRef",
+            "description": "Where the tile opens; kind department for built-in department pages"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "link"
+        ]
+      },
       "content.BannerBlock": {
         "type": "object",
         "properties": {
@@ -166329,7 +166500,8 @@
               "brand",
               "policy",
               "help",
-              "external"
+              "external",
+              "department"
             ]
           }
         },
@@ -166438,6 +166610,7 @@
             "type": "string",
             "enum": [
               "campaign_banner",
+              "departments",
               "category_shortcuts",
               "deals",
               "official_highlights",
@@ -166464,6 +166637,7 @@
             "type": "string",
             "enum": [
               "campaign_banner",
+              "departments",
               "category_shortcuts",
               "deals",
               "official_highlights",
@@ -166476,7 +166650,8 @@
               "collection_teaser",
               "promise_strip",
               "news"
-            ]
+            ],
+            "description": "departments replaced category_shortcuts (Shop by category); old category_shortcuts sections still show and can be edited, but new ones are departments"
           },
           "heading": {
             "type": [
@@ -166539,6 +166714,16 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          "departments": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/content.DepartmentItem"
+            },
+            "description": "departments only: 1–24 items in order, hidden ones included"
           },
           "linkedPromotionId": {
             "type": [
@@ -166880,6 +167065,13 @@
               "$ref": "#/components/schemas/content.CategoryTile"
             }
           },
+          "departments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/content.DepartmentTile"
+            },
+            "description": "departments only: the visible items in order. Built-in department pages exist only in the app, so they are sent for device=app only; items whose category is hidden are left out"
+          },
           "sellers": {
             "type": "array",
             "items": {
@@ -166930,6 +167122,7 @@
           "news",
           "products",
           "categories",
+          "departments",
           "sellers",
           "brands",
           "promiseItems"

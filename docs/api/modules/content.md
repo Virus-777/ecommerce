@@ -209,6 +209,41 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | name | `string` |
 | image | `MediaRef?` |
 
+### DepartmentDestination
+
+| Field | Type |
+|---|---|
+| kind | `enum(department|category|path|url)` department: a built-in department page in the app; category: a catalog category (/c/{slug}); path: any store path; url: an outside web address |
+| department | `enum(phones|farm_machines|software|welfare|food|booking|blogs|companies|play|rewards)?` kind department: which page (/phones, /farm-machines, /software, /welfare, /food, /booking, /blogs, /companies, /play, /rewards) |
+| categoryId | `uuid?` kind category |
+| path | `string?` kind path: a store path starting with /, e.g. /deals or /pages/home-week |
+| url | `url?` kind url: an http(s) address, opened in the browser |
+
+### DepartmentItem
+
+| Field | Type |
+|---|---|
+| id | `string?` Kept across edits; the server sets it for new items |
+| title | `string` e.g. Food delivery (at most 40 characters) |
+| label | `string?` Shorter text under the tile; defaults to the title (at most 24 characters) |
+| icon | `string?` Icon name from the design system (Lucide), e.g. smartphone; used when there is no image |
+| image | `MediaRef?` Picture that fills the circle instead of the icon (content_image upload) |
+| tint | `int?` Placeholder tint 1–6 behind the icon |
+| destination | `DepartmentDestination` |
+| visible | `bool` Hidden items stay in the list for staff and are left out of the store |
+
+### DepartmentTile
+
+| Field | Type |
+|---|---|
+| id | `string` |
+| title | `string` |
+| label | `string?` Text under the tile; null means the title |
+| icon | `string?` Icon name from the design system (Lucide), e.g. smartphone |
+| image | `MediaRef?` |
+| tint | `int?` Placeholder tint 1–6 |
+| link | `LinkRef` Where the tile opens; kind department for built-in department pages |
+
 ### BannerBlock
 
 | Field | Type |
@@ -227,7 +262,7 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 |---|---|
 | label | `string` |
 | url | `string` |
-| kind | `enum(page|collection|category|product|deals|seller|brand|policy|help|external)?` |
+| kind | `enum(page|collection|category|product|deals|seller|brand|policy|help|external|department)?` |
 
 ### ProductSource
 
@@ -253,13 +288,13 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 
 | Field | Type |
 |---|---|
-| kind | `enum(campaign_banner|category_shortcuts|deals|official_highlights|featured_products|featured_sellers|new_arrivals|popular_products|brand_collections|recently_viewed|collection_teaser|promise_strip|ad_position)` |
+| kind | `enum(campaign_banner|departments|category_shortcuts|deals|official_highlights|featured_products|featured_sellers|new_arrivals|popular_products|brand_collections|recently_viewed|collection_teaser|promise_strip|ad_position)` |
 
 ### SectionInput
 
 | Field | Type |
 |---|---|
-| kind | `enum(campaign_banner|category_shortcuts|deals|official_highlights|featured_products|featured_sellers|new_arrivals|popular_products|brand_collections|recently_viewed|collection_teaser|promise_strip|news)` |
+| kind | `enum(campaign_banner|departments|category_shortcuts|deals|official_highlights|featured_products|featured_sellers|new_arrivals|popular_products|brand_collections|recently_viewed|collection_teaser|promise_strip|news)` departments replaced category_shortcuts (Shop by category); old category_shortcuts sections still show and can be edited, but new ones are departments |
 | heading | `string?` |
 | subheading | `string?` |
 | banner | `BannerBlock?` |
@@ -267,6 +302,7 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | categoryIds | `uuid[]?` |
 | sellerIds | `uuid[]?` |
 | brandIds | `uuid[]?` |
+| departments | `DepartmentItem[]?` departments only: 1–24 items in order, hidden ones included |
 | linkedPromotionId | `uuid?` Section hides when the promotion ends |
 | linkedPageId | `uuid?` |
 | promiseItems | `PromiseItem[]?` promise_strip only (2–4 items) |
@@ -338,6 +374,7 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | banner | `BannerBlock?` |
 | products | `ProductTile[]` |
 | categories | `CategoryTile[]` |
+| departments | `DepartmentTile[]` departments only: the visible items in order. Built-in department pages exist only in the app, so they are sent for device=app only; items whose category is hidden are left out |
 | sellers | `SellerTile[]` |
 | brands | `BrandTile[]` |
 | deals | `promotions.FlashSaleBlock[]?` Flash sales from promotions (countdown, claimed meters, limits); null when promotions is off or for other kinds |
@@ -1454,6 +1491,8 @@ enum ContentLinkKind @areas(in: [STORE, ADMIN]) {
   POLICY
   HELP
   EXTERNAL
+  "A built-in department page in the app, e.g. /software"
+  DEPARTMENT
 }
 
 "Campaign or promotional banner (hero) used by sections and page blocks"
@@ -1507,6 +1546,20 @@ type ContentCategoryShortcut @areas(in: [STORE, ADMIN]) {
   label: String
 }
 
+"One tile of the Departments rail: a department page, category, store page or outside link"
+type ContentDepartmentTile @areas(in: [STORE, ADMIN]) {
+  id: String!
+  title: String!
+  "Text under the tile; null means the title"
+  label: String
+  "Icon name from the design system (Lucide), e.g. smartphone; shown when there is no image"
+  icon: String
+  image: MediaRef
+  "Placeholder tint 1–6 behind the icon"
+  tint: Int
+  link: ContentLink!
+}
+
 "Campaign or page period, shown with its time zone"
 type ContentPeriod @areas(in: [STORE, ADMIN]) {
   from: DateTime!
@@ -1527,6 +1580,9 @@ type HomePage @areas(in: [STORE, ADMIN]) {
 
 enum HomeSectionKind @areas(in: [STORE, ADMIN]) {
   CAMPAIGN_BANNER
+  "Departments rail: read HomeSection.departments"
+  DEPARTMENTS
+  "Older form of the Departments rail: read HomeSection.categories"
   CATEGORY_SHORTCUTS
   "Flash deals strip: read HomeSection.flashSales (promotions)"
   DEALS
@@ -1561,6 +1617,8 @@ type HomeSection @areas(in: [STORE, ADMIN]) {
   "Products in order, unavailable ones already removed"
   products(limit: Int): [ContentProductTile!]! @cost(weight: 10)
   categories: [ContentCategoryShortcut!]!
+  "DEPARTMENTS only: the visible tiles in order (built-in department pages are app-only and left out on the web)"
+  departments: [ContentDepartmentTile!]!
   "Featured seller cards in published order (FEATURED_SELLERS), resolved by reference to sellers: name, slug, logo, Verified label, location, dispatch label. Rating comes from reviews (Seller.rating). Suspended or closed sellers are left out."
   sellers: [Seller!]!
   brands: [Brand!]!

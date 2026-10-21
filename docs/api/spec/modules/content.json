@@ -60,8 +60,33 @@
     "SellerTile": { "sellerId": "uuid", "sellerSlug": { "type": "string?", "desc": "Storefront slug for /shop/{slug} (sellers.getStorefrontCard)" }, "name": "string", "logo": "MediaRef?", "verified": "bool", "positivePct": "number?", "location": "string?", "dispatchLabel": "string?" },
     "BrandTile": { "brandId": "uuid", "slug": { "type": "string?", "desc": "Brand slug (catalog.getBrands) for the brand page" }, "pageSlug": { "type": "string?", "desc": "Slug of the brand's published collection page the tile comes from (/pages/{pageSlug})" }, "name": "string", "logo": "MediaRef?", "productCount": "int" },
     "CategoryTile": { "categoryId": "uuid", "slug": { "type": "string?", "desc": "Category slug for the category page" }, "name": "string", "image": "MediaRef?" },
+    "DepartmentDestination": {
+      "kind": { "type": "enum(department|category|path|url)", "desc": "department: a built-in department page in the app; category: a catalog category (/c/{slug}); path: any store path; url: an outside web address" },
+      "department": { "type": "enum(phones|farm_machines|software|welfare|food|booking|blogs|companies|play|rewards)?", "desc": "kind department: which page (/phones, /farm-machines, /software, /welfare, /food, /booking, /blogs, /companies, /play, /rewards)" },
+      "categoryId": { "type": "uuid?", "desc": "kind category" },
+      "path": { "type": "string?", "desc": "kind path: a store path starting with /, e.g. /deals or /pages/home-week" },
+      "url": { "type": "url?", "desc": "kind url: an http(s) address, opened in the browser" }
+    },
+    "DepartmentItem": {
+      "id": { "type": "string?", "desc": "Kept across edits; the server sets it for new items" },
+      "title": { "type": "string", "desc": "e.g. Food delivery (at most 40 characters)" },
+      "label": { "type": "string?", "desc": "Shorter text under the tile; defaults to the title (at most 24 characters)" },
+      "icon": { "type": "string?", "desc": "Icon name from the design system (Lucide), e.g. smartphone; used when there is no image" },
+      "image": { "type": "MediaRef?", "desc": "Picture that fills the circle instead of the icon (content_image upload)" },
+      "tint": { "type": "int?", "desc": "Placeholder tint 1–6 behind the icon" },
+      "destination": "DepartmentDestination",
+      "visible": { "type": "bool", "desc": "Hidden items stay in the list for staff and are left out of the store" }
+    },
+    "DepartmentTile": {
+      "id": "string", "title": "string",
+      "label": { "type": "string?", "desc": "Text under the tile; null means the title" },
+      "icon": { "type": "string?", "desc": "Icon name from the design system (Lucide), e.g. smartphone" },
+      "image": "MediaRef?",
+      "tint": { "type": "int?", "desc": "Placeholder tint 1–6" },
+      "link": { "type": "LinkRef", "desc": "Where the tile opens; kind department for built-in department pages" }
+    },
     "BannerBlock": { "eyebrow": "string?", "headline": "string", "body": "string?", "images": "MediaRef[]", "primaryCta": "LinkRef", "secondaryCta": "LinkRef?", "theme": "enum(brand|light|dark)?" },
-    "LinkRef": { "label": "string", "url": "string", "kind": "enum(page|collection|category|product|deals|seller|brand|policy|help|external)?" },
+    "LinkRef": { "label": "string", "url": "string", "kind": "enum(page|collection|category|product|deals|seller|brand|policy|help|external|department)?" },
     "ProductSource": {
       "mode": "enum(manual|collection|rule)",
       "productIds": "uuid[]?",
@@ -75,13 +100,14 @@
       "campaignId": { "type": "uuid?", "desc": "deals only: limit to one promotion (promotions.liveDeals({ campaignId })); the section or page then hides when that promotion ends, like linkedPromotionId" },
       "description": { "type": "string", "desc": "Published selection rule, e.g. Ranked by units sold in the last 30 days across all sellers. Sponsored placements don't affect rank." }
     },
-    "SectionKind": { "kind": { "type": "enum(campaign_banner|category_shortcuts|deals|official_highlights|featured_products|featured_sellers|new_arrivals|popular_products|brand_collections|recently_viewed|collection_teaser|promise_strip|ad_position)" } },
+    "SectionKind": { "kind": { "type": "enum(campaign_banner|departments|category_shortcuts|deals|official_highlights|featured_products|featured_sellers|new_arrivals|popular_products|brand_collections|recently_viewed|collection_teaser|promise_strip|ad_position)" } },
     "SectionInput": {
-      "kind": "enum(campaign_banner|category_shortcuts|deals|official_highlights|featured_products|featured_sellers|new_arrivals|popular_products|brand_collections|recently_viewed|collection_teaser|promise_strip|news)",
+      "kind": { "type": "enum(campaign_banner|departments|category_shortcuts|deals|official_highlights|featured_products|featured_sellers|new_arrivals|popular_products|brand_collections|recently_viewed|collection_teaser|promise_strip|news)", "desc": "departments replaced category_shortcuts (Shop by category); old category_shortcuts sections still show and can be edited, but new ones are departments" },
       "heading": "string?", "subheading": "string?",
       "banner": "BannerBlock?",
       "productSource": "ProductSource?",
       "categoryIds": "uuid[]?", "sellerIds": "uuid[]?", "brandIds": "uuid[]?",
+      "departments": { "type": "DepartmentItem[]?", "desc": "departments only: 1–24 items in order, hidden ones included" },
       "linkedPromotionId": { "type": "uuid?", "desc": "Section hides when the promotion ends" },
       "linkedPageId": "uuid?",
       "promiseItems": { "type": "PromiseItem[]?", "desc": "promise_strip only (2–4 items)" },
@@ -125,6 +151,7 @@
       "banner": "BannerBlock?",
       "products": "ProductTile[]",
       "categories": "CategoryTile[]",
+      "departments": { "type": "DepartmentTile[]", "desc": "departments only: the visible items in order. Built-in department pages exist only in the app, so they are sent for device=app only; items whose category is hidden are left out" },
       "sellers": "SellerTile[]",
       "brands": "BrandTile[]",
       "deals": { "type": "promotions.FlashSaleBlock[]?", "desc": "Flash sales from promotions (countdown, claimed meters, limits); null when promotions is off or for other kinds" },

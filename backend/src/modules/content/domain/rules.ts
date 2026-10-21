@@ -258,6 +258,7 @@ function lcsDiff(x: string[], y: string[]): { kind: 'same' | 'ins' | 'del'; text
 
 export const SECTION_KIND_LABEL: Record<string, string> = {
   campaign_banner: 'Campaign banner',
+  departments: 'Departments',
   category_shortcuts: 'Category shortcuts',
   deals: 'Flash deals',
   official_highlights: 'Official Store highlights',
@@ -272,6 +273,38 @@ export const SECTION_KIND_LABEL: Record<string, string> = {
   news: 'Latest news',
   ad_position: 'Ad position',
 };
+
+/** The built-in department pages of the app (Departments rail destinations), in their default order */
+export const DEPARTMENT_PAGES = {
+  phones: { title: 'Phones', path: '/phones', icon: 'smartphone' },
+  farm_machines: { title: 'Farm machines', path: '/farm-machines', icon: 'tractor' },
+  software: { title: 'Softwares', path: '/software', icon: 'app-window' },
+  welfare: { title: 'Welfare services', path: '/welfare', icon: 'hand-heart' },
+  food: { title: 'Food delivery', path: '/food', icon: 'utensils' },
+  booking: { title: 'Booking', path: '/booking', icon: 'calendar-check' },
+  blogs: { title: 'Blogs', path: '/blogs', icon: 'newspaper' },
+  companies: { title: 'Companies', path: '/companies', icon: 'building-2' },
+  play: { title: 'Play center', path: '/play', icon: 'gamepad-2' },
+  rewards: { title: 'Daily rewards', path: '/rewards', icon: 'gift' },
+} as const;
+
+export type DepartmentKey = keyof typeof DEPARTMENT_PAGES;
+
+/** Most items one Departments section holds */
+export const MAX_DEPARTMENTS = 24;
+
+/** A new Departments section: every department page in the default order, tints 1–6 in turn */
+export const defaultDepartmentItems = (newId: () => string) =>
+  (Object.keys(DEPARTMENT_PAGES) as DepartmentKey[]).map((key, i) => ({
+    id: newId(),
+    title: DEPARTMENT_PAGES[key].title,
+    label: null,
+    icon: DEPARTMENT_PAGES[key].icon,
+    image: null,
+    tint: (i % 6) + 1,
+    destination: { kind: 'department' as const, department: key },
+    visible: true,
+  }));
 
 /** Kinds whose products come from a product source */
 export const PRODUCT_KINDS = new Set(['featured_products', 'official_highlights', 'new_arrivals', 'popular_products', 'collection_teaser']);

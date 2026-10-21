@@ -162,6 +162,88 @@ export const CategoryTile: z.ZodType<CategoryTile> = z.object({
   },
 }).register(common.apiTypes, { id: "content.CategoryTile" });
 
+export interface DepartmentDestination {
+  /** department: a built-in department page in the app; category: a catalog category (/c/{slug}); path: any store path; url: an outside web address */
+  kind: "department" | "category" | "path" | "url";
+  /** kind department: which page (/phones, /farm-machines, /software, /welfare, /food, /booking, /blogs, /companies, /play, /rewards) */
+  department?: "phones" | "farm_machines" | "software" | "welfare" | "food" | "booking" | "blogs" | "companies" | "play" | "rewards" | null;
+  /** kind category */
+  categoryId?: string | null;
+  /** kind path: a store path starting with /, e.g. /deals or /pages/home-week */
+  path?: string | null;
+  /** kind url: an http(s) address, opened in the browser */
+  url?: string | null;
+}
+
+export const DepartmentDestination: z.ZodType<DepartmentDestination> = z.object({
+  kind: z.enum(["department", "category", "path", "url"]).describe("department: a built-in department page in the app; category: a catalog category (/c/{slug}); path: any store path; url: an outside web address"),
+  department: z.enum(["phones", "farm_machines", "software", "welfare", "food", "booking", "blogs", "companies", "play", "rewards"]).describe("kind department: which page (/phones, /farm-machines, /software, /welfare, /food, /booking, /blogs, /companies, /play, /rewards)").nullish(),
+  categoryId: z.uuid().describe("kind category").nullish(),
+  path: z.string().describe("kind path: a store path starting with /, e.g. /deals or /pages/home-week").nullish(),
+  url: z.url().describe("kind url: an http(s) address, opened in the browser").nullish(),
+}).register(common.apiTypes, { id: "content.DepartmentDestination" });
+
+export interface DepartmentItem {
+  /** Kept across edits; the server sets it for new items */
+  id?: string | null;
+  /** e.g. Food delivery (at most 40 characters) */
+  title: string;
+  /** Shorter text under the tile; defaults to the title (at most 24 characters) */
+  label?: string | null;
+  /** Icon name from the design system (Lucide), e.g. smartphone; used when there is no image */
+  icon?: string | null;
+  /** Picture that fills the circle instead of the icon (content_image upload) */
+  image?: common.MediaRef | null;
+  /** Placeholder tint 1–6 behind the icon */
+  tint?: number | null;
+  destination: DepartmentDestination;
+  /** Hidden items stay in the list for staff and are left out of the store */
+  visible: boolean;
+}
+
+export const DepartmentItem: z.ZodType<DepartmentItem> = z.object({
+  id: z.string().describe("Kept across edits; the server sets it for new items").nullish(),
+  title: z.string().describe("e.g. Food delivery (at most 40 characters)"),
+  label: z.string().describe("Shorter text under the tile; defaults to the title (at most 24 characters)").nullish(),
+  icon: z.string().describe("Icon name from the design system (Lucide), e.g. smartphone; used when there is no image").nullish(),
+  get image() {
+    return common.MediaRef.nullish();
+  },
+  tint: z.number().int().describe("Placeholder tint 1–6 behind the icon").nullish(),
+  get destination() {
+    return DepartmentDestination;
+  },
+  visible: z.boolean().describe("Hidden items stay in the list for staff and are left out of the store"),
+}).register(common.apiTypes, { id: "content.DepartmentItem" });
+
+export interface DepartmentTile {
+  id: string;
+  title: string;
+  /** Text under the tile; null means the title */
+  label?: string | null;
+  /** Icon name from the design system (Lucide), e.g. smartphone */
+  icon?: string | null;
+  image?: common.MediaRef | null;
+  /** Placeholder tint 1–6 */
+  tint?: number | null;
+  /** Where the tile opens; kind department for built-in department pages */
+  link: LinkRef;
+}
+
+export const DepartmentTile: z.ZodType<DepartmentTile> = z.object({
+  id: z.string(),
+  title: z.string(),
+  label: z.string().describe("Text under the tile; null means the title").nullish(),
+  icon: z.string().describe("Icon name from the design system (Lucide), e.g. smartphone").nullish(),
+  get image() {
+    return common.MediaRef.nullish();
+  },
+  tint: z.number().int().describe("Placeholder tint 1–6").nullish(),
+  get link() {
+    return LinkRef;
+  },
+}).register(common.apiTypes, { id: "content.DepartmentTile" });
+
 export interface BannerBlock {
   eyebrow?: string | null;
   headline: string;
@@ -191,13 +273,13 @@ export const BannerBlock: z.ZodType<BannerBlock> = z.object({
 export interface LinkRef {
   label: string;
   url: string;
-  kind?: "page" | "collection" | "category" | "product" | "deals" | "seller" | "brand" | "policy" | "help" | "external" | null;
+  kind?: "page" | "collection" | "category" | "product" | "deals" | "seller" | "brand" | "policy" | "help" | "external" | "department" | null;
 }
 
 export const LinkRef: z.ZodType<LinkRef> = z.object({
   label: z.string(),
   url: z.string(),
-  kind: z.enum(["page", "collection", "category", "product", "deals", "seller", "brand", "policy", "help", "external"]).nullish(),
+  kind: z.enum(["page", "collection", "category", "product", "deals", "seller", "brand", "policy", "help", "external", "department"]).nullish(),
 }).register(common.apiTypes, { id: "content.LinkRef" });
 
 export interface ProductSource {
@@ -237,15 +319,16 @@ export const SourceRule: z.ZodType<SourceRule> = z.object({
 }).register(common.apiTypes, { id: "content.SourceRule" });
 
 export interface SectionKind {
-  kind: "campaign_banner" | "category_shortcuts" | "deals" | "official_highlights" | "featured_products" | "featured_sellers" | "new_arrivals" | "popular_products" | "brand_collections" | "recently_viewed" | "collection_teaser" | "promise_strip" | "ad_position";
+  kind: "campaign_banner" | "departments" | "category_shortcuts" | "deals" | "official_highlights" | "featured_products" | "featured_sellers" | "new_arrivals" | "popular_products" | "brand_collections" | "recently_viewed" | "collection_teaser" | "promise_strip" | "ad_position";
 }
 
 export const SectionKind: z.ZodType<SectionKind> = z.object({
-  kind: z.enum(["campaign_banner", "category_shortcuts", "deals", "official_highlights", "featured_products", "featured_sellers", "new_arrivals", "popular_products", "brand_collections", "recently_viewed", "collection_teaser", "promise_strip", "ad_position"]),
+  kind: z.enum(["campaign_banner", "departments", "category_shortcuts", "deals", "official_highlights", "featured_products", "featured_sellers", "new_arrivals", "popular_products", "brand_collections", "recently_viewed", "collection_teaser", "promise_strip", "ad_position"]),
 }).register(common.apiTypes, { id: "content.SectionKind" });
 
 export interface SectionInput {
-  kind: "campaign_banner" | "category_shortcuts" | "deals" | "official_highlights" | "featured_products" | "featured_sellers" | "new_arrivals" | "popular_products" | "brand_collections" | "recently_viewed" | "collection_teaser" | "promise_strip" | "news";
+  /** departments replaced category_shortcuts (Shop by category); old category_shortcuts sections still show and can be edited, but new ones are departments */
+  kind: "campaign_banner" | "departments" | "category_shortcuts" | "deals" | "official_highlights" | "featured_products" | "featured_sellers" | "new_arrivals" | "popular_products" | "brand_collections" | "recently_viewed" | "collection_teaser" | "promise_strip" | "news";
   heading?: string | null;
   subheading?: string | null;
   banner?: BannerBlock | null;
@@ -253,6 +336,8 @@ export interface SectionInput {
   categoryIds?: string[] | null;
   sellerIds?: string[] | null;
   brandIds?: string[] | null;
+  /** departments only: 1–24 items in order, hidden ones included */
+  departments?: DepartmentItem[] | null;
   /** Section hides when the promotion ends */
   linkedPromotionId?: string | null;
   linkedPageId?: string | null;
@@ -268,7 +353,7 @@ export interface SectionInput {
 }
 
 export const SectionInput: z.ZodType<SectionInput> = z.object({
-  kind: z.enum(["campaign_banner", "category_shortcuts", "deals", "official_highlights", "featured_products", "featured_sellers", "new_arrivals", "popular_products", "brand_collections", "recently_viewed", "collection_teaser", "promise_strip", "news"]),
+  kind: z.enum(["campaign_banner", "departments", "category_shortcuts", "deals", "official_highlights", "featured_products", "featured_sellers", "new_arrivals", "popular_products", "brand_collections", "recently_viewed", "collection_teaser", "promise_strip", "news"]).describe("departments replaced category_shortcuts (Shop by category); old category_shortcuts sections still show and can be edited, but new ones are departments"),
   heading: z.string().nullish(),
   subheading: z.string().nullish(),
   get banner() {
@@ -280,6 +365,9 @@ export const SectionInput: z.ZodType<SectionInput> = z.object({
   categoryIds: z.array(z.uuid()).nullish(),
   sellerIds: z.array(z.uuid()).nullish(),
   brandIds: z.array(z.uuid()).nullish(),
+  get departments() {
+    return z.array(DepartmentItem).nullish();
+  },
   linkedPromotionId: z.uuid().describe("Section hides when the promotion ends").nullish(),
   linkedPageId: z.uuid().nullish(),
   get promiseItems() {
@@ -412,6 +500,8 @@ export interface HomeSection {
   banner?: BannerBlock | null;
   products: ProductTile[];
   categories: CategoryTile[];
+  /** departments only: the visible items in order. Built-in department pages exist only in the app, so they are sent for device=app only; items whose category is hidden are left out */
+  departments: DepartmentTile[];
   sellers: SellerTile[];
   brands: BrandTile[];
   /** Flash sales from promotions (countdown, claimed meters, limits); null when promotions is off or for other kinds */
@@ -442,6 +532,9 @@ export const HomeSection: z.ZodType<HomeSection> = z.object({
   },
   get categories() {
     return z.array(CategoryTile);
+  },
+  get departments() {
+    return z.array(DepartmentTile);
   },
   get sellers() {
     return z.array(SellerTile);
