@@ -4,7 +4,7 @@
  */
 import { allSpecs } from '../../kernel/module-system/loader.js';
 import type { MongoMigration } from '../../kernel/mongo/schema.js';
-import { ANNOUNCEMENT_ROLES, ANNOUNCEMENTS_SEND, BUSINESS_OWNER, MARKETING_OFFERS_VIEW, NEWS_MANAGE, NEWS_PUBLISH, PLATFORM_ADMINISTRATOR, STAFF_UPLOADS, SYSTEM_ROLES, viewCompanions } from './domain/seed.js';
+import { ANNOUNCEMENT_ROLES, ANNOUNCEMENTS_SEND, BUSINESS_OWNER, DEPARTMENTS_MANAGE, MARKETING_OFFERS_VIEW, NEWS_MANAGE, NEWS_PUBLISH, PLATFORM_ADMINISTRATOR, STAFF_UPLOADS, SYSTEM_ROLES, viewCompanions } from './domain/seed.js';
 
 /** Every staff permission key ending in `.view`, from every module's spec (enabled or not, like the registry) */
 export function staffViewKeys(): string[] {
@@ -127,4 +127,24 @@ export const announcementKeys: MongoMigration = {
   },
 };
 
-export const mongoMigrations: readonly MongoMigration[] = [businessOwnerViewKeys, staffWorkUploads, platformAdminAccountActions, newsKeys, announcementKeys];
+/**
+ * Department pages of the app (departments module, 2026-10-21): the new keys reach roles seeded before them. The
+ * seeded Content Manager gets every departments key, the Marketing Manager the manage keys, and every role holding one
+ * of them departments.view (VIEW_COMPANIONS); the Business Owner gets departments.view from the registry sync like any
+ * new view key. It runs once, so a key the owner removes afterwards stays removed.
+ */
+export const departmentsKeys: MongoMigration = {
+  id: '2026-10-21-departments-keys',
+  async up(db) {
+    const roles = await db.collection('access.roles').find({ system: true, key: { $in: ['content_manager', 'marketing_manager'] }, archived_at: null }).toArray();
+    if (!roles.length) return; // a new install: the registry sync seeds the roles with the keys
+    const now = new Date();
+    const grant = (roleId: unknown, key: string) =>
+      db.collection('access.role_permissions').updateOne({ role_id: roleId, permission_key: key }, { $setOnInsert: { granted_by: 'system', granted_at: now } }, { upsert: true });
+    for (const role of roles) {
+      for (const key of ['departments.view', ...DEPARTMENTS_MANAGE]) await grant(role._id, key);
+    }
+  },
+};
+
+export const mongoMigrations: readonly MongoMigration[] = [businessOwnerViewKeys, staffWorkUploads, platformAdminAccountActions, newsKeys, announcementKeys, departmentsKeys];

@@ -7,6 +7,7 @@ import { adminReadsFlow, screensFlow } from './admin.js';
 import { cancellationFlow, messagesFlow, returnFlow, reviewFlow, supportFlow, trustFlow } from './aftersales.js';
 import { catalogFlow, officialStoreFlow, searchFlow } from './catalog.js';
 import { contentFlow } from './content.js';
+import { departmentsFlow } from './departments.js';
 import { fulfilmentFlow } from './fulfilment.js';
 import { financeFlow, paymentsFlow } from './money.js';
 import { sellersFlow } from './sellers.js';
@@ -28,6 +29,8 @@ export const FLOWS: FlowDef[] = [
   // store content (policies, navigation, help, About, homepage): the Content Managers hired in 1, the homepage
   // built from the categories, sellers and products of 2 and 3a
   { name: '3d store content', needs: ['1 staff', '2 sellers', '3a catalog'], run: contentFlow },
+  // the app's department pages (blogs, companies, Play center, Phone tab): the Content Managers of 1, phones from 3a
+  { name: '3e department pages', needs: ['1 staff', '3a catalog'], run: departmentsFlow },
   { name: '4a promotion', needs: ['1 staff'], run: promotionFlow },
   { name: '4b customers', needs: ['3a catalog'], run: customersFlow },
   { name: '5 fulfilment', needs: ['4b customers'], run: fulfilmentFlow },

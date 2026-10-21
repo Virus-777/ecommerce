@@ -4,7 +4,7 @@ Every uploaded or generated file: images, video and documents. Uploads and signe
 
 - **Group:** Platform · **Launch phase:** 1 · **Plan chapters:** 5, 8, 13, 16, 17
 - **Depends on:** nothing · **Optional:** [audit](audit.md), [identity](identity.md)
-- **Required by:** [advertising](advertising.md), [catalog](catalog.md), [content](content.md), [sellers](sellers.md)
+- **Required by:** [advertising](advertising.md), [catalog](catalog.md), [content](content.md), [departments](departments.md), [sellers](sellers.md)
 
 ## Owns
 - Upload sessions with expiring upload tickets (website and Android app): the bytes go to the API's PUT /uploads/{id}/content, streamed to storage

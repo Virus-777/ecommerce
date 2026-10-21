@@ -10,6 +10,7 @@ import { spec as catalog } from './catalog.js';
 import { spec as checkout } from './checkout.js';
 import { spec as content } from './content.js';
 import { spec as customers } from './customers.js';
+import { spec as departments } from './departments.js';
 import { spec as finance } from './finance.js';
 import { spec as fulfillmentService } from './fulfillment-service.js';
 import { spec as identity } from './identity.js';
@@ -46,6 +47,7 @@ export const specs = {
   "checkout": checkout,
   "content": content,
   "customers": customers,
+  "departments": departments,
   "finance": finance,
   "fulfillment-service": fulfillmentService,
   "identity": identity,

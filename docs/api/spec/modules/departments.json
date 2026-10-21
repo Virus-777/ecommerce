@@ -1,0 +1,301 @@
+{
+  "name": "departments",
+  "title": "Departments",
+  "group": "Growth",
+  "phase": 2,
+  "chapters": [],
+  "summary": "The app's department pages opened from the home Departments rail: the Phones picks, Blogs (topics, staff authors, posts, reactions, replies and reports), the Companies directory (industries, company pages, inquiries) and the Play center (games and ranking tables). Staff manage all of it in Admin › Departments.",
+  "owns": [
+    "Phones: the phones staff pick one by one for the Phone tab, in order",
+    "Blogs: topics, author profiles, posts (sanitized rich text, cover, publish state), likes and dislikes, customer replies, reports and their review",
+    "Companies: industries, company pages (logo, photos, description, contacts, map location, verified mark) and customer inquiries",
+    "Play center: games (list only at this phase: no playing or score submission) and the ranking tables staff keep per game and period"
+  ],
+  "notOwns": [
+    "Product cards, prices and stock of the Phone tab: search, offers and inventory (search.getProductCards)",
+    "The Departments rail itself (titles, icons, destinations): content (homepage section kind departments)",
+    "The carousel ads at the top of Companies and Play center: advertising (placements companies_top, play_top)",
+    "Files: media (uploads with purpose content_image)"
+  ],
+  "dependsOn": ["media"],
+  "optionalDeps": ["search", "customers", "audit"],
+  "publicApi": [],
+  "types": {
+    "PhonesPage": {
+      "products": { "type": "search.ProductCard[]", "desc": "The picked phones in order; ones the store no longer shows are left out. The app builds the brand chips from brandName" }
+    },
+    "PhonesAdmin": {
+      "productIds": { "type": "uuid[]", "desc": "Every picked product in order, unavailable ones included" },
+      "products": { "type": "search.ProductCard[]", "desc": "Cards of the picks the store still shows" },
+      "updatedAt": "datetime?"
+    },
+    "PhonesInput": { "productIds": { "type": "uuid[]", "desc": "1–100 products in order" } },
+
+    "BlogTopic": { "id": "uuid", "slug": "string", "name": "string", "position": "int", "visible": "bool", "postCount": { "type": "int", "desc": "Published posts" } },
+    "BlogTopicInput": { "name": "string", "slug": "string?", "position": "int?", "visible": "bool?" },
+    "BlogTopicRef": { "id": "uuid", "slug": "string", "name": "string" },
+    "BlogAuthorCard": { "id": "uuid", "slug": "string", "name": "string", "avatar": "MediaRef?" },
+    "BlogAuthor": {
+      "id": "uuid", "slug": "string", "name": "string", "avatar": "MediaRef?",
+      "email": { "type": "email?", "desc": "Public contact address the author chose to show" },
+      "bio": "string?",
+      "postCount": { "type": "int", "desc": "Published posts" },
+      "likeCount": { "type": "int", "desc": "Likes on the published posts" },
+      "reportCount": { "type": "int", "desc": "Reports about the author and their posts that staff upheld" },
+      "joinedAt": "datetime"
+    },
+    "BlogAuthorAdmin": {
+      "id": "uuid", "slug": "string", "name": "string", "avatar": "MediaRef?", "email": "email?", "bio": "string?",
+      "postCount": { "type": "int", "desc": "All posts, drafts included" },
+      "likeCount": "int", "reportCount": "int", "createdAt": "datetime", "updatedAt": "datetime"
+    },
+    "BlogAuthorInput": { "name": "string", "slug": "string?", "email": "email?", "avatar": "MediaRef?", "bio": "string?" },
+    "BlogPostCard": {
+      "id": "uuid", "slug": "string", "title": "string", "summary": "string?", "cover": "MediaRef?",
+      "topic": "BlogTopicRef?", "author": "BlogAuthorCard",
+      "publishedAt": "datetime", "readMinutes": "int",
+      "likeCount": "int", "dislikeCount": "int", "replyCount": "int",
+      "featured": { "type": "bool", "desc": "Shown large at the top of the list" }
+    },
+    "BlogPost": {
+      "id": "uuid", "slug": "string", "title": "string", "summary": "string?", "cover": "MediaRef?",
+      "topic": "BlogTopicRef?", "author": "BlogAuthorCard",
+      "publishedAt": "datetime", "readMinutes": "int",
+      "likeCount": "int", "dislikeCount": "int", "replyCount": "int", "featured": "bool",
+      "body": { "type": "text", "desc": "Rich text as sanitized HTML (p, h2–h4, lists, links, tables, blockquote, strong/em)" },
+      "myReaction": { "type": "enum(like|dislike)?", "desc": "The signed-in customer's reaction; null for visitors" },
+      "previous": { "type": "BlogPostCard?", "desc": "The post published just before this one" },
+      "next": { "type": "BlogPostCard?", "desc": "The post published just after this one" }
+    },
+    "BlogPostAdmin": {
+      "id": "uuid", "slug": "string", "title": "string", "summary": "string?", "cover": "MediaRef?", "body": "text",
+      "topic": "BlogTopicRef?", "author": "BlogAuthorCard",
+      "status": "enum(draft|published|unpublished)", "featured": "bool",
+      "publishedAt": "datetime?", "readMinutes": "int",
+      "likeCount": "int", "dislikeCount": "int", "replyCount": "int", "openReportCount": "int",
+      "createdAt": "datetime", "updatedAt": "datetime"
+    },
+    "BlogPostInput": {
+      "title": { "type": "string", "desc": "At most 120 characters" },
+      "slug": { "type": "string?", "desc": "Made from the title when omitted" },
+      "summary": { "type": "string?", "desc": "At most 240 characters" },
+      "body": "text",
+      "cover": { "type": "MediaRef?", "desc": "16:9 picture (content_image upload)" },
+      "topicId": "uuid?", "authorId": "uuid",
+      "featured": "bool?",
+      "status": { "type": "enum(draft|published|unpublished)?", "desc": "Publishing sets publishedAt the first time" }
+    },
+    "BlogReactionResult": { "likeCount": "int", "dislikeCount": "int", "myReaction": "enum(like|dislike)?" },
+    "BlogReply": {
+      "id": "uuid", "postId": "uuid", "parentId": { "type": "uuid?", "desc": "The reply this one answers (one level)" },
+      "authorName": { "type": "string", "desc": "The customer's first name and last initial" },
+      "text": "string", "createdAt": "datetime",
+      "mine": { "type": "bool", "desc": "Written by the signed-in customer (they can delete it)" }
+    },
+    "BlogReplyAdmin": {
+      "id": "uuid", "postId": "uuid", "postTitle": "string", "parentId": "uuid?",
+      "customerId": "uuid", "authorName": "string", "text": "string",
+      "status": "enum(visible|hidden)", "openReportCount": "int", "createdAt": "datetime"
+    },
+    "BlogReportInput": {
+      "targetType": "enum(post|reply|author)", "targetId": "uuid",
+      "reason": "enum(spam|offensive|misleading|other)", "note": "string?"
+    },
+    "BlogReportAdmin": {
+      "id": "uuid", "targetType": "enum(post|reply|author)", "targetId": "uuid",
+      "targetLabel": { "type": "string", "desc": "Post title, the reply's first words or the author's name" },
+      "reason": "enum(spam|offensive|misleading|other)", "note": "string?",
+      "status": "enum(open|upheld|dismissed)", "reporterId": "uuid",
+      "createdAt": "datetime", "decidedAt": "datetime?"
+    },
+
+    "Industry": { "id": "uuid", "slug": "string", "name": "string", "position": "int", "visible": "bool", "companyCount": { "type": "int", "desc": "Published companies" } },
+    "IndustryInput": { "name": "string", "slug": "string?", "position": "int?", "visible": "bool?" },
+    "IndustryRef": { "id": "uuid", "slug": "string", "name": "string" },
+    "CompanyContacts": { "phone": "string?", "email": "email?", "website": "url?", "address": "string?" },
+    "GeoPoint": { "lat": "number", "lng": "number" },
+    "CompanyCard": {
+      "id": "uuid", "slug": "string", "name": "string", "logo": "MediaRef?",
+      "industry": "IndustryRef?", "city": "string?", "tagline": "string?", "verified": "bool"
+    },
+    "Company": {
+      "id": "uuid", "slug": "string", "name": "string", "logo": "MediaRef?",
+      "industry": "IndustryRef?", "city": "string?", "tagline": "string?", "verified": "bool",
+      "description": { "type": "text?", "desc": "Plain text; blank lines separate paragraphs" },
+      "photos": { "type": "MediaRef[]", "desc": "Carousel and gallery pictures in order (up to 12)" },
+      "founded": { "type": "int?", "desc": "Year" },
+      "employees": { "type": "string?", "desc": "e.g. 50–100" },
+      "contacts": "CompanyContacts",
+      "location": "GeoPoint?"
+    },
+    "CompanyAdmin": {
+      "id": "uuid", "slug": "string", "name": "string", "logo": "MediaRef?",
+      "industry": "IndustryRef?", "city": "string?", "tagline": "string?", "verified": "bool",
+      "description": "text?", "photos": "MediaRef[]", "founded": "int?", "employees": "string?",
+      "contacts": "CompanyContacts", "location": "GeoPoint?",
+      "status": "enum(published|hidden)", "position": "int",
+      "openInquiryCount": "int", "createdAt": "datetime", "updatedAt": "datetime"
+    },
+    "CompanyInput": {
+      "name": "string", "slug": "string?", "logo": "MediaRef?", "industryId": "uuid?",
+      "city": "string?", "tagline": { "type": "string?", "desc": "At most 120 characters" }, "verified": "bool?",
+      "description": "text?", "photos": "MediaRef[]?", "founded": "int?", "employees": "string?",
+      "contacts": "CompanyContacts?", "location": "GeoPoint?",
+      "status": "enum(published|hidden)?", "position": "int?"
+    },
+    "InquiryInput": { "name": "string", "email": "email", "phone": "string?", "message": { "type": "string", "desc": "At most 2,000 characters" } },
+    "InquiryReceipt": { "id": "uuid", "message": { "type": "string", "desc": "e.g. Sent to Northwind Tools. They usually reply by email." } },
+    "InquiryAdmin": {
+      "id": "uuid", "companyId": "uuid", "companyName": "string", "customerId": "uuid?",
+      "name": "string", "email": "email", "phone": "string?", "message": "string",
+      "status": "enum(new|replied|closed)", "staffNote": "string?",
+      "createdAt": "datetime", "updatedAt": "datetime"
+    },
+    "InquiryUpdate": { "status": "enum(new|replied|closed)?", "staffNote": "string?" },
+
+    "GameCard": {
+      "id": "uuid", "slug": "string", "title": "string", "genre": "string",
+      "icon": "MediaRef?", "cover": "MediaRef?",
+      "playersLabel": { "type": "string?", "desc": "e.g. 12k players this week" },
+      "featured": "bool",
+      "hasPrizes": { "type": "bool", "desc": "Top ranks win coupons (shows the Win coupons badge)" }
+    },
+    "GamePrize": { "ranks": { "type": "string", "desc": "e.g. #1 or #4–10" }, "reward": { "type": "string", "desc": "e.g. $20 coupon" } },
+    "Game": {
+      "id": "uuid", "slug": "string", "title": "string", "genre": "string",
+      "icon": "MediaRef?", "cover": "MediaRef?", "playersLabel": "string?", "featured": "bool", "hasPrizes": "bool",
+      "description": "text?",
+      "howToPlay": { "type": "string[]", "desc": "Short steps in order" },
+      "prizes": "GamePrize[]",
+      "playable": { "type": "bool", "desc": "False at this phase: the Play button says Coming soon" }
+    },
+    "GameAdmin": {
+      "id": "uuid", "slug": "string", "title": "string", "genre": "string",
+      "icon": "MediaRef?", "cover": "MediaRef?", "playersLabel": "string?", "featured": "bool",
+      "description": "text?", "howToPlay": "string[]", "prizes": "GamePrize[]",
+      "status": "enum(published|hidden)", "position": "int",
+      "rankingsUpdatedAt": "datetime?", "createdAt": "datetime", "updatedAt": "datetime"
+    },
+    "GameInput": {
+      "title": "string", "slug": "string?", "genre": "string",
+      "icon": "MediaRef?", "cover": "MediaRef?", "playersLabel": "string?", "featured": "bool?",
+      "description": "text?", "howToPlay": "string[]?", "prizes": "GamePrize[]?",
+      "status": "enum(published|hidden)?", "position": "int?"
+    },
+    "PlayGames": { "games": "GameCard[]", "genres": { "type": "string[]", "desc": "Genres of the listed games, in first-seen order" } },
+    "RankingEntry": {
+      "rank": "int", "name": "string", "score": "int",
+      "change": { "type": "int?", "desc": "Places moved since the last update: positive up, negative down, 0 same, null new" }
+    },
+    "RankingTable": {
+      "game": "GameCard", "period": "enum(today|week|all_time)",
+      "entries": { "type": "RankingEntry[]", "desc": "Best first (up to 100)" },
+      "updatedAt": "datetime?"
+    },
+    "RankingRowInput": { "name": "string", "score": "int", "change": "int?" },
+    "RankingInput": { "entries": { "type": "RankingRowInput[]", "desc": "Up to 100 rows; ranks follow the score, best first" } }
+  },
+  "tables": [
+    { "name": "phone_picks", "desc": "One row (id phones): the products of the Phone tab in order", "columns": { "id": "text pk", "product_ids": "jsonb", "updated_by": "text?", "updated_at": "timestamptz" } },
+    { "name": "blog_topics", "columns": { "id": "uuid pk", "slug": "text unique", "name": "text", "position": "int", "visible": "bool" } },
+    { "name": "blog_authors", "columns": { "id": "uuid pk", "slug": "text unique", "name": "text", "email": "text?", "avatar": "jsonb?", "bio": "text?", "created_at": "timestamptz", "updated_at": "timestamptz" } },
+    { "name": "blog_posts", "columns": { "id": "uuid pk", "slug": "text unique", "title": "text", "summary": "text?", "body": "text", "cover": "jsonb?", "topic_id": "uuid? → blog_topics", "author_id": "uuid → blog_authors", "status": "text", "featured": "bool", "published_at": "timestamptz?", "read_minutes": "int", "like_count": "int", "dislike_count": "int", "reply_count": "int", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(status, published_at)", "(topic_id, status, published_at)", "(author_id, status, published_at)"] },
+    { "name": "blog_reactions", "columns": { "id": "uuid pk", "post_id": "uuid → blog_posts", "customer_id": "uuid", "reaction": "text", "at": "timestamptz" }, "indexes": ["unique (post_id, customer_id)"] },
+    { "name": "blog_replies", "columns": { "id": "uuid pk", "post_id": "uuid → blog_posts", "parent_id": "uuid?", "customer_id": "uuid", "author_name": "text", "text": "text", "status": "text", "created_at": "timestamptz" }, "indexes": ["(post_id, status, created_at)", "(status, created_at)"] },
+    { "name": "blog_reports", "columns": { "id": "uuid pk", "target_type": "text", "target_id": "uuid", "reporter_id": "uuid", "reason": "text", "note": "text?", "status": "text", "created_at": "timestamptz", "decided_at": "timestamptz?", "decided_by": "text?" }, "indexes": ["unique (target_type, target_id, reporter_id)", "(status, created_at)"] },
+    { "name": "industries", "columns": { "id": "uuid pk", "slug": "text unique", "name": "text", "position": "int", "visible": "bool" } },
+    { "name": "companies", "columns": { "id": "uuid pk", "slug": "text unique", "name": "text", "logo": "jsonb?", "industry_id": "uuid? → industries", "city": "text?", "tagline": "text?", "verified": "bool", "description": "text?", "photos": "jsonb", "founded": "int?", "employees": "text?", "contacts": "jsonb", "location": "jsonb?", "status": "text", "position": "int", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(status, position)", "(industry_id, status, position)"] },
+    { "name": "inquiries", "columns": { "id": "uuid pk", "company_id": "uuid → companies", "customer_id": "uuid?", "name": "text", "email": "text", "phone": "text?", "message": "text", "status": "text", "staff_note": "text?", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(status, created_at)", "(company_id, created_at)"] },
+    { "name": "games", "columns": { "id": "uuid pk", "slug": "text unique", "title": "text", "genre": "text", "icon": "jsonb?", "cover": "jsonb?", "players_label": "text?", "featured": "bool", "description": "text?", "how_to_play": "jsonb", "prizes": "jsonb", "status": "text", "position": "int", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(status, position)"] },
+    { "name": "rankings", "desc": "One row per game and period (today, week, all_time)", "columns": { "id": "uuid pk", "game_id": "uuid → games", "period": "text", "entries": "jsonb", "updated_by": "text?", "updated_at": "timestamptz" }, "indexes": ["unique (game_id, period)"] }
+  ],
+  "endpoints": [
+    { "id": "getPhones", "area": "store", "method": "GET", "path": "/phones", "summary": "The Phone tab: picked phones as product cards, in order", "auth": "visitor", "query": { "postalCode": "string?" }, "response": "PhonesPage", "screens": ["store/phones"] },
+
+    { "id": "listBlogTopics", "area": "store", "method": "GET", "path": "/blogs/topics", "summary": "Visible blog topics in order", "auth": "visitor", "response": "BlogTopic[]", "screens": ["store/blogs"] },
+    { "id": "listBlogPosts", "area": "store", "method": "GET", "path": "/blogs/posts", "summary": "Published posts, newest first", "desc": "Featured posts are not moved to the top: the app shows the first featured one of the first page large.", "auth": "visitor", "paging": true, "query": { "topic": { "type": "string?", "desc": "Topic slug" }, "q": "string?" }, "response": "BlogPostCard", "screens": ["store/blogs"] },
+    { "id": "getBlogPost", "area": "store", "method": "GET", "path": "/blogs/posts/{slug}", "summary": "A published post with its body and the previous and next posts", "auth": "visitor", "params": { "slug": "string" }, "response": "BlogPost", "errors": ["NOT_FOUND"], "screens": ["store/blog-post"] },
+    { "id": "reactToBlogPost", "area": "store", "method": "POST", "path": "/blogs/posts/{id}/reaction", "summary": "Like, dislike or clear the reaction", "auth": "customer", "params": { "id": "uuid" }, "body": { "reaction": "enum(like|dislike|none)" }, "response": "BlogReactionResult", "errors": ["NOT_FOUND"], "screens": ["store/blog-post"] },
+    { "id": "listBlogReplies", "area": "store", "method": "GET", "path": "/blogs/posts/{id}/replies", "summary": "Visible replies, oldest first", "auth": "visitor", "params": { "id": "uuid" }, "paging": true, "response": "BlogReply", "screens": ["store/blog-post"] },
+    { "id": "replyToBlogPost", "area": "store", "method": "POST", "path": "/blogs/posts/{id}/replies", "summary": "Write a reply", "auth": "customer", "params": { "id": "uuid" }, "body": { "text": { "type": "string", "desc": "1–1,000 characters" }, "parentId": "uuid?" }, "response": "BlogReply", "status": 201, "errors": ["NOT_FOUND", "REPLIES_CLOSED"], "screens": ["store/blog-post"] },
+    { "id": "deleteMyBlogReply", "area": "store", "method": "DELETE", "path": "/blogs/replies/{id}", "summary": "Delete my reply", "auth": "customer", "params": { "id": "uuid" }, "response": null, "status": 204, "errors": ["NOT_FOUND"], "screens": ["store/blog-post"] },
+    { "id": "getBlogAuthor", "area": "store", "method": "GET", "path": "/blogs/authors/{slug}", "summary": "An author's profile", "auth": "visitor", "params": { "slug": "string" }, "response": "BlogAuthor", "errors": ["NOT_FOUND"], "screens": ["store/blog-author"] },
+    { "id": "listBlogAuthorPosts", "area": "store", "method": "GET", "path": "/blogs/authors/{slug}/posts", "summary": "An author's published posts, newest first", "auth": "visitor", "params": { "slug": "string" }, "paging": true, "response": "BlogPostCard", "screens": ["store/blog-author"] },
+    { "id": "reportBlogContent", "area": "store", "method": "POST", "path": "/blogs/reports", "summary": "Report a post, a reply or an author", "auth": "customer", "body": "BlogReportInput", "response": { "id": "uuid" }, "status": 201, "errors": ["NOT_FOUND", "ALREADY_REPORTED"], "screens": ["store/blog-post", "store/blog-author"] },
+
+    { "id": "listIndustries", "area": "store", "method": "GET", "path": "/industries", "summary": "Visible industries in order", "auth": "visitor", "response": "Industry[]", "screens": ["store/companies"] },
+    { "id": "listCompanies", "area": "store", "method": "GET", "path": "/companies", "summary": "Published companies in staff order", "auth": "visitor", "paging": true, "query": { "industry": { "type": "string?", "desc": "Industry slug" }, "q": "string?" }, "response": "CompanyCard", "screens": ["store/companies"] },
+    { "id": "getCompany", "area": "store", "method": "GET", "path": "/companies/{slug}", "summary": "A company page", "auth": "visitor", "params": { "slug": "string" }, "response": "Company", "errors": ["NOT_FOUND"], "screens": ["store/company"] },
+    { "id": "sendInquiry", "area": "store", "method": "POST", "path": "/companies/{id}/inquiries", "summary": "Send an inquiry to a company (staff pass it on)", "auth": "customer", "params": { "id": "uuid" }, "body": "InquiryInput", "response": "InquiryReceipt", "status": 201, "idempotent": true, "errors": ["NOT_FOUND"], "screens": ["store/company"] },
+
+    { "id": "listGames", "area": "store", "method": "GET", "path": "/play/games", "summary": "Published games in staff order, with their genres", "auth": "visitor", "query": { "genre": "string?" }, "response": "PlayGames", "screens": ["store/play"] },
+    { "id": "getGame", "area": "store", "method": "GET", "path": "/play/games/{slug}", "summary": "A game's page", "auth": "visitor", "params": { "slug": "string" }, "response": "Game", "errors": ["NOT_FOUND"], "screens": ["store/play-game"] },
+    { "id": "getRankings", "area": "store", "method": "GET", "path": "/play/rankings", "summary": "A game's ranking table for a period", "desc": "Without game, the first published game.", "auth": "visitor", "query": { "game": { "type": "string?", "desc": "Game slug" }, "period": "enum(today|week|all_time)?" }, "response": "RankingTable", "errors": ["NOT_FOUND"], "screens": ["store/play", "store/play-game"] },
+
+    { "id": "getPhonesAdmin", "area": "admin", "method": "GET", "path": "/phones", "summary": "The Phone tab picks", "auth": "staff", "permission": "departments.view", "response": "PhonesAdmin", "screens": ["admin/departments-phones"] },
+    { "id": "setPhones", "area": "admin", "method": "PUT", "path": "/phones", "summary": "Replace the Phone tab picks", "auth": "staff", "permission": "departments.phones.manage", "body": "PhonesInput", "response": "PhonesAdmin", "audited": true, "screens": ["admin/departments-phones"] },
+
+    { "id": "listBlogTopicsAdmin", "area": "admin", "method": "GET", "path": "/blogs/topics", "summary": "Every blog topic", "auth": "staff", "permission": "departments.view", "response": "BlogTopic[]", "screens": ["admin/departments-blogs"] },
+    { "id": "createBlogTopic", "area": "admin", "method": "POST", "path": "/blogs/topics", "summary": "Add a topic", "auth": "staff", "permission": "departments.blogs.manage", "body": "BlogTopicInput", "response": "BlogTopic", "status": 201, "errors": ["SLUG_TAKEN"], "audited": true, "screens": ["admin/departments-blogs"] },
+    { "id": "updateBlogTopic", "area": "admin", "method": "PATCH", "path": "/blogs/topics/{id}", "summary": "Rename, reorder, hide or show a topic", "auth": "staff", "permission": "departments.blogs.manage", "params": { "id": "uuid" }, "body": "BlogTopicInput", "response": "BlogTopic", "errors": ["NOT_FOUND", "SLUG_TAKEN"], "audited": true, "screens": ["admin/departments-blogs"] },
+    { "id": "deleteBlogTopic", "area": "admin", "method": "DELETE", "path": "/blogs/topics/{id}", "summary": "Delete a topic without posts", "auth": "staff", "permission": "departments.blogs.manage", "params": { "id": "uuid" }, "response": null, "status": 204, "errors": ["NOT_FOUND", "IN_USE"], "audited": true, "screens": ["admin/departments-blogs"] },
+    { "id": "listBlogAuthorsAdmin", "area": "admin", "method": "GET", "path": "/blogs/authors", "summary": "Every author profile", "auth": "staff", "permission": "departments.view", "response": "BlogAuthorAdmin[]", "screens": ["admin/departments-blogs"] },
+    { "id": "createBlogAuthor", "area": "admin", "method": "POST", "path": "/blogs/authors", "summary": "Add an author profile", "auth": "staff", "permission": "departments.blogs.manage", "body": "BlogAuthorInput", "response": "BlogAuthorAdmin", "status": 201, "errors": ["SLUG_TAKEN"], "audited": true, "screens": ["admin/departments-blogs"] },
+    { "id": "updateBlogAuthor", "area": "admin", "method": "PATCH", "path": "/blogs/authors/{id}", "summary": "Edit an author profile", "auth": "staff", "permission": "departments.blogs.manage", "params": { "id": "uuid" }, "body": "BlogAuthorInput", "response": "BlogAuthorAdmin", "errors": ["NOT_FOUND", "SLUG_TAKEN"], "audited": true, "screens": ["admin/departments-blogs"] },
+    { "id": "deleteBlogAuthor", "area": "admin", "method": "DELETE", "path": "/blogs/authors/{id}", "summary": "Delete an author without posts", "auth": "staff", "permission": "departments.blogs.manage", "params": { "id": "uuid" }, "response": null, "status": 204, "errors": ["NOT_FOUND", "IN_USE"], "audited": true, "screens": ["admin/departments-blogs"] },
+    { "id": "listBlogPostsAdmin", "area": "admin", "method": "GET", "path": "/blogs/posts", "summary": "Posts, newest change first", "auth": "staff", "permission": "departments.view", "paging": true, "query": { "status": "enum(draft|published|unpublished)?", "topicId": "uuid?", "authorId": "uuid?", "q": "string?" }, "response": "BlogPostAdmin", "screens": ["admin/departments-blogs"] },
+    { "id": "createBlogPost", "area": "admin", "method": "POST", "path": "/blogs/posts", "summary": "Write a post", "auth": "staff", "permission": "departments.blogs.manage", "body": "BlogPostInput", "response": "BlogPostAdmin", "status": 201, "errors": ["SLUG_TAKEN"], "audited": true, "screens": ["admin/departments-blogs"] },
+    { "id": "getBlogPostAdmin", "area": "admin", "method": "GET", "path": "/blogs/posts/{id}", "summary": "A post for editing", "auth": "staff", "permission": "departments.view", "params": { "id": "uuid" }, "response": "BlogPostAdmin", "errors": ["NOT_FOUND"], "screens": ["admin/departments-blogs"] },
+    { "id": "updateBlogPost", "area": "admin", "method": "PATCH", "path": "/blogs/posts/{id}", "summary": "Edit, publish or unpublish a post", "auth": "staff", "permission": "departments.blogs.manage", "params": { "id": "uuid" }, "body": "BlogPostInput", "response": "BlogPostAdmin", "errors": ["NOT_FOUND", "SLUG_TAKEN"], "audited": true, "screens": ["admin/departments-blogs"] },
+    { "id": "deleteBlogPost", "area": "admin", "method": "DELETE", "path": "/blogs/posts/{id}", "summary": "Delete a post with its reactions, replies and reports", "auth": "staff", "permission": "departments.blogs.manage", "params": { "id": "uuid" }, "response": null, "status": 204, "errors": ["NOT_FOUND"], "audited": true, "screens": ["admin/departments-blogs"] },
+    { "id": "listBlogRepliesAdmin", "area": "admin", "method": "GET", "path": "/blogs/replies", "summary": "Replies, newest first", "auth": "staff", "permission": "departments.view", "paging": true, "query": { "status": "enum(visible|hidden)?", "postId": "uuid?", "reported": { "type": "bool?", "desc": "Only replies with open reports" } }, "response": "BlogReplyAdmin", "screens": ["admin/departments-blogs"] },
+    { "id": "moderateBlogReply", "area": "admin", "method": "PATCH", "path": "/blogs/replies/{id}", "summary": "Hide or show a reply", "auth": "staff", "permission": "departments.blogs.manage", "params": { "id": "uuid" }, "body": { "status": "enum(visible|hidden)" }, "response": "BlogReplyAdmin", "errors": ["NOT_FOUND"], "audited": true, "screens": ["admin/departments-blogs"] },
+    { "id": "listBlogReports", "area": "admin", "method": "GET", "path": "/blogs/reports", "summary": "Reports, newest first", "auth": "staff", "permission": "departments.view", "paging": true, "query": { "status": "enum(open|upheld|dismissed)?" }, "response": "BlogReportAdmin", "screens": ["admin/departments-blogs"] },
+    { "id": "decideBlogReport", "area": "admin", "method": "PATCH", "path": "/blogs/reports/{id}", "summary": "Uphold or dismiss a report", "desc": "Upholding a reply report hides the reply; upholding a post report unpublishes the post. Author reports only count toward the author's reportCount.", "auth": "staff", "permission": "departments.blogs.manage", "params": { "id": "uuid" }, "body": { "status": "enum(upheld|dismissed)" }, "response": "BlogReportAdmin", "errors": ["NOT_FOUND", "ILLEGAL_TRANSITION"], "audited": true, "screens": ["admin/departments-blogs"] },
+
+    { "id": "listIndustriesAdmin", "area": "admin", "method": "GET", "path": "/industries", "summary": "Every industry", "auth": "staff", "permission": "departments.view", "response": "Industry[]", "screens": ["admin/departments-companies"] },
+    { "id": "createIndustry", "area": "admin", "method": "POST", "path": "/industries", "summary": "Add an industry", "auth": "staff", "permission": "departments.companies.manage", "body": "IndustryInput", "response": "Industry", "status": 201, "errors": ["SLUG_TAKEN"], "audited": true, "screens": ["admin/departments-companies"] },
+    { "id": "updateIndustry", "area": "admin", "method": "PATCH", "path": "/industries/{id}", "summary": "Rename, reorder, hide or show an industry", "auth": "staff", "permission": "departments.companies.manage", "params": { "id": "uuid" }, "body": "IndustryInput", "response": "Industry", "errors": ["NOT_FOUND", "SLUG_TAKEN"], "audited": true, "screens": ["admin/departments-companies"] },
+    { "id": "deleteIndustry", "area": "admin", "method": "DELETE", "path": "/industries/{id}", "summary": "Delete an industry without companies", "auth": "staff", "permission": "departments.companies.manage", "params": { "id": "uuid" }, "response": null, "status": 204, "errors": ["NOT_FOUND", "IN_USE"], "audited": true, "screens": ["admin/departments-companies"] },
+    { "id": "listCompaniesAdmin", "area": "admin", "method": "GET", "path": "/companies", "summary": "Companies in staff order", "auth": "staff", "permission": "departments.view", "paging": true, "query": { "status": "enum(published|hidden)?", "industryId": "uuid?", "q": "string?" }, "response": "CompanyAdmin", "screens": ["admin/departments-companies"] },
+    { "id": "createCompany", "area": "admin", "method": "POST", "path": "/companies", "summary": "Add a company", "auth": "staff", "permission": "departments.companies.manage", "body": "CompanyInput", "response": "CompanyAdmin", "status": 201, "errors": ["SLUG_TAKEN"], "audited": true, "screens": ["admin/departments-companies"] },
+    { "id": "getCompanyAdmin", "area": "admin", "method": "GET", "path": "/companies/{id}", "summary": "A company for editing", "auth": "staff", "permission": "departments.view", "params": { "id": "uuid" }, "response": "CompanyAdmin", "errors": ["NOT_FOUND"], "screens": ["admin/departments-companies"] },
+    { "id": "updateCompany", "area": "admin", "method": "PATCH", "path": "/companies/{id}", "summary": "Edit, hide or show a company", "auth": "staff", "permission": "departments.companies.manage", "params": { "id": "uuid" }, "body": "CompanyInput", "response": "CompanyAdmin", "errors": ["NOT_FOUND", "SLUG_TAKEN"], "audited": true, "screens": ["admin/departments-companies"] },
+    { "id": "deleteCompany", "area": "admin", "method": "DELETE", "path": "/companies/{id}", "summary": "Delete a company with its inquiries", "auth": "staff", "permission": "departments.companies.manage", "params": { "id": "uuid" }, "response": null, "status": 204, "errors": ["NOT_FOUND"], "audited": true, "screens": ["admin/departments-companies"] },
+    { "id": "listInquiries", "area": "admin", "method": "GET", "path": "/inquiries", "summary": "Inquiries, newest first", "auth": "staff", "permission": "departments.view", "paging": true, "query": { "status": "enum(new|replied|closed)?", "companyId": "uuid?" }, "response": "InquiryAdmin", "screens": ["admin/departments-companies"] },
+    { "id": "updateInquiry", "area": "admin", "method": "PATCH", "path": "/inquiries/{id}", "summary": "Mark an inquiry replied or closed, or note what was done", "auth": "staff", "permission": "departments.companies.manage", "params": { "id": "uuid" }, "body": "InquiryUpdate", "response": "InquiryAdmin", "errors": ["NOT_FOUND"], "audited": true, "screens": ["admin/departments-companies"] },
+
+    { "id": "listGamesAdmin", "area": "admin", "method": "GET", "path": "/play/games", "summary": "Games in staff order", "auth": "staff", "permission": "departments.view", "response": "GameAdmin[]", "screens": ["admin/departments-play"] },
+    { "id": "createGame", "area": "admin", "method": "POST", "path": "/play/games", "summary": "Add a game", "auth": "staff", "permission": "departments.play.manage", "body": "GameInput", "response": "GameAdmin", "status": 201, "errors": ["SLUG_TAKEN"], "audited": true, "screens": ["admin/departments-play"] },
+    { "id": "updateGame", "area": "admin", "method": "PATCH", "path": "/play/games/{id}", "summary": "Edit, hide or show a game", "auth": "staff", "permission": "departments.play.manage", "params": { "id": "uuid" }, "body": "GameInput", "response": "GameAdmin", "errors": ["NOT_FOUND", "SLUG_TAKEN"], "audited": true, "screens": ["admin/departments-play"] },
+    { "id": "deleteGame", "area": "admin", "method": "DELETE", "path": "/play/games/{id}", "summary": "Delete a game with its ranking tables", "auth": "staff", "permission": "departments.play.manage", "params": { "id": "uuid" }, "response": null, "status": 204, "errors": ["NOT_FOUND"], "audited": true, "screens": ["admin/departments-play"] },
+    { "id": "getRankingsAdmin", "area": "admin", "method": "GET", "path": "/play/games/{id}/rankings/{period}", "summary": "A game's ranking table for a period", "auth": "staff", "permission": "departments.view", "params": { "id": "uuid", "period": "enum(today|week|all_time)" }, "response": "RankingTable", "errors": ["NOT_FOUND"], "screens": ["admin/departments-play"] },
+    { "id": "setRankings", "area": "admin", "method": "PUT", "path": "/play/games/{id}/rankings/{period}", "summary": "Replace a game's ranking table for a period", "auth": "staff", "permission": "departments.play.manage", "params": { "id": "uuid", "period": "enum(today|week|all_time)" }, "body": "RankingInput", "response": "RankingTable", "errors": ["NOT_FOUND"], "audited": true, "screens": ["admin/departments-play"] }
+  ],
+  "events": { "publishes": [], "consumes": [] },
+  "permissions": [
+    { "key": "departments.view", "audience": "staff", "desc": "See the department pages' content in Admin › Departments" },
+    { "key": "departments.phones.manage", "audience": "staff", "desc": "Pick the phones of the Phone tab" },
+    { "key": "departments.blogs.manage", "audience": "staff", "desc": "Blog topics, authors and posts; hide replies and decide reports" },
+    { "key": "departments.companies.manage", "audience": "staff", "desc": "Industries and company pages; handle inquiries" },
+    { "key": "departments.play.manage", "audience": "staff", "desc": "Play center games and ranking tables" }
+  ],
+  "settings": [
+    { "key": "blogRepliesOpen", "type": "bool", "default": true, "desc": "Customers can reply to blog posts" }
+  ],
+  "integrations": [],
+  "errorCodes": {
+    "SLUG_TAKEN": { "status": 409, "meaning": "Another record already uses this slug." },
+    "IN_USE": { "status": 409, "meaning": "Posts or companies still use it; move or delete them first." },
+    "ALREADY_REPORTED": { "status": 409, "meaning": "You already reported this." },
+    "REPLIES_CLOSED": { "status": 409, "meaning": "Replies are closed for now." }
+  },
+  "notes": [
+    "Department pages exist only in the app for now (2026-10-21 decision): the web store has no pages for these endpoints yet.",
+    "Blog posts are written by staff under author profiles; customers react, reply and report (2026-10-21 decision). Replies are shown at once and hidden by staff when needed.",
+    "Play center is list-only at this phase (2026-10-21 decision): games and the ranking tables staff keep. Game.playable is false; score submission comes with playing.",
+    "Bodies are sanitized HTML with the same allow-list as content's news and help (a copy of content domain rules sanitizeHtml, since modules don't import each other's files). Pictures are content_image uploads attached with media.attach to the record that shows them.",
+    "Slugs are made from the name or title when omitted (lowercase words joined by -) and must be unique per table; a taken slug answers SLUG_TAKEN.",
+    "A reply's authorName is the customer's first name and last initial when it was written (customers.getProfile), else Customer."
+  ]
+}

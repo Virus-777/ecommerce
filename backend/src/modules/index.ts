@@ -13,6 +13,7 @@ export const moduleLoaders: Record<string, () => Promise<{ default: ModuleDefini
   "checkout": () => import('./checkout/module.js'),
   "content": () => import('./content/module.js'),
   "customers": () => import('./customers/module.js'),
+  "departments": () => import('./departments/module.js'),
   "finance": () => import('./finance/module.js'),
   "fulfillment-service": () => import('./fulfillment-service/module.js'),
   "identity": () => import('./identity/module.js'),

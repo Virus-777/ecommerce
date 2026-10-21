@@ -59,6 +59,12 @@ export const NEWS_PUBLISH = 'content.news.publish';
  */
 export const ANNOUNCEMENTS_SEND = 'notifications.announcements.send';
 export const ANNOUNCEMENT_ROLES = ['seller_manager', 'platform_administrator'] as const;
+/**
+ * Department pages of the app (departments module, 2026-10-21): the Content Manager runs them all (departments.*); the
+ * Marketing Manager edits their content. Installs seeded before them get the keys from access migration
+ * 2026-10-21-departments-keys.
+ */
+export const DEPARTMENTS_MANAGE = ['departments.phones.manage', 'departments.blogs.manage', 'departments.companies.manage', 'departments.play.manage'] as const;
 
 export const SYSTEM_ROLES: SeedRole[] = [
   {
@@ -261,7 +267,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Marketing and content',
     description: 'Promotions, homepage and marketing broadcasts.',
     escalationRoleKey: BUSINESS_OWNER,
-    permissions: ['promotions.*', 'content.homepage.manage', NEWS_MANAGE, 'reports.customers-marketing.view', 'notifications.broadcasts.manage', 'advertising.campaigns.review', MARKETING_OFFERS_VIEW, STAFF_UPLOADS, ...QUEUES],
+    permissions: ['promotions.*', 'content.homepage.manage', NEWS_MANAGE, ...DEPARTMENTS_MANAGE, 'reports.customers-marketing.view', 'notifications.broadcasts.manage', 'advertising.campaigns.review', MARKETING_OFFERS_VIEW, STAFF_UPLOADS, ...QUEUES],
     limits: { 'promotions.budgets.approve': upTo(5_000) },
   },
   {
@@ -281,7 +287,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Marketing and content',
     description: 'Pages, help center and policies (policies approved by the Business Owner).',
     escalationRoleKey: BUSINESS_OWNER,
-    permissions: ['content.*', 'media.assets.manage', STAFF_UPLOADS, 'advertising.campaigns.review', ...QUEUES],
+    permissions: ['content.*', 'departments.*', 'media.assets.manage', STAFF_UPLOADS, 'advertising.campaigns.review', ...QUEUES],
     limits: { 'content.policies.approve': RECOMMEND, 'content.policies.short-notice': RECOMMEND },
   },
   {
@@ -363,6 +369,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
 export const VIEW_COMPANIONS: Readonly<Record<string, string>> = {
   'catalog.view': 'catalog.',
   'content.view': 'content.',
+  'departments.view': 'departments.',
   'offers.official.view': 'offers.official.',
   'sellers.applications.view': 'sellers.applications.',
   'returns.inspections.view': 'returns.inspections.',

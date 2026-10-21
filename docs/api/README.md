@@ -1,6 +1,6 @@
 # Marketly API design
 
-Generated from `docs/api/spec/` by `node docs/api/tools/build.mjs`. 34 modules, 1,362 endpoints.
+Generated from `docs/api/spec/` by `node docs/api/tools/build.mjs`. 35 modules, 1,416 endpoints.
 
 - **GraphQL read layer:** [graphql/README.md](graphql/README.md), composed schemas `graphql/schema.{store,seller,admin}.graphql`, screen queries in `graphql/operations/`
 - **OpenAPI 3.1:** [openapi.json](openapi.json) (open in Swagger UI, Redoc or Postman)
@@ -11,9 +11,9 @@ Generated from `docs/api/spec/` by `node docs/api/tools/build.mjs`. 34 modules, 
 
 | Area | Prefix | Who | Auth | Endpoints |
 |---|---|---|---|---|
-| Store API | `/api/store/{module}` | Customers and guests on the website and the Android app | Every request carries a token: a visitor token (guests, issued when the app opens) or a customer access token. | 273 |
+| Store API | `/api/store/{module}` | Customers and guests on the website and the Android app | Every request carries a token: a visitor token (guests, issued when the app opens) or a customer access token. | 291 |
 | Seller API | `/api/seller/{module}` | Seller owners and seller staff in Seller Center (website + Android app) | Seller member session. Every request acts for one seller account; seller member permissions apply. | 277 |
-| Admin API | `/api/admin/{module}` | Internal staff in the Admin Center and Operations Center | Staff session. Role permissions and approval limits apply. | 782 |
+| Admin API | `/api/admin/{module}` | Internal staff in the Admin Center and Operations Center | Staff session. Role permissions and approval limits apply. | 818 |
 | Public API | `/api/public/{module}` | Anyone (sign-in, registration, public settings) | Visitor token of any app. Refresh and sign-out take the refresh token; the bootstrap endpoint takes an app proof. | 21 |
 | Webhooks | `/webhooks/{module}` | Payment, carrier and email providers | Provider signature header, verified per provider | 9 |
 
@@ -23,12 +23,12 @@ Every endpoint needs a token ([../03-auth-middleware.md](../03-auth-middleware.m
 
 | Area | Auth kind | Who | Endpoints |
 |---|---|---|---|
-| Store API | `visitor` | Any valid token of the app: a visitor token (before sign-in) or a signed-in access token | 56 |
+| Store API | `visitor` | Any valid token of the app: a visitor token (before sign-in) or a signed-in access token | 69 |
 | Store API | `shopper` | A store token that can hold a cart: visitor (guest) or customer | 103 |
-| Store API | `customer` | Signed-in customer | 103 |
+| Store API | `customer` | Signed-in customer | 108 |
 | Store API | `account` | Any signed-in account, any realm (self-service security endpoints) | 11 |
 | Seller API | `seller` | Seller member acting for the seller in the token; optional `permission` narrows it | 277 |
-| Admin API | `staff` | Staff member (email and password sign-in); optional `permission` narrows it | 782 |
+| Admin API | `staff` | Staff member (email and password sign-in); optional `permission` narrows it | 818 |
 | Public API | `visitor` | Any valid token of the app: a visitor token (before sign-in) or a signed-in access token | 18 |
 | Public API | `refresh` | Refresh token only (website: the cookie of the app named by audience in the body; Android: refreshToken in the body) | 2 |
 | Public API | `bootstrap` | No token: an app proof (Play Integrity or bot challenge). Only POST /api/public/identity/app-sessions | 1 |
@@ -93,6 +93,7 @@ Every endpoint needs a token ([../03-auth-middleware.md](../03-auth-middleware.m
 |---|---|---|---|---|
 | [advertising](modules/advertising.md) | 1 | Ad placements and their rules, ad campaigns through the full lifecycle, creatives and their review, audiences, schedules, frequency caps and dismissal suppression, rotation and priority, the serving decision for each page view, display/click/dismissal tracking with attribution, and seller sponsored campaigns with spending limits and ad charges kept separate from commission. | media, access | 49 |
 | [content](modules/content.md) | 1 | Store content managed by the Content Manager: ordered and scheduled homepage sections, campaign pages and curated collections, Help Center articles and categories, news posts and their categories, policies with versions and effective dates, the About page and footer links. Every item has an owner, a preview, a publication status and schedule, a version history with restore, and a correction or removal action. | media, access | 90 |
+| [departments](modules/departments.md) | 2 | The app's department pages opened from the home Departments rail: the Phones picks, Blogs (topics, staff authors, posts, reactions, replies and reports), the Companies directory (industries, company pages, inquiries) and the Play center (games and ranking tables). Staff manage all of it in Admin › Departments. | media | 54 |
 | [promotions](modules/promotions.md) | 1 | Discounts and sales campaigns: markdowns, percentage and fixed coupons, minimum-spend and free-shipping offers, flash sales, seller discounts and platform campaigns with seller consent. Owns eligibility, stacking, budgets and caps, the funding owner of every discount, coupon clipping and redemption, the Deals page data and campaign results. | catalog, offers | 55 |
 
 ## Later phases
@@ -110,7 +111,7 @@ Each module needs only modules in earlier layers (required dependencies; optiona
 | Layer | Modules |
 |---|---|
 | 0 | [audit](modules/audit.md), [identity](modules/identity.md), [inventory](modules/inventory.md), [media](modules/media.md), [reports](modules/reports.md) |
-| 1 | [access](modules/access.md), [catalog](modules/catalog.md), [customers](modules/customers.md), [notifications](modules/notifications.md), [purchasing](modules/purchasing.md) |
+| 1 | [access](modules/access.md), [catalog](modules/catalog.md), [customers](modules/customers.md), [departments](modules/departments.md), [notifications](modules/notifications.md), [purchasing](modules/purchasing.md) |
 | 2 | [advertising](modules/advertising.md), [backups](modules/backups.md), [content](modules/content.md), [sellers](modules/sellers.md), [settings](modules/settings.md), [trust](modules/trust.md), [workqueues](modules/workqueues.md) |
 | 3 | [offers](modules/offers.md) |
 | 4 | [cart](modules/cart.md), [orders](modules/orders.md), [promotions](modules/promotions.md), [search](modules/search.md), [wishlist](modules/wishlist.md) |

@@ -43,6 +43,7 @@ export const enabledModules: string[] = [
   // Growth
   'advertising',
   'content',
+  'departments',
   'promotions',
 
   // Later phases (off at launch)
