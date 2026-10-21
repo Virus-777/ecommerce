@@ -24,3 +24,17 @@ user
 archive
 newspaper
 table
+# Departments rail: the department page icons and the icon picker (Admin › Homepage and pages › Departments)
+tractor
+hand-heart
+utensils
+gamepad-2
+baby
+music
+plane
+dumbbell
+graduation-cap
+briefcase
+stethoscope
+bike
+pizza

@@ -728,6 +728,7 @@ button.toast-main:hover .t { text-decoration: underline; }
 .imgph.tiny { width: 40px; height: 40px; border-radius: var(--r-sm); }
 .imgph.tiny svg.lucide { width: var(--ic-md); height: var(--ic-md); stroke-width: 1.5; }
 .imgph.xl { width: 96px; height: 96px; }
+.imgph.round { border-radius: 50%; }
 .avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--brand-soft); color: var(--brand-text); display: inline-flex; align-items: center; justify-content: center; font-weight: var(--fw-bold); font-size: var(--fs-sm); flex: none; }
 .avatar.lg { width: 56px; height: 56px; font-size: var(--fs-lg); }
 .avatar.sq { border-radius: var(--r-md); }
@@ -836,6 +837,8 @@ button.toast-main:hover .t { text-decoration: underline; }
 .grabber { width: 40px; height: 4px; border-radius: var(--r-pill); background: var(--border-strong); margin: var(--sp-2) auto 0; }
 @container app (min-width: 768px) { .grabber { display: none; } }
 .drawer { position: absolute; top: 0; right: 0; bottom: 0; width: min(440px, 100%); background: var(--surface); box-shadow: var(--sh-3); z-index: var(--z-drawer); display: flex; flex-direction: column; overflow: auto; }
+/* a drawer whose list rows carry several actions (Homepage and pages › Departments) */
+.drawer.wide { width: min(560px, 100%); }
 
 /* ---- Pagination ---- */
 .pager { display: flex; align-items: center; gap: var(--sp-1); flex-wrap: wrap; }

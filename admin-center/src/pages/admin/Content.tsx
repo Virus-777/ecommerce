@@ -11,14 +11,16 @@ import { Alert, announce, Badge, Breadcrumbs, Button, Card, DateTimeField, Drawe
 import { useStaffSession } from '@/app/session';
 import { LoadError, SkeletonLines, dateTime, actorLabel } from '@/app/parts';
 import { flattenTree, type ApiCategory } from './data/categories';
+import { defaultDepartments, departmentProblem, DepartmentsField, type DepartmentItem } from './ContentDepartments';
 
 // Design: pages/admin/admin-content.html · view "edit-section" = edit drawer for a homepage section.
 // Data: GET /api/admin/content/homepage (sections, draft and review state), /homepage/versions, /pages (campaign
 // pages), /homepage/sections/{id}/products (drawer). Writes: PUT /homepage/order (reorder = draft), POST
 // /homepage/submit | review | publish | discard-draft, /homepage/versions/{n}/restore, POST/PATCH /homepage/sections,
 // /sections/{id}/schedule, /sections/{id}/remove, POST /pages (new campaign page draft), /pages/{id}/publish.
-// The drawer edits what a section holds: banner copy, button and images (uploaded as content_image), the category
-// list (GET /api/admin/catalog/categories) and manual products. Flash deals hold nothing: they come from Promotions.
+// The drawer edits what a section holds: banner copy, button and images (uploaded as content_image), the Departments
+// tiles (ContentDepartments.tsx; they replaced Shop by category, whose older sections still edit as a category list from
+// GET /api/admin/catalog/categories) and manual products. Flash deals hold nothing: they come from Promotions.
 // The layout follows the API's review rule: when a review is required the author sends the draft for review and
 // someone else approves it (SAME_REVIEWER) before it is published.
 
@@ -30,6 +32,7 @@ type MediaRef = S['MediaRef'];
 
 const KIND: Record<string, { icon: IconName; wire: string }> = {
   campaign_banner: { icon: 'image', wire: 'w-hero' },
+  departments: { icon: 'layout-grid', wire: 'w-cats' },
   category_shortcuts: { icon: 'layout-grid', wire: 'w-cats' },
   deals: { icon: 'tag', wire: 'w-deals' },
   official_highlights: { icon: 'badge-check', wire: 'w-off' },
@@ -62,7 +65,7 @@ const PRODUCT_KINDS = new Set(['featured_products', 'official_highlights', 'new_
 // Kinds "Add section" can create here: each one's contents can be filled in the drawer.
 const NEW_KINDS: Array<{ value: SectionInput['kind']; label: string }> = [
   { value: 'campaign_banner', label: 'Campaign banner' },
-  { value: 'category_shortcuts', label: 'Shop by category' },
+  { value: 'departments', label: 'Departments' },
   { value: 'deals', label: 'Flash deals' },
 ];
 const MAX_BANNER_IMAGES = 3; // the storefront hero shows three tiles
@@ -76,6 +79,7 @@ interface SectionEdit {
   source: SourceMode;
   productIds: string[];
   categoryIds: string[];
+  departments: DepartmentItem[];
   eyebrow: string;
   headline: string;
   body: string;
@@ -103,6 +107,7 @@ const editOf = (s?: Section): SectionEdit => {
     source: (c?.productSource?.mode as SourceMode | undefined) ?? 'manual',
     productIds: c?.productSource?.productIds ?? [],
     categoryIds: c?.categoryIds ?? [],
+    departments: c?.departments ?? [],
     eyebrow: b?.eyebrow ?? '',
     headline: b?.headline ?? '',
     body: b?.body ?? '',
@@ -133,7 +138,7 @@ export default function Content() {
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState<SectionEdit>(editOf());
   const [position, setPosition] = useState(0);
-  const [errs, setErrs] = useState<Partial<Record<'heading' | 'headline' | 'ctaLabel' | 'ctaUrl' | 'categories' | 'from' | 'to', string>>>({});
+  const [errs, setErrs] = useState<Partial<Record<'heading' | 'headline' | 'ctaLabel' | 'ctaUrl' | 'categories' | 'departments' | 'from' | 'to', string>>>({});
   const [device, setDevice] = useState<'desktop' | 'phone'>('desktop');
   const [notice, setNotice] = useState<{ tone: 'success' | 'info'; title: string } | null>(null);
 
@@ -154,7 +159,7 @@ export default function Content() {
   const canSchedule = !target || target.status === 'draft';
   const categories = useQuery({
     queryKey: ['catalog', 'categories', 'admin'],
-    enabled: open && kind === 'category_shortcuts',
+    enabled: open && (kind === 'category_shortcuts' || kind === 'departments'),
     queryFn: () => call(api.GET('/api/admin/catalog/categories')),
   });
   // "Parent › Child" names, in catalog order
@@ -303,6 +308,7 @@ export default function Content() {
               }
             : base.banner,
         categoryIds: k === 'category_shortcuts' ? draft.categoryIds : base.categoryIds,
+        departments: k === 'departments' ? draft.departments.map((d) => ({ ...d, title: d.title.trim(), label: d.label?.trim() || null, destination: { ...d.destination, path: d.destination.path?.trim() || null, url: d.destination.url?.trim() || null } })) : base.departments,
         showFrom: draft.from ? wallToIso(draft.from, draft.tz) : null,
         removeAt: draft.to ? wallToIso(draft.to, draft.tz) : null,
         timeZone: draft.tz,
@@ -372,6 +378,7 @@ export default function Content() {
     setDraft((d) => ({ ...d, [k]: v }));
     if (k in errs) setErrs((e) => ({ ...e, [k]: undefined }));
     if (k === 'categoryIds') setErrs((e) => ({ ...e, categories: undefined }));
+    if (k === 'departments') setErrs((e) => ({ ...e, departments: undefined }));
   };
   const moveCat = (i: number, dir: -1 | 1) => {
     const ids = [...draft.categoryIds];
@@ -390,11 +397,16 @@ export default function Content() {
       if (!/^(\/(?!\/)|https?:\/\/|mailto:|tel:)/i.test(draft.ctaUrl.trim())) e.ctaUrl = 'Use a store path such as /deals, or a full https:// link.';
     }
     if (kind === 'category_shortcuts' && !draft.categoryIds.length) e.categories = 'Add at least one category.';
+    if (kind === 'departments') {
+      const bad = draft.departments.findIndex((d) => departmentProblem(d, catList));
+      if (!draft.departments.length) e.departments = 'Add at least one department.';
+      else if (bad >= 0) e.departments = `${draft.departments[bad].title.trim() || `Department ${bad + 1}`}: ${departmentProblem(draft.departments[bad], catList)}`;
+    }
     // wall times in one time zone: the strings compare in time order
     if (draft.from && draft.to && draft.to <= draft.from) e.to = 'The removal time must be after “Show from”.';
     setErrs(e);
     if (Object.keys(e).length) {
-      document.getElementById(e.heading ? 'ct-head' : e.headline ? 'ct-headline' : e.ctaLabel ? 'ct-cta' : e.ctaUrl ? 'ct-url' : e.categories ? 'ct-addcat' : 'ct-to')?.focus();
+      document.getElementById(e.heading ? 'ct-head' : e.headline ? 'ct-headline' : e.ctaLabel ? 'ct-cta' : e.ctaUrl ? 'ct-url' : e.categories ? 'ct-addcat' : e.departments ? 'ct-adddept' : 'ct-to')?.focus();
       return;
     }
     if (mode === 'schedule' && !draft.from) {
@@ -732,6 +744,7 @@ export default function Content() {
       <Drawer
         open={open}
         onClose={close}
+        className={kind === 'departments' ? 'wide' : undefined}
         title={target ? `Edit section: ${target.title}` : 'Add section'}
         foot={
           <>
@@ -763,7 +776,20 @@ export default function Content() {
         )}
         {!target && (
           <Field label="Type">
-            <Select id="ct-kind" options={NEW_KINDS} value={draft.kind} onChange={(e) => set('kind', e.target.value)} />
+            <Select
+              id="ct-kind"
+              options={NEW_KINDS}
+              value={draft.kind}
+              onChange={(e) => {
+                const k = e.target.value;
+                set('kind', k);
+                // a new Departments section starts with the ten department pages
+                if (k === 'departments') {
+                  if (!draft.departments.length) set('departments', defaultDepartments());
+                  if (!draft.heading.trim()) set('heading', 'Departments');
+                }
+              }}
+            />
           </Field>
         )}
         {kind === 'campaign_banner' ? (
@@ -803,8 +829,19 @@ export default function Content() {
             {target?.config?.linkedPromotionId && <span className="xs muted">This banner follows a promotion campaign and hides by itself when the campaign ends.</span>}
           </>
         )}
+        {kind === 'departments' &&
+          (categories.isPending ? (
+            <SkeletonLines rows={4} />
+          ) : categories.isError ? (
+            <LoadError error={categories.error} onRetry={() => void categories.refetch()} />
+          ) : (
+            <DepartmentsField items={draft.departments} onChange={(v) => set('departments', v)} categories={catList} error={errs.departments} />
+          ))}
         {kind === 'category_shortcuts' && (
           <div className="stack gap-2">
+            <Alert tone="info" title="Shop by category is now Departments">
+              New sections use Departments, which can also open department pages, store pages and web links. This older section still shows its categories until it is removed.
+            </Alert>
             <span className="label">Categories ({draft.categoryIds.length})</span>
             {categories.isPending ? (
               <SkeletonLines rows={3} />

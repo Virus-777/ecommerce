@@ -6,7 +6,7 @@ import { call, useApi, type components } from '@marketly/web-shared/api';
 import { dollars } from '@marketly/web-shared/lib/format';
 import { useIsPhone } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
-import { Badge, Button, Countdown, Icon, Meter, Price, SectionHeader } from '@marketly/web-shared/ui';
+import { Badge, Button, Countdown, Icon, iconFor, Meter, Price, SectionHeader } from '@marketly/web-shared/ui';
 import { adsFor, HomeAdCarousel, OpeningAd, OVERLAY_KEYS, useAdDecision } from '@/api/ads';
 import { categoryArt, initialsOf, tintOf } from '@/api/catalog';
 import { ApiProductCard, CardGridSkeleton, LoadError, LogoPic, Pic } from '@/api/cards';
@@ -159,6 +159,35 @@ export default function Home() {
                   <Pic icon="cooking-pot" tint="3" />
                 </>
               )}
+            </div>
+          </section>
+        );
+      }
+      case 'departments': {
+        // department pages are app-only for now: the API sends the web only categories, store pages and web links
+        const tiles = s.departments.filter((d) => d.link.kind !== 'department');
+        if (!tiles.length) return null;
+        return (
+          <section key={s.id} className="stack gap-4" aria-labelledby={hid}>
+            <SectionHeader title={s.heading ?? 'Departments'} id={hid} link={link?.label ?? 'All categories'} to={link?.to ?? href('store/categories')} />
+            <div className="home-cats">
+              {tiles.map((d) => {
+                const tile = (
+                  <>
+                    <Pic image={d.image} icon={iconFor(d.icon, 'layout-grid')} tint={String(d.tint ?? 1)} />
+                    <span>{d.label || d.title}</span>
+                  </>
+                );
+                return isExternal(d.link.url) ? (
+                  <a key={d.id} className="home-cat" href={d.link.url} target="_blank" rel="noopener noreferrer">
+                    {tile}
+                  </a>
+                ) : (
+                  <Link key={d.id} className="home-cat" to={contentLinkTo(d.link.url)}>
+                    {tile}
+                  </Link>
+                );
+              })}
             </div>
           </section>
         );

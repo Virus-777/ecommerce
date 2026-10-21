@@ -32876,6 +32876,60 @@ export interface components {
             name: string;
             image?: components["schemas"]["MediaRef"] | null;
         };
+        "content.DepartmentDestination": {
+            /**
+             * @description department: a built-in department page in the app; category: a catalog category (/c/{slug}); path: any store path; url: an outside web address
+             * @enum {string}
+             */
+            kind: "department" | "category" | "path" | "url";
+            /**
+             * @description kind department: which page (/phones, /farm-machines, /software, /welfare, /food, /booking, /blogs, /companies, /play, /rewards)
+             * @enum {string|null}
+             */
+            department?: "phones" | "farm_machines" | "software" | "welfare" | "food" | "booking" | "blogs" | "companies" | "play" | "rewards" | null;
+            /**
+             * Format: uuid
+             * @description kind category
+             */
+            categoryId?: string | null;
+            /** @description kind path: a store path starting with /, e.g. /deals or /pages/home-week */
+            path?: string | null;
+            /**
+             * Format: uri
+             * @description kind url: an http(s) address, opened in the browser
+             */
+            url?: string | null;
+        };
+        "content.DepartmentItem": {
+            /** @description Kept across edits; the server sets it for new items */
+            id?: string | null;
+            /** @description e.g. Food delivery (at most 40 characters) */
+            title: string;
+            /** @description Shorter text under the tile; defaults to the title (at most 24 characters) */
+            label?: string | null;
+            /** @description Icon name from the design system (Lucide), e.g. smartphone; used when there is no image */
+            icon?: string | null;
+            /** @description Picture that fills the circle instead of the icon (content_image upload) */
+            image?: components["schemas"]["MediaRef"] | null;
+            /** @description Placeholder tint 1–6 behind the icon */
+            tint?: number | null;
+            destination: components["schemas"]["content.DepartmentDestination"];
+            /** @description Hidden items stay in the list for staff and are left out of the store */
+            visible: boolean;
+        };
+        "content.DepartmentTile": {
+            id: string;
+            title: string;
+            /** @description Text under the tile; null means the title */
+            label?: string | null;
+            /** @description Icon name from the design system (Lucide), e.g. smartphone */
+            icon?: string | null;
+            image?: components["schemas"]["MediaRef"] | null;
+            /** @description Placeholder tint 1–6 */
+            tint?: number | null;
+            /** @description Where the tile opens; kind department for built-in department pages */
+            link: components["schemas"]["content.LinkRef"];
+        };
         "content.BannerBlock": {
             eyebrow?: string | null;
             headline: string;
@@ -32890,7 +32944,7 @@ export interface components {
             label: string;
             url: string;
             /** @enum {string|null} */
-            kind?: "page" | "collection" | "category" | "product" | "deals" | "seller" | "brand" | "policy" | "help" | "external" | null;
+            kind?: "page" | "collection" | "category" | "product" | "deals" | "seller" | "brand" | "policy" | "help" | "external" | "department" | null;
         };
         "content.ProductSource": {
             /** @enum {string} */
@@ -32917,11 +32971,14 @@ export interface components {
         };
         "content.SectionKind": {
             /** @enum {string} */
-            kind: "campaign_banner" | "category_shortcuts" | "deals" | "official_highlights" | "featured_products" | "featured_sellers" | "new_arrivals" | "popular_products" | "brand_collections" | "recently_viewed" | "collection_teaser" | "promise_strip" | "ad_position";
+            kind: "campaign_banner" | "departments" | "category_shortcuts" | "deals" | "official_highlights" | "featured_products" | "featured_sellers" | "new_arrivals" | "popular_products" | "brand_collections" | "recently_viewed" | "collection_teaser" | "promise_strip" | "ad_position";
         };
         "content.SectionInput": {
-            /** @enum {string} */
-            kind: "campaign_banner" | "category_shortcuts" | "deals" | "official_highlights" | "featured_products" | "featured_sellers" | "new_arrivals" | "popular_products" | "brand_collections" | "recently_viewed" | "collection_teaser" | "promise_strip" | "news";
+            /**
+             * @description departments replaced category_shortcuts (Shop by category); old category_shortcuts sections still show and can be edited, but new ones are departments
+             * @enum {string}
+             */
+            kind: "campaign_banner" | "departments" | "category_shortcuts" | "deals" | "official_highlights" | "featured_products" | "featured_sellers" | "new_arrivals" | "popular_products" | "brand_collections" | "recently_viewed" | "collection_teaser" | "promise_strip" | "news";
             heading?: string | null;
             subheading?: string | null;
             banner?: components["schemas"]["content.BannerBlock"] | null;
@@ -32929,6 +32986,8 @@ export interface components {
             categoryIds?: string[] | null;
             sellerIds?: string[] | null;
             brandIds?: string[] | null;
+            /** @description departments only: 1–24 items in order, hidden ones included */
+            departments?: components["schemas"]["content.DepartmentItem"][] | null;
             /**
              * Format: uuid
              * @description Section hides when the promotion ends
@@ -33018,6 +33077,8 @@ export interface components {
             banner?: components["schemas"]["content.BannerBlock"] | null;
             products: components["schemas"]["content.ProductTile"][];
             categories: components["schemas"]["content.CategoryTile"][];
+            /** @description departments only: the visible items in order. Built-in department pages exist only in the app, so they are sent for device=app only; items whose category is hidden are left out */
+            departments: components["schemas"]["content.DepartmentTile"][];
             sellers: components["schemas"]["content.SellerTile"][];
             brands: components["schemas"]["content.BrandTile"][];
             /** @description Flash sales from promotions (countdown, claimed meters, limits); null when promotions is off or for other kinds */
