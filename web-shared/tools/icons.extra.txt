@@ -38,3 +38,5 @@ briefcase
 stethoscope
 bike
 pizza
+# Admin › Departments (Play center rankings)
+trophy

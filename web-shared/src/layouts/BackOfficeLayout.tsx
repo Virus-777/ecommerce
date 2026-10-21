@@ -80,6 +80,12 @@ export const ADMIN_NAV: NavEntry[] = [
     { key: 'ads', label: 'Advertisements', icon: 'megaphone', id: 'admin/ads' },
     { key: 'ad-assets', label: 'Ad creative library', icon: 'images', id: 'admin/ad-assets' },
   ] },
+  { grp: 'Departments', items: [
+    { key: 'dept-phones', label: 'Phones', icon: 'smartphone', id: 'admin/departments-phones' },
+    { key: 'dept-blogs', label: 'Blogs', icon: 'newspaper', id: 'admin/departments-blogs' },
+    { key: 'dept-companies', label: 'Companies', icon: 'building-2', id: 'admin/departments-companies' },
+    { key: 'dept-play', label: 'Play center', icon: 'gamepad-2', id: 'admin/departments-play' },
+  ] },
   { grp: 'Reports and settings', items: [
     { key: 'reports', label: 'Reports', icon: 'chart-column', id: 'admin/reports' },
     { key: 'staff', label: 'Staff and roles', icon: 'user-cog', id: 'admin/staff' },
