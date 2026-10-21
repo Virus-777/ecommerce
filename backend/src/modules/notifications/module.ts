@@ -22,7 +22,7 @@ import { schemas } from './schema.js';
  */
 export default defineModule({
   spec,
-  version: '2.2.0',
+  version: '2.2.1',
   schemas,
   async register(ctx) {
     // Providers: deterministic development adapters (no network); real adapters plug in behind the same ports
@@ -115,6 +115,7 @@ export default defineModule({
     ctx.events.on("reviews.report.created", (e) => service.onReportCreatedFromReviews(e.payload, e.id));
     ctx.events.on("trust.report.created", (e) => service.onReportCreatedFromTrust(e.payload, e.id));
     ctx.events.on("wishlist.alert.triggered", (e) => service.onAlertTriggeredFromWishlist(e.payload, e.id));
+    ctx.events.on("services.request.status_changed", (e) => service.onRequestStatusChangedFromServices(e.payload, e.id));
     ctx.events.on("access.approval.requested", (e) => service.onApprovalRequestedFromAccess(e.payload, e.id));
     ctx.events.on("access.approval.partially_approved", (e) => service.onApprovalPartiallyApprovedFromAccess(e.payload, e.id));
     ctx.events.on("access.approval.returned", (e) => service.onApprovalReturnedFromAccess(e.payload, e.id));

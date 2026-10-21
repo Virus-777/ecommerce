@@ -1,6 +1,6 @@
 import { contains, type ModuleStore } from '../../kernel/mongo/index.js';
 import type { Page, PageRequest } from '../../kernel/lib/pagination.js';
-import type { AuthorRow, CompanyRow, GameRow, IndustryRow, InquiryRow, PhonePicksRow, PostRow, RankingRow, ReactionRow, ReplyRow, ReportRow, TopicRow } from './ports.js';
+import type { AuthorRow, CompanyRow, FarmSetupRow, GameRow, IndustryRow, InquiryRow, PhonePicksRow, PostRow, RankingRow, ReactionRow, ReplyRow, ReportRow, TopicRow } from './ports.js';
 
 export type Lock = { forUpdate?: boolean };
 export type SlugTable = 'topics' | 'authors' | 'posts' | 'industries' | 'companies' | 'games';
@@ -15,6 +15,7 @@ export class DepartmentsRepository {
   constructor(private readonly store: ModuleStore) {
     this.#t = {
       picks: store.table<PhonePicksRow>('phone_picks'),
+      farm: store.table<FarmSetupRow>('farm_setup'),
       topics: store.table<TopicRow>('blog_topics'),
       authors: store.table<AuthorRow>('blog_authors'),
       posts: store.table<PostRow>('blog_posts'),
@@ -41,6 +42,15 @@ export class DepartmentsRepository {
   }
   savePicks(productIds: string[], by: string, at: Date): Promise<PhonePicksRow> {
     return this.#t.picks.upsert({ id: 'phones', product_ids: productIds, updated_by: by, updated_at: at });
+  }
+
+  /* ---------------------------------------------------------------- farm machines */
+
+  getFarm(): Promise<FarmSetupRow | undefined> {
+    return this.#t.farm.get('farm');
+  }
+  saveFarm(v: { types: unknown[]; machines: unknown[] }, by: string, at: Date): Promise<FarmSetupRow> {
+    return this.#t.farm.upsert({ id: 'farm', types: v.types as never, machines: v.machines as never, updated_by: by, updated_at: at });
   }
 
   /* ---------------------------------------------------------------- blog topics and authors */

@@ -28,6 +28,7 @@ import { spec as returns } from './returns.js';
 import { spec as reviews } from './reviews.js';
 import { spec as search } from './search.js';
 import { spec as sellers } from './sellers.js';
+import { spec as services } from './services.js';
 import { spec as settings } from './settings.js';
 import { spec as shipping } from './shipping.js';
 import { spec as support } from './support.js';
@@ -65,6 +66,7 @@ export const specs = {
   "reviews": reviews,
   "search": search,
   "sellers": sellers,
+  "services": services,
   "settings": settings,
   "shipping": shipping,
   "support": support,

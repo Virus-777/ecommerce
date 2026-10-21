@@ -4,7 +4,7 @@
  */
 import { allSpecs } from '../../kernel/module-system/loader.js';
 import type { MongoMigration } from '../../kernel/mongo/schema.js';
-import { ANNOUNCEMENT_ROLES, ANNOUNCEMENTS_SEND, BUSINESS_OWNER, DEPARTMENTS_MANAGE, MARKETING_OFFERS_VIEW, NEWS_MANAGE, NEWS_PUBLISH, PLATFORM_ADMINISTRATOR, STAFF_UPLOADS, SYSTEM_ROLES, viewCompanions } from './domain/seed.js';
+import { ANNOUNCEMENT_ROLES, ANNOUNCEMENTS_SEND, BUSINESS_OWNER, DEPARTMENTS_MANAGE, MARKETING_OFFERS_VIEW, SERVICES_MANAGE, SERVICES_REQUESTS, NEWS_MANAGE, NEWS_PUBLISH, PLATFORM_ADMINISTRATOR, STAFF_UPLOADS, SYSTEM_ROLES, viewCompanions } from './domain/seed.js';
 
 /** Every staff permission key ending in `.view`, from every module's spec (enabled or not, like the registry) */
 export function staffViewKeys(): string[] {
@@ -147,4 +147,33 @@ export const departmentsKeys: MongoMigration = {
   },
 };
 
-export const mongoMigrations: readonly MongoMigration[] = [businessOwnerViewKeys, staffWorkUploads, platformAdminAccountActions, newsKeys, announcementKeys, departmentsKeys];
+/**
+ * Services, requests and bookings (services module, 2026-10-22) and Farm machines (departments.farm.manage): the new
+ * keys reach roles seeded before them, as in the seed (Content Manager all of them, Marketing Manager the manage keys,
+ * Customer Support Manager and Support Agent the requests). A Business Owner role that staff already gave the
+ * department manage keys (departments.blogs.manage) gets these manage keys too, so the people who edit the department
+ * pages keep doing so. It runs once.
+ */
+export const servicesKeys: MongoMigration = {
+  id: '2026-10-22-services-keys',
+  async up(db) {
+    const roles = await db.collection('access.roles').find({ system: true, key: { $in: ['content_manager', 'marketing_manager', 'customer_support_manager', 'support_agent', BUSINESS_OWNER] }, archived_at: null }).toArray();
+    if (!roles.length) return; // a new install: the registry sync seeds the roles with the keys
+    const now = new Date();
+    const perms = db.collection('access.role_permissions');
+    const grant = (roleId: unknown, key: string) => perms.updateOne({ role_id: roleId, permission_key: key }, { $setOnInsert: { granted_by: 'system', granted_at: now } }, { upsert: true });
+    const keys: Record<string, string[]> = {
+      content_manager: ['services.view', SERVICES_MANAGE, 'services.requests.manage', 'departments.farm.manage'],
+      marketing_manager: ['services.view', SERVICES_MANAGE, 'departments.farm.manage'],
+      customer_support_manager: [...SERVICES_REQUESTS],
+      support_agent: [...SERVICES_REQUESTS],
+    };
+    for (const role of roles) {
+      let list = keys[String(role.key)] ?? [];
+      if (role.key === BUSINESS_OWNER) list = (await perms.countDocuments({ role_id: role._id, permission_key: 'departments.blogs.manage' }, { limit: 1 })) ? [SERVICES_MANAGE, 'services.requests.manage', 'departments.farm.manage'] : [];
+      for (const key of list) await grant(role._id, key);
+    }
+  },
+};
+
+export const mongoMigrations: readonly MongoMigration[] = [businessOwnerViewKeys, staffWorkUploads, platformAdminAccountActions, newsKeys, announcementKeys, departmentsKeys, servicesKeys];

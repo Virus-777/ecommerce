@@ -309,6 +309,17 @@ describe('customer preferences and push devices', () => {
     expect(await service.canSendPromotional({ kind: 'customer', accountId: promo.accountId }, 'email')).toBe(true);
     expect(await service.canSendPromotional({ kind: 'guest_email', email: 'x@example.com' }, 'email')).toBe(false);
   });
+
+  it('tells customers what happened to their service requests, not that they made one', async () => {
+    const c = world.customer();
+    const requestId = newId();
+    await publish(app, 'services.request.status_changed', { requestId, customerId: c.accountId, status: 'requested', ref: 'SR-4K7Q2' });
+    expect((await get('/api/store/notifications/inbox', as.customer(c))).items).toHaveLength(0);
+    await publish(app, 'services.request.status_changed', { requestId, customerId: c.accountId, status: 'confirmed', ref: 'SR-4K7Q2' });
+    const [notice] = (await get('/api/store/notifications/inbox', as.customer(c))).items;
+    expect(notice).toMatchObject({ topicKey: 'customer.services.request', title: 'Your request SR-4K7Q2 was confirmed' });
+    expect(notice.link).toMatchObject({ kind: 'service_request', id: requestId, screen: 'store/my-request' });
+  });
 });
 
 describe('public API', () => {

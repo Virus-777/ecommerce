@@ -144,11 +144,14 @@ function table(top: number, seed: number) {
   return PLAYERS.map((_, i) => ({ name: PLAYERS[(i + seed) % PLAYERS.length]!, score: Math.round(top * (1 - i * 0.07)), change: [2, 0, -1, 1, 3, -2, 0, 1, -1, 0][(i + seed) % 10]! }));
 }
 
+export const FARM_TYPES = ['Tractors', 'Harvesters', 'Tillers', 'Seeders', 'Sprayers', 'Irrigation'];
+const FARM_HIGHLIGHTS = [['25 hp · 4WD', 'Front loader ready'], ['Grain and corn heads', '6 m cut'], ['5 ft working width'], ['12-row precision'], ['300 L tank · 12 m boom'], ['Drip and sprinkler kits']];
+
 const slug = (s: string) => s.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 
 /** Writes what is missing; answers what it added */
 export async function seedDepartments(admin: AdminCall, store: StoreCall): Promise<Record<string, number>> {
-  const added = { topics: 0, authors: 0, posts: 0, industries: 0, companies: 0, games: 0, rankings: 0, phones: 0 };
+  const added = { topics: 0, authors: 0, posts: 0, industries: 0, companies: 0, games: 0, rankings: 0, phones: 0, farmMachines: 0 };
 
   // blogs
   const topics = (await admin('GET', '/admin/departments/blogs/topics')) as { id: string; slug: string }[];
@@ -234,6 +237,24 @@ export async function seedDepartments(admin: AdminCall, store: StoreCall): Promi
         await admin('PUT', '/admin/departments/phones', { productIds: ids });
         added.phones = ids.length;
       }
+    }
+  }
+  // farm machines: products found by farm words (else a few garden or outdoor products as placeholders), when none are picked yet
+  const farm = (await admin('GET', '/admin/departments/farm')) as { machines: unknown[] };
+  if (!farm.machines.length) {
+    const found: string[] = [];
+    for (const q of ['tractor', 'harvester', 'tiller', 'seeder', 'sprayer', 'irrigation', 'mower', 'garden', 'outdoor']) {
+      const res = (await store(`/store/search/products?q=${encodeURIComponent(q)}&limit=12`)) as { items: { product?: { productId?: string } }[] };
+      for (const id of res.items.map((p) => p.product?.productId)) if (id && !found.includes(id)) found.push(id);
+      if (found.length >= 9) break;
+    }
+    if (found.length) {
+      const types = FARM_TYPES.map((name, i) => ({ id: `type-${i + 1}`, name, slug: slug(name) }));
+      const machineIds = found.slice(0, 6);
+      const attachments = found.slice(6, 9);
+      const machines = machineIds.map((productId, i) => ({ productId, typeId: types[i % types.length]!.id, highlights: FARM_HIGHLIGHTS[i % FARM_HIGHLIGHTS.length]!, attachmentIds: i === 0 ? attachments : [] }));
+      await admin('PUT', '/admin/departments/farm', { types, machines });
+      added.farmMachines = machines.length;
     }
   }
   return added;

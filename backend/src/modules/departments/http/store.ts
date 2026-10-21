@@ -22,6 +22,10 @@ const viewerOf = (principal: Principal): string | null => (principal.kind === 'c
  */
 export const storeRoutes = (service: DepartmentsService) =>
   routes(endpoints, 'store', {
+    /** GET /farm: Farm machines: types and picked machines */
+    getFarm: async ({ query }) => service.getFarm(query),
+    /** GET /farm/machines/{productId}: A picked machine with its attachments */
+    getFarmMachine: async ({ params }) => service.getFarmMachine(params.productId),
     /** GET /phones: The Phone tab: picked phones as product cards, in order */
     getPhones: async ({ query }) => service.getPhones(query),
     /** GET /blogs/topics: Visible blog topics in order */

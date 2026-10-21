@@ -7,6 +7,7 @@ The app's department pages opened from the home Departments rail: the Phones pic
 
 ## Owns
 - Phones: the phones staff pick one by one for the Phone tab, in order
+- Farm machines: machine types and the machines staff pick (catalog products, bought through cart and checkout) with their attachments
 - Blogs: topics, author profiles, posts (sanitized rich text, cover, publish state), likes and dislikes, customer replies, reports and their review
 - Companies: industries, company pages (logo, photos, description, contacts, map location, verified mark) and customer inquiries
 - Play center: games (list only at this phase: no playing or score submission) and the ranking tables staff keep per game and period
@@ -22,6 +23,8 @@ The app's department pages opened from the home Departments rail: the Phones pic
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
 | GET | `/api/store/departments/phones` | The Phone tab: picked phones as product cards, in order | visitor | `PhonesPage` |
+| GET | `/api/store/departments/farm` | Farm machines: types and picked machines | visitor | `FarmPage` |
+| GET | `/api/store/departments/farm/machines/{productId}` | A picked machine with its attachments | visitor | `FarmMachine` |
 | GET | `/api/store/departments/blogs/topics` | Visible blog topics in order | visitor | `BlogTopic[]` |
 | GET | `/api/store/departments/blogs/posts` | Published posts, newest first | visitor | Page<BlogPostCard> |
 | GET | `/api/store/departments/blogs/posts/{slug}` | A published post with its body and the previous and next posts | visitor | `BlogPost` |
@@ -46,6 +49,8 @@ The app's department pages opened from the home Departments rail: the Phones pic
 |---|---|---|---|---|
 | GET | `/api/admin/departments/phones` | The Phone tab picks | staff<br>`departments.view` | `PhonesAdmin` |
 | PUT | `/api/admin/departments/phones` | Replace the Phone tab picks _(audited)_ | staff<br>`departments.phones.manage` | `PhonesInput` → `PhonesAdmin` |
+| GET | `/api/admin/departments/farm` | Farm machine types and picks | staff<br>`departments.view` | `FarmAdmin` |
+| PUT | `/api/admin/departments/farm` | Replace the farm machine types and picks _(audited)_ | staff<br>`departments.farm.manage` | `FarmInput` → `FarmAdmin` |
 | GET | `/api/admin/departments/blogs/topics` | Every blog topic | staff<br>`departments.view` | `BlogTopic[]` |
 | POST | `/api/admin/departments/blogs/topics` | Add a topic _(audited)_ | staff<br>`departments.blogs.manage` | `BlogTopicInput` → `BlogTopic` |
 | PATCH | `/api/admin/departments/blogs/topics/{id}` | Rename, reorder, hide or show a topic _(audited)_ | staff<br>`departments.blogs.manage` | `BlogTopicInput` → `BlogTopic` |
@@ -593,6 +598,63 @@ The app's department pages opened from the home Departments rail: the Phones pic
 |---|---|
 | entries | `RankingRowInput[]` Up to 100 rows; ranks follow the score, best first |
 
+### FarmType
+
+| Field | Type |
+|---|---|
+| id | `string` |
+| name | `string` e.g. Tractors |
+| slug | `string` |
+
+### FarmMachineCard
+
+| Field | Type |
+|---|---|
+| product | `search.ProductCard` The machine (a catalog product sold through cart and checkout) |
+| typeId | `string` |
+| highlights | `string[]` Short spec lines, e.g. 25 hp · 4WD |
+
+### FarmPage
+
+| Field | Type |
+|---|---|
+| types | `FarmType[]` |
+| machines | `FarmMachineCard[]` Picked machines in order; ones the store no longer shows are left out |
+
+### FarmMachine
+
+| Field | Type |
+|---|---|
+| product | `search.ProductCard` |
+| typeId | `string` |
+| highlights | `string[]` |
+| attachments | `search.ProductCard[]` Attachments to add with the machine (catalog products) |
+
+### FarmMachineInput
+
+| Field | Type |
+|---|---|
+| productId | `uuid` |
+| typeId | `string` |
+| highlights | `string[]?` |
+| attachmentIds | `uuid[]?` Up to 8 catalog products |
+
+### FarmInput
+
+| Field | Type |
+|---|---|
+| types | `FarmType[]` 1–12 types in order; ids are kept, new ones get one |
+| machines | `FarmMachineInput[]` Up to 100 machines in order |
+
+### FarmAdmin
+
+| Field | Type |
+|---|---|
+| types | `FarmType[]` |
+| machines | `FarmMachineInput[]` |
+| products | `search.ProductCard[]` Cards of the picked machines and attachments the store still shows |
+| updatedAt | `datetime?` |
+
 ## Data (schema `departments`)
 
 **phone_picks**: One row (id phones): the products of the Phone tab in order
@@ -783,12 +845,23 @@ Indexes: `(status, position)`
 
 Indexes: `unique (game_id, period)`
 
+**farm_setup**: One row (id farm): machine types and the picked machines with their attachments
+
+| Column | Type |
+|---|---|
+| id | text pk |
+| types | jsonb |
+| machines | jsonb |
+| updated_by | text? |
+| updated_at | timestamptz |
+
 ## Permissions
 
 | Key | Who | Allows |
 |---|---|---|
 | `departments.view` | staff | See the department pages' content in Admin › Departments |
 | `departments.phones.manage` | staff | Pick the phones of the Phone tab |
+| `departments.farm.manage` | staff | Farm machine types, picked machines and their attachments |
 | `departments.blogs.manage` | staff | Blog topics, authors and posts; hide replies and decide reports |
 | `departments.companies.manage` | staff | Industries and company pages; handle inquiries |
 | `departments.play.manage` | staff | Play center games and ranking tables |
@@ -815,3 +888,4 @@ Indexes: `unique (game_id, period)`
 - Bodies are sanitized HTML with the same allow-list as content's news and help (a copy of content domain rules sanitizeHtml, since modules don't import each other's files). Pictures are content_image uploads attached with media.attach to the record that shows them.
 - Slugs are made from the name or title when omitted (lowercase words joined by -) and must be unique per table; a taken slug answers SLUG_TAKEN.
 - A reply's authorName is the customer's first name and last initial when it was written (customers.getProfile), else Customer.
+- Farm machines are bought through cart and checkout (2026-10-21 decision); renting is left out of v1. The app adds the machine and the chosen attachments to the cart and opens checkout.

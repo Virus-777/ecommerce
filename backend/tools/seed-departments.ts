@@ -9,6 +9,7 @@
  * servers only: the app session uses the development app proof.
  */
 import { seedDepartments } from './simulate/departments-data.js';
+import { seedServices } from './simulate/services-data.js';
 
 const base = (process.argv[2] ?? process.env.API_URL ?? 'http://localhost:4000').replace(/\/$/, '');
 const email = process.env.SEED_EMAIL;
@@ -42,8 +43,7 @@ if (signedIn.status !== 'signed_in') {
 const staff = signedIn.tokens.accessToken as string;
 const visitor = await appSession('store');
 
-const added = await seedDepartments(
-  (method, path, body) => request(method, `/api${path}`, body, staff),
-  (path) => request('GET', `/api${path}`, undefined, visitor),
-);
+const admin = (method: 'GET' | 'POST' | 'PATCH' | 'PUT', path: string, body?: unknown) => request(method, `/api${path}`, body, staff);
+const added = await seedDepartments(admin, (path) => request('GET', `/api${path}`, undefined, visitor));
 console.log('Department pages content added:', added);
+console.log('Services, providers and categories added:', await seedServices(admin));

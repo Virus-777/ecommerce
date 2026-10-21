@@ -2,6 +2,7 @@ import type { DepartmentsDb } from '../../spec/departments.js';
 
 /** Rows of the departments collections (spec tables) */
 export type PhonePicksRow = DepartmentsDb['phone_picks'];
+export type FarmSetupRow = DepartmentsDb['farm_setup'];
 export type TopicRow = DepartmentsDb['blog_topics'];
 export type AuthorRow = DepartmentsDb['blog_authors'];
 export type PostRow = DepartmentsDb['blog_posts'];

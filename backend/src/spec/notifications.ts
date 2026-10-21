@@ -2720,6 +2720,7 @@ export const spec = defineModuleSpec({
       "reviews.report.created": "Staff: reported content to the moderation queue role",
       "trust.report.created": "Staff: new risk report to Trust and Risk Manager",
       "wishlist.alert.triggered": "Customer: price drop or back in stock (promotional, consent required)",
+      "services.request.status_changed": "Customer: their service request or booking was confirmed, started, completed, declined or cancelled",
       "access.approval.requested": "Staff: waiting approval to eligible approvers (nominated reviewer first), action required with due date",
       "access.approval.partially_approved": "Staff: second approval needed, to remaining eligible approvers",
       "access.approval.returned": "Staff: request sent back to the requester with the comment",

@@ -1002,6 +1002,121 @@ export const RankingInput: z.ZodType<RankingInput> = z.object({
   },
 }).register(common.apiTypes, { id: "departments.RankingInput" });
 
+export interface FarmType {
+  id: string;
+  /** e.g. Tractors */
+  name: string;
+  slug: string;
+}
+
+export const FarmType: z.ZodType<FarmType> = z.object({
+  id: z.string(),
+  name: z.string().describe("e.g. Tractors"),
+  slug: z.string(),
+}).register(common.apiTypes, { id: "departments.FarmType" });
+
+export interface FarmMachineCard {
+  /** The machine (a catalog product sold through cart and checkout) */
+  product: search.ProductCard;
+  typeId: string;
+  /** Short spec lines, e.g. 25 hp · 4WD */
+  highlights: string[];
+}
+
+export const FarmMachineCard: z.ZodType<FarmMachineCard> = z.object({
+  get product() {
+    return search.ProductCard;
+  },
+  typeId: z.string(),
+  highlights: z.array(z.string()).describe("Short spec lines, e.g. 25 hp · 4WD"),
+}).register(common.apiTypes, { id: "departments.FarmMachineCard" });
+
+export interface FarmPage {
+  types: FarmType[];
+  /** Picked machines in order; ones the store no longer shows are left out */
+  machines: FarmMachineCard[];
+}
+
+export const FarmPage: z.ZodType<FarmPage> = z.object({
+  get types() {
+    return z.array(FarmType);
+  },
+  get machines() {
+    return z.array(FarmMachineCard);
+  },
+}).register(common.apiTypes, { id: "departments.FarmPage" });
+
+export interface FarmMachine {
+  product: search.ProductCard;
+  typeId: string;
+  highlights: string[];
+  /** Attachments to add with the machine (catalog products) */
+  attachments: search.ProductCard[];
+}
+
+export const FarmMachine: z.ZodType<FarmMachine> = z.object({
+  get product() {
+    return search.ProductCard;
+  },
+  typeId: z.string(),
+  highlights: z.array(z.string()),
+  get attachments() {
+    return z.array(search.ProductCard);
+  },
+}).register(common.apiTypes, { id: "departments.FarmMachine" });
+
+export interface FarmMachineInput {
+  productId: string;
+  typeId: string;
+  highlights?: string[] | null;
+  /** Up to 8 catalog products */
+  attachmentIds?: string[] | null;
+}
+
+export const FarmMachineInput: z.ZodType<FarmMachineInput> = z.object({
+  productId: z.uuid(),
+  typeId: z.string(),
+  highlights: z.array(z.string()).nullish(),
+  attachmentIds: z.array(z.uuid()).describe("Up to 8 catalog products").nullish(),
+}).register(common.apiTypes, { id: "departments.FarmMachineInput" });
+
+export interface FarmInput {
+  /** 1–12 types in order; ids are kept, new ones get one */
+  types: FarmType[];
+  /** Up to 100 machines in order */
+  machines: FarmMachineInput[];
+}
+
+export const FarmInput: z.ZodType<FarmInput> = z.object({
+  get types() {
+    return z.array(FarmType);
+  },
+  get machines() {
+    return z.array(FarmMachineInput);
+  },
+}).register(common.apiTypes, { id: "departments.FarmInput" });
+
+export interface FarmAdmin {
+  types: FarmType[];
+  machines: FarmMachineInput[];
+  /** Cards of the picked machines and attachments the store still shows */
+  products: search.ProductCard[];
+  updatedAt?: string | null;
+}
+
+export const FarmAdmin: z.ZodType<FarmAdmin> = z.object({
+  get types() {
+    return z.array(FarmType);
+  },
+  get machines() {
+    return z.array(FarmMachineInput);
+  },
+  get products() {
+    return z.array(search.ProductCard);
+  },
+  updatedAt: z.iso.datetime({ offset: true }).nullish(),
+}).register(common.apiTypes, { id: "departments.FarmAdmin" });
+
 /* ------------------------------------------------------------------ events */
 
 /* ------------------------------------------------------------------ public API (in-process) */
@@ -1152,6 +1267,14 @@ export interface DepartmentsDb {
     updated_by: string | null;
     updated_at: Date;
   };
+  /** One row (id farm): machine types and the picked machines with their attachments */
+  farm_setup: {
+    id: string;
+    types: Json;
+    machines: Json;
+    updated_by: string | null;
+    updated_at: Date;
+  };
 }
 
 /* ------------------------------------------------------------------ endpoints */
@@ -1171,6 +1294,39 @@ export const endpoints = defineEndpoints({
     response: () => PhonesPage,
     status: 200,
     screens: ["store/phones"],
+    phase: 2,
+  },
+  getFarm: {
+    area: "store",
+    method: "GET",
+    path: "/farm",
+    auth: "visitor",
+    scope: "public",
+    summary: "Farm machines: types and picked machines",
+    query: () =>
+      z.object({
+        postalCode: z.string().optional(),
+      }),
+    response: () => FarmPage,
+    status: 200,
+    screens: ["store/farm"],
+    phase: 2,
+  },
+  getFarmMachine: {
+    area: "store",
+    method: "GET",
+    path: "/farm/machines/{productId}",
+    auth: "visitor",
+    scope: "public",
+    summary: "A picked machine with its attachments",
+    params: () =>
+      z.object({
+        productId: z.uuid(),
+      }),
+    response: () => FarmMachine,
+    status: 200,
+    errors: ["NOT_FOUND"],
+    screens: ["store/farm-order"],
     phase: 2,
   },
   listBlogTopics: {
@@ -1490,6 +1646,35 @@ export const endpoints = defineEndpoints({
     status: 200,
     audited: true,
     screens: ["admin/departments-phones"],
+    phase: 2,
+  },
+  getFarmAdmin: {
+    area: "admin",
+    method: "GET",
+    path: "/farm",
+    auth: "staff",
+    permission: "departments.view",
+    scope: "staff",
+    summary: "Farm machine types and picks",
+    response: () => FarmAdmin,
+    status: 200,
+    screens: ["admin/departments-farm"],
+    phase: 2,
+  },
+  setFarm: {
+    area: "admin",
+    method: "PUT",
+    path: "/farm",
+    auth: "staff",
+    permission: "departments.farm.manage",
+    scope: "staff",
+    summary: "Replace the farm machine types and picks",
+    body: () => FarmInput,
+    response: () => FarmAdmin,
+    status: 200,
+    errors: ["IN_USE"],
+    audited: true,
+    screens: ["admin/departments-farm"],
     phase: 2,
   },
   listBlogTopicsAdmin: {
@@ -2137,6 +2322,11 @@ export const spec = defineModuleSpec({
       "key": "departments.phones.manage",
       "audience": "staff",
       "desc": "Pick the phones of the Phone tab"
+    },
+    {
+      "key": "departments.farm.manage",
+      "audience": "staff",
+      "desc": "Farm machine types, picked machines and their attachments"
     },
     {
       "key": "departments.blogs.manage",
@@ -3401,6 +3591,65 @@ export const spec = defineModuleSpec({
           "unique": true
         }
       ],
+      "unenforced": []
+    },
+    "farm_setup": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "types",
+        "machines",
+        "updated_by",
+        "updated_at"
+      ],
+      "nullable": [
+        "updated_by"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "types",
+            "machines",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "types": {},
+            "machines": {},
+            "updated_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
       "unenforced": []
     }
   },

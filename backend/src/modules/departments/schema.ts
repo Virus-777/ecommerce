@@ -238,6 +238,20 @@ const rankings = new Schema(
 );
 rankings.index({"game_id":1,"period":1}, {"name":"rankings_game_id_period_e2c735","unique":true});
 
+/** One row (id farm): machine types and the picked machines with their attachments */
+const farm_setup = new Schema(
+  {
+    _id: { type: String, required: true }, // id
+    types: { type: Schema.Types.Mixed },
+    machines: { type: Schema.Types.Mixed },
+    updated_by: { type: String, default: null },
+    updated_at: { type: Date, required: true },
+    /** lock-by-write counter (kernel/mongo/table.ts) */
+    _lock: Number,
+  },
+  collectionOptions("departments.farm_setup"),
+);
+
 /** Table name → schema */
 export const schemas = {
   phone_picks: phone_picks,
@@ -252,4 +266,5 @@ export const schemas = {
   inquiries: inquiries,
   games: games,
   rankings: rankings,
+  farm_setup: farm_setup,
 };

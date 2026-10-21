@@ -31,6 +31,7 @@ export const moduleLoaders: Record<string, () => Promise<{ default: ModuleDefini
   "reviews": () => import('./reviews/module.js'),
   "search": () => import('./search/module.js'),
   "sellers": () => import('./sellers/module.js'),
+  "services": () => import('./services/module.js'),
   "settings": () => import('./settings/module.js'),
   "shipping": () => import('./shipping/module.js'),
   "support": () => import('./support/module.js'),

@@ -591,6 +591,11 @@ export class NotificationsService implements NotificationsPublicApi {
     await this.consumers.handle('wishlist.alert.triggered', event, eventId);
   }
 
+  /** services.request.status_changed: Customer: their service request or booking was confirmed, started, completed, declined or cancelled */
+  async onRequestStatusChangedFromServices(event: EventPayload<'services.request.status_changed'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('services.request.status_changed', event, eventId);
+  }
+
   /** access.approval.requested: Staff: waiting approval to eligible approvers (nominated reviewer first), action required with due date */
   async onApprovalRequestedFromAccess(event: EventPayload<'access.approval.requested'>, eventId?: string): Promise<void> {
     await this.consumers.handle('access.approval.requested', event, eventId);

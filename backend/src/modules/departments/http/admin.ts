@@ -8,6 +8,10 @@ import type { DepartmentsService } from '../service.js';
  */
 export const adminRoutes = (service: DepartmentsService) =>
   routes(endpoints, 'admin', {
+    /** GET /farm: Farm machine types and picks */
+    getFarmAdmin: async () => service.getFarmAdmin(),
+    /** PUT /farm: Replace the farm machine types and picks */
+    setFarm: async ({ body, actor, requestId }) => service.setFarm(body, { actor, requestId }),
     /** GET /phones: The Phone tab picks */
     getPhonesAdmin: async () => service.getPhonesAdmin(),
     /** PUT /phones: Replace the Phone tab picks */

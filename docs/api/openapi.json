@@ -97,6 +97,10 @@
       "description": "Seller admission and the seller account: the Sell with us programme and multi-step application, verification checks and review decisions, seller statuses with account status, product approval and payout readiness kept separate, setup and launch readiness, storefront profile and public storefront, seller members and permissions, performance against targets, warnings, restrictions, suspensions and appeals."
     },
     {
+      "name": "Store API · Services",
+      "description": "Services customers request or book in the app's department pages: OS installs and post-sale repairs (Phones), welfare services and time-slot bookings. Staff keep the providers, their services and opening hours, and handle every request in Admin › Departments. No online payment at this phase: customers pay the provider."
+    },
+    {
       "name": "Store API · Shipping",
       "description": "How things get delivered: carriers and services, destinations and excluded areas, shipping profiles with rates (Official Store and sellers), free-shipping rules, dispatch targets and cutoffs, the holiday and service-interruption calendar, delivery estimates for a location, shipments with contents and tracking, labels where supported, partial shipments, and delivery exceptions with their required responses and carrier claims."
     },
@@ -319,6 +323,10 @@
     {
       "name": "Admin API · Sellers",
       "description": "Seller admission and the seller account: the Sell with us programme and multi-step application, verification checks and review decisions, seller statuses with account status, product approval and payout readiness kept separate, setup and launch readiness, storefront profile and public storefront, seller members and permissions, performance against targets, warnings, restrictions, suspensions and appeals."
+    },
+    {
+      "name": "Admin API · Services",
+      "description": "Services customers request or book in the app's department pages: OS installs and post-sale repairs (Phones), welfare services and time-slot bookings. Staff keep the providers, their services and opening hours, and handle every request in Admin › Departments. No online payment at this phase: customers pay the provider."
     },
     {
       "name": "Admin API · Settings",
@@ -34894,6 +34902,168 @@
         "x-phase": 2
       }
     },
+    "/api/store/departments/farm": {
+      "get": {
+        "operationId": "departments.getFarm",
+        "tags": [
+          "Store API · Departments"
+        ],
+        "summary": "Farm machines: types and picked machines",
+        "description": "**Screens:** store/farm\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "postalCode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/departments.FarmPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "departments",
+        "x-area": "store",
+        "x-auth": "visitor",
+        "x-screens": [
+          "store/farm"
+        ],
+        "x-phase": 2
+      }
+    },
+    "/api/store/departments/farm/machines/{productId}": {
+      "get": {
+        "operationId": "departments.getFarmMachine",
+        "tags": [
+          "Store API · Departments"
+        ],
+        "summary": "A picked machine with its attachments",
+        "description": "**Screens:** store/farm-order\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "productId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/departments.FarmMachine"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "departments",
+        "x-area": "store",
+        "x-auth": "visitor",
+        "x-screens": [
+          "store/farm-order"
+        ],
+        "x-phase": 2
+      }
+    },
     "/api/store/departments/blogs/topics": {
       "get": {
         "operationId": "departments.listBlogTopics",
@@ -36809,6 +36979,155 @@
         "x-permission": "departments.phones.manage",
         "x-screens": [
           "admin/departments-phones"
+        ],
+        "x-audited": true,
+        "x-phase": 2
+      }
+    },
+    "/api/admin/departments/farm": {
+      "get": {
+        "operationId": "departments.getFarmAdmin",
+        "tags": [
+          "Admin API · Departments"
+        ],
+        "summary": "Farm machine types and picks",
+        "description": "**Permission:** `departments.view`\n\n**Screens:** admin/departments-farm\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/departments.FarmAdmin"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "departments",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "departments.view",
+        "x-screens": [
+          "admin/departments-farm"
+        ],
+        "x-phase": 2
+      },
+      "put": {
+        "operationId": "departments.setFarm",
+        "tags": [
+          "Admin API · Departments"
+        ],
+        "summary": "Replace the farm machine types and picks",
+        "description": "**Permission:** `departments.farm.manage`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/departments-farm\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/departments.FarmInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/departments.FarmAdmin"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IN_USE: Posts or companies still use it; move or delete them first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "departments",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "departments.farm.manage",
+        "x-screens": [
+          "admin/departments-farm"
         ],
         "x-audited": true,
         "x-phase": 2
@@ -128181,6 +128500,3613 @@
         "x-phase": 1
       }
     },
+    "/api/store/services/categories": {
+      "get": {
+        "operationId": "services.listCategories",
+        "tags": [
+          "Store API · Services"
+        ],
+        "summary": "Visible categories of an area in order",
+        "description": "**Screens:** store/phones, store/welfare, store/booking\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "area",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "os_install",
+                "post_sale",
+                "welfare",
+                "booking"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/services.ServiceCategory"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "services",
+        "x-area": "store",
+        "x-auth": "visitor",
+        "x-screens": [
+          "store/phones",
+          "store/welfare",
+          "store/booking"
+        ],
+        "x-phase": 2
+      }
+    },
+    "/api/store/services/services": {
+      "get": {
+        "operationId": "services.listServices",
+        "tags": [
+          "Store API · Services"
+        ],
+        "summary": "Published services of an area",
+        "description": "**Screens:** store/phones, store/welfare\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "area",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "os_install",
+                "post_sale",
+                "welfare",
+                "booking"
+              ]
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Category slug"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "recommended",
+                "price",
+                "rating"
+              ]
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from the previous response. Used by the Android app's infinite scroll.",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Opaque cursor from the previous response. Used by the Android app's infinite scroll."
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "1-based page number. Used by the website's numbered pages.",
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "1-based page number. Used by the website's numbered pages."
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Items per batch, 1–100, default 24",
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "Items per batch, 1–100, default 24"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/services.ServiceCard"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Pass as ?cursor= for the next batch (app). Null at the end."
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "totalPages": {
+                      "type": "integer"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "services",
+        "x-area": "store",
+        "x-auth": "visitor",
+        "x-screens": [
+          "store/phones",
+          "store/welfare"
+        ],
+        "x-phase": 2
+      }
+    },
+    "/api/store/services/services/{slug}": {
+      "get": {
+        "operationId": "services.getService",
+        "tags": [
+          "Store API · Services"
+        ],
+        "summary": "A service with its provider, price table, terms, steps and newest reviews",
+        "description": "**Screens:** store/service, store/welfare-service\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/services.Service"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "services",
+        "x-area": "store",
+        "x-auth": "visitor",
+        "x-screens": [
+          "store/service",
+          "store/welfare-service"
+        ],
+        "x-phase": 2
+      }
+    },
+    "/api/store/services/services/{id}/reviews": {
+      "get": {
+        "operationId": "services.listServiceReviews",
+        "tags": [
+          "Store API · Services"
+        ],
+        "summary": "A service's reviews, newest first",
+        "description": "**Screens:** store/service\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from the previous response. Used by the Android app's infinite scroll.",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Opaque cursor from the previous response. Used by the Android app's infinite scroll."
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "1-based page number. Used by the website's numbered pages.",
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "1-based page number. Used by the website's numbered pages."
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Items per batch, 1–100, default 24",
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "Items per batch, 1–100, default 24"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/services.ServiceReview"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Pass as ?cursor= for the next batch (app). Null at the end."
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "totalPages": {
+                      "type": "integer"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "services",
+        "x-area": "store",
+        "x-auth": "visitor",
+        "x-screens": [
+          "store/service"
+        ],
+        "x-phase": 2
+      }
+    },
+    "/api/store/services/providers": {
+      "get": {
+        "operationId": "services.listProviders",
+        "tags": [
+          "Store API · Services"
+        ],
+        "summary": "Published providers of an area (Booking: Available near you)",
+        "description": "**Screens:** store/booking\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "area",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "os_install",
+                "post_sale",
+                "welfare",
+                "booking"
+              ]
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from the previous response. Used by the Android app's infinite scroll.",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Opaque cursor from the previous response. Used by the Android app's infinite scroll."
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "1-based page number. Used by the website's numbered pages.",
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "1-based page number. Used by the website's numbered pages."
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Items per batch, 1–100, default 24",
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "Items per batch, 1–100, default 24"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/services.ProviderCard"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Pass as ?cursor= for the next batch (app). Null at the end."
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "totalPages": {
+                      "type": "integer"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "services",
+        "x-area": "store",
+        "x-auth": "visitor",
+        "x-screens": [
+          "store/booking"
+        ],
+        "x-phase": 2
+      }
+    },
+    "/api/store/services/providers/{slug}": {
+      "get": {
+        "operationId": "services.getProvider",
+        "tags": [
+          "Store API · Services"
+        ],
+        "summary": "A provider's page with its services, hours and staff",
+        "description": "**Screens:** store/booking-provider\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "area",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "os_install",
+                "post_sale",
+                "welfare",
+                "booking"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/services.Provider"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "services",
+        "x-area": "store",
+        "x-auth": "visitor",
+        "x-screens": [
+          "store/booking-provider"
+        ],
+        "x-phase": 2
+      }
+    },
+    "/api/store/services/services/{id}/availability": {
+      "get": {
+        "operationId": "services.getAvailability",
+        "tags": [
+          "Store API · Services"
+        ],
+        "summary": "Free time slots of a bookable service, day by day",
+        "description": "**Screens:** store/booking-provider\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date",
+              "description": "Default today (market time)"
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "1–14, default 7"
+            }
+          },
+          {
+            "name": "staffId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/services.AvailabilityDay"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "services",
+        "x-area": "store",
+        "x-auth": "visitor",
+        "x-screens": [
+          "store/booking-provider"
+        ],
+        "x-phase": 2
+      }
+    },
+    "/api/store/services/requests": {
+      "post": {
+        "operationId": "services.createRequest",
+        "tags": [
+          "Store API · Services"
+        ],
+        "summary": "Request or book a service",
+        "description": "A bookable service needs slotStart, which must still be free (SLOT_TAKEN otherwise).\n\n**Idempotent:** send an Idempotency-Key.\n\n**Screens:** store/service, store/welfare-service, store/booking-provider\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Required on endpoints marked idempotent (orders, payments, refunds, payouts). Same key + same request returns the first result (with Idempotent-Replayed: true).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/services.RequestInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/services.ServiceRequest"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.\nSLOT_REQUIRED: Pick a time for this service.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SLOT_TAKEN: That time was just booked; pick another.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "services",
+        "x-area": "store",
+        "x-auth": "customer",
+        "x-screens": [
+          "store/service",
+          "store/welfare-service",
+          "store/booking-provider"
+        ],
+        "x-idempotent": true,
+        "x-phase": 2
+      },
+      "get": {
+        "operationId": "services.listMyRequests",
+        "tags": [
+          "Store API · Services"
+        ],
+        "summary": "My requests and bookings, newest first",
+        "description": "**Screens:** store/my-requests, store/booking\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "area",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "os_install",
+                "post_sale",
+                "welfare",
+                "booking"
+              ]
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "open",
+                "past"
+              ],
+              "description": "open: requested, confirmed, in progress; past: the rest"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from the previous response. Used by the Android app's infinite scroll.",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Opaque cursor from the previous response. Used by the Android app's infinite scroll."
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "1-based page number. Used by the website's numbered pages.",
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "1-based page number. Used by the website's numbered pages."
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Items per batch, 1–100, default 24",
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "Items per batch, 1–100, default 24"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/services.ServiceRequest"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Pass as ?cursor= for the next batch (app). Null at the end."
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "totalPages": {
+                      "type": "integer"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "services",
+        "x-area": "store",
+        "x-auth": "customer",
+        "x-screens": [
+          "store/my-requests",
+          "store/booking"
+        ],
+        "x-phase": 2
+      }
+    },
+    "/api/store/services/requests/{id}": {
+      "get": {
+        "operationId": "services.getMyRequest",
+        "tags": [
+          "Store API · Services"
+        ],
+        "summary": "One of my requests",
+        "description": "**Screens:** store/my-request\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/services.ServiceRequest"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "services",
+        "x-area": "store",
+        "x-auth": "customer",
+        "x-screens": [
+          "store/my-request"
+        ],
+        "x-phase": 2
+      }
+    },
+    "/api/store/services/requests/{id}/cancel": {
+      "post": {
+        "operationId": "services.cancelMyRequest",
+        "tags": [
+          "Store API · Services"
+        ],
+        "summary": "Cancel my request or booking",
+        "description": "**Screens:** store/my-request\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/services.ServiceRequest"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nTOO_LATE_TO_CANCEL: It is too close to the booking to cancel in the app; call the provider.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "services",
+        "x-area": "store",
+        "x-auth": "customer",
+        "x-screens": [
+          "store/my-request"
+        ],
+        "x-phase": 2
+      }
+    },
+    "/api/store/services/requests/{id}/review": {
+      "post": {
+        "operationId": "services.reviewMyRequest",
+        "tags": [
+          "Store API · Services"
+        ],
+        "summary": "Rate a completed request",
+        "description": "**Screens:** store/my-request\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/services.ReviewInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/services.ServiceRequest"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nALREADY_REVIEWED: You already rated this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "services",
+        "x-area": "store",
+        "x-auth": "customer",
+        "x-screens": [
+          "store/my-request"
+        ],
+        "x-phase": 2
+      }
+    },
+    "/api/admin/services/categories": {
+      "get": {
+        "operationId": "services.listCategoriesAdmin",
+        "tags": [
+          "Admin API · Services"
+        ],
+        "summary": "Categories of an area",
+        "description": "**Permission:** `services.view`\n\n**Screens:** admin/departments-services\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "area",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "os_install",
+                "post_sale",
+                "welfare",
+                "booking"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/services.ServiceCategory"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "services",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "services.view",
+        "x-screens": [
+          "admin/departments-services"
+        ],
+        "x-phase": 2
+      },
+      "post": {
+        "operationId": "services.createCategory",
+        "tags": [
+          "Admin API · Services"
+        ],
+        "summary": "Add a category",
+        "description": "**Permission:** `services.manage`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/departments-services\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/services.ServiceCategoryInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/services.ServiceCategory"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SLUG_TAKEN: Another record already uses this slug.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "services",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "services.manage",
+        "x-screens": [
+          "admin/departments-services"
+        ],
+        "x-audited": true,
+        "x-phase": 2
+      }
+    },
+    "/api/admin/services/categories/{id}": {
+      "patch": {
+        "operationId": "services.updateCategory",
+        "tags": [
+          "Admin API · Services"
+        ],
+        "summary": "Rename, reorder, hide or show a category",
+        "description": "**Permission:** `services.manage`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/departments-services\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/services.ServiceCategoryInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/services.ServiceCategory"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SLUG_TAKEN: Another record already uses this slug.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "services",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "services.manage",
+        "x-screens": [
+          "admin/departments-services"
+        ],
+        "x-audited": true,
+        "x-phase": 2
+      },
+      "delete": {
+        "operationId": "services.deleteCategory",
+        "tags": [
+          "Admin API · Services"
+        ],
+        "summary": "Delete a category no service uses",
+        "description": "**Permission:** `services.manage`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/departments-services\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success, no content"
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IN_USE: Services or requests still use it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "services",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "services.manage",
+        "x-screens": [
+          "admin/departments-services"
+        ],
+        "x-audited": true,
+        "x-phase": 2
+      }
+    },
+    "/api/admin/services/providers": {
+      "get": {
+        "operationId": "services.listProvidersAdmin",
+        "tags": [
+          "Admin API · Services"
+        ],
+        "summary": "Providers",
+        "description": "**Permission:** `services.view`\n\n**Screens:** admin/departments-services\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "area",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "os_install",
+                "post_sale",
+                "welfare",
+                "booking"
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "published",
+                "hidden"
+              ]
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from the previous response. Used by the Android app's infinite scroll.",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Opaque cursor from the previous response. Used by the Android app's infinite scroll."
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "1-based page number. Used by the website's numbered pages.",
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "1-based page number. Used by the website's numbered pages."
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Items per batch, 1–100, default 24",
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "Items per batch, 1–100, default 24"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/services.ProviderAdmin"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Pass as ?cursor= for the next batch (app). Null at the end."
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "totalPages": {
+                      "type": "integer"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "services",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "services.view",
+        "x-screens": [
+          "admin/departments-services"
+        ],
+        "x-phase": 2
+      },
+      "post": {
+        "operationId": "services.createProvider",
+        "tags": [
+          "Admin API · Services"
+        ],
+        "summary": "Add a provider",
+        "description": "**Permission:** `services.manage`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/departments-services\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/services.ProviderInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/services.ProviderAdmin"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SLUG_TAKEN: Another record already uses this slug.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "services",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "services.manage",
+        "x-screens": [
+          "admin/departments-services"
+        ],
+        "x-audited": true,
+        "x-phase": 2
+      }
+    },
+    "/api/admin/services/providers/{id}": {
+      "get": {
+        "operationId": "services.getProviderAdmin",
+        "tags": [
+          "Admin API · Services"
+        ],
+        "summary": "A provider for editing",
+        "description": "**Permission:** `services.view`\n\n**Screens:** admin/departments-services\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/services.ProviderAdmin"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "services",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "services.view",
+        "x-screens": [
+          "admin/departments-services"
+        ],
+        "x-phase": 2
+      },
+      "patch": {
+        "operationId": "services.updateProvider",
+        "tags": [
+          "Admin API · Services"
+        ],
+        "summary": "Edit, hide or show a provider",
+        "description": "**Permission:** `services.manage`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/departments-services\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/services.ProviderInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/services.ProviderAdmin"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SLUG_TAKEN: Another record already uses this slug.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "services",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "services.manage",
+        "x-screens": [
+          "admin/departments-services"
+        ],
+        "x-audited": true,
+        "x-phase": 2
+      },
+      "delete": {
+        "operationId": "services.deleteProvider",
+        "tags": [
+          "Admin API · Services"
+        ],
+        "summary": "Delete a provider without services",
+        "description": "**Permission:** `services.manage`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/departments-services\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success, no content"
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IN_USE: Services or requests still use it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "services",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "services.manage",
+        "x-screens": [
+          "admin/departments-services"
+        ],
+        "x-audited": true,
+        "x-phase": 2
+      }
+    },
+    "/api/admin/services/services": {
+      "get": {
+        "operationId": "services.listServicesAdmin",
+        "tags": [
+          "Admin API · Services"
+        ],
+        "summary": "Services in staff order",
+        "description": "**Permission:** `services.view`\n\n**Screens:** admin/departments-services\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "area",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "os_install",
+                "post_sale",
+                "welfare",
+                "booking"
+              ]
+            }
+          },
+          {
+            "name": "providerId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "categoryId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "published",
+                "hidden"
+              ]
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from the previous response. Used by the Android app's infinite scroll.",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Opaque cursor from the previous response. Used by the Android app's infinite scroll."
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "1-based page number. Used by the website's numbered pages.",
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "1-based page number. Used by the website's numbered pages."
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Items per batch, 1–100, default 24",
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "Items per batch, 1–100, default 24"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/services.ServiceAdmin"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Pass as ?cursor= for the next batch (app). Null at the end."
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "totalPages": {
+                      "type": "integer"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "services",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "services.view",
+        "x-screens": [
+          "admin/departments-services"
+        ],
+        "x-phase": 2
+      },
+      "post": {
+        "operationId": "services.createService",
+        "tags": [
+          "Admin API · Services"
+        ],
+        "summary": "Add a service",
+        "description": "**Permission:** `services.manage`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/departments-services\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/services.ServiceInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/services.ServiceAdmin"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SLUG_TAKEN: Another record already uses this slug.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "services",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "services.manage",
+        "x-screens": [
+          "admin/departments-services"
+        ],
+        "x-audited": true,
+        "x-phase": 2
+      }
+    },
+    "/api/admin/services/services/{id}": {
+      "get": {
+        "operationId": "services.getServiceAdmin",
+        "tags": [
+          "Admin API · Services"
+        ],
+        "summary": "A service for editing",
+        "description": "**Permission:** `services.view`\n\n**Screens:** admin/departments-services\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/services.ServiceAdmin"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "services",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "services.view",
+        "x-screens": [
+          "admin/departments-services"
+        ],
+        "x-phase": 2
+      },
+      "patch": {
+        "operationId": "services.updateService",
+        "tags": [
+          "Admin API · Services"
+        ],
+        "summary": "Edit, hide or show a service",
+        "description": "**Permission:** `services.manage`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/departments-services\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/services.ServiceInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/services.ServiceAdmin"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SLUG_TAKEN: Another record already uses this slug.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "services",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "services.manage",
+        "x-screens": [
+          "admin/departments-services"
+        ],
+        "x-audited": true,
+        "x-phase": 2
+      },
+      "delete": {
+        "operationId": "services.deleteService",
+        "tags": [
+          "Admin API · Services"
+        ],
+        "summary": "Delete a service without open requests",
+        "description": "**Permission:** `services.manage`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/departments-services\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success, no content"
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IN_USE: Services or requests still use it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "services",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "services.manage",
+        "x-screens": [
+          "admin/departments-services"
+        ],
+        "x-audited": true,
+        "x-phase": 2
+      }
+    },
+    "/api/admin/services/requests": {
+      "get": {
+        "operationId": "services.listRequestsAdmin",
+        "tags": [
+          "Admin API · Services"
+        ],
+        "summary": "Requests and bookings, newest first",
+        "description": "**Permission:** `services.view`\n\n**Screens:** admin/departments-services\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "area",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "os_install",
+                "post_sale",
+                "welfare",
+                "booking"
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "requested",
+                "confirmed",
+                "in_progress",
+                "completed",
+                "cancelled",
+                "declined"
+              ]
+            }
+          },
+          {
+            "name": "providerId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Ref, customer name or phone"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from the previous response. Used by the Android app's infinite scroll.",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Opaque cursor from the previous response. Used by the Android app's infinite scroll."
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "1-based page number. Used by the website's numbered pages.",
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "1-based page number. Used by the website's numbered pages."
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Items per batch, 1–100, default 24",
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "Items per batch, 1–100, default 24"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/services.RequestAdmin"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Pass as ?cursor= for the next batch (app). Null at the end."
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "totalPages": {
+                      "type": "integer"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "services",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "services.view",
+        "x-screens": [
+          "admin/departments-services"
+        ],
+        "x-phase": 2
+      }
+    },
+    "/api/admin/services/requests/{id}": {
+      "get": {
+        "operationId": "services.getRequestAdmin",
+        "tags": [
+          "Admin API · Services"
+        ],
+        "summary": "A request",
+        "description": "**Permission:** `services.view`\n\n**Screens:** admin/departments-services\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/services.RequestAdmin"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "services",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "services.view",
+        "x-screens": [
+          "admin/departments-services"
+        ],
+        "x-phase": 2
+      },
+      "patch": {
+        "operationId": "services.updateRequest",
+        "tags": [
+          "Admin API · Services"
+        ],
+        "summary": "Confirm, start, complete, decline or cancel a request; move a booking; add notes",
+        "description": "**Permission:** `services.requests.manage`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `services.request.status_changed`\n\n**Screens:** admin/departments-services\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/services.RequestUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/services.RequestAdmin"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nSLOT_TAKEN: That time was just booked; pick another.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "services",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "services.requests.manage",
+        "x-screens": [
+          "admin/departments-services"
+        ],
+        "x-events": [
+          "services.request.status_changed"
+        ],
+        "x-audited": true,
+        "x-phase": 2
+      }
+    },
+    "/api/admin/services/reviews": {
+      "get": {
+        "operationId": "services.listReviewsAdmin",
+        "tags": [
+          "Admin API · Services"
+        ],
+        "summary": "Reviews, newest first",
+        "description": "**Permission:** `services.view`\n\n**Screens:** admin/departments-services\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "visible",
+                "hidden"
+              ]
+            }
+          },
+          {
+            "name": "serviceId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from the previous response. Used by the Android app's infinite scroll.",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Opaque cursor from the previous response. Used by the Android app's infinite scroll."
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "1-based page number. Used by the website's numbered pages.",
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "1-based page number. Used by the website's numbered pages."
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Items per batch, 1–100, default 24",
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "Items per batch, 1–100, default 24"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/services.ReviewAdmin"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Pass as ?cursor= for the next batch (app). Null at the end."
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "totalPages": {
+                      "type": "integer"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "services",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "services.view",
+        "x-screens": [
+          "admin/departments-services"
+        ],
+        "x-phase": 2
+      }
+    },
+    "/api/admin/services/reviews/{id}": {
+      "patch": {
+        "operationId": "services.moderateReview",
+        "tags": [
+          "Admin API · Services"
+        ],
+        "summary": "Hide or show a review",
+        "description": "**Permission:** `services.manage`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/departments-services\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "visible",
+                      "hidden"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/services.ReviewAdmin"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "services",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "services.manage",
+        "x-screens": [
+          "admin/departments-services"
+        ],
+        "x-audited": true,
+        "x-phase": 2
+      }
+    },
     "/api/public/settings/app-config": {
       "get": {
         "operationId": "settings.getAppConfig",
@@ -179135,6 +183061,197 @@
           "entries"
         ]
       },
+      "departments.FarmType": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "description": "e.g. Tractors"
+          },
+          "slug": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "slug"
+        ]
+      },
+      "departments.FarmMachineCard": {
+        "type": "object",
+        "properties": {
+          "product": {
+            "$ref": "#/components/schemas/search.ProductCard",
+            "description": "The machine (a catalog product sold through cart and checkout)"
+          },
+          "typeId": {
+            "type": "string"
+          },
+          "highlights": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Short spec lines, e.g. 25 hp · 4WD"
+          }
+        },
+        "required": [
+          "product",
+          "typeId",
+          "highlights"
+        ]
+      },
+      "departments.FarmPage": {
+        "type": "object",
+        "properties": {
+          "types": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/departments.FarmType"
+            }
+          },
+          "machines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/departments.FarmMachineCard"
+            },
+            "description": "Picked machines in order; ones the store no longer shows are left out"
+          }
+        },
+        "required": [
+          "types",
+          "machines"
+        ]
+      },
+      "departments.FarmMachine": {
+        "type": "object",
+        "properties": {
+          "product": {
+            "$ref": "#/components/schemas/search.ProductCard"
+          },
+          "typeId": {
+            "type": "string"
+          },
+          "highlights": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/search.ProductCard"
+            },
+            "description": "Attachments to add with the machine (catalog products)"
+          }
+        },
+        "required": [
+          "product",
+          "typeId",
+          "highlights",
+          "attachments"
+        ]
+      },
+      "departments.FarmMachineInput": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "typeId": {
+            "type": "string"
+          },
+          "highlights": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "attachmentIds": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Up to 8 catalog products"
+          }
+        },
+        "required": [
+          "productId",
+          "typeId"
+        ]
+      },
+      "departments.FarmInput": {
+        "type": "object",
+        "properties": {
+          "types": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/departments.FarmType"
+            },
+            "description": "1–12 types in order; ids are kept, new ones get one"
+          },
+          "machines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/departments.FarmMachineInput"
+            },
+            "description": "Up to 100 machines in order"
+          }
+        },
+        "required": [
+          "types",
+          "machines"
+        ]
+      },
+      "departments.FarmAdmin": {
+        "type": "object",
+        "properties": {
+          "types": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/departments.FarmType"
+            }
+          },
+          "machines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/departments.FarmMachineInput"
+            }
+          },
+          "products": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/search.ProductCard"
+            },
+            "description": "Cards of the picked machines and attachments the store still shows"
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "types",
+          "machines",
+          "products"
+        ]
+      },
       "finance.Reference": {
         "type": "object",
         "properties": {
@@ -221312,6 +225429,2331 @@
         "required": [
           "invitation",
           "code"
+        ]
+      },
+      "services.Contacts": {
+        "type": "object",
+        "properties": {
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "email"
+          },
+          "website": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "address": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "services.GeoPoint": {
+        "type": "object",
+        "properties": {
+          "lat": {
+            "type": "number"
+          },
+          "lng": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "lat",
+          "lng"
+        ]
+      },
+      "services.RequestContact": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "phone": {
+            "type": "string"
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "email"
+          }
+        },
+        "required": [
+          "name",
+          "phone"
+        ]
+      },
+      "services.StatusChange": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Admin only: who changed it"
+          }
+        },
+        "required": [
+          "status",
+          "at"
+        ]
+      },
+      "services.ServiceArea": {
+        "type": "object",
+        "properties": {
+          "area": {
+            "type": "string",
+            "enum": [
+              "os_install",
+              "post_sale",
+              "welfare",
+              "booking"
+            ],
+            "description": "Which department page the record belongs to"
+          }
+        },
+        "required": [
+          "area"
+        ]
+      },
+      "services.ServiceCategory": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "area": {
+            "type": "string",
+            "enum": [
+              "os_install",
+              "post_sale",
+              "welfare",
+              "booking"
+            ]
+          },
+          "slug": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "icon": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Lucide icon name"
+          },
+          "position": {
+            "type": "integer"
+          },
+          "visible": {
+            "type": "boolean"
+          },
+          "serviceCount": {
+            "type": "integer",
+            "description": "Published services (providers for booking)"
+          }
+        },
+        "required": [
+          "id",
+          "area",
+          "slug",
+          "name",
+          "position",
+          "visible",
+          "serviceCount"
+        ]
+      },
+      "services.ServiceCategoryInput": {
+        "type": "object",
+        "properties": {
+          "area": {
+            "type": "string",
+            "enum": [
+              "os_install",
+              "post_sale",
+              "welfare",
+              "booking"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "icon": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "position": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "visible": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "area",
+          "name"
+        ]
+      },
+      "services.ServiceCategoryRef": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "name"
+        ]
+      },
+      "services.OpeningHours": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/services.OpeningDay"
+            },
+            "description": "Seven entries, Monday first"
+          },
+          "timeZone": {
+            "type": "string",
+            "description": "IANA zone, default the market time zone"
+          },
+          "todayLabel": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Read only, e.g. Open today 9:00 AM – 7:00 PM, or Closed today"
+          }
+        },
+        "required": [
+          "days",
+          "timeZone"
+        ]
+      },
+      "services.OpeningDay": {
+        "type": "object",
+        "properties": {
+          "weekday": {
+            "type": "string",
+            "enum": [
+              "mon",
+              "tue",
+              "wed",
+              "thu",
+              "fri",
+              "sat",
+              "sun"
+            ]
+          },
+          "open": {
+            "type": "boolean"
+          },
+          "from": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "HH:MM local"
+          },
+          "to": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "HH:MM local"
+          }
+        },
+        "required": [
+          "weekday",
+          "open"
+        ]
+      },
+      "services.ProviderStaff": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "e.g. Stylist, Technician"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "services.RatingSummary": {
+        "type": "object",
+        "properties": {
+          "average": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Null without reviews"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "stars": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "Counts for 5, 4, 3, 2 and 1 stars"
+          }
+        },
+        "required": [
+          "count",
+          "stars"
+        ]
+      },
+      "services.ProviderCard": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "logo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MediaRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cover": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MediaRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "e.g. Hair salon, Dental clinic, Licensed home care agency"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/services.ServiceCategoryRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "city": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "verified": {
+            "type": "boolean"
+          },
+          "rating": {
+            "$ref": "#/components/schemas/services.RatingSummary"
+          },
+          "fromPrice": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lowest price of its published services"
+          },
+          "nextFree": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Booking providers: e.g. Next free: Today 3:30 PM"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "name",
+          "verified",
+          "rating"
+        ]
+      },
+      "services.Provider": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "logo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MediaRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cover": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MediaRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "category": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/services.ServiceCategoryRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "city": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "verified": {
+            "type": "boolean"
+          },
+          "rating": {
+            "$ref": "#/components/schemas/services.RatingSummary"
+          },
+          "fromPrice": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "nextFree": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "photos": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MediaRef"
+            }
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "since": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Year founded"
+          },
+          "contacts": {
+            "$ref": "#/components/schemas/services.Contacts"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/services.GeoPoint"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Map pin"
+          },
+          "hours": {
+            "$ref": "#/components/schemas/services.OpeningHours"
+          },
+          "staff": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/services.ProviderStaff"
+            }
+          },
+          "replyTime": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "e.g. Replies within 1 hour"
+          },
+          "services": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/services.ServiceCard"
+            },
+            "description": "Its published services in order"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "name",
+          "verified",
+          "rating",
+          "photos",
+          "contacts",
+          "hours",
+          "staff",
+          "services"
+        ]
+      },
+      "services.ProviderAdmin": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "logo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MediaRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cover": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MediaRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "categoryId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "areas": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "os_install",
+                "post_sale",
+                "welfare",
+                "booking"
+              ]
+            }
+          },
+          "city": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "verified": {
+            "type": "boolean"
+          },
+          "photos": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MediaRef"
+            }
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "since": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "contacts": {
+            "$ref": "#/components/schemas/services.Contacts"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/services.GeoPoint"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "hours": {
+            "$ref": "#/components/schemas/services.OpeningHours"
+          },
+          "staff": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/services.ProviderStaff"
+            }
+          },
+          "replyTime": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "published",
+              "hidden"
+            ]
+          },
+          "serviceCount": {
+            "type": "integer"
+          },
+          "openRequestCount": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "name",
+          "areas",
+          "verified",
+          "photos",
+          "contacts",
+          "hours",
+          "staff",
+          "status",
+          "serviceCount",
+          "openRequestCount",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "services.ProviderInput": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "logo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MediaRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cover": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MediaRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "categoryId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Booking providers: the booking category (Beauty, Health…)"
+          },
+          "city": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "verified": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "photos": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/MediaRef"
+            }
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "since": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "contacts": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/services.Contacts"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "location": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/services.GeoPoint"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "hours": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/services.OpeningHours"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "staff": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/services.ProviderStaff"
+            }
+          },
+          "replyTime": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "published",
+              "hidden"
+            ]
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "services.PriceRow": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "description": "e.g. Galaxy S26 Ultra, or Weekly"
+          },
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "e.g. 3+ visits a week"
+          },
+          "price": {
+            "type": "string",
+            "description": "Display text, e.g. $229, $24/hr, Free"
+          }
+        },
+        "required": [
+          "label",
+          "price"
+        ]
+      },
+      "services.HandoverOption": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "dropoff",
+              "pickup",
+              "at_home",
+              "online"
+            ]
+          },
+          "fee": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "e.g. Ready in about 2 hours"
+          }
+        },
+        "required": [
+          "mode"
+        ]
+      },
+      "services.ServiceStep": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "title"
+        ]
+      },
+      "services.ServiceCard": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "area": {
+            "type": "string",
+            "enum": [
+              "os_install",
+              "post_sale",
+              "welfare",
+              "booking"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "summary": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "image": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MediaRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "category": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/services.ServiceCategoryRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "provider": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "slug": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "verified": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "slug",
+              "name",
+              "verified"
+            ]
+          },
+          "badge": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "e.g. Popular, Genuine parts"
+          },
+          "fromPrice": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "priceUnit": {
+            "type": "string",
+            "enum": [
+              "fixed",
+              "hour",
+              "visit",
+              "night",
+              "free"
+            ],
+            "description": "How fromPrice reads: $29, $24/hr, Free"
+          },
+          "durationLabel": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "e.g. About 1–2 hours, Same day, 30 min"
+          },
+          "supportedLabel": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "e.g. Samsung, Pixel, Xiaomi"
+          },
+          "coverage": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where it is offered, e.g. Millbrook and 15 km around"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Short facts on the card, e.g. Free pickup"
+          },
+          "rating": {
+            "$ref": "#/components/schemas/services.RatingSummary"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "area",
+          "title",
+          "provider",
+          "priceUnit",
+          "tags",
+          "rating"
+        ]
+      },
+      "services.Service": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "area": {
+            "type": "string",
+            "enum": [
+              "os_install",
+              "post_sale",
+              "welfare",
+              "booking"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "summary": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "image": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MediaRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "photos": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MediaRef"
+            }
+          },
+          "category": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/services.ServiceCategoryRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "provider": {
+            "$ref": "#/components/schemas/services.ProviderCard"
+          },
+          "badge": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fromPrice": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "priceUnit": {
+            "type": "string",
+            "enum": [
+              "fixed",
+              "hour",
+              "visit",
+              "night",
+              "free"
+            ]
+          },
+          "durationLabel": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "supportedLabel": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "coverage": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "rating": {
+            "$ref": "#/components/schemas/services.RatingSummary"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "included": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requirements": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Eligibility and requirements"
+          },
+          "supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Supported models"
+          },
+          "osVersions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "OS install: versions to pick from"
+          },
+          "handover": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/services.HandoverOption"
+            }
+          },
+          "priceTable": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/services.PriceRow"
+            },
+            "description": "Price by model, or schedule and prices"
+          },
+          "priceTableTitle": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "e.g. Price by model, Schedule and prices"
+          },
+          "terms": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "e.g. warranty terms"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/services.ServiceStep"
+            },
+            "description": "How it works, in order"
+          },
+          "slotMinutes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Bookable services: the length of one slot; null when the service is requested without a time"
+          },
+          "durationMinutes": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "firstAvailable": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "e.g. First visit available Fri, Oct 23"
+          },
+          "reviews": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/services.ServiceReview"
+            },
+            "description": "The newest three"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "area",
+          "title",
+          "photos",
+          "provider",
+          "priceUnit",
+          "tags",
+          "rating",
+          "included",
+          "requirements",
+          "supported",
+          "osVersions",
+          "handover",
+          "priceTable",
+          "terms",
+          "steps",
+          "reviews"
+        ]
+      },
+      "services.ServiceAdmin": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "area": {
+            "type": "string",
+            "enum": [
+              "os_install",
+              "post_sale",
+              "welfare",
+              "booking"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "summary": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "image": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MediaRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "photos": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MediaRef"
+            }
+          },
+          "categoryId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "providerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "providerName": {
+            "type": "string"
+          },
+          "badge": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fromPrice": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "priceUnit": {
+            "type": "string",
+            "enum": [
+              "fixed",
+              "hour",
+              "visit",
+              "night",
+              "free"
+            ]
+          },
+          "durationLabel": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "supportedLabel": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "coverage": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "included": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requirements": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "osVersions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "handover": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/services.HandoverOption"
+            }
+          },
+          "priceTable": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/services.PriceRow"
+            }
+          },
+          "priceTableTitle": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "terms": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/services.ServiceStep"
+            }
+          },
+          "slotMinutes": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "durationMinutes": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "published",
+              "hidden"
+            ]
+          },
+          "position": {
+            "type": "integer"
+          },
+          "rating": {
+            "$ref": "#/components/schemas/services.RatingSummary"
+          },
+          "openRequestCount": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "area",
+          "title",
+          "photos",
+          "providerId",
+          "providerName",
+          "priceUnit",
+          "tags",
+          "included",
+          "requirements",
+          "supported",
+          "osVersions",
+          "handover",
+          "priceTable",
+          "terms",
+          "steps",
+          "status",
+          "position",
+          "rating",
+          "openRequestCount",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "services.ServiceInput": {
+        "type": "object",
+        "properties": {
+          "area": {
+            "type": "string",
+            "enum": [
+              "os_install",
+              "post_sale",
+              "welfare",
+              "booking"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "slug": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "summary": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "image": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MediaRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "photos": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/MediaRef"
+            }
+          },
+          "categoryId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "providerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "badge": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fromPrice": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "priceUnit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "fixed",
+              "hour",
+              "visit",
+              "night",
+              "free"
+            ]
+          },
+          "durationLabel": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "supportedLabel": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "coverage": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tags": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "included": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "requirements": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "supported": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "osVersions": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "handover": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/services.HandoverOption"
+            }
+          },
+          "priceTable": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/services.PriceRow"
+            }
+          },
+          "priceTableTitle": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "terms": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "steps": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/services.ServiceStep"
+            }
+          },
+          "slotMinutes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "15–480; set for services booked at a time"
+          },
+          "durationMinutes": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "published",
+              "hidden"
+            ]
+          },
+          "position": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "area",
+          "title",
+          "providerId"
+        ]
+      },
+      "services.AvailabilitySlot": {
+        "type": "object",
+        "properties": {
+          "start": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "label": {
+            "type": "string",
+            "description": "e.g. 3:30 PM"
+          },
+          "available": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "label",
+          "available"
+        ]
+      },
+      "services.AvailabilityDay": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "weekdayLabel": {
+            "type": "string",
+            "description": "e.g. Thu"
+          },
+          "open": {
+            "type": "boolean"
+          },
+          "slots": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/services.AvailabilitySlot"
+            }
+          }
+        },
+        "required": [
+          "date",
+          "weekdayLabel",
+          "open",
+          "slots"
+        ]
+      },
+      "services.RequestDetails": {
+        "type": "object",
+        "properties": {
+          "deviceModel": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "OS install and post-sale"
+          },
+          "osVersion": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "OS install"
+          },
+          "handover": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "dropoff",
+              "pickup",
+              "at_home",
+              "online"
+            ],
+            "description": "How the item or person is reached"
+          },
+          "address": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pickup or home visit address"
+          },
+          "careFor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Welfare: who the service is for, e.g. My mother, 78"
+          },
+          "preferredDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "description": "Requests without a slot: the day the customer would like"
+          },
+          "plan": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The price row the customer chose, e.g. Weekly"
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "services.RequestInput": {
+        "type": "object",
+        "properties": {
+          "serviceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "slotStart": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Bookable services: the chosen slot (must still be free)"
+          },
+          "staffId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A chosen staff member; any free one when omitted"
+          },
+          "contact": {
+            "$ref": "#/components/schemas/services.RequestContact"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/services.RequestDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "serviceId",
+          "contact"
+        ]
+      },
+      "services.ServiceRequest": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ref": {
+            "type": "string",
+            "description": "Short code shown to the customer, e.g. SR-4K7Q2"
+          },
+          "area": {
+            "type": "string",
+            "enum": [
+              "os_install",
+              "post_sale",
+              "welfare",
+              "booking"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "requested",
+              "confirmed",
+              "in_progress",
+              "completed",
+              "cancelled",
+              "declined"
+            ]
+          },
+          "statusLabel": {
+            "type": "string",
+            "description": "e.g. Waiting for the provider to confirm"
+          },
+          "service": {
+            "$ref": "#/components/schemas/services.ServiceCard"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/services.ProviderCard"
+          },
+          "slotStart": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "slotEnd": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "whenLabel": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "e.g. Sat, Oct 24 · 10:15 AM"
+          },
+          "staff": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/services.ProviderStaff"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "contact": {
+            "$ref": "#/components/schemas/services.RequestContact"
+          },
+          "details": {
+            "$ref": "#/components/schemas/services.RequestDetails"
+          },
+          "priceLabel": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "e.g. from $29, paid at the shop"
+          },
+          "providerNote": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the provider or staff said, e.g. a decline reason"
+          },
+          "canCancel": {
+            "type": "boolean"
+          },
+          "canReview": {
+            "type": "boolean"
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/services.StatusChange"
+            },
+            "description": "Status changes, oldest first"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "ref",
+          "area",
+          "status",
+          "statusLabel",
+          "service",
+          "provider",
+          "contact",
+          "details",
+          "canCancel",
+          "canReview",
+          "history",
+          "createdAt"
+        ]
+      },
+      "services.RequestAdmin": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ref": {
+            "type": "string"
+          },
+          "area": {
+            "type": "string",
+            "enum": [
+              "os_install",
+              "post_sale",
+              "welfare",
+              "booking"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "requested",
+              "confirmed",
+              "in_progress",
+              "completed",
+              "cancelled",
+              "declined"
+            ]
+          },
+          "serviceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "serviceTitle": {
+            "type": "string"
+          },
+          "providerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "providerName": {
+            "type": "string"
+          },
+          "customerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "slotStart": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "slotEnd": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "staff": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/services.ProviderStaff"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "contact": {
+            "$ref": "#/components/schemas/services.RequestContact"
+          },
+          "details": {
+            "$ref": "#/components/schemas/services.RequestDetails"
+          },
+          "providerNote": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "staffNote": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/services.StatusChange"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "ref",
+          "area",
+          "status",
+          "serviceId",
+          "serviceTitle",
+          "providerId",
+          "providerName",
+          "customerId",
+          "contact",
+          "details",
+          "history",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "services.RequestUpdate": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "confirmed",
+              "in_progress",
+              "completed",
+              "declined",
+              "cancelled"
+            ]
+          },
+          "providerNote": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Shown to the customer"
+          },
+          "staffNote": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Staff only"
+          },
+          "slotStart": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Move a booking to another free slot"
+          }
+        }
+      },
+      "services.ServiceReview": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "rating": {
+            "type": "integer"
+          },
+          "text": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "authorName": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "rating",
+          "authorName",
+          "createdAt"
+        ]
+      },
+      "services.ReviewInput": {
+        "type": "object",
+        "properties": {
+          "rating": {
+            "type": "integer",
+            "description": "1–5"
+          },
+          "text": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "At most 1,000 characters"
+          }
+        },
+        "required": [
+          "rating"
+        ]
+      },
+      "services.ReviewAdmin": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "serviceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "serviceTitle": {
+            "type": "string"
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "rating": {
+            "type": "integer"
+          },
+          "text": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "authorName": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "visible",
+              "hidden"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "serviceId",
+          "serviceTitle",
+          "requestId",
+          "rating",
+          "authorName",
+          "status",
+          "createdAt"
         ]
       },
       "settings.DayHours": {

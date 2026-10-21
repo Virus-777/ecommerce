@@ -1047,6 +1047,7 @@ Indexes: `(sent_at desc)`
 | `reviews.report.created` | reviews | Staff: reported content to the moderation queue role |
 | `trust.report.created` | trust | Staff: new risk report to Trust and Risk Manager |
 | `wishlist.alert.triggered` | wishlist | Customer: price drop or back in stock (promotional, consent required) |
+| `services.request.status_changed` | services | Customer: their service request or booking was confirmed, started, completed, declined or cancelled |
 | `access.approval.requested` | access | Staff: waiting approval to eligible approvers (nominated reviewer first), action required with due date |
 | `access.approval.partially_approved` | access | Staff: second approval needed, to remaining eligible approvers |
 | `access.approval.returned` | access | Staff: request sent back to the requester with the comment |

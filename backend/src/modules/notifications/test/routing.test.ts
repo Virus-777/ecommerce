@@ -48,7 +48,7 @@ function orderAccepted(o: { orderId?: string; customerId?: string | null; email:
 describe('catalogue', () => {
   it('routes every consumed event and seeds valid default templates', () => {
     expect(Object.keys(ROUTES).sort()).toEqual(Object.keys(spec.events.consumes).sort());
-    expect(Object.keys(spec.events.consumes)).toHaveLength(130);
+    expect(Object.keys(spec.events.consumes)).toHaveLength(131);
     for (const t of TOPICS) {
       for (const channel of templateChannels(t)) {
         const v = validateContent(t, channel, defaultContent(t, channel, {}));

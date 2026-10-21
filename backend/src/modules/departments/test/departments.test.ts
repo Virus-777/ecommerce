@@ -35,6 +35,46 @@ describe('phones', () => {
   });
 });
 
+describe('farm machines', () => {
+  it('keeps machine types and picks with attachments, and shows the store what search still shows', async () => {
+    const tractor = k.card({ title: 'Kubota L2502' });
+    const loader = k.card({ title: 'Front loader LA344' });
+    const tiller = k.card({ title: 'Rotary tiller, 5 ft' });
+    k.cards.set(tractor.productId, tractor).set(loader.productId, loader).set(tiller.productId, tiller);
+    const gone = newId();
+    expect((await k.admin('PUT', '/farm', { types: [], machines: [] })).status).toBe(400);
+    expect((await k.admin('PUT', '/farm', { types: [{ id: 'a', name: 'Tractors', slug: '' }, { id: 'b', name: 'tractors', slug: '' }], machines: [] })).body.error.details.issues[0].path).toBe('types[1].name');
+    const set = await k.admin('PUT', '/farm', {
+      types: [
+        { id: 'new-1', name: 'Tractors', slug: '' },
+        { id: 'new-2', name: 'Harvesters', slug: '' },
+      ],
+      machines: [
+        { productId: gone, typeId: 'new-1', highlights: ['22 hp'] },
+        { productId: tractor.productId, typeId: 'new-1', highlights: ['25 hp · 4WD', ' '], attachmentIds: [loader.productId, tiller.productId, gone] },
+      ],
+    });
+    expect(set.status, JSON.stringify(set.body)).toBe(200);
+    const [tractors, harvesters] = set.body.types;
+    expect(tractors).toMatchObject({ name: 'Tractors', slug: 'tractors' });
+    expect(tractors.id).not.toBe('new-1');
+    expect(set.body.machines[1]).toMatchObject({ productId: tractor.productId, typeId: tractors.id, highlights: ['25 hp · 4WD'] });
+
+    const page = (await k.store('GET', '/farm')).body;
+    expect(page.types.map((t: any) => t.name)).toEqual(['Tractors', 'Harvesters']);
+    expect(page.machines.map((m: any) => [m.product.title, m.typeId])).toEqual([['Kubota L2502', tractors.id]]);
+    const machine = (await k.store('GET', `/farm/machines/${tractor.productId}`)).body;
+    expect(machine.attachments.map((a: any) => a.title)).toEqual(['Front loader LA344', 'Rotary tiller, 5 ft']);
+    expect((await k.store('GET', `/farm/machines/${loader.productId}`)).status).toBe(404);
+
+    // ids are kept on the next save; a machine must use one of the types
+    const again = await k.admin('PUT', '/farm', { types: set.body.types, machines: [{ productId: tractor.productId, typeId: harvesters.id }] });
+    expect(again.body.types.map((t: any) => t.id)).toEqual([tractors.id, harvesters.id]);
+    expect((await k.admin('PUT', '/farm', { types: [tractors], machines: [{ productId: tractor.productId, typeId: harvesters.id }] })).body.error.details.issues[0].path).toBe('machines[0].typeId');
+    expect((await k.admin('PUT', '/farm', { types: [tractors], machines: [] }, k.staff(['departments.view']))).status).toBe(403);
+  });
+});
+
 describe('blogs', () => {
   let topic: any;
   let hiddenTopic: any;

@@ -80,6 +80,17 @@ const REACT_SCREENS = [
   ['admin/departments-blogs', 'admin', 'Departments', 'Blogs'],
   ['admin/departments-companies', 'admin', 'Departments', 'Companies'],
   ['admin/departments-play', 'admin', 'Departments', 'Play center'],
+  ['store/farm', 'store', 'Departments', 'Farm machines'],
+  ['store/farm-order', 'store', 'Departments', 'Farm machine order'],
+  ['store/service', 'store', 'Departments', 'Phone service'],
+  ['store/welfare', 'store', 'Departments', 'Welfare services'],
+  ['store/welfare-service', 'store', 'Departments', 'Welfare service'],
+  ['store/booking', 'store', 'Departments', 'Booking'],
+  ['store/booking-provider', 'store', 'Departments', 'Booking provider'],
+  ['store/my-requests', 'store', 'Departments', 'My requests and bookings'],
+  ['store/my-request', 'store', 'Departments', 'Request or booking'],
+  ['admin/departments-farm', 'admin', 'Departments', 'Farm machines'],
+  ['admin/departments-services', 'admin', 'Departments', 'Services and requests'],
 ];
 const SCREENS = loadScreens();
 

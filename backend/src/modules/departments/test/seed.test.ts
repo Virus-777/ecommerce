@@ -13,7 +13,8 @@ afterAll(async () => {
 describe('sample content (tools/simulate/departments-data.ts)', () => {
   it('passes the admin API as it is and adds nothing the second time', async () => {
     const phone = k.card({ title: 'Pixel 9' });
-    k.cards.set(phone.productId, phone);
+    const tractor = k.card({ title: 'Kubota L2502' });
+    k.cards.set(phone.productId, phone).set(tractor.productId, tractor);
     // catalog and search are not booted here: the category tree and the listing answer as a small store would
     const admin = async (method: 'GET' | 'POST' | 'PATCH' | 'PUT', path: string, body?: unknown) => {
       if (path.startsWith('/admin/catalog/categories')) return [{ name: 'Electronics', slug: 'electronics', children: [{ name: 'Phones', slug: 'phones', children: [] }] }];
@@ -21,10 +22,11 @@ describe('sample content (tools/simulate/departments-data.ts)', () => {
       if (res.status >= 300) throw new Error(`${method} ${path} → ${res.status} ${JSON.stringify(res.body)}`);
       return res.body;
     };
-    const store = async (path: string) => (path.startsWith('/store/search/products?category=phones') ? { items: [{ position: 1, kind: 'organic', product: { productId: phone.productId } }] } : { items: [] });
+    const row = (productId: string) => ({ items: [{ position: 1, kind: 'organic', product: { productId } }] });
+    const store = async (path: string) => (path.startsWith('/store/search/products?category=phones') ? row(phone.productId) : path.startsWith('/store/search/products?q=tractor') ? row(tractor.productId) : { items: [] });
     const added = await seedDepartments(admin, store);
-    expect(added).toEqual({ topics: 6, authors: 3, posts: BLOG_POSTS.length, industries: 6, companies: COMPANIES.length, games: GAMES.length, rankings: GAMES.length * 3, phones: 1 });
-    expect(await seedDepartments(admin, store)).toEqual({ topics: 0, authors: 0, posts: 0, industries: 0, companies: 0, games: 0, rankings: 0, phones: 0 });
+    expect(added).toEqual({ topics: 6, authors: 3, posts: BLOG_POSTS.length, industries: 6, companies: COMPANIES.length, games: GAMES.length, rankings: GAMES.length * 3, phones: 1, farmMachines: 1 });
+    expect(await seedDepartments(admin, store)).toEqual({ topics: 0, authors: 0, posts: 0, industries: 0, companies: 0, games: 0, rankings: 0, phones: 0, farmMachines: 0 });
 
     const posts = await k.store('GET', '/blogs/posts?limit=50');
     expect(posts.body.items).toHaveLength(BLOG_POSTS.length);
@@ -33,5 +35,8 @@ describe('sample content (tools/simulate/departments-data.ts)', () => {
     expect(week.body.entries).toHaveLength(10);
     expect(week.body.entries[0].score).toBeGreaterThan(week.body.entries[9].score);
     expect((await k.store('GET', '/phones')).body.products.map((p: any) => p.title)).toEqual(['Pixel 9']);
+    const farm = (await k.store('GET', '/farm')).body;
+    expect(farm.types.map((t: any) => t.name)).toEqual(['Tractors', 'Harvesters', 'Tillers', 'Seeders', 'Sprayers', 'Irrigation']);
+    expect(farm.machines.map((m: any) => m.product.title)).toEqual(['Kubota L2502']);
   });
 });

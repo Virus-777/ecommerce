@@ -184,6 +184,8 @@ const VARIABLE_EXAMPLES: Record<string, string> = {
   'message.from': 'Casa Verde Home',
   'wishlist.product': 'Aurora Desk Lamp',
   'wishlist.price': '$159.00',
+  'request.ref': 'SR-4K7Q2',
+  'request.status': 'confirmed',
   'unsubscribe.url': 'https://marketly.example/unsubscribe/…',
   'guest.url': 'https://marketly.example/orders/link/…',
   'po.ref': 'PO-261009-0042',
@@ -526,6 +528,10 @@ export const TOPICS: readonly TopicDef[] = [
   cu('trust.appeal_decided', { group: 'cases', label: 'Appeal result', opens: 'Appeal', triggers: ['trust.appeal.decided'], icon: 'scale',
     description: 'The result of an appeal against a trust action on the account, and what changes',
     t: { title: 'Your appeal {{appeal.ref}} was decided', body: 'The action on your account was {{appeal.outcome}}. {{appeal.explanation}} {{appeal.changes}}', subject: 'The result of your appeal {{appeal.ref}}', button: 'View appeal' } }),
+
+  cu('services.request', { group: 'orders', label: 'Requests and bookings', opens: 'Request', triggers: ['services.request.status_changed'], icon: 'calendar-check', tone: 'brand',
+    description: 'A service request or booking (OS install, repair, welfare service, appointment) was confirmed, started, completed, declined or cancelled',
+    t: { title: 'Your request {{request.ref}} was {{request.status}}', body: 'Your request {{request.ref}} was {{request.status}}. Open it to see the details and what happens next.', subject: 'Your request {{request.ref}} was {{request.status}}', button: 'View request' } }),
 
   /* ---------------------------------------------------------------- customer: promotional */
   cu('promotions.newsletter', { group: 'promotions', label: 'Deals and coupons newsletter', opens: 'Deals', category: 'promotional', frequency: 'Weekly', family: 'promotions', icon: 'percent', tone: 'deal', supports: ['email', 'sms', 'push'], channels: { sms: true },

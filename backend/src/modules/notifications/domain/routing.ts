@@ -117,6 +117,9 @@ export type Routes = { [N in Consumed]: EventRoute<EventPayload<N>> };
 
 const L = (kind: string, id: string, screen: string, label?: string, ref?: string | null, url?: string | null): NoticeLink => ({ kind, id, screen, ...(label ? { label } : {}), ...(ref ? { ref } : {}), ...(url ? { url } : {}) });
 
+/** How a request status reads in a notice: Your request SR-… was confirmed */
+const REQUEST_STATUS: Record<string, string> = { confirmed: 'confirmed', in_progress: 'started', completed: 'completed', declined: 'declined', cancelled: 'cancelled' };
+
 const orderLink = (orderId: string, ref?: string | null) => L('order', orderId, 'account/order', 'View order', ref);
 const returnLink = (returnId: string, ref?: string | null, label = 'View return') => L('return', returnId, 'account/return', label, ref);
 const caseLink = (caseId: string, ref?: string | null) => L('case', caseId, 'help/case', 'View case', ref);
@@ -1296,6 +1299,24 @@ export const ROUTES: Routes = {
         dedupe: `wishlist:${p.alertId}`,
       },
     ],
+  },
+
+  /* ---------------------------------------------------------------- services (department pages) */
+  'services.request.status_changed': {
+    // the customer made the request themselves: they hear about what the provider or staff do with it
+    sends: (p) =>
+      p.status === 'requested'
+        ? []
+        : [
+            {
+              topic: 'customer.services.request',
+              // services keeps customers by their account id (the store principal's accountId), not a customers record id
+              to: [{ kind: 'customer', accountId: p.customerId }],
+              link: L('service_request', p.requestId, 'store/my-request', 'View request', p.ref),
+              context: { request: { ref: p.ref, status: REQUEST_STATUS[p.status] ?? p.status.replace('_', ' ') } },
+              dedupe: `service-request:${p.requestId}:${p.status}`,
+            },
+          ],
   },
 
   /* ---------------------------------------------------------------- access */

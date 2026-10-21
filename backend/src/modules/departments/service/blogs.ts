@@ -10,12 +10,12 @@ import type { BlogAuthor, BlogAuthorAdmin, BlogAuthorCard, BlogAuthorInput, Blog
 import { LIMITS, plainText, readMinutes, replyAuthorName, sanitizeHtml } from '../domain/rules.js';
 import type { AuthorRow, PostRow, ReplyRow, ReportRow, TopicRow } from '../ports.js';
 import { actorKey, invalid, iso, mediaOf, notFound, optionalText, requireText, unique, type By, type StoredMedia } from './base.js';
-import { DepartmentsPhones } from './phones.js';
+import { DepartmentsFarm } from './farm.js';
 
 type Reaction = 'like' | 'dislike';
 const asReaction = (v: string | null | undefined): Reaction | null => (v === 'like' || v === 'dislike' ? v : null);
 
-export class DepartmentsBlogs extends DepartmentsPhones {
+export class DepartmentsBlogs extends DepartmentsFarm {
   /* ---------------------------------------------------------------- mapping */
 
   private topicRef(t: TopicRow | undefined): BlogTopicRef | null {
