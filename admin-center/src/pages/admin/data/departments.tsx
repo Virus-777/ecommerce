@@ -27,6 +27,25 @@ export type Game = S['departments.GameAdmin'];
 export type GameInput = S['departments.GameInput'];
 export type RankingTable = S['departments.RankingTable'];
 export type Period = RankingTable['period'];
+export type FarmAdmin = S['departments.FarmAdmin'];
+export type FarmType = S['departments.FarmType'];
+export type FarmMachineInput = S['departments.FarmMachineInput'];
+export type ServiceArea = S['services.ServiceCategory']['area'];
+export type ServiceCategory = S['services.ServiceCategory'];
+export type Provider = S['services.ProviderAdmin'];
+export type ProviderInput = S['services.ProviderInput'];
+export type OpeningDay = S['services.OpeningDay'];
+export type ProviderStaff = S['services.ProviderStaff'];
+export type Service = S['services.ServiceAdmin'];
+export type ServiceInput = S['services.ServiceInput'];
+export type HandoverOption = S['services.HandoverOption'];
+export type PriceRow = S['services.PriceRow'];
+export type ServiceStep = S['services.ServiceStep'];
+export type ServiceRequest = S['services.RequestAdmin'];
+export type RequestStatus = ServiceRequest['status'];
+export type RequestUpdate = S['services.RequestUpdate'];
+export type ServiceReview = S['services.ReviewAdmin'];
+export type Money = S['Money'];
 
 export const PAGE_SIZE = 20;
 
@@ -46,6 +65,37 @@ export const PERIODS: Array<{ value: Period; label: string }> = [
   { value: 'all_time', label: 'All time' },
 ];
 
+/** The four service areas: which department page they belong to (services spec notes) */
+export const AREA: Record<ServiceArea, { title: string; nav: string; icon: IconName; noun: string }> = {
+  os_install: { title: 'OS install', nav: 'dept-os-install', icon: 'wrench', noun: 'OS install' },
+  post_sale: { title: 'Post-sale services', nav: 'dept-post-sale', icon: 'shield-check', noun: 'post-sale service' },
+  welfare: { title: 'Welfare services', nav: 'dept-welfare', icon: 'hand-heart', noun: 'welfare service' },
+  booking: { title: 'Booking', nav: 'dept-booking', icon: 'calendar-check', noun: 'booking' },
+};
+export const REQUEST_STATUS: Record<RequestStatus, { label: string; tone: 'brand' | 'info' | 'warning' | 'success' | 'danger' | '' }> = {
+  requested: { label: 'Requested', tone: 'brand' },
+  confirmed: { label: 'Confirmed', tone: 'info' },
+  in_progress: { label: 'In progress', tone: 'warning' },
+  completed: { label: 'Completed', tone: 'success' },
+  cancelled: { label: 'Cancelled', tone: '' },
+  declined: { label: 'Declined', tone: 'danger' },
+};
+export const PRICE_UNIT: Record<Service['priceUnit'], string> = { fixed: 'Fixed price', hour: 'Per hour', visit: 'Per visit', night: 'Per night', free: 'Free' };
+export const HANDOVER: Record<HandoverOption['mode'], string> = { dropoff: 'Drop-off', pickup: 'Pickup', at_home: 'At home', online: 'Online' };
+export const WEEKDAYS: Array<{ value: OpeningDay['weekday']; label: string }> = [
+  { value: 'mon', label: 'Monday' },
+  { value: 'tue', label: 'Tuesday' },
+  { value: 'wed', label: 'Wednesday' },
+  { value: 'thu', label: 'Thursday' },
+  { value: 'fri', label: 'Friday' },
+  { value: 'sat', label: 'Saturday' },
+  { value: 'sun', label: 'Sunday' },
+];
+/** Dollars typed in a field ↔ API money (minor units, USD) */
+export const toMoney = (dollars: string): Money | null => (dollars.trim() && !Number.isNaN(Number(dollars)) ? { amount: Math.round(Number(dollars) * 100), currency: 'USD' } : null);
+export const moneyText = (m: Money | null | undefined) => (m ? String(m.amount / 100) : '');
+export const newKey = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `k${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`);
+
 /** Page frame: breadcrumbs, title and the notice shown without departments.view */
 export function DeptPage({ active, title, canView, children }: { active: string; title: string; canView: boolean; children: ReactNode }) {
   if (!canView) {
@@ -64,6 +114,58 @@ export function DeptPage({ active, title, canView, children }: { active: string;
     );
   }
   return <AdminLayout active={active}>{children}</AdminLayout>;
+}
+
+/* ---------------- Lists of short lines ---------------- */
+
+/** An ordered list of short text lines (what's included, requirements, highlights…): add, edit, move, remove. */
+export function LinesField({ id, label, hint, lines, onChange, placeholder, max = 30, disabled }: { id: string; label: string; hint?: string; lines: string[]; onChange: (l: string[]) => void; placeholder?: string; max?: number; disabled: boolean }) {
+  const [text, setText] = useState('');
+  const add = () => {
+    const v = text.trim();
+    if (!v || lines.length >= max) return;
+    onChange([...lines, v]);
+    setText('');
+  };
+  const move = (i: number, dir: -1 | 1) => {
+    const j = i + dir;
+    if (j < 0 || j >= lines.length) return;
+    const next = [...lines];
+    [next[i], next[j]] = [next[j], next[i]];
+    onChange(next);
+  };
+  return (
+    <div className="stack gap-2">
+      <span className="label">
+        {label} <span className="muted">({lines.length})</span>
+      </span>
+      {hint && <span className="xs sub">{hint}</span>}
+      {lines.length > 0 && (
+        <ul className="list">
+          {lines.map((l, i) => (
+            <li key={`${i}-${l}`}>
+              <input className="input grow" aria-label={`${label} ${i + 1}`} value={l} disabled={disabled} onChange={(e) => onChange(lines.map((x, k) => (k === i ? e.target.value : x)))} />
+              {!disabled && (
+                <>
+                  <IconButton icon="arrow-up" label={`Move line ${i + 1} up`} disabled={i === 0} onClick={() => move(i, -1)} />
+                  <IconButton icon="arrow-down" label={`Move line ${i + 1} down`} disabled={i === lines.length - 1} onClick={() => move(i, 1)} />
+                  <IconButton icon="x" label={`Remove line ${i + 1}`} onClick={() => onChange(lines.filter((_, k) => k !== i))} />
+                </>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {!disabled && lines.length < max && (
+        <div className="row gap-2">
+          <input className="input grow" id={id} placeholder={placeholder ?? 'Add a line'} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())} />
+          <Button variant="secondary" size="sm" icon="plus" onClick={add} disabled={!text.trim()}>
+            Add
+          </Button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 /* ---------------- Picture uploads ---------------- */

@@ -82,9 +82,14 @@ export const ADMIN_NAV: NavEntry[] = [
   ] },
   { grp: 'Departments', items: [
     { key: 'dept-phones', label: 'Phones', icon: 'smartphone', id: 'admin/departments-phones' },
+    { key: 'dept-os-install', label: 'OS install', icon: 'wrench', id: 'admin/departments-os-install' },
+    { key: 'dept-post-sale', label: 'Post-sale services', icon: 'shield-check', id: 'admin/departments-post-sale' },
     { key: 'dept-blogs', label: 'Blogs', icon: 'newspaper', id: 'admin/departments-blogs' },
     { key: 'dept-companies', label: 'Companies', icon: 'building-2', id: 'admin/departments-companies' },
     { key: 'dept-play', label: 'Play center', icon: 'gamepad-2', id: 'admin/departments-play' },
+    { key: 'dept-farm', label: 'Farm machines', icon: 'tractor', id: 'admin/departments-farm' },
+    { key: 'dept-welfare', label: 'Welfare services', icon: 'hand-heart', id: 'admin/departments-welfare' },
+    { key: 'dept-booking', label: 'Booking', icon: 'calendar-check', id: 'admin/departments-booking' },
   ] },
   { grp: 'Reports and settings', items: [
     { key: 'reports', label: 'Reports', icon: 'chart-column', id: 'admin/reports' },

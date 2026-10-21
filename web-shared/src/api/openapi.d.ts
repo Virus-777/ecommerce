@@ -6718,6 +6718,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/store/departments/farm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Farm machines: types and picked machines
+         * @description **Screens:** store/farm
+         *
+         *     **Launch phase:** 2
+         */
+        get: operations["departments.getFarm"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/store/departments/farm/machines/{productId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A picked machine with its attachments
+         * @description **Screens:** store/farm-order
+         *
+         *     **Launch phase:** 2
+         */
+        get: operations["departments.getFarmMachine"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/store/departments/blogs/topics": {
         parameters: {
             query?: never;
@@ -7109,6 +7153,40 @@ export interface paths {
          *     **Launch phase:** 2
          */
         put: operations["departments.setPhones"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/departments/farm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Farm machine types and picks
+         * @description **Permission:** `departments.view`
+         *
+         *     **Screens:** admin/departments-farm
+         *
+         *     **Launch phase:** 2
+         */
+        get: operations["departments.getFarmAdmin"];
+        /**
+         * Replace the farm machine types and picks
+         * @description **Permission:** `departments.farm.manage`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Screens:** admin/departments-farm
+         *
+         *     **Launch phase:** 2
+         */
+        put: operations["departments.setFarm"];
         post?: never;
         delete?: never;
         options?: never;
@@ -24741,6 +24819,594 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/store/services/categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Visible categories of an area in order
+         * @description **Screens:** store/phones, store/welfare, store/booking
+         *
+         *     **Launch phase:** 2
+         */
+        get: operations["services.listCategories"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/store/services/services": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Published services of an area
+         * @description **Screens:** store/phones, store/welfare
+         *
+         *     **Launch phase:** 2
+         */
+        get: operations["services.listServices"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/store/services/services/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A service with its provider, price table, terms, steps and newest reviews
+         * @description **Screens:** store/service, store/welfare-service
+         *
+         *     **Launch phase:** 2
+         */
+        get: operations["services.getService"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/store/services/services/{id}/reviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A service's reviews, newest first
+         * @description **Screens:** store/service
+         *
+         *     **Launch phase:** 2
+         */
+        get: operations["services.listServiceReviews"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/store/services/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Published providers of an area (Booking: Available near you)
+         * @description **Screens:** store/booking
+         *
+         *     **Launch phase:** 2
+         */
+        get: operations["services.listProviders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/store/services/providers/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A provider's page with its services, hours and staff
+         * @description **Screens:** store/booking-provider
+         *
+         *     **Launch phase:** 2
+         */
+        get: operations["services.getProvider"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/store/services/services/{id}/availability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Free time slots of a bookable service, day by day
+         * @description **Screens:** store/booking-provider
+         *
+         *     **Launch phase:** 2
+         */
+        get: operations["services.getAvailability"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/store/services/requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * My requests and bookings, newest first
+         * @description **Screens:** store/my-requests, store/booking
+         *
+         *     **Launch phase:** 2
+         */
+        get: operations["services.listMyRequests"];
+        put?: never;
+        /**
+         * Request or book a service
+         * @description A bookable service needs slotStart, which must still be free (SLOT_TAKEN otherwise).
+         *
+         *     **Idempotent:** send an Idempotency-Key.
+         *
+         *     **Screens:** store/service, store/welfare-service, store/booking-provider
+         *
+         *     **Launch phase:** 2
+         */
+        post: operations["services.createRequest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/store/services/requests/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One of my requests
+         * @description **Screens:** store/my-request
+         *
+         *     **Launch phase:** 2
+         */
+        get: operations["services.getMyRequest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/store/services/requests/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel my request or booking
+         * @description **Screens:** store/my-request
+         *
+         *     **Launch phase:** 2
+         */
+        post: operations["services.cancelMyRequest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/store/services/requests/{id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rate a completed request
+         * @description **Screens:** store/my-request
+         *
+         *     **Launch phase:** 2
+         */
+        post: operations["services.reviewMyRequest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/services/categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Categories of an area
+         * @description **Permission:** `services.view`
+         *
+         *     **Screens:** admin/departments-services
+         *
+         *     **Launch phase:** 2
+         */
+        get: operations["services.listCategoriesAdmin"];
+        put?: never;
+        /**
+         * Add a category
+         * @description **Permission:** `services.manage`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Screens:** admin/departments-services
+         *
+         *     **Launch phase:** 2
+         */
+        post: operations["services.createCategory"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/services/categories/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a category no service uses
+         * @description **Permission:** `services.manage`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Screens:** admin/departments-services
+         *
+         *     **Launch phase:** 2
+         */
+        delete: operations["services.deleteCategory"];
+        options?: never;
+        head?: never;
+        /**
+         * Rename, reorder, hide or show a category
+         * @description **Permission:** `services.manage`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Screens:** admin/departments-services
+         *
+         *     **Launch phase:** 2
+         */
+        patch: operations["services.updateCategory"];
+        trace?: never;
+    };
+    "/api/admin/services/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Providers
+         * @description **Permission:** `services.view`
+         *
+         *     **Screens:** admin/departments-services
+         *
+         *     **Launch phase:** 2
+         */
+        get: operations["services.listProvidersAdmin"];
+        put?: never;
+        /**
+         * Add a provider
+         * @description **Permission:** `services.manage`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Screens:** admin/departments-services
+         *
+         *     **Launch phase:** 2
+         */
+        post: operations["services.createProvider"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/services/providers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A provider for editing
+         * @description **Permission:** `services.view`
+         *
+         *     **Screens:** admin/departments-services
+         *
+         *     **Launch phase:** 2
+         */
+        get: operations["services.getProviderAdmin"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a provider without services
+         * @description **Permission:** `services.manage`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Screens:** admin/departments-services
+         *
+         *     **Launch phase:** 2
+         */
+        delete: operations["services.deleteProvider"];
+        options?: never;
+        head?: never;
+        /**
+         * Edit, hide or show a provider
+         * @description **Permission:** `services.manage`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Screens:** admin/departments-services
+         *
+         *     **Launch phase:** 2
+         */
+        patch: operations["services.updateProvider"];
+        trace?: never;
+    };
+    "/api/admin/services/services": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Services in staff order
+         * @description **Permission:** `services.view`
+         *
+         *     **Screens:** admin/departments-services
+         *
+         *     **Launch phase:** 2
+         */
+        get: operations["services.listServicesAdmin"];
+        put?: never;
+        /**
+         * Add a service
+         * @description **Permission:** `services.manage`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Screens:** admin/departments-services
+         *
+         *     **Launch phase:** 2
+         */
+        post: operations["services.createService"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/services/services/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A service for editing
+         * @description **Permission:** `services.view`
+         *
+         *     **Screens:** admin/departments-services
+         *
+         *     **Launch phase:** 2
+         */
+        get: operations["services.getServiceAdmin"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a service without open requests
+         * @description **Permission:** `services.manage`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Screens:** admin/departments-services
+         *
+         *     **Launch phase:** 2
+         */
+        delete: operations["services.deleteService"];
+        options?: never;
+        head?: never;
+        /**
+         * Edit, hide or show a service
+         * @description **Permission:** `services.manage`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Screens:** admin/departments-services
+         *
+         *     **Launch phase:** 2
+         */
+        patch: operations["services.updateService"];
+        trace?: never;
+    };
+    "/api/admin/services/requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Requests and bookings, newest first
+         * @description **Permission:** `services.view`
+         *
+         *     **Screens:** admin/departments-services
+         *
+         *     **Launch phase:** 2
+         */
+        get: operations["services.listRequestsAdmin"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/services/requests/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A request
+         * @description **Permission:** `services.view`
+         *
+         *     **Screens:** admin/departments-services
+         *
+         *     **Launch phase:** 2
+         */
+        get: operations["services.getRequestAdmin"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Confirm, start, complete, decline or cancel a request; move a booking; add notes
+         * @description **Permission:** `services.requests.manage`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Publishes:** `services.request.status_changed`
+         *
+         *     **Screens:** admin/departments-services
+         *
+         *     **Launch phase:** 2
+         */
+        patch: operations["services.updateRequest"];
+        trace?: never;
+    };
+    "/api/admin/services/reviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Reviews, newest first
+         * @description **Permission:** `services.view`
+         *
+         *     **Screens:** admin/departments-services
+         *
+         *     **Launch phase:** 2
+         */
+        get: operations["services.listReviewsAdmin"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/services/reviews/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Hide or show a review
+         * @description **Permission:** `services.manage`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Screens:** admin/departments-services
+         *
+         *     **Launch phase:** 2
+         */
+        patch: operations["services.moderateReview"];
+        trace?: never;
+    };
     "/api/public/settings/app-config": {
         parameters: {
             query?: never;
@@ -35790,6 +36456,53 @@ export interface components {
             /** @description Up to 100 rows; ranks follow the score, best first */
             entries: components["schemas"]["departments.RankingRowInput"][];
         };
+        "departments.FarmType": {
+            id: string;
+            /** @description e.g. Tractors */
+            name: string;
+            slug: string;
+        };
+        "departments.FarmMachineCard": {
+            /** @description The machine (a catalog product sold through cart and checkout) */
+            product: components["schemas"]["search.ProductCard"];
+            typeId: string;
+            /** @description Short spec lines, e.g. 25 hp · 4WD */
+            highlights: string[];
+        };
+        "departments.FarmPage": {
+            types: components["schemas"]["departments.FarmType"][];
+            /** @description Picked machines in order; ones the store no longer shows are left out */
+            machines: components["schemas"]["departments.FarmMachineCard"][];
+        };
+        "departments.FarmMachine": {
+            product: components["schemas"]["search.ProductCard"];
+            typeId: string;
+            highlights: string[];
+            /** @description Attachments to add with the machine (catalog products) */
+            attachments: components["schemas"]["search.ProductCard"][];
+        };
+        "departments.FarmMachineInput": {
+            /** Format: uuid */
+            productId: string;
+            typeId: string;
+            highlights?: string[] | null;
+            /** @description Up to 8 catalog products */
+            attachmentIds?: string[] | null;
+        };
+        "departments.FarmInput": {
+            /** @description 1–12 types in order; ids are kept, new ones get one */
+            types: components["schemas"]["departments.FarmType"][];
+            /** @description Up to 100 machines in order */
+            machines: components["schemas"]["departments.FarmMachineInput"][];
+        };
+        "departments.FarmAdmin": {
+            types: components["schemas"]["departments.FarmType"][];
+            machines: components["schemas"]["departments.FarmMachineInput"][];
+            /** @description Cards of the picked machines and attachments the store still shows */
+            products: components["schemas"]["search.ProductCard"][];
+            /** Format: date-time */
+            updatedAt?: string | null;
+        };
         "finance.Reference": {
             /** @enum {string} */
             kind: "order" | "order_item" | "return" | "refund" | "case" | "chargeback" | "payout" | "adjustment" | "ad_campaign" | "fulfillment_service" | "statement" | "seller" | "reconciliation" | "receipt";
@@ -46690,6 +47403,540 @@ export interface components {
             invitation: components["schemas"]["sellers.SellerInvitation"];
             /** @description SENSITIVE: the invitation code the business enters when it applies (also emailed where email works). Only its hash is stored; it is never in a log or the audit trail */
             code: string;
+        };
+        "services.Contacts": {
+            phone?: string | null;
+            /** Format: email */
+            email?: string | null;
+            /** Format: uri */
+            website?: string | null;
+            address?: string | null;
+        };
+        "services.GeoPoint": {
+            lat: number;
+            lng: number;
+        };
+        "services.RequestContact": {
+            name: string;
+            phone: string;
+            /** Format: email */
+            email?: string | null;
+        };
+        "services.StatusChange": {
+            status: string;
+            /** Format: date-time */
+            at: string;
+            /** @description Admin only: who changed it */
+            by?: string | null;
+        };
+        "services.ServiceArea": {
+            /**
+             * @description Which department page the record belongs to
+             * @enum {string}
+             */
+            area: "os_install" | "post_sale" | "welfare" | "booking";
+        };
+        "services.ServiceCategory": {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            area: "os_install" | "post_sale" | "welfare" | "booking";
+            slug: string;
+            name: string;
+            /** @description Lucide icon name */
+            icon?: string | null;
+            position: number;
+            visible: boolean;
+            /** @description Published services (providers for booking) */
+            serviceCount: number;
+        };
+        "services.ServiceCategoryInput": {
+            /** @enum {string} */
+            area: "os_install" | "post_sale" | "welfare" | "booking";
+            name: string;
+            slug?: string | null;
+            icon?: string | null;
+            position?: number | null;
+            visible?: boolean | null;
+        };
+        "services.ServiceCategoryRef": {
+            /** Format: uuid */
+            id: string;
+            slug: string;
+            name: string;
+        };
+        "services.OpeningHours": {
+            /** @description Seven entries, Monday first */
+            days: components["schemas"]["services.OpeningDay"][];
+            /** @description IANA zone, default the market time zone */
+            timeZone: string;
+            /** @description Read only, e.g. Open today 9:00 AM – 7:00 PM, or Closed today */
+            todayLabel?: string | null;
+        };
+        "services.OpeningDay": {
+            /** @enum {string} */
+            weekday: "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+            open: boolean;
+            /** @description HH:MM local */
+            from?: string | null;
+            /** @description HH:MM local */
+            to?: string | null;
+        };
+        "services.ProviderStaff": {
+            id: string;
+            name: string;
+            /** @description e.g. Stylist, Technician */
+            role?: string | null;
+        };
+        "services.RatingSummary": {
+            /** @description Null without reviews */
+            average?: number | null;
+            count: number;
+            /** @description Counts for 5, 4, 3, 2 and 1 stars */
+            stars: number[];
+        };
+        "services.ProviderCard": {
+            /** Format: uuid */
+            id: string;
+            slug: string;
+            name: string;
+            logo?: components["schemas"]["MediaRef"] | null;
+            cover?: components["schemas"]["MediaRef"] | null;
+            /** @description e.g. Hair salon, Dental clinic, Licensed home care agency */
+            kind?: string | null;
+            category?: components["schemas"]["services.ServiceCategoryRef"] | null;
+            city?: string | null;
+            verified: boolean;
+            rating: components["schemas"]["services.RatingSummary"];
+            /** @description Lowest price of its published services */
+            fromPrice?: components["schemas"]["Money"] | null;
+            /** @description Booking providers: e.g. Next free: Today 3:30 PM */
+            nextFree?: string | null;
+        };
+        "services.Provider": {
+            /** Format: uuid */
+            id: string;
+            slug: string;
+            name: string;
+            logo?: components["schemas"]["MediaRef"] | null;
+            cover?: components["schemas"]["MediaRef"] | null;
+            kind?: string | null;
+            category?: components["schemas"]["services.ServiceCategoryRef"] | null;
+            city?: string | null;
+            verified: boolean;
+            rating: components["schemas"]["services.RatingSummary"];
+            fromPrice?: components["schemas"]["Money"] | null;
+            nextFree?: string | null;
+            photos: components["schemas"]["MediaRef"][];
+            description?: string | null;
+            /** @description Year founded */
+            since?: number | null;
+            contacts: components["schemas"]["services.Contacts"];
+            /** @description Map pin */
+            location?: components["schemas"]["services.GeoPoint"] | null;
+            hours: components["schemas"]["services.OpeningHours"];
+            staff: components["schemas"]["services.ProviderStaff"][];
+            /** @description e.g. Replies within 1 hour */
+            replyTime?: string | null;
+            /** @description Its published services in order */
+            services: components["schemas"]["services.ServiceCard"][];
+        };
+        "services.ProviderAdmin": {
+            /** Format: uuid */
+            id: string;
+            slug: string;
+            name: string;
+            logo?: components["schemas"]["MediaRef"] | null;
+            cover?: components["schemas"]["MediaRef"] | null;
+            kind?: string | null;
+            /** Format: uuid */
+            categoryId?: string | null;
+            areas: ("os_install" | "post_sale" | "welfare" | "booking")[];
+            city?: string | null;
+            verified: boolean;
+            photos: components["schemas"]["MediaRef"][];
+            description?: string | null;
+            since?: number | null;
+            contacts: components["schemas"]["services.Contacts"];
+            location?: components["schemas"]["services.GeoPoint"] | null;
+            hours: components["schemas"]["services.OpeningHours"];
+            staff: components["schemas"]["services.ProviderStaff"][];
+            replyTime?: string | null;
+            /** @enum {string} */
+            status: "published" | "hidden";
+            serviceCount: number;
+            openRequestCount: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        "services.ProviderInput": {
+            name: string;
+            slug?: string | null;
+            logo?: components["schemas"]["MediaRef"] | null;
+            cover?: components["schemas"]["MediaRef"] | null;
+            kind?: string | null;
+            /**
+             * Format: uuid
+             * @description Booking providers: the booking category (Beauty, Health…)
+             */
+            categoryId?: string | null;
+            city?: string | null;
+            verified?: boolean | null;
+            photos?: components["schemas"]["MediaRef"][] | null;
+            description?: string | null;
+            since?: number | null;
+            contacts?: components["schemas"]["services.Contacts"] | null;
+            location?: components["schemas"]["services.GeoPoint"] | null;
+            hours?: components["schemas"]["services.OpeningHours"] | null;
+            staff?: components["schemas"]["services.ProviderStaff"][] | null;
+            replyTime?: string | null;
+            /** @enum {string|null} */
+            status?: "published" | "hidden" | null;
+        };
+        "services.PriceRow": {
+            /** @description e.g. Galaxy S26 Ultra, or Weekly */
+            label: string;
+            /** @description e.g. 3+ visits a week */
+            detail?: string | null;
+            /** @description Display text, e.g. $229, $24/hr, Free */
+            price: string;
+        };
+        "services.HandoverOption": {
+            /** @enum {string} */
+            mode: "dropoff" | "pickup" | "at_home" | "online";
+            fee?: components["schemas"]["Money"] | null;
+            /** @description e.g. Ready in about 2 hours */
+            note?: string | null;
+        };
+        "services.ServiceStep": {
+            title: string;
+            detail?: string | null;
+        };
+        "services.ServiceCard": {
+            /** Format: uuid */
+            id: string;
+            slug: string;
+            /** @enum {string} */
+            area: "os_install" | "post_sale" | "welfare" | "booking";
+            title: string;
+            summary?: string | null;
+            image?: components["schemas"]["MediaRef"] | null;
+            category?: components["schemas"]["services.ServiceCategoryRef"] | null;
+            provider: {
+                /** Format: uuid */
+                id: string;
+                slug: string;
+                name: string;
+                verified: boolean;
+            };
+            /** @description e.g. Popular, Genuine parts */
+            badge?: string | null;
+            fromPrice?: components["schemas"]["Money"] | null;
+            /**
+             * @description How fromPrice reads: $29, $24/hr, Free
+             * @enum {string}
+             */
+            priceUnit: "fixed" | "hour" | "visit" | "night" | "free";
+            /** @description e.g. About 1–2 hours, Same day, 30 min */
+            durationLabel?: string | null;
+            /** @description e.g. Samsung, Pixel, Xiaomi */
+            supportedLabel?: string | null;
+            /** @description Where it is offered, e.g. Millbrook and 15 km around */
+            coverage?: string | null;
+            /** @description Short facts on the card, e.g. Free pickup */
+            tags: string[];
+            rating: components["schemas"]["services.RatingSummary"];
+        };
+        "services.Service": {
+            /** Format: uuid */
+            id: string;
+            slug: string;
+            /** @enum {string} */
+            area: "os_install" | "post_sale" | "welfare" | "booking";
+            title: string;
+            summary?: string | null;
+            image?: components["schemas"]["MediaRef"] | null;
+            photos: components["schemas"]["MediaRef"][];
+            category?: components["schemas"]["services.ServiceCategoryRef"] | null;
+            provider: components["schemas"]["services.ProviderCard"];
+            badge?: string | null;
+            fromPrice?: components["schemas"]["Money"] | null;
+            /** @enum {string} */
+            priceUnit: "fixed" | "hour" | "visit" | "night" | "free";
+            durationLabel?: string | null;
+            supportedLabel?: string | null;
+            coverage?: string | null;
+            tags: string[];
+            rating: components["schemas"]["services.RatingSummary"];
+            description?: string | null;
+            included: string[];
+            /** @description Eligibility and requirements */
+            requirements: string[];
+            /** @description Supported models */
+            supported: string[];
+            /** @description OS install: versions to pick from */
+            osVersions: string[];
+            handover: components["schemas"]["services.HandoverOption"][];
+            /** @description Price by model, or schedule and prices */
+            priceTable: components["schemas"]["services.PriceRow"][];
+            /** @description e.g. Price by model, Schedule and prices */
+            priceTableTitle?: string | null;
+            /** @description e.g. warranty terms */
+            terms: string[];
+            /** @description How it works, in order */
+            steps: components["schemas"]["services.ServiceStep"][];
+            /** @description Bookable services: the length of one slot; null when the service is requested without a time */
+            slotMinutes?: number | null;
+            durationMinutes?: number | null;
+            /** @description e.g. First visit available Fri, Oct 23 */
+            firstAvailable?: string | null;
+            /** @description The newest three */
+            reviews: components["schemas"]["services.ServiceReview"][];
+        };
+        "services.ServiceAdmin": {
+            /** Format: uuid */
+            id: string;
+            slug: string;
+            /** @enum {string} */
+            area: "os_install" | "post_sale" | "welfare" | "booking";
+            title: string;
+            summary?: string | null;
+            image?: components["schemas"]["MediaRef"] | null;
+            photos: components["schemas"]["MediaRef"][];
+            /** Format: uuid */
+            categoryId?: string | null;
+            /** Format: uuid */
+            providerId: string;
+            providerName: string;
+            badge?: string | null;
+            fromPrice?: components["schemas"]["Money"] | null;
+            /** @enum {string} */
+            priceUnit: "fixed" | "hour" | "visit" | "night" | "free";
+            durationLabel?: string | null;
+            supportedLabel?: string | null;
+            coverage?: string | null;
+            tags: string[];
+            description?: string | null;
+            included: string[];
+            requirements: string[];
+            supported: string[];
+            osVersions: string[];
+            handover: components["schemas"]["services.HandoverOption"][];
+            priceTable: components["schemas"]["services.PriceRow"][];
+            priceTableTitle?: string | null;
+            terms: string[];
+            steps: components["schemas"]["services.ServiceStep"][];
+            slotMinutes?: number | null;
+            durationMinutes?: number | null;
+            /** @enum {string} */
+            status: "published" | "hidden";
+            position: number;
+            rating: components["schemas"]["services.RatingSummary"];
+            openRequestCount: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        "services.ServiceInput": {
+            /** @enum {string} */
+            area: "os_install" | "post_sale" | "welfare" | "booking";
+            title: string;
+            slug?: string | null;
+            summary?: string | null;
+            image?: components["schemas"]["MediaRef"] | null;
+            photos?: components["schemas"]["MediaRef"][] | null;
+            /** Format: uuid */
+            categoryId?: string | null;
+            /** Format: uuid */
+            providerId: string;
+            badge?: string | null;
+            fromPrice?: components["schemas"]["Money"] | null;
+            /** @enum {string|null} */
+            priceUnit?: "fixed" | "hour" | "visit" | "night" | "free" | null;
+            durationLabel?: string | null;
+            supportedLabel?: string | null;
+            coverage?: string | null;
+            tags?: string[] | null;
+            description?: string | null;
+            included?: string[] | null;
+            requirements?: string[] | null;
+            supported?: string[] | null;
+            osVersions?: string[] | null;
+            handover?: components["schemas"]["services.HandoverOption"][] | null;
+            priceTable?: components["schemas"]["services.PriceRow"][] | null;
+            priceTableTitle?: string | null;
+            terms?: string[] | null;
+            steps?: components["schemas"]["services.ServiceStep"][] | null;
+            /** @description 15–480; set for services booked at a time */
+            slotMinutes?: number | null;
+            durationMinutes?: number | null;
+            /** @enum {string|null} */
+            status?: "published" | "hidden" | null;
+            position?: number | null;
+        };
+        "services.AvailabilitySlot": {
+            /** Format: date-time */
+            start: string;
+            /** Format: date-time */
+            end: string;
+            /** @description e.g. 3:30 PM */
+            label: string;
+            available: boolean;
+        };
+        "services.AvailabilityDay": {
+            /** Format: date */
+            date: string;
+            /** @description e.g. Thu */
+            weekdayLabel: string;
+            open: boolean;
+            slots: components["schemas"]["services.AvailabilitySlot"][];
+        };
+        "services.RequestDetails": {
+            /** @description OS install and post-sale */
+            deviceModel?: string | null;
+            /** @description OS install */
+            osVersion?: string | null;
+            /**
+             * @description How the item or person is reached
+             * @enum {string|null}
+             */
+            handover?: "dropoff" | "pickup" | "at_home" | "online" | null;
+            /** @description Pickup or home visit address */
+            address?: string | null;
+            /** @description Welfare: who the service is for, e.g. My mother, 78 */
+            careFor?: string | null;
+            /**
+             * Format: date
+             * @description Requests without a slot: the day the customer would like
+             */
+            preferredDate?: string | null;
+            /** @description The price row the customer chose, e.g. Weekly */
+            plan?: string | null;
+            notes?: string | null;
+        };
+        "services.RequestInput": {
+            /** Format: uuid */
+            serviceId: string;
+            /**
+             * Format: date-time
+             * @description Bookable services: the chosen slot (must still be free)
+             */
+            slotStart?: string | null;
+            /** @description A chosen staff member; any free one when omitted */
+            staffId?: string | null;
+            contact: components["schemas"]["services.RequestContact"];
+            details?: components["schemas"]["services.RequestDetails"] | null;
+        };
+        "services.ServiceRequest": {
+            /** Format: uuid */
+            id: string;
+            /** @description Short code shown to the customer, e.g. SR-4K7Q2 */
+            ref: string;
+            /** @enum {string} */
+            area: "os_install" | "post_sale" | "welfare" | "booking";
+            /** @enum {string} */
+            status: "requested" | "confirmed" | "in_progress" | "completed" | "cancelled" | "declined";
+            /** @description e.g. Waiting for the provider to confirm */
+            statusLabel: string;
+            service: components["schemas"]["services.ServiceCard"];
+            provider: components["schemas"]["services.ProviderCard"];
+            /** Format: date-time */
+            slotStart?: string | null;
+            /** Format: date-time */
+            slotEnd?: string | null;
+            /** @description e.g. Sat, Oct 24 · 10:15 AM */
+            whenLabel?: string | null;
+            staff?: components["schemas"]["services.ProviderStaff"] | null;
+            contact: components["schemas"]["services.RequestContact"];
+            details: components["schemas"]["services.RequestDetails"];
+            /** @description e.g. from $29, paid at the shop */
+            priceLabel?: string | null;
+            /** @description What the provider or staff said, e.g. a decline reason */
+            providerNote?: string | null;
+            canCancel: boolean;
+            canReview: boolean;
+            /** @description Status changes, oldest first */
+            history: components["schemas"]["services.StatusChange"][];
+            /** Format: date-time */
+            createdAt: string;
+        };
+        "services.RequestAdmin": {
+            /** Format: uuid */
+            id: string;
+            ref: string;
+            /** @enum {string} */
+            area: "os_install" | "post_sale" | "welfare" | "booking";
+            /** @enum {string} */
+            status: "requested" | "confirmed" | "in_progress" | "completed" | "cancelled" | "declined";
+            /** Format: uuid */
+            serviceId: string;
+            serviceTitle: string;
+            /** Format: uuid */
+            providerId: string;
+            providerName: string;
+            /** Format: uuid */
+            customerId: string;
+            /** Format: date-time */
+            slotStart?: string | null;
+            /** Format: date-time */
+            slotEnd?: string | null;
+            staff?: components["schemas"]["services.ProviderStaff"] | null;
+            contact: components["schemas"]["services.RequestContact"];
+            details: components["schemas"]["services.RequestDetails"];
+            providerNote?: string | null;
+            staffNote?: string | null;
+            history: components["schemas"]["services.StatusChange"][];
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        "services.RequestUpdate": {
+            /** @enum {string|null} */
+            status?: "confirmed" | "in_progress" | "completed" | "declined" | "cancelled" | null;
+            /** @description Shown to the customer */
+            providerNote?: string | null;
+            /** @description Staff only */
+            staffNote?: string | null;
+            /**
+             * Format: date-time
+             * @description Move a booking to another free slot
+             */
+            slotStart?: string | null;
+        };
+        "services.ServiceReview": {
+            /** Format: uuid */
+            id: string;
+            rating: number;
+            text?: string | null;
+            authorName: string;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        "services.ReviewInput": {
+            /** @description 1–5 */
+            rating: number;
+            /** @description At most 1,000 characters */
+            text?: string | null;
+        };
+        "services.ReviewAdmin": {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            serviceId: string;
+            serviceTitle: string;
+            /** Format: uuid */
+            requestId: string;
+            rating: number;
+            text?: string | null;
+            authorName: string;
+            /** @enum {string} */
+            status: "visible" | "hidden";
+            /** Format: date-time */
+            createdAt: string;
         };
         "settings.DayHours": {
             /** @enum {string} */
@@ -71050,6 +72297,113 @@ export interface operations {
             };
         };
     };
+    "departments.getFarm": {
+        parameters: {
+            query?: {
+                postalCode?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["departments.FarmPage"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "departments.getFarmMachine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                productId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["departments.FarmMachine"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     "departments.listBlogTopics": {
         parameters: {
             query?: never;
@@ -72183,6 +73537,119 @@ export interface operations {
              *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
              */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "departments.getFarmAdmin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["departments.FarmAdmin"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "departments.setFarm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["departments.FarmInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["departments.FarmAdmin"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description IN_USE: Posts or companies still use it; move or delete them first. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -126229,6 +127696,2047 @@ export interface operations {
             };
             /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "services.listCategories": {
+        parameters: {
+            query: {
+                area: "os_install" | "post_sale" | "welfare" | "booking";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["services.ServiceCategory"][];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "services.listServices": {
+        parameters: {
+            query: {
+                area: "os_install" | "post_sale" | "welfare" | "booking";
+                category?: string | null;
+                q?: string | null;
+                sort?: "recommended" | "price" | "rating" | null;
+                /** @description Opaque cursor from the previous response. Used by the Android app's infinite scroll. */
+                cursor?: string | null;
+                /** @description 1-based page number. Used by the website's numbered pages. */
+                page?: number | null;
+                /** @description Items per batch, 1–100, default 24 */
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["services.ServiceCard"][];
+                        /** @description Pass as ?cursor= for the next batch (app). Null at the end. */
+                        nextCursor: string | null;
+                        page?: number;
+                        totalPages?: number;
+                        total?: number;
+                    };
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "services.getService": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["services.Service"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "services.listServiceReviews": {
+        parameters: {
+            query?: {
+                /** @description Opaque cursor from the previous response. Used by the Android app's infinite scroll. */
+                cursor?: string | null;
+                /** @description 1-based page number. Used by the website's numbered pages. */
+                page?: number | null;
+                /** @description Items per batch, 1–100, default 24 */
+                limit?: number | null;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["services.ServiceReview"][];
+                        /** @description Pass as ?cursor= for the next batch (app). Null at the end. */
+                        nextCursor: string | null;
+                        page?: number;
+                        totalPages?: number;
+                        total?: number;
+                    };
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "services.listProviders": {
+        parameters: {
+            query: {
+                area: "os_install" | "post_sale" | "welfare" | "booking";
+                category?: string | null;
+                q?: string | null;
+                /** @description Opaque cursor from the previous response. Used by the Android app's infinite scroll. */
+                cursor?: string | null;
+                /** @description 1-based page number. Used by the website's numbered pages. */
+                page?: number | null;
+                /** @description Items per batch, 1–100, default 24 */
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["services.ProviderCard"][];
+                        /** @description Pass as ?cursor= for the next batch (app). Null at the end. */
+                        nextCursor: string | null;
+                        page?: number;
+                        totalPages?: number;
+                        total?: number;
+                    };
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "services.getProvider": {
+        parameters: {
+            query?: {
+                area?: "os_install" | "post_sale" | "welfare" | "booking" | null;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["services.Provider"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "services.getAvailability": {
+        parameters: {
+            query?: {
+                from?: string | null;
+                days?: number | null;
+                staffId?: string | null;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["services.AvailabilityDay"][];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "services.listMyRequests": {
+        parameters: {
+            query?: {
+                area?: "os_install" | "post_sale" | "welfare" | "booking" | null;
+                state?: "open" | "past" | null;
+                /** @description Opaque cursor from the previous response. Used by the Android app's infinite scroll. */
+                cursor?: string | null;
+                /** @description 1-based page number. Used by the website's numbered pages. */
+                page?: number | null;
+                /** @description Items per batch, 1–100, default 24 */
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["services.ServiceRequest"][];
+                        /** @description Pass as ?cursor= for the next batch (app). Null at the end. */
+                        nextCursor: string | null;
+                        page?: number;
+                        totalPages?: number;
+                        total?: number;
+                    };
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "services.createRequest": {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required on endpoints marked idempotent (orders, payments, refunds, payouts). Same key + same request returns the first result (with Idempotent-Replayed: true). */
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["services.RequestInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["services.ServiceRequest"];
+                };
+            };
+            /**
+             * @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.
+             *     SLOT_REQUIRED: Pick a time for this service.
+             */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description SLOT_TAKEN: That time was just booked; pick another. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "services.getMyRequest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["services.ServiceRequest"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "services.cancelMyRequest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    reason?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["services.ServiceRequest"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.
+             *     TOO_LATE_TO_CANCEL: It is too close to the booking to cancel in the app; call the provider.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "services.reviewMyRequest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["services.ReviewInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["services.ServiceRequest"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.
+             *     ALREADY_REVIEWED: You already rated this.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "services.listCategoriesAdmin": {
+        parameters: {
+            query?: {
+                area?: "os_install" | "post_sale" | "welfare" | "booking" | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["services.ServiceCategory"][];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "services.createCategory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["services.ServiceCategoryInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["services.ServiceCategory"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description SLUG_TAKEN: Another record already uses this slug. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "services.deleteCategory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success, no content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description IN_USE: Services or requests still use it. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "services.updateCategory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["services.ServiceCategoryInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["services.ServiceCategory"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description SLUG_TAKEN: Another record already uses this slug. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "services.listProvidersAdmin": {
+        parameters: {
+            query?: {
+                area?: "os_install" | "post_sale" | "welfare" | "booking" | null;
+                status?: "published" | "hidden" | null;
+                q?: string | null;
+                /** @description Opaque cursor from the previous response. Used by the Android app's infinite scroll. */
+                cursor?: string | null;
+                /** @description 1-based page number. Used by the website's numbered pages. */
+                page?: number | null;
+                /** @description Items per batch, 1–100, default 24 */
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["services.ProviderAdmin"][];
+                        /** @description Pass as ?cursor= for the next batch (app). Null at the end. */
+                        nextCursor: string | null;
+                        page?: number;
+                        totalPages?: number;
+                        total?: number;
+                    };
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "services.createProvider": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["services.ProviderInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["services.ProviderAdmin"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description SLUG_TAKEN: Another record already uses this slug. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "services.getProviderAdmin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["services.ProviderAdmin"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "services.deleteProvider": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success, no content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description IN_USE: Services or requests still use it. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "services.updateProvider": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["services.ProviderInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["services.ProviderAdmin"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description SLUG_TAKEN: Another record already uses this slug. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "services.listServicesAdmin": {
+        parameters: {
+            query?: {
+                area?: "os_install" | "post_sale" | "welfare" | "booking" | null;
+                providerId?: string | null;
+                categoryId?: string | null;
+                status?: "published" | "hidden" | null;
+                q?: string | null;
+                /** @description Opaque cursor from the previous response. Used by the Android app's infinite scroll. */
+                cursor?: string | null;
+                /** @description 1-based page number. Used by the website's numbered pages. */
+                page?: number | null;
+                /** @description Items per batch, 1–100, default 24 */
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["services.ServiceAdmin"][];
+                        /** @description Pass as ?cursor= for the next batch (app). Null at the end. */
+                        nextCursor: string | null;
+                        page?: number;
+                        totalPages?: number;
+                        total?: number;
+                    };
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "services.createService": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["services.ServiceInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["services.ServiceAdmin"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description SLUG_TAKEN: Another record already uses this slug. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "services.getServiceAdmin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["services.ServiceAdmin"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "services.deleteService": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success, no content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description IN_USE: Services or requests still use it. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "services.updateService": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["services.ServiceInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["services.ServiceAdmin"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description SLUG_TAKEN: Another record already uses this slug. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "services.listRequestsAdmin": {
+        parameters: {
+            query?: {
+                area?: "os_install" | "post_sale" | "welfare" | "booking" | null;
+                status?: "requested" | "confirmed" | "in_progress" | "completed" | "cancelled" | "declined" | null;
+                providerId?: string | null;
+                q?: string | null;
+                /** @description Opaque cursor from the previous response. Used by the Android app's infinite scroll. */
+                cursor?: string | null;
+                /** @description 1-based page number. Used by the website's numbered pages. */
+                page?: number | null;
+                /** @description Items per batch, 1–100, default 24 */
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["services.RequestAdmin"][];
+                        /** @description Pass as ?cursor= for the next batch (app). Null at the end. */
+                        nextCursor: string | null;
+                        page?: number;
+                        totalPages?: number;
+                        total?: number;
+                    };
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "services.getRequestAdmin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["services.RequestAdmin"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "services.updateRequest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["services.RequestUpdate"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["services.RequestAdmin"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.
+             *     SLOT_TAKEN: That time was just booked; pick another.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "services.listReviewsAdmin": {
+        parameters: {
+            query?: {
+                status?: "visible" | "hidden" | null;
+                serviceId?: string | null;
+                /** @description Opaque cursor from the previous response. Used by the Android app's infinite scroll. */
+                cursor?: string | null;
+                /** @description 1-based page number. Used by the website's numbered pages. */
+                page?: number | null;
+                /** @description Items per batch, 1–100, default 24 */
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["services.ReviewAdmin"][];
+                        /** @description Pass as ?cursor= for the next batch (app). Null at the end. */
+                        nextCursor: string | null;
+                        page?: number;
+                        totalPages?: number;
+                        total?: number;
+                    };
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "services.moderateReview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    status: "visible" | "hidden";
+                };
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["services.ReviewAdmin"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
