@@ -59,6 +59,35 @@ export const NEWS_PUBLISH = 'content.news.publish';
  */
 export const ANNOUNCEMENTS_SEND = 'notifications.announcements.send';
 export const ANNOUNCEMENT_ROLES = ['seller_manager', 'platform_administrator'] as const;
+/**
+ * Department pages of the app (departments module, 2026-10-21): the Content Manager runs them all (departments.*); the
+ * Marketing Manager edits their content. Installs seeded before them get the keys from access migration
+ * 2026-10-21-departments-keys.
+ */
+export const DEPARTMENTS_MANAGE = ['departments.phones.manage', 'departments.blogs.manage', 'departments.companies.manage', 'departments.play.manage', 'departments.farm.manage'] as const;
+/**
+ * Services, requests and bookings of the department pages (services module, 2026-10-22): the Content Manager runs them
+ * (services.*), the Marketing Manager keeps providers and services, and support handles customers' requests. Installs
+ * seeded before them get the keys from access migration 2026-10-22-services-keys.
+ */
+export const SERVICES_MANAGE = 'services.manage';
+export const SERVICES_REQUESTS = ['services.view', 'services.requests.manage'] as const;
+/**
+ * Softwares, Food delivery and Daily rewards (software, food and rewards modules, 2026-10-23): the Content Manager runs
+ * them (software.*, food.*, rewards.*), the Marketing Manager keeps their catalogues and rewards (the manage keys), and
+ * support reads them and handles food orders. Installs seeded before them get the keys from access migration
+ * 2026-10-23-phase3-keys.
+ */
+export const PHASE3_MANAGE = ['software.manage', 'food.manage', 'rewards.manage'] as const;
+export const PHASE3_SUPPORT = ['software.view', 'food.view', 'rewards.view', 'food.orders.manage'] as const;
+/**
+ * Phase 4 of the department pages (farm module, Post-sale devices, game server keys and review moderation, 2026-10-24):
+ * the Content Manager runs them (farm.*, services.*, departments.*), the Marketing Manager keeps dealers, game server
+ * keys and review moderation (the manage keys), and support reads farm orders, moves them and verifies registered
+ * devices. Installs seeded before them get the keys from access migration 2026-10-24-phase4-keys.
+ */
+export const PHASE4_MANAGE = ['farm.manage', 'departments.play.keys', 'departments.reviews.manage'] as const;
+export const PHASE4_SUPPORT = ['farm.view', 'farm.orders.manage', 'services.devices.manage'] as const;
 
 export const SYSTEM_ROLES: SeedRole[] = [
   {
@@ -214,7 +243,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Customers and support',
     description: 'Support cases, customer accounts and messaging.',
     escalationRoleKey: BUSINESS_OWNER,
-    permissions: ['support.*', 'customers.*', '!customers.accounts.export', 'messaging.*', 'orders.orders.view', 'orders.customers.view-contact', 'returns.requests.view', 'wallet.credit.view', 'wallet.goodwill.grant', OWNER_DECIDES, STAFF_UPLOADS, ...QUEUES],
+    permissions: ['support.*', 'customers.*', '!customers.accounts.export', 'messaging.*', ...SERVICES_REQUESTS, ...PHASE3_SUPPORT, ...PHASE4_SUPPORT,'orders.orders.view', 'orders.customers.view-contact', 'returns.requests.view', 'wallet.credit.view', 'wallet.goodwill.grant', OWNER_DECIDES, STAFF_UPLOADS, ...QUEUES],
     limits: {
       'support.remedies.approve': upTo(500),
       'wallet.goodwill.grant': upTo(50),
@@ -261,7 +290,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Marketing and content',
     description: 'Promotions, homepage and marketing broadcasts.',
     escalationRoleKey: BUSINESS_OWNER,
-    permissions: ['promotions.*', 'content.homepage.manage', NEWS_MANAGE, 'reports.customers-marketing.view', 'notifications.broadcasts.manage', 'advertising.campaigns.review', MARKETING_OFFERS_VIEW, STAFF_UPLOADS, ...QUEUES],
+    permissions: ['promotions.*', 'content.homepage.manage', NEWS_MANAGE, ...DEPARTMENTS_MANAGE, SERVICES_MANAGE, ...PHASE3_MANAGE, ...PHASE4_MANAGE, 'reports.customers-marketing.view', 'notifications.broadcasts.manage', 'advertising.campaigns.review', MARKETING_OFFERS_VIEW, STAFF_UPLOADS, ...QUEUES],
     limits: { 'promotions.budgets.approve': upTo(5_000) },
   },
   {
@@ -281,7 +310,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Marketing and content',
     description: 'Pages, help center and policies (policies approved by the Business Owner).',
     escalationRoleKey: BUSINESS_OWNER,
-    permissions: ['content.*', 'media.assets.manage', STAFF_UPLOADS, 'advertising.campaigns.review', ...QUEUES],
+    permissions: ['content.*', 'departments.*', 'services.*', 'software.*', 'food.*', 'rewards.*', 'farm.*', 'media.assets.manage', STAFF_UPLOADS, 'advertising.campaigns.review', ...QUEUES],
     limits: { 'content.policies.approve': RECOMMEND, 'content.policies.short-notice': RECOMMEND },
   },
   {
@@ -351,7 +380,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Customers and support',
     description: 'Support cases, customer notes and conversations.',
     escalationRoleKey: 'customer_support_manager',
-    permissions: ['support.cases.view', 'support.cases.handle', 'customers.accounts.view', 'customers.notes.write', 'messaging.conversations.read', 'messaging.conversations.participate', 'orders.orders.view', 'wallet.credit.view', 'wallet.goodwill.grant', STAFF_UPLOADS, ...QUEUES],
+    permissions: ['support.cases.view', 'support.cases.handle', ...SERVICES_REQUESTS, ...PHASE3_SUPPORT, ...PHASE4_SUPPORT,'customers.accounts.view', 'customers.notes.write', 'messaging.conversations.read', 'messaging.conversations.participate', 'orders.orders.view', 'wallet.credit.view', 'wallet.goodwill.grant', STAFF_UPLOADS, ...QUEUES],
     limits: { 'support.remedies.approve': upTo(50), 'wallet.goodwill.grant': upTo(50) },
   },
 ];
@@ -363,6 +392,12 @@ export const SYSTEM_ROLES: SeedRole[] = [
 export const VIEW_COMPANIONS: Readonly<Record<string, string>> = {
   'catalog.view': 'catalog.',
   'content.view': 'content.',
+  'departments.view': 'departments.',
+  'services.view': 'services.',
+  'software.view': 'software.',
+  'food.view': 'food.',
+  'rewards.view': 'rewards.',
+  'farm.view': 'farm.',
   'offers.official.view': 'offers.official.',
   'sellers.applications.view': 'sellers.applications.',
   'returns.inspections.view': 'returns.inspections.',

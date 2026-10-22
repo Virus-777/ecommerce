@@ -30,6 +30,8 @@ enum ContentLinkKind @areas(in: [STORE, ADMIN]) {
   POLICY
   HELP
   EXTERNAL
+  "A built-in department page in the app, e.g. /software"
+  DEPARTMENT
 }
 
 "Campaign or promotional banner (hero) used by sections and page blocks"
@@ -83,6 +85,20 @@ type ContentCategoryShortcut @areas(in: [STORE, ADMIN]) {
   label: String
 }
 
+"One tile of the Departments rail: a department page, category, store page or outside link"
+type ContentDepartmentTile @areas(in: [STORE, ADMIN]) {
+  id: String!
+  title: String!
+  "Text under the tile; null means the title"
+  label: String
+  "Icon name from the design system (Lucide), e.g. smartphone; shown when there is no image"
+  icon: String
+  image: MediaRef
+  "Placeholder tint 1–6 behind the icon"
+  tint: Int
+  link: ContentLink!
+}
+
 "Campaign or page period, shown with its time zone"
 type ContentPeriod @areas(in: [STORE, ADMIN]) {
   from: DateTime!
@@ -103,6 +119,9 @@ type HomePage @areas(in: [STORE, ADMIN]) {
 
 enum HomeSectionKind @areas(in: [STORE, ADMIN]) {
   CAMPAIGN_BANNER
+  "Departments rail: read HomeSection.departments"
+  DEPARTMENTS
+  "Older form of the Departments rail: read HomeSection.categories"
   CATEGORY_SHORTCUTS
   "Flash deals strip: read HomeSection.flashSales (promotions)"
   DEALS
@@ -137,6 +156,8 @@ type HomeSection @areas(in: [STORE, ADMIN]) {
   "Products in order, unavailable ones already removed"
   products(limit: Int): [ContentProductTile!]! @cost(weight: 10)
   categories: [ContentCategoryShortcut!]!
+  "DEPARTMENTS only: the visible tiles in order (built-in department pages are app-only and left out on the web)"
+  departments: [ContentDepartmentTile!]!
   "Featured seller cards in published order (FEATURED_SELLERS), resolved by reference to sellers: name, slug, logo, Verified label, location, dispatch label. Rating comes from reviews (Seller.rating). Suspended or closed sellers are left out."
   sellers: [Seller!]!
   brands: [Brand!]!

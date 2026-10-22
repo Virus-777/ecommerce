@@ -3,7 +3,12 @@
   "title": "Notifications",
   "group": "Platform",
   "phase": 1,
-  "chapters": [7, 11, 15, 19],
+  "chapters": [
+    7,
+    11,
+    15,
+    19
+  ],
   "summary": "Who is told what, on which channel: notification topics for customers, sellers and staff, routing from platform events to recipients (staff by role, with backups), templates with versions and preview, in-app inboxes for the store, Seller Center and Admin Center, email delivery with retries and suppression, seller and staff channel preferences, promotional broadcasts under consent, and Android push devices (phase 3).",
   "owns": [
     "Topic catalogue: every notice per audience with category (essential, optional, promotional), inbox group, link target, deadline and channels (in-app and email at launch; SMS phase 2; push phase 3)",
@@ -26,43 +31,183 @@
     "Campaign content and audiences for marketing: promotions (a broadcast references a promotional template and a consent channel)",
     "Policy and help texts: content"
   ],
-  "dependsOn": ["identity"],
-  "optionalDeps": ["access", "customers", "sellers", "media", "settings", "audit", "messaging"],
+  "dependsOn": [
+    "identity"
+  ],
+  "optionalDeps": [
+    "access",
+    "customers",
+    "sellers",
+    "media",
+    "settings",
+    "audit",
+    "messaging"
+  ],
   "publicApi": [
-    { "name": "notify", "signature": "(input: NotifyInput) => { noticeIds: uuid[], deliveryIds: uuid[] }", "desc": "Send a topic to recipients now (for cases not covered by the event routing rules, e.g. mentions, test notices, guest order links). Essential topics ignore promotional consent; promotional topics check it.", "usedBy": ["customers", "support", "messaging", "sellers", "finance", "returns", "workqueues", "access", "reports", "audit", "fulfillment-service"] },
-    { "name": "schedule", "signature": "(input: NotifyInput, sendAt: datetime) => uuid", "desc": "Send later (deadline reminders). Requires a dedupeKey so it can be cancelled.", "usedBy": ["shipping", "orders", "returns", "sellers", "support", "access"] },
-    { "name": "cancelScheduled", "signature": "(dedupeKey: string) => int", "desc": "Cancel scheduled notices (e.g. order dispatched before the reminder)", "usedBy": ["shipping", "orders", "returns", "sellers", "support", "access"] },
-    { "name": "resolve", "signature": "(dedupeKey: string, note?: string) => int", "desc": "Mark action-required notices as done for every recipient (the queue item was handled), so inboxes stop showing them as needing action", "usedBy": ["workqueues", "support", "access", "finance", "sellers", "shipping", "returns"] },
-    { "name": "canSendPromotional", "signature": "(recipient: Recipient, channel: 'email' | 'sms' | 'push') => bool", "desc": "Consent, suppression and account status check before any promotional send", "usedBy": ["promotions", "advertising", "wishlist", "reviews"] },
-    { "name": "verifyUnsubscribeToken", "signature": "(token: string) => { audience: 'customer' | 'seller', accountId: uuid | null, email: string, channel: 'email' | 'sms' | 'push', topicGroup: string } | null", "desc": "Tokens in promotional footers are signed here; customers' public unsubscribe endpoint verifies them", "usedBy": ["customers"] },
-    { "name": "unreadCount", "signature": "(principal: identity.Principal) => int", "desc": "Badge count for navigation responses of other modules", "usedBy": ["customers", "sellers", "graphql"] },
-    { "name": "listInbox", "signature": "(principal: identity.Principal, filter: { group?: string, unreadOnly?: bool, actionRequired?: bool, category?: 'essential' | 'optional' | 'promotional', view?: 'all' | 'needs_my_action' | 'mentions' }, page: PageInput) => Page<Notice>", "desc": "The caller's own inbox, newest first: customer (store), seller member within the current seller (Seller Center), staff member including notices received as backup (Admin Center). Same rules as GET /inbox in each area.", "usedBy": ["graphql"] },
-    { "name": "inboxSummary", "signature": "(principal: identity.Principal) => InboxSummary & Partial<StaffInboxSummary>", "desc": "Unread per group, open action notices (max 10, by deadline) and, for staff, needs-my-action, mentions and routing today. Same data as GET /inbox/summary in each area.", "usedBy": ["graphql"] }
+    {
+      "name": "notify",
+      "signature": "(input: NotifyInput) => { noticeIds: uuid[], deliveryIds: uuid[] }",
+      "desc": "Send a topic to recipients now (for cases not covered by the event routing rules, e.g. mentions, test notices, guest order links). Essential topics ignore promotional consent; promotional topics check it.",
+      "usedBy": [
+        "customers",
+        "support",
+        "messaging",
+        "sellers",
+        "finance",
+        "returns",
+        "workqueues",
+        "access",
+        "reports",
+        "audit",
+        "fulfillment-service"
+      ]
+    },
+    {
+      "name": "schedule",
+      "signature": "(input: NotifyInput, sendAt: datetime) => uuid",
+      "desc": "Send later (deadline reminders). Requires a dedupeKey so it can be cancelled.",
+      "usedBy": [
+        "shipping",
+        "orders",
+        "returns",
+        "sellers",
+        "support",
+        "access"
+      ]
+    },
+    {
+      "name": "cancelScheduled",
+      "signature": "(dedupeKey: string) => int",
+      "desc": "Cancel scheduled notices (e.g. order dispatched before the reminder)",
+      "usedBy": [
+        "shipping",
+        "orders",
+        "returns",
+        "sellers",
+        "support",
+        "access"
+      ]
+    },
+    {
+      "name": "resolve",
+      "signature": "(dedupeKey: string, note?: string) => int",
+      "desc": "Mark action-required notices as done for every recipient (the queue item was handled), so inboxes stop showing them as needing action",
+      "usedBy": [
+        "workqueues",
+        "support",
+        "access",
+        "finance",
+        "sellers",
+        "shipping",
+        "returns"
+      ]
+    },
+    {
+      "name": "canSendPromotional",
+      "signature": "(recipient: Recipient, channel: 'email' | 'sms' | 'push') => bool",
+      "desc": "Consent, suppression and account status check before any promotional send",
+      "usedBy": [
+        "promotions",
+        "advertising",
+        "wishlist",
+        "reviews"
+      ]
+    },
+    {
+      "name": "verifyUnsubscribeToken",
+      "signature": "(token: string) => { audience: 'customer' | 'seller', accountId: uuid | null, email: string, channel: 'email' | 'sms' | 'push', topicGroup: string } | null",
+      "desc": "Tokens in promotional footers are signed here; customers' public unsubscribe endpoint verifies them",
+      "usedBy": [
+        "customers"
+      ]
+    },
+    {
+      "name": "unreadCount",
+      "signature": "(principal: identity.Principal) => int",
+      "desc": "Badge count for navigation responses of other modules",
+      "usedBy": [
+        "customers",
+        "sellers",
+        "graphql"
+      ]
+    },
+    {
+      "name": "listInbox",
+      "signature": "(principal: identity.Principal, filter: { group?: string, unreadOnly?: bool, actionRequired?: bool, category?: 'essential' | 'optional' | 'promotional', view?: 'all' | 'needs_my_action' | 'mentions' }, page: PageInput) => Page<Notice>",
+      "desc": "The caller's own inbox, newest first: customer (store), seller member within the current seller (Seller Center), staff member including notices received as backup (Admin Center). Same rules as GET /inbox in each area.",
+      "usedBy": [
+        "graphql"
+      ]
+    },
+    {
+      "name": "inboxSummary",
+      "signature": "(principal: identity.Principal) => InboxSummary & Partial<StaffInboxSummary>",
+      "desc": "Unread per group, open action notices (max 10, by deadline) and, for staff, needs-my-action, mentions and routing today. Same data as GET /inbox/summary in each area.",
+      "usedBy": [
+        "graphql"
+      ]
+    }
   ],
   "types": {
     "Recipient": {
-      "kind": { "type": "enum(customer|guest_email|seller|seller_member|staff_role|staff_member|external_email)", "desc": "external_email: a contact outside Marketly (supplier, rights owner, scheduled-report address); email only, essential topics only" },
-      "accountId": { "type": "uuid?", "desc": "Identity account (seller member, staff member; a customer only when no customerId is known)" },
-      "customerId": { "type": "uuid?", "desc": "customer: the customers-module id (preferred over accountId; never an account id). notifications resolves the identity account and email through customers.getCustomer, so modules that only know an order's customerId (shipping, returns, payments) address the customer directly instead of the order email" },
-      "email": { "type": "email?", "desc": "Guests (checkout email) and external_email recipients" },
-      "sellerId": { "type": "uuid?", "desc": "seller: all members who should get this topic; seller_member: one member" },
+      "kind": {
+        "type": "enum(customer|guest_email|seller|seller_member|staff_role|staff_member|external_email)",
+        "desc": "external_email: a contact outside Marketly (supplier, rights owner, scheduled-report address); email only, essential topics only"
+      },
+      "accountId": {
+        "type": "uuid?",
+        "desc": "Identity account (seller member, staff member; a customer only when no customerId is known)"
+      },
+      "customerId": {
+        "type": "uuid?",
+        "desc": "customer: the customers-module id (preferred over accountId; never an account id). notifications resolves the identity account and email through customers.getCustomer, so modules that only know an order's customerId (shipping, returns, payments) address the customer directly instead of the order email"
+      },
+      "email": {
+        "type": "email?",
+        "desc": "Guests (checkout email) and external_email recipients"
+      },
+      "sellerId": {
+        "type": "uuid?",
+        "desc": "seller: all members who should get this topic; seller_member: one member"
+      },
       "memberId": "uuid?",
-      "roleKey": { "type": "string?", "desc": "staff_role: resolved through access (lead, or covering backup)" }
+      "roleKey": {
+        "type": "string?",
+        "desc": "staff_role: resolved through access (lead, or covering backup)"
+      }
     },
     "NoticeLink": {
-      "kind": { "type": "string", "desc": "order, order_item, shipment, return, refund, case, conversation, product, seller_order, payout, statement, hold, restriction, approval, queue, setting_change, account, campaign" },
+      "kind": {
+        "type": "string",
+        "desc": "order, order_item, shipment, return, refund, case, conversation, product, seller_order, payout, statement, hold, restriction, approval, queue, setting_change, account, campaign"
+      },
       "id": "string",
-      "ref": { "type": "string?", "desc": "Reference of the record the screen opens, next to its id: MK-260914-48213 for order, shipment (tracking) and seller order links (refund notices link to the order, the return or the case and carry that reference, never the RF- one), RT-261002-0520, CS-261005-3381, PO-261005-3381" },
-      "label": { "type": "string?", "desc": "Button text, e.g. Open dispatch queue" },
-      "screen": { "type": "string", "desc": "App route / prototype screen id (design/prototype catalogue), the screen where the publishing module shows the record (its endpoint screens), e.g. account/tracking, seller/order, ops/dispatch. Invitation emails carry url and use accept-invitation (identity lists no screen for it)" },
+      "ref": {
+        "type": "string?",
+        "desc": "Reference of the record the screen opens, next to its id: MK-260914-48213 for order, shipment (tracking) and seller order links (refund notices link to the order, the return or the case and carry that reference, never the RF- one), RT-261002-0520, CS-261005-3381, PO-261005-3381"
+      },
+      "label": {
+        "type": "string?",
+        "desc": "Button text, e.g. Open dispatch queue"
+      },
+      "screen": {
+        "type": "string",
+        "desc": "App route / prototype screen id (design/prototype catalogue), the screen where the publishing module shows the record (its endpoint screens), e.g. account/tracking, seller/order, ops/dispatch. Invitation emails carry url and use accept-invitation (identity lists no screen for it)"
+      },
       "url": "url?"
     },
     "NotifyInput": {
       "topic": "string",
       "recipients": "Recipient[]",
-      "context": { "type": "json", "desc": "Template variables, e.g. { order: { ref }, seller: { name }, package: { label, items } }" },
+      "context": {
+        "type": "json",
+        "desc": "Template variables, e.g. { order: { ref }, seller: { name }, package: { label, items } }"
+      },
       "link": "NoticeLink",
-      "dedupeKey": { "type": "string?", "desc": "Same key + recipient within dedupeWindowMinutes is sent once; also used by resolve and cancelScheduled" },
+      "dedupeKey": {
+        "type": "string?",
+        "desc": "Same key + recipient within dedupeWindowMinutes is sent once; also used by resolve and cancelScheduled"
+      },
       "actionRequired": "bool?",
       "deadline": "datetime?",
       "sellerId": "uuid?"
@@ -71,76 +216,173 @@
       "roleKey": "string",
       "roleName": "string",
       "reason": "enum(lead|backup|member|direct|requester|approver|mention)",
-      "coveringFor": { "type": "string?", "desc": "Name of the away lead when received as backup" },
-      "recipients": { "type": "RoutingRecipient[]", "desc": "Who receives the notice now for this role, e.g. Theo Grant (lead); from notice_recipients" }
+      "coveringFor": {
+        "type": "string?",
+        "desc": "Name of the away lead when received as backup"
+      },
+      "recipients": {
+        "type": "RoutingRecipient[]",
+        "desc": "Who receives the notice now for this role, e.g. Theo Grant (lead); from notice_recipients"
+      }
     },
-    "RoutingRecipient": { "staffId": "uuid", "name": "string", "as": "enum(lead|backup|member)" },
+    "RoutingRecipient": {
+      "staffId": "uuid",
+      "name": "string",
+      "as": "enum(lead|backup|member)"
+    },
     "Notice": {
       "id": "uuid",
       "topicKey": "string",
       "category": "enum(essential|optional|promotional)",
-      "group": { "type": "string", "desc": "Inbox filter: customer orders|returns_refunds|cases|account|promotions; seller orders|returns_cases|products|account_finance; staff = work area" },
+      "group": {
+        "type": "string",
+        "desc": "Inbox filter: customer orders|returns_refunds|cases|account|promotions; seller orders|returns_cases|products|account_finance; staff = work area"
+      },
       "title": "string",
       "body": "text",
-      "icon": { "type": "string?", "desc": "Lucide icon name as lucide-react 1.x names it, e.g. truck, triangle-alert, circle-x (never the old aliases alert-triangle, x-circle)" },
+      "icon": {
+        "type": "string?",
+        "desc": "Lucide icon name as lucide-react 1.x names it, e.g. truck, triangle-alert, circle-x (never the old aliases alert-triangle, x-circle)"
+      },
       "tone": "enum(info|success|warning|danger|brand|deal|neutral)",
       "link": "NoticeLink",
       "createdAt": "datetime",
       "readAt": "datetime?",
-      "archivedAt": { "type": "datetime?", "desc": "Archived by me (hidden from the inbox and its counts; listed with archived=true)" },
+      "archivedAt": {
+        "type": "datetime?",
+        "desc": "Archived by me (hidden from the inbox and its counts; listed with archived=true)"
+      },
       "actionRequired": "bool",
       "deadline": "Deadline?",
-      "resolvedAt": { "type": "datetime?", "desc": "The work was done (shows 'Resolved Oct 7')" },
-      "state": { "type": "enum(open|resolved|expired)?", "desc": "Action notices only (null for information notices): open; resolved = the work was done; expired = no longer needed (the record closed another way or the notice aged out), shown as 'No longer needed', never as Resolved" },
+      "resolvedAt": {
+        "type": "datetime?",
+        "desc": "The work was done (shows 'Resolved Oct 7')"
+      },
+      "state": {
+        "type": "enum(open|resolved|expired)?",
+        "desc": "Action notices only (null for information notices): open; resolved = the work was done; expired = no longer needed (the record closed another way or the notice aged out), shown as 'No longer needed', never as Resolved"
+      },
       "expiredAt": "datetime?",
-      "routedTo": { "type": "RoutingInfo?", "desc": "Staff notices only" }
+      "routedTo": {
+        "type": "RoutingInfo?",
+        "desc": "Staff notices only"
+      }
     },
     "InboxSummary": {
       "unread": "int",
-      "byGroup": { "type": "map<int>", "desc": "Unread per group" },
-      "total": { "type": "int", "desc": "All notices in the inbox (read and unread), for the All chip" },
-      "totalByGroup": { "type": "map<int>", "desc": "All notices per group (read and unread), for the category chips, e.g. Returns & cases 4" },
+      "byGroup": {
+        "type": "map<int>",
+        "desc": "Unread per group"
+      },
+      "total": {
+        "type": "int",
+        "desc": "All notices in the inbox (read and unread), for the All chip"
+      },
+      "totalByGroup": {
+        "type": "map<int>",
+        "desc": "All notices per group (read and unread), for the category chips, e.g. Returns & cases 4"
+      },
       "actionRequired": "int",
-      "needsAction": { "type": "Notice[]", "desc": "Open action notices sorted by deadline, max 10" }
+      "needsAction": {
+        "type": "Notice[]",
+        "desc": "Open action notices sorted by deadline, max 10"
+      }
     },
-    "RoutingRow": { "roleKey": "string", "roleName": "string", "receivingNow": "string[]", "lead": "string?", "leadAway": "bool", "note": "string?" },
+    "RoutingRow": {
+      "roleKey": "string",
+      "roleName": "string",
+      "receivingNow": "string[]",
+      "lead": "string?",
+      "leadAway": "bool",
+      "note": "string?"
+    },
     "StaffInboxSummary": {
       "unread": "int",
       "byArea": "map<int>",
       "needsMyAction": "int",
       "mentions": "int",
-      "routingToday": { "type": "RoutingRow[]", "desc": "Roles the caller leads, backs up or covers, and who receives their notices today (from access)" },
-      "coveringNote": { "type": "string?", "desc": "Backup Seller Manager on Oct 8–9" }
+      "routingToday": {
+        "type": "RoutingRow[]",
+        "desc": "Roles the caller leads, backs up or covers, and who receives their notices today (from access)"
+      },
+      "coveringNote": {
+        "type": "string?",
+        "desc": "Backup Seller Manager on Oct 8–9"
+      }
     },
     "ChannelSetting": {
       "channel": "enum(in_app|email|sms|push)",
       "enabled": "bool",
-      "available": { "type": "bool", "desc": "False until the channel's phase (SMS 2, push 3)" },
-      "locked": { "type": "bool", "desc": "In-app for essential topics is always on" }
+      "available": {
+        "type": "bool",
+        "desc": "False until the channel's phase (SMS 2, push 3)"
+      },
+      "locked": {
+        "type": "bool",
+        "desc": "In-app for essential topics is always on"
+      }
     },
-    "TemplateVariable": { "name": { "type": "string", "desc": "order.ref, seller.name, tracking.url…" }, "desc": "string", "example": "string", "required": { "type": "bool", "desc": "e.g. the link variable: every notice must link to its record" } },
+    "TemplateVariable": {
+      "name": {
+        "type": "string",
+        "desc": "order.ref, seller.name, tracking.url…"
+      },
+      "desc": "string",
+      "example": "string",
+      "required": {
+        "type": "bool",
+        "desc": "e.g. the link variable: every notice must link to its record"
+      }
+    },
     "Topic": {
-      "key": { "type": "string", "desc": "customer.shipment.dispatched, seller.dispatch.reminder, staff.approval.waiting…" },
-      "audience": { "type": "enum(customer|seller|staff|external)", "desc": "external: suppliers and rights owners, by email only" },
+      "key": {
+        "type": "string",
+        "desc": "customer.shipment.dispatched, seller.dispatch.reminder, staff.approval.waiting…"
+      },
+      "audience": {
+        "type": "enum(customer|seller|staff|external)",
+        "desc": "external: suppliers and rights owners, by email only"
+      },
       "category": "enum(essential|optional|promotional)",
       "group": "string",
       "label": "string",
       "description": "text",
-      "triggers": { "type": "string[]", "desc": "Event names that produce it (or 'scheduled', 'direct')" },
-      "opens": { "type": "string", "desc": "What the link opens: Order details, Tracking, Seller order, Payout record…" },
+      "triggers": {
+        "type": "string[]",
+        "desc": "Event names that produce it (or 'scheduled', 'direct')"
+      },
+      "opens": {
+        "type": "string",
+        "desc": "What the link opens: Order details, Tracking, Seller order, Payout record…"
+      },
       "channels": "ChannelSetting[]",
       "actionRequired": "bool",
-      "staffRoleKeys": { "type": "string[]", "desc": "Staff topics: roles it is routed to" },
-      "sellerPermission": { "type": "string?", "desc": "Seller topics: members need this permission to receive it" },
-      "ownerOnly": { "type": "bool", "desc": "Seller topics only for the owner (payouts and holds)" },
-      "frequencyLabel": { "type": "string?", "desc": "Promotional topics: how often it is sent, e.g. Weekly, Monthly; null for event-driven topics" },
+      "staffRoleKeys": {
+        "type": "string[]",
+        "desc": "Staff topics: roles it is routed to"
+      },
+      "sellerPermission": {
+        "type": "string?",
+        "desc": "Seller topics: members need this permission to receive it"
+      },
+      "ownerOnly": {
+        "type": "bool",
+        "desc": "Seller topics only for the owner (payouts and holds)"
+      },
+      "frequencyLabel": {
+        "type": "string?",
+        "desc": "Promotional topics: how often it is sent, e.g. Weekly, Monthly; null for event-driven topics"
+      },
       "variables": "TemplateVariable[]",
       "phase": "int"
     },
     "DeliveryStats": {
       "essentialTopics": "int",
       "channelsLive": "string[]",
-      "emailDeliveryRate7d": { "type": "number", "desc": "0–1" },
+      "emailDeliveryRate7d": {
+        "type": "number",
+        "desc": "0–1"
+      },
       "emailDeliveryRateDelta": "number?",
       "bouncedOrBlocked": "int",
       "failedLast24h": "int",
@@ -151,22 +393,63 @@
       "seller": "Topic[]",
       "staff": "Topic[]",
       "promotional": "Topic[]",
-      "external": { "type": "Topic[]", "desc": "Email-only topics for contacts outside Marketly (suppliers, rights owners)" },
+      "external": {
+        "type": "Topic[]",
+        "desc": "Email-only topics for contacts outside Marketly (suppliers, rights owners)"
+      },
       "stats": "DeliveryStats"
     },
     "TemplateContent": {
-      "subject": { "type": "string?", "desc": "Email; keep under 60 characters" },
-      "preheader": { "type": "string?", "desc": "Email preview line with {{variables}}; shortened to 90 characters after rendering (never inside a variable)" },
-      "title": { "type": "string?", "desc": "In-app and push title" },
-      "body": { "type": "text", "desc": "Plain text with {{variables}}; email HTML is rendered from the layout; push bodies are shortened to 140 characters after rendering" },
+      "subject": {
+        "type": "string?",
+        "desc": "Email; keep under 60 characters"
+      },
+      "preheader": {
+        "type": "string?",
+        "desc": "Email preview line with {{variables}}; shortened to 90 characters after rendering (never inside a variable)"
+      },
+      "title": {
+        "type": "string?",
+        "desc": "In-app and push title"
+      },
+      "body": {
+        "type": "text",
+        "desc": "Plain text with {{variables}}; email HTML is rendered from the layout; push bodies are shortened to 140 characters after rendering"
+      },
       "button": "TemplateButton?",
-      "sender": { "type": "string?", "desc": "Marketly Orders <orders@marketly.example>" },
-      "allowPromotionalContent": { "type": "bool", "desc": "Always false for essential topics" }
+      "sender": {
+        "type": "string?",
+        "desc": "Marketly Orders <orders@marketly.example>"
+      },
+      "allowPromotionalContent": {
+        "type": "bool",
+        "desc": "Always false for essential topics"
+      }
     },
-    "TemplateButton": { "label": "string", "url": { "type": "string", "desc": "Usually a variable such as {{tracking.url}}" } },
-    "ValidationIssue": { "severity": "enum(blocking|warning)", "field": "string?", "message": "string" },
-    "TemplateValidation": { "ok": "bool", "issues": "ValidationIssue[]" },
-    "TemplateVersionSummary": { "id": "uuid", "version": "int", "status": "enum(draft|published|superseded|discarded)", "by": "Actor", "at": "datetime", "note": "text?" },
+    "TemplateButton": {
+      "label": "string",
+      "url": {
+        "type": "string",
+        "desc": "Usually a variable such as {{tracking.url}}"
+      }
+    },
+    "ValidationIssue": {
+      "severity": "enum(blocking|warning)",
+      "field": "string?",
+      "message": "string"
+    },
+    "TemplateValidation": {
+      "ok": "bool",
+      "issues": "ValidationIssue[]"
+    },
+    "TemplateVersionSummary": {
+      "id": "uuid",
+      "version": "int",
+      "status": "enum(draft|published|superseded|discarded)",
+      "by": "Actor",
+      "at": "datetime",
+      "note": "text?"
+    },
     "TemplateVersion": {
       "id": "uuid",
       "templateId": "uuid",
@@ -183,9 +466,15 @@
     "Template": {
       "id": "uuid",
       "topicKey": "string",
-      "audience": { "type": "enum(customer|seller|staff|external)", "desc": "external: email templates for suppliers and rights owners" },
+      "audience": {
+        "type": "enum(customer|seller|staff|external)",
+        "desc": "external: email templates for suppliers and rights owners"
+      },
       "channel": "enum(email|in_app|sms|push)",
-      "language": { "type": "string", "desc": "en-US (only locale at launch)" },
+      "language": {
+        "type": "string",
+        "desc": "en-US (only locale at launch)"
+      },
       "live": "TemplateVersionSummary?",
       "draft": "TemplateVersionSummary?",
       "updatedAt": "datetime"
@@ -196,7 +485,10 @@
       "live": "TemplateVersion?",
       "draft": "TemplateVersion?",
       "versions": "TemplateVersionSummary[]",
-      "otherChannels": { "type": "Template[]", "desc": "Same topic in other channels (Email / In-app tabs)" }
+      "otherChannels": {
+        "type": "Template[]",
+        "desc": "Same topic in other channels (Email / In-app tabs)"
+      }
     },
     "RenderPreview": {
       "channel": "enum(email|in_app|sms|push)",
@@ -206,7 +498,10 @@
       "html": "text?",
       "text": "text",
       "title": "string?",
-      "footer": { "type": "string", "desc": "Essential: 'You can't unsubscribe from order updates…'; promotional: unsubscribe line" },
+      "footer": {
+        "type": "string",
+        "desc": "Essential: 'You can't unsubscribe from order updates…'; promotional: unsubscribe line"
+      },
       "sampleContext": "json",
       "validation": "TemplateValidation"
     },
@@ -219,7 +514,10 @@
       "accountId": "uuid?",
       "addressMasked": "string",
       "status": "enum(queued|sending|sent|delivered|retrying|failed|bounced|complained|suppressed|skipped)",
-      "skipReason": { "type": "string?", "desc": "no_consent, preference_off, account_closed, duplicate" },
+      "skipReason": {
+        "type": "string?",
+        "desc": "no_consent, preference_off, account_closed, duplicate"
+      },
       "attempts": "int",
       "lastError": "string?",
       "providerMessageId": "string?",
@@ -232,7 +530,10 @@
     },
     "DeliveryDetail": {
       "delivery": "Delivery",
-      "subject": { "type": "string?", "desc": "Rendered subject (bodies are not stored; sensitive topics store no subject variables)" },
+      "subject": {
+        "type": "string?",
+        "desc": "Rendered subject (bodies are not stored; sensitive topics store no subject variables)"
+      },
       "events": "TimelineEvent[]"
     },
     "Suppression": {
@@ -246,54 +547,119 @@
       "removedAt": "datetime?",
       "removedBy": "Actor?"
     },
-    "TopicGroupInfo": { "key": "string", "label": "string", "ownerOnly": "bool", "essentialForOwner": "bool", "permission": "string?" },
+    "TopicGroupInfo": {
+      "key": "string",
+      "label": "string",
+      "ownerOnly": "bool",
+      "essentialForOwner": "bool",
+      "permission": "string?"
+    },
     "MemberPreference": {
       "memberId": "uuid",
       "accountId": "uuid",
       "name": "string",
       "roleLabel": "string",
       "isOwner": "bool",
-      "groups": { "type": "map<bool>", "desc": "Topic group key → receives (new_orders, dispatch_overdue, returns_cases, customer_messages, payouts_holds, products, promotions)" },
+      "groups": {
+        "type": "map<bool>",
+        "desc": "Topic group key → receives (new_orders, dispatch_overdue, returns_cases, customer_messages, payouts_holds, products, promotions)"
+      },
       "channel": "enum(in_app|in_app_and_email|email)",
-      "lockedGroups": { "type": "string[]", "desc": "Owner: essential groups always on; staff: owner-only groups cannot be enabled" }
+      "lockedGroups": {
+        "type": "string[]",
+        "desc": "Owner: essential groups always on; staff: owner-only groups cannot be enabled"
+      }
     },
-    "SellerPreferences": { "groups": "TopicGroupInfo[]", "members": "MemberPreference[]", "essentialNote": "string" },
-    "MemberPreferenceInput": { "groups": "map<bool>", "channel": "enum(in_app|in_app_and_email|email)" },
+    "SellerPreferences": {
+      "groups": "TopicGroupInfo[]",
+      "members": "MemberPreference[]",
+      "essentialNote": "string"
+    },
+    "MemberPreferenceInput": {
+      "groups": "map<bool>",
+      "channel": "enum(in_app|in_app_and_email|email)"
+    },
     "CustomerNotificationPreferences": {
-      "essential": { "type": "EssentialSummary", "desc": "Always on, in the account and by email" },
-      "promotional": { "type": "PromotionalPointer", "desc": "Promotional consent lives in customers" },
+      "essential": {
+        "type": "EssentialSummary",
+        "desc": "Always on, in the account and by email"
+      },
+      "promotional": {
+        "type": "PromotionalPointer",
+        "desc": "Promotional consent lives in customers"
+      },
       "push": "PushPreference"
     },
-    "EssentialSummary": { "channels": "string[]", "topics": "string[]", "note": "string" },
-    "PromotionalPointer": { "managedBy": "string", "path": { "type": "string", "desc": "/api/store/customers/marketing-preferences" } },
-    "PushPreference": { "available": "bool", "orderUpdates": "bool", "devices": "PushDevice[]" },
+    "EssentialSummary": {
+      "channels": "string[]",
+      "topics": "string[]",
+      "note": "string"
+    },
+    "PromotionalPointer": {
+      "managedBy": "string",
+      "path": {
+        "type": "string",
+        "desc": "/api/store/customers/marketing-preferences"
+      }
+    },
+    "PushPreference": {
+      "available": "bool",
+      "orderUpdates": "bool",
+      "devices": "PushDevice[]"
+    },
     "StaffPreferences": {
       "accountId": "uuid",
-      "emailByArea": { "type": "map<bool>", "desc": "Work area → also send by email (in-app is always on)" },
+      "emailByArea": {
+        "type": "map<bool>",
+        "desc": "Work area → also send by email (in-app is always on)"
+      },
       "emailForMentions": "bool",
-      "dailyDigest": { "type": "bool", "desc": "One summary email at the start of business hours instead of individual emails for non-urgent notices" }
+      "dailyDigest": {
+        "type": "bool",
+        "desc": "One summary email at the start of business hours instead of individual emails for non-urgent notices"
+      }
     },
     "PushDevice": {
       "id": "uuid",
       "platform": "enum(android)",
-      "tokenSuffix": { "type": "string", "desc": "Last 6 characters, for display" },
+      "tokenSuffix": {
+        "type": "string",
+        "desc": "Last 6 characters, for display"
+      },
       "appVersion": "string",
       "installationId": "string?",
       "createdAt": "datetime",
       "lastSeenAt": "datetime",
       "enabled": "bool"
     },
-    "PushDeviceInput": { "token": "string", "platform": "enum(android)", "appVersion": "string", "installationId": "string?" },
+    "PushDeviceInput": {
+      "token": "string",
+      "platform": "enum(android)",
+      "appVersion": "string",
+      "installationId": "string?"
+    },
     "BroadcastSegment": {
       "consentChannel": "enum(email|sms|push)",
-      "filters": { "type": "json", "desc": "Audience filters, e.g. { customersSince: date, purchasedCategories: uuid[] } or { sellerCategories: uuid[] }" }
+      "filters": {
+        "type": "json",
+        "desc": "Audience filters, e.g. { customersSince: date, purchasedCategories: uuid[] } or { sellerCategories: uuid[] }"
+      }
     },
-    "BroadcastStats": { "recipients": "int", "sent": "int", "delivered": "int", "bounced": "int", "unsubscribed": "int" },
+    "BroadcastStats": {
+      "recipients": "int",
+      "sent": "int",
+      "delivered": "int",
+      "bounced": "int",
+      "unsubscribed": "int"
+    },
     "Broadcast": {
       "id": "uuid",
       "name": "string",
       "audience": "enum(customers|sellers)",
-      "topicKey": { "type": "string", "desc": "A promotional topic, e.g. customer.promotions.newsletter" },
+      "topicKey": {
+        "type": "string",
+        "desc": "A promotional topic, e.g. customer.promotions.newsletter"
+      },
       "templateVersionId": "uuid",
       "segment": "BroadcastSegment",
       "status": "enum(draft|scheduled|sending|sent|cancelled)",
@@ -301,11 +667,21 @@
       "sentAt": "datetime?",
       "recipientEstimate": "int",
       "stats": "BroadcastStats",
-      "campaignId": { "type": "uuid?", "desc": "Promotions campaign it belongs to" },
+      "campaignId": {
+        "type": "uuid?",
+        "desc": "Promotions campaign it belongs to"
+      },
       "createdBy": "Actor",
       "createdAt": "datetime"
     },
-    "BroadcastInput": { "name": "string", "audience": "enum(customers|sellers)", "topicKey": "string", "templateVersionId": "uuid", "segment": "BroadcastSegment", "campaignId": "uuid?" },
+    "BroadcastInput": {
+      "name": "string",
+      "audience": "enum(customers|sellers)",
+      "topicKey": "string",
+      "templateVersionId": "uuid",
+      "segment": "BroadcastSegment",
+      "campaignId": "uuid?"
+    },
     "ProviderEmailEvent": {
       "providerEventId": "string",
       "type": "enum(delivered|bounced|complained|opened|deferred|rejected)",
@@ -317,341 +693,2490 @@
     },
     "InboundEmail": {
       "providerEventId": "string",
-      "to": { "type": "string", "desc": "reply+<signed token>@reply.marketly.example" },
+      "to": {
+        "type": "string",
+        "desc": "reply+<signed token>@reply.marketly.example"
+      },
       "from": "email",
       "subject": "string",
       "text": "text",
       "attachments": "InboundAttachment[]",
       "receivedAt": "datetime"
     },
-    "InboundAttachment": { "fileName": "string", "contentType": "string", "sizeBytes": "int", "downloadUrl": "url" },
-    "AnnouncementLink": { "screen": { "type": "string", "desc": "A Seller Center screen id (seller/…), e.g. seller/help or seller/store; the notice opens it like any NoticeLink (screen + id)" }, "id": { "type": "string", "desc": "The record the screen opens, 1–200 characters" }, "label": { "type": "string?", "desc": "Button text, at most 40 characters (default Read more)" } },
-    "AnnouncementInput": { "title": { "type": "string", "desc": "1–120 characters" }, "body": { "type": "text", "desc": "Plain text, 1–2000 characters" }, "sellerIds": { "type": "uuid[]?", "desc": "1–500 seller ids (each must be a known seller); omitted: every active seller (approved or restricted)" }, "link": { "type": "AnnouncementLink?", "desc": "Where the notice opens; omitted: the seller's notifications page" } },
-    "Announcement": { "id": "uuid", "title": "string", "body": "text", "audience": { "type": "enum(all|chosen)", "desc": "all: every active seller when it was sent; chosen: the sellerIds of the request" }, "sellerCount": { "type": "int", "desc": "Seller workspaces it was sent to" }, "link": "AnnouncementLink?", "sentBy": "Actor", "sentAt": "datetime" }
+    "InboundAttachment": {
+      "fileName": "string",
+      "contentType": "string",
+      "sizeBytes": "int",
+      "downloadUrl": "url"
+    },
+    "AnnouncementLink": {
+      "screen": {
+        "type": "string",
+        "desc": "A Seller Center screen id (seller/…), e.g. seller/help or seller/store; the notice opens it like any NoticeLink (screen + id)"
+      },
+      "id": {
+        "type": "string",
+        "desc": "The record the screen opens, 1–200 characters"
+      },
+      "label": {
+        "type": "string?",
+        "desc": "Button text, at most 40 characters (default Read more)"
+      }
+    },
+    "AnnouncementInput": {
+      "title": {
+        "type": "string",
+        "desc": "1–120 characters"
+      },
+      "body": {
+        "type": "text",
+        "desc": "Plain text, 1–2000 characters"
+      },
+      "sellerIds": {
+        "type": "uuid[]?",
+        "desc": "1–500 seller ids (each must be a known seller); omitted: every active seller (approved or restricted)"
+      },
+      "link": {
+        "type": "AnnouncementLink?",
+        "desc": "Where the notice opens; omitted: the seller's notifications page"
+      }
+    },
+    "Announcement": {
+      "id": "uuid",
+      "title": "string",
+      "body": "text",
+      "audience": {
+        "type": "enum(all|chosen)",
+        "desc": "all: every active seller when it was sent; chosen: the sellerIds of the request"
+      },
+      "sellerCount": {
+        "type": "int",
+        "desc": "Seller workspaces it was sent to"
+      },
+      "link": "AnnouncementLink?",
+      "sentBy": "Actor",
+      "sentAt": "datetime"
+    }
   },
   "tables": [
-    { "name": "topics", "desc": "Topic catalogue seeded from module code; staff toggle channels", "columns": { "key": "text pk", "audience": "text", "category": "text", "group_key": "text", "label": "text", "description": "text", "triggers": "jsonb", "opens": "text", "channels": "jsonb (channel → enabled)", "action_required": "bool", "staff_role_keys": "jsonb", "seller_permission": "text?", "owner_only": "bool", "frequency_label": "text?", "variables": "jsonb", "phase": "int", "updated_by": "text?", "updated_at": "timestamptz?" } },
-    { "name": "templates", "columns": { "id": "uuid pk", "topic_key": "text → topics", "channel": "text", "language": "text", "live_version_id": "uuid? → template_versions", "updated_at": "timestamptz" }, "indexes": ["unique (topic_key, channel, language)"] },
-    { "name": "template_versions", "columns": { "id": "uuid pk", "template_id": "uuid → templates", "version": "int", "status": "text", "content": "jsonb", "note": "text?", "created_by": "text", "created_at": "timestamptz", "published_by": "text?", "published_at": "timestamptz?" }, "indexes": ["unique (template_id, version)", "(template_id) where status = 'draft'"] },
-    { "name": "notices", "desc": "In-app notices (one per addressed audience: a customer, a seller workspace, a staff role or member)", "columns": { "id": "uuid pk", "topic_key": "text", "audience": "text", "address_kind": "text (customer|seller|role|staff)", "address_id": "text", "seller_id": "uuid?", "group_key": "text", "title": "text", "body": "text", "icon": "text?", "tone": "text", "link": "jsonb", "linked_ref": "text?", "action_required": "bool", "deadline_at": "timestamptz?", "dedupe_key": "text?", "resolved_at": "timestamptz?", "resolve_note": "text?", "expired_at": "timestamptz? (action notices that ended without being resolved)", "created_at": "timestamptz", "expires_at": "timestamptz" }, "indexes": ["(address_kind, address_id, created_at desc)", "(dedupe_key)", "(expires_at)", "gin(link jsonb_path_ops)"] },
-    { "name": "notice_recipients", "desc": "Fan-out with per-person read state (seller members, staff lead/backup)", "columns": { "notice_id": "uuid → notices", "account_id": "uuid", "reason": "text", "covering_for": "text?", "read_at": "timestamptz?", "archived_at": "timestamptz?", "created_at": "timestamptz" }, "indexes": ["pk (notice_id, account_id)", "(account_id, read_at, created_at desc)"] },
-    { "name": "scheduled_notifications", "columns": { "id": "uuid pk", "dedupe_key": "text", "send_at": "timestamptz", "input": "jsonb", "status": "text (pending|sent|cancelled)", "created_by_module": "text", "created_at": "timestamptz" }, "indexes": ["(status, send_at)", "(dedupe_key)"] },
-    { "name": "deliveries", "columns": { "id": "uuid pk", "notice_id": "uuid? → notices", "topic_key": "text", "channel": "text", "recipient_kind": "text", "account_id": "uuid?", "address_hash": "text", "address_masked": "text", "status": "text", "skip_reason": "text?", "attempts": "int", "last_error": "text?", "provider_message_id": "text?", "template_version_id": "uuid?", "subject": "text?", "linked_ref": "text?", "dedupe_key": "text?", "broadcast_id": "uuid?", "created_at": "timestamptz", "sent_at": "timestamptz?", "delivered_at": "timestamptz?", "next_attempt_at": "timestamptz?" }, "indexes": ["(status, next_attempt_at)", "(provider_message_id)", "(account_id, created_at desc)", "(address_hash, created_at desc)", "(topic_key, created_at desc)", "(linked_ref)", "(dedupe_key)"] },
-    { "name": "delivery_events", "columns": { "id": "uuid pk", "delivery_id": "uuid → deliveries", "type": "text", "provider_event_id": "text? unique", "detail": "text?", "at": "timestamptz" }, "indexes": ["(delivery_id, at)"] },
-    { "name": "member_preferences", "desc": "Seller member preferences, set by the owner or the member", "columns": { "seller_id": "uuid", "member_id": "uuid", "account_id": "uuid", "groups": "jsonb", "channel": "text", "updated_by": "text", "updated_at": "timestamptz" }, "indexes": ["pk (seller_id, member_id)", "(account_id)"] },
-    { "name": "invited_members", "desc": "Seller members invited and not joined yet (from sellers.member.invited, removed on joined or removed): their preferences open once they accept", "columns": { "seller_id": "uuid", "member_id": "uuid", "email": "text", "invited_at": "timestamptz" }, "indexes": ["pk (seller_id, member_id)"] },
-    { "name": "staff_preferences", "columns": { "account_id": "uuid pk", "email_by_area": "jsonb", "email_for_mentions": "bool", "daily_digest": "bool", "updated_at": "timestamptz" } },
-    { "name": "push_devices", "columns": { "id": "uuid pk", "account_id": "uuid", "audience": "text (customer|seller)", "seller_id": "uuid?", "platform": "text", "token_encrypted": "bytea", "token_hash": "text unique", "app_version": "text", "installation_id": "text?", "enabled": "bool", "created_at": "timestamptz", "last_seen_at": "timestamptz", "invalidated_at": "timestamptz?" }, "indexes": ["(account_id) where invalidated_at is null"] },
-    { "name": "suppressions", "columns": { "id": "uuid pk", "channel": "text", "address_hash": "text", "address_masked": "text", "account_id": "uuid?", "reason": "text", "source": "text", "created_at": "timestamptz", "removed_at": "timestamptz?", "removed_by": "text?", "remove_reason": "text?" }, "indexes": ["unique (channel, address_hash) where removed_at is null", "(account_id)"] },
-    { "name": "broadcasts", "columns": { "id": "uuid pk", "name": "text", "audience": "text", "topic_key": "text", "template_version_id": "uuid → template_versions", "segment": "jsonb", "status": "text", "scheduled_at": "timestamptz?", "sent_at": "timestamptz?", "recipient_estimate": "int", "stats": "jsonb", "campaign_id": "uuid?", "created_by": "text", "created_at": "timestamptz" }, "indexes": ["(status, scheduled_at)"] },
-    { "name": "announcements", "desc": "Messages from Marketly staff to sellers (topic seller.announcement), listed newest first in the Admin Center", "columns": { "id": "uuid pk", "title": "text", "body": "text", "audience": "text (all|chosen)", "seller_ids": "uuid[] (the chosen sellers; empty when sent to all)", "seller_count": "int", "link": "jsonb?", "sent_by": "text", "sent_at": "timestamptz" }, "indexes": ["(sent_at desc)"] }
+    {
+      "name": "topics",
+      "desc": "Topic catalogue seeded from module code; staff toggle channels",
+      "columns": {
+        "key": "text pk",
+        "audience": "text",
+        "category": "text",
+        "group_key": "text",
+        "label": "text",
+        "description": "text",
+        "triggers": "jsonb",
+        "opens": "text",
+        "channels": "jsonb (channel → enabled)",
+        "action_required": "bool",
+        "staff_role_keys": "jsonb",
+        "seller_permission": "text?",
+        "owner_only": "bool",
+        "frequency_label": "text?",
+        "variables": "jsonb",
+        "phase": "int",
+        "updated_by": "text?",
+        "updated_at": "timestamptz?"
+      }
+    },
+    {
+      "name": "templates",
+      "columns": {
+        "id": "uuid pk",
+        "topic_key": "text → topics",
+        "channel": "text",
+        "language": "text",
+        "live_version_id": "uuid? → template_versions",
+        "updated_at": "timestamptz"
+      },
+      "indexes": [
+        "unique (topic_key, channel, language)"
+      ]
+    },
+    {
+      "name": "template_versions",
+      "columns": {
+        "id": "uuid pk",
+        "template_id": "uuid → templates",
+        "version": "int",
+        "status": "text",
+        "content": "jsonb",
+        "note": "text?",
+        "created_by": "text",
+        "created_at": "timestamptz",
+        "published_by": "text?",
+        "published_at": "timestamptz?"
+      },
+      "indexes": [
+        "unique (template_id, version)",
+        "(template_id) where status = 'draft'"
+      ]
+    },
+    {
+      "name": "notices",
+      "desc": "In-app notices (one per addressed audience: a customer, a seller workspace, a staff role or member)",
+      "columns": {
+        "id": "uuid pk",
+        "topic_key": "text",
+        "audience": "text",
+        "address_kind": "text (customer|seller|role|staff)",
+        "address_id": "text",
+        "seller_id": "uuid?",
+        "group_key": "text",
+        "title": "text",
+        "body": "text",
+        "icon": "text?",
+        "tone": "text",
+        "link": "jsonb",
+        "linked_ref": "text?",
+        "action_required": "bool",
+        "deadline_at": "timestamptz?",
+        "dedupe_key": "text?",
+        "resolved_at": "timestamptz?",
+        "resolve_note": "text?",
+        "expired_at": "timestamptz? (action notices that ended without being resolved)",
+        "created_at": "timestamptz",
+        "expires_at": "timestamptz"
+      },
+      "indexes": [
+        "(address_kind, address_id, created_at desc)",
+        "(dedupe_key)",
+        "(expires_at)",
+        "gin(link jsonb_path_ops)"
+      ]
+    },
+    {
+      "name": "notice_recipients",
+      "desc": "Fan-out with per-person read state (seller members, staff lead/backup)",
+      "columns": {
+        "notice_id": "uuid → notices",
+        "account_id": "uuid",
+        "reason": "text",
+        "covering_for": "text?",
+        "read_at": "timestamptz?",
+        "archived_at": "timestamptz?",
+        "created_at": "timestamptz"
+      },
+      "indexes": [
+        "pk (notice_id, account_id)",
+        "(account_id, read_at, created_at desc)"
+      ]
+    },
+    {
+      "name": "scheduled_notifications",
+      "columns": {
+        "id": "uuid pk",
+        "dedupe_key": "text",
+        "send_at": "timestamptz",
+        "input": "jsonb",
+        "status": "text (pending|sent|cancelled)",
+        "created_by_module": "text",
+        "created_at": "timestamptz"
+      },
+      "indexes": [
+        "(status, send_at)",
+        "(dedupe_key)"
+      ]
+    },
+    {
+      "name": "deliveries",
+      "columns": {
+        "id": "uuid pk",
+        "notice_id": "uuid? → notices",
+        "topic_key": "text",
+        "channel": "text",
+        "recipient_kind": "text",
+        "account_id": "uuid?",
+        "address_hash": "text",
+        "address_masked": "text",
+        "status": "text",
+        "skip_reason": "text?",
+        "attempts": "int",
+        "last_error": "text?",
+        "provider_message_id": "text?",
+        "template_version_id": "uuid?",
+        "subject": "text?",
+        "linked_ref": "text?",
+        "dedupe_key": "text?",
+        "broadcast_id": "uuid?",
+        "created_at": "timestamptz",
+        "sent_at": "timestamptz?",
+        "delivered_at": "timestamptz?",
+        "next_attempt_at": "timestamptz?"
+      },
+      "indexes": [
+        "(status, next_attempt_at)",
+        "(provider_message_id)",
+        "(account_id, created_at desc)",
+        "(address_hash, created_at desc)",
+        "(topic_key, created_at desc)",
+        "(linked_ref)",
+        "(dedupe_key)"
+      ]
+    },
+    {
+      "name": "delivery_events",
+      "columns": {
+        "id": "uuid pk",
+        "delivery_id": "uuid → deliveries",
+        "type": "text",
+        "provider_event_id": "text? unique",
+        "detail": "text?",
+        "at": "timestamptz"
+      },
+      "indexes": [
+        "(delivery_id, at)"
+      ]
+    },
+    {
+      "name": "member_preferences",
+      "desc": "Seller member preferences, set by the owner or the member",
+      "columns": {
+        "seller_id": "uuid",
+        "member_id": "uuid",
+        "account_id": "uuid",
+        "groups": "jsonb",
+        "channel": "text",
+        "updated_by": "text",
+        "updated_at": "timestamptz"
+      },
+      "indexes": [
+        "pk (seller_id, member_id)",
+        "(account_id)"
+      ]
+    },
+    {
+      "name": "invited_members",
+      "desc": "Seller members invited and not joined yet (from sellers.member.invited, removed on joined or removed): their preferences open once they accept",
+      "columns": {
+        "seller_id": "uuid",
+        "member_id": "uuid",
+        "email": "text",
+        "invited_at": "timestamptz"
+      },
+      "indexes": [
+        "pk (seller_id, member_id)"
+      ]
+    },
+    {
+      "name": "staff_preferences",
+      "columns": {
+        "account_id": "uuid pk",
+        "email_by_area": "jsonb",
+        "email_for_mentions": "bool",
+        "daily_digest": "bool",
+        "updated_at": "timestamptz"
+      }
+    },
+    {
+      "name": "push_devices",
+      "columns": {
+        "id": "uuid pk",
+        "account_id": "uuid",
+        "audience": "text (customer|seller)",
+        "seller_id": "uuid?",
+        "platform": "text",
+        "token_encrypted": "bytea",
+        "token_hash": "text unique",
+        "app_version": "text",
+        "installation_id": "text?",
+        "enabled": "bool",
+        "created_at": "timestamptz",
+        "last_seen_at": "timestamptz",
+        "invalidated_at": "timestamptz?"
+      },
+      "indexes": [
+        "(account_id) where invalidated_at is null"
+      ]
+    },
+    {
+      "name": "suppressions",
+      "columns": {
+        "id": "uuid pk",
+        "channel": "text",
+        "address_hash": "text",
+        "address_masked": "text",
+        "account_id": "uuid?",
+        "reason": "text",
+        "source": "text",
+        "created_at": "timestamptz",
+        "removed_at": "timestamptz?",
+        "removed_by": "text?",
+        "remove_reason": "text?"
+      },
+      "indexes": [
+        "unique (channel, address_hash) where removed_at is null",
+        "(account_id)"
+      ]
+    },
+    {
+      "name": "broadcasts",
+      "columns": {
+        "id": "uuid pk",
+        "name": "text",
+        "audience": "text",
+        "topic_key": "text",
+        "template_version_id": "uuid → template_versions",
+        "segment": "jsonb",
+        "status": "text",
+        "scheduled_at": "timestamptz?",
+        "sent_at": "timestamptz?",
+        "recipient_estimate": "int",
+        "stats": "jsonb",
+        "campaign_id": "uuid?",
+        "created_by": "text",
+        "created_at": "timestamptz"
+      },
+      "indexes": [
+        "(status, scheduled_at)"
+      ]
+    },
+    {
+      "name": "announcements",
+      "desc": "Messages from Marketly staff to sellers (topic seller.announcement), listed newest first in the Admin Center",
+      "columns": {
+        "id": "uuid pk",
+        "title": "text",
+        "body": "text",
+        "audience": "text (all|chosen)",
+        "seller_ids": "uuid[] (the chosen sellers; empty when sent to all)",
+        "seller_count": "int",
+        "link": "jsonb?",
+        "sent_by": "text",
+        "sent_at": "timestamptz"
+      },
+      "indexes": [
+        "(sent_at desc)"
+      ]
+    }
   ],
   "stateMachines": [
     {
-      "name": "Template version", "field": "TemplateVersion.status", "initial": "draft",
+      "name": "Template version",
+      "field": "TemplateVersion.status",
+      "initial": "draft",
       "transitions": [
-        ["draft", "publish", "published"],
-        ["draft", "discard", "discarded"],
-        ["published", "supersede", "superseded"]
+        [
+          "draft",
+          "publish",
+          "published"
+        ],
+        [
+          "draft",
+          "discard",
+          "discarded"
+        ],
+        [
+          "published",
+          "supersede",
+          "superseded"
+        ]
       ],
       "notes": "One draft per template at a time. publish is blocked while validation has blocking issues (missing required variable such as the record link, promotional content in an essential topic, unknown variable). Publishing supersedes the previous live version. Restore = start a new draft from an old version."
     },
     {
-      "name": "Delivery", "field": "Delivery.status", "initial": "queued",
+      "name": "Delivery",
+      "field": "Delivery.status",
+      "initial": "queued",
       "transitions": [
-        ["queued", "send", "sending"],
-        ["queued", "suppress", "suppressed"],
-        ["queued", "skip", "skipped"],
-        ["sending", "accept", "sent"],
-        ["sending", "temporaryFailure", "retrying"],
-        ["retrying", "send", "sending"],
-        ["retrying", "giveUp", "failed"],
-        ["sending", "permanentFailure", "failed"],
-        ["sent", "deliver", "delivered"],
-        ["sent", "bounce", "bounced"],
-        ["delivered", "complain", "complained"],
-        ["failed", "retryManually", "queued"]
+        [
+          "queued",
+          "send",
+          "sending"
+        ],
+        [
+          "queued",
+          "suppress",
+          "suppressed"
+        ],
+        [
+          "queued",
+          "skip",
+          "skipped"
+        ],
+        [
+          "sending",
+          "accept",
+          "sent"
+        ],
+        [
+          "sending",
+          "temporaryFailure",
+          "retrying"
+        ],
+        [
+          "retrying",
+          "send",
+          "sending"
+        ],
+        [
+          "retrying",
+          "giveUp",
+          "failed"
+        ],
+        [
+          "sending",
+          "permanentFailure",
+          "failed"
+        ],
+        [
+          "sent",
+          "deliver",
+          "delivered"
+        ],
+        [
+          "sent",
+          "bounce",
+          "bounced"
+        ],
+        [
+          "delivered",
+          "complain",
+          "complained"
+        ],
+        [
+          "failed",
+          "retryManually",
+          "queued"
+        ]
       ],
       "notes": "skip: promotional without consent, member preference off, account closed, duplicate dedupeKey. suppress: address on the suppression list (hard bounce, complaint). Retries back off (1, 5, 15, 60, 240 min) up to maxDeliveryAttempts, then failed and notifications.delivery.failed. A hard bounce adds a suppression and publishes notifications.address.suppressed. In-app notices are written in the same transaction as the triggering event handling and never depend on email delivery."
     },
     {
-      "name": "Broadcast", "field": "Broadcast.status", "initial": "draft",
+      "name": "Broadcast",
+      "field": "Broadcast.status",
+      "initial": "draft",
       "transitions": [
-        ["draft", "schedule", "scheduled"],
-        ["scheduled", "unschedule", "draft"],
-        ["scheduled", "start", "sending"],
-        ["sending", "finish", "sent"],
-        ["draft", "cancel", "cancelled"],
-        ["scheduled", "cancel", "cancelled"]
+        [
+          "draft",
+          "schedule",
+          "scheduled"
+        ],
+        [
+          "scheduled",
+          "unschedule",
+          "draft"
+        ],
+        [
+          "scheduled",
+          "start",
+          "sending"
+        ],
+        [
+          "sending",
+          "finish",
+          "sent"
+        ],
+        [
+          "draft",
+          "cancel",
+          "cancelled"
+        ],
+        [
+          "scheduled",
+          "cancel",
+          "cancelled"
+        ]
       ],
       "notes": "Recipients are resolved at start from consent (customers.getMarketingConsent, seller member promotions group) minus suppressions; quiet hours apply to SMS and push."
     },
     {
-      "name": "Action notice", "field": "Notice.state", "initial": "open",
+      "name": "Action notice",
+      "field": "Notice.state",
+      "initial": "open",
       "transitions": [
-        ["open", "resolve", "resolved"],
-        ["open", "expire", "expired"]
+        [
+          "open",
+          "resolve",
+          "resolved"
+        ],
+        [
+          "open",
+          "expire",
+          "expired"
+        ]
       ],
       "notes": "Only notices with actionRequired. resolve comes from the owning module (resolve(dedupeKey)) when the work is done and sets resolvedAt; expire (purge job, daily) sets expiredAt and never resolvedAt: an open action notice expires actionNoticeExpiryDays after its deadline, or, when it has no deadline, actionNoticeExpiryDays after it was created (the owning module never resolved it, so the record closed another way). Read state is separate and per person."
     }
   ],
   "endpoints": [
-    { "id": "listInbox", "area": "store", "method": "GET", "path": "/inbox", "summary": "Customer notifications", "desc": "Newest first; essential and promotional notices come in separate groups. Each notice links to its order, return or case.", "auth": "customer", "paging": true, "query": { "group": "enum(orders|returns_refunds|cases|account|promotions)?", "unreadOnly": "bool?", "archived": { "type": "bool?", "desc": "true: only archived notices; default: the inbox without them" } }, "response": "Notice", "screens": ["account/notifications", "account/overview"] },
-    { "id": "getInboxSummary", "area": "store", "method": "GET", "path": "/inbox/summary", "summary": "Unread badge and counts per group", "auth": "customer", "response": "InboxSummary", "screens": ["account/overview", "account/notifications", "store/home"] },
-    { "id": "markRead", "area": "store", "method": "POST", "path": "/inbox/{id}/read", "summary": "Mark one notice as read", "auth": "customer", "params": { "id": "uuid" }, "response": "Notice", "screens": ["account/notifications"] },
-    { "id": "archiveNotice", "area": "store", "method": "POST", "path": "/inbox/{id}/archive", "summary": "Archive one notice (for me)", "desc": "Hides it from the inbox and its counts; it stays listed with archived=true until it expires. An open action notice is archived once its work is done.", "auth": "customer", "params": { "id": "uuid" }, "response": "Notice", "errors": ["NOTICE_ACTION_OPEN"], "screens": ["account/notifications"] },
-    { "id": "archiveAllNotices", "area": "store", "method": "POST", "path": "/inbox/archive-all", "summary": "Archive all (or one group) for me", "desc": "Open action notices stay in the inbox.", "auth": "customer", "body": { "group": "string?", "readOnly": { "type": "bool?", "desc": "Only notices I have read" } }, "response": { "updated": "int" }, "screens": ["account/notifications"] },
-    { "id": "markAllRead", "area": "store", "method": "POST", "path": "/inbox/read-all", "summary": "Mark all (or one group) as read", "auth": "customer", "body": { "group": "string?" }, "response": { "updated": "int" }, "screens": ["account/notifications"] },
-    { "id": "getCustomerPreferences", "area": "store", "method": "GET", "path": "/preferences", "summary": "What we send and where to change it", "desc": "Essential notices are always on; promotional consent is changed through customers (PromotionalPointer); push settings per Android device from phase 3.", "auth": "customer", "response": "CustomerNotificationPreferences", "screens": ["account/profile", "account/notifications"] },
-    { "id": "updateCustomerPushPreference", "area": "store", "method": "PUT", "path": "/preferences/push", "summary": "Turn order-update push notices on or off", "auth": "customer", "body": { "orderUpdates": "bool" }, "response": "PushPreference", "screens": ["account/profile"], "phase": 3 },
-    { "id": "registerPushDevice", "area": "store", "method": "POST", "path": "/push-devices", "summary": "Register the Android app for push notices", "desc": "Upsert by installationId; a token moving to another account is reassigned.", "auth": "customer", "body": "PushDeviceInput", "response": "PushDevice", "status": 201, "phase": 3 },
-    { "id": "removePushDevice", "area": "store", "method": "DELETE", "path": "/push-devices/{id}", "summary": "Stop push notices on a device (sign-out)", "auth": "customer", "params": { "id": "uuid" }, "response": null, "phase": 3 },
-
-    { "id": "listSellerInbox", "area": "seller", "method": "GET", "path": "/inbox", "summary": "Seller workspace notifications", "desc": "Only topics the member may see (permission) and has not turned off; owner-only topics (payouts and holds) only for the owner.", "auth": "seller", "paging": true, "query": { "group": "enum(orders|returns_cases|products|account_finance)?", "unreadOnly": "bool?", "actionRequired": "bool?", "archived": { "type": "bool?", "desc": "true: only archived notices; default: the inbox without them" } }, "response": "Notice", "screens": ["seller/notifications", "seller/dashboard"] },
-    { "id": "getSellerInboxSummary", "area": "seller", "method": "GET", "path": "/inbox/summary", "summary": "Unread, needs action (sorted by deadline)", "auth": "seller", "response": "InboxSummary", "screens": ["seller/notifications", "seller/dashboard"] },
-    { "id": "streamSellerInbox", "area": "seller", "method": "GET", "path": "/stream", "summary": "Live notices for my Seller Center inbox (Server-Sent Events)", "desc": "The notices GET /inbox shows this member (workspace notices whose topic the member receives, and notices to the member), as they are created. Events: `notice` (id: the notice id; data: one Notice exactly as GET /inbox returns it to this caller), sent only after the notice is saved; `ready` (data { at, caughtUp }) once the catch-up is sent; `end` (data { reason }) just before the server closes the stream. A `: ping` comment every 25 s keeps proxies from closing the line. With the Last-Event-ID header (the id of the last notice received), first the notices of this inbox created after that one, only from the last 15 minutes, at most 20, oldest first; an unknown id catches up nothing. End reasons: `signed_out` (the session or account was revoked: stop; the next request leads to sign-in), `restart` (the server is shutting down: reconnect after retry), `max_age` (after 60 minutes, so permissions and topics are read again: reconnect at once). Wire format and client rules: docs/api/README.md, \"Live notifications\".", "auth": "seller", "response": "event-stream", "screens": ["seller/notifications"] },
-    { "id": "markSellerRead", "area": "seller", "method": "POST", "path": "/inbox/{id}/read", "summary": "Mark one notice as read (for me)", "auth": "seller", "params": { "id": "uuid" }, "response": "Notice", "screens": ["seller/notifications"] },
-    { "id": "archiveSellerNotice", "area": "seller", "method": "POST", "path": "/inbox/{id}/archive", "summary": "Archive one notice (for me)", "desc": "Hides it from the inbox and its counts; it stays listed with archived=true until it expires. An open action notice is archived once its work is done.", "auth": "seller", "params": { "id": "uuid" }, "response": "Notice", "errors": ["NOTICE_ACTION_OPEN"], "screens": ["seller/notifications"] },
-    { "id": "archiveAllSellerNotices", "area": "seller", "method": "POST", "path": "/inbox/archive-all", "summary": "Archive all (or one group) for me", "desc": "Open action notices stay in the inbox.", "auth": "seller", "body": { "group": "string?", "readOnly": { "type": "bool?", "desc": "Only notices I have read" } }, "response": { "updated": "int" }, "screens": ["seller/notifications"] },
-    { "id": "markAllSellerRead", "area": "seller", "method": "POST", "path": "/inbox/read-all", "summary": "Mark all as read (for me)", "auth": "seller", "body": { "group": "string?" }, "response": { "updated": "int" }, "screens": ["seller/notifications"] },
-    { "id": "getSellerPreferences", "area": "seller", "method": "GET", "path": "/preferences", "summary": "Who hears about what (all members)", "auth": "seller", "response": "SellerPreferences", "screens": ["seller/staff", "seller/notifications"] },
-    { "id": "updateMemberPreferences", "area": "seller", "method": "PUT", "path": "/preferences/members/{memberId}", "summary": "Set one member's topics and channel", "desc": "The owner (notifications.preferences.manage) sets anyone's; members may change their own channel and non-essential groups. Essential groups stay on for the owner; owner-only groups cannot be given to staff. An invited member's preferences open once they accept the invitation (409 MEMBER_NOT_JOINED until then).", "auth": "seller", "params": { "memberId": "uuid" }, "body": "MemberPreferenceInput", "response": "MemberPreference", "errors": ["FORBIDDEN", "GROUP_LOCKED", "MEMBER_NOT_JOINED"], "audited": true, "screens": ["seller/staff"], "scope": "own-member", "permissionWhen": [{ "if": { "params.memberId": "!self-member" }, "permission": "notifications.preferences.manage" }] },
-    { "id": "registerSellerPushDevice", "area": "seller", "method": "POST", "path": "/push-devices", "summary": "Register the Android app for seller push notices", "auth": "seller", "body": "PushDeviceInput", "response": "PushDevice", "status": 201, "phase": 3 },
-    { "id": "removeSellerPushDevice", "area": "seller", "method": "DELETE", "path": "/push-devices/{id}", "summary": "Stop seller push notices on a device", "auth": "seller", "params": { "id": "uuid" }, "response": null, "phase": 3 },
-
-    { "id": "listStaffInbox", "area": "admin", "method": "GET", "path": "/inbox", "summary": "My staff notices (routed by role, including roles I cover as backup)", "auth": "staff", "paging": true, "query": { "view": "enum(all|needs_my_action|mentions)?", "area": "string?", "unreadOnly": "bool?", "archived": { "type": "bool?", "desc": "true: only archived notices; default: the inbox without them" } }, "response": "Notice", "screens": ["admin/inbox", "admin/dashboard"] },
-    { "id": "getStaffInboxSummary", "area": "admin", "method": "GET", "path": "/inbox/summary", "summary": "Counts and today's routing for my roles", "auth": "staff", "response": "StaffInboxSummary", "screens": ["admin/inbox", "admin/dashboard"] },
-    { "id": "streamStaffInbox", "area": "admin", "method": "GET", "path": "/stream", "summary": "Live notices for my Admin Center inbox (Server-Sent Events)", "desc": "The notices GET /inbox shows this staff member (routed to them by role, as a backup or directly), as they are created, with their own reason and cover. Events: `notice` (id: the notice id; data: one Notice exactly as GET /inbox returns it to this caller), sent only after the notice is saved; `ready` (data { at, caughtUp }) once the catch-up is sent; `end` (data { reason }) just before the server closes the stream. A `: ping` comment every 25 s keeps proxies from closing the line. With the Last-Event-ID header (the id of the last notice received), first the notices of this inbox created after that one, only from the last 15 minutes, at most 20, oldest first; an unknown id catches up nothing. The open stream is not activity: the connect request counts once, and staffIdleMinutes still signs out a person who only has the stream open. End reasons: `signed_out` (the session or account was revoked, or the session expired: stop), `session_idle` (the staff session went idle: stop), `restart` (the server is shutting down: reconnect after retry). No maximum age. Wire format and client rules: docs/api/README.md, \"Live notifications\".", "auth": "staff", "response": "event-stream", "screens": ["admin/inbox"] },
-    { "id": "markStaffRead", "area": "admin", "method": "POST", "path": "/inbox/{id}/read", "summary": "Mark one notice as read (for me)", "auth": "staff", "params": { "id": "uuid" }, "response": "Notice", "screens": ["admin/inbox"] },
-    { "id": "archiveStaffNotice", "area": "admin", "method": "POST", "path": "/inbox/{id}/archive", "summary": "Archive one notice (for me)", "desc": "Hides it from the inbox and its counts; it stays listed with archived=true until it expires. An open action notice is archived once its work is done.", "auth": "staff", "params": { "id": "uuid" }, "response": "Notice", "errors": ["NOTICE_ACTION_OPEN"], "screens": ["admin/inbox"] },
-    { "id": "archiveAllStaffNotices", "area": "admin", "method": "POST", "path": "/inbox/archive-all", "summary": "Archive all (or one area) for me", "desc": "Open action notices stay in the inbox.", "auth": "staff", "body": { "area": "string?", "readOnly": { "type": "bool?", "desc": "Only notices I have read" } }, "response": { "updated": "int" }, "screens": ["admin/inbox"] },
-    { "id": "markStaffUnread", "area": "admin", "method": "POST", "path": "/inbox/{id}/unread", "summary": "Mark one notice as unread (for me)", "auth": "staff", "params": { "id": "uuid" }, "response": "Notice", "screens": ["admin/inbox"] },
-    { "id": "markAllStaffRead", "area": "admin", "method": "POST", "path": "/inbox/read-all", "summary": "Mark all as read (for me)", "auth": "staff", "body": { "area": "string?" }, "response": { "updated": "int" }, "screens": ["admin/inbox"] },
-    { "id": "getMyStaffPreferences", "area": "admin", "method": "GET", "path": "/my-preferences", "summary": "My email preferences for staff notices", "auth": "staff", "response": "StaffPreferences", "screens": ["admin/inbox"] },
-    { "id": "updateMyStaffPreferences", "area": "admin", "method": "PUT", "path": "/my-preferences", "summary": "Change my email preferences", "desc": "In-app is always on. Urgent topics (overdue, failed payouts, integrity alerts) are emailed regardless of the digest.", "auth": "staff", "body": { "emailByArea": "map<bool>", "emailForMentions": "bool", "dailyDigest": "bool" }, "response": "StaffPreferences", "screens": ["admin/inbox"] },
-
-    { "id": "getTopicMatrix", "area": "admin", "method": "GET", "path": "/topics", "summary": "Audience × event × channel matrix with delivery stats", "auth": "staff", "permission": "notifications.templates.view", "response": "TopicMatrix", "screens": ["admin/notifications"] },
-    { "id": "updateTopicChannels", "area": "admin", "method": "PUT", "path": "/topics/{key}/channels", "summary": "Turn channels on or off for a topic", "desc": "In-app cannot be turned off for essential topics; channels before their phase are unavailable.", "auth": "staff", "permission": "notifications.routing.manage", "params": { "key": "string" }, "body": { "channels": "ChannelSetting[]", "reason": { "type": "text?", "desc": "Recorded in the audit log; default 'Notification channels changed in the Admin Center'" } }, "response": "Topic", "errors": ["CHANNEL_LOCKED", "CHANNEL_NOT_AVAILABLE"], "audited": true, "events": ["notifications.topic.changed"], "screens": ["admin/notifications"] },
-    { "id": "listTemplates", "area": "admin", "method": "GET", "path": "/templates", "summary": "Templates", "auth": "staff", "permission": "notifications.templates.view", "paging": true, "query": { "topicKey": "string?", "audience": "enum(customer|seller|staff|external)?", "channel": "enum(email|in_app|sms|push)?", "hasDraft": "bool?", "q": "string?" }, "response": "Template", "screens": ["admin/notifications"] },
-    { "id": "getTemplate", "area": "admin", "method": "GET", "path": "/templates/{id}", "summary": "Template editor: topic, variables, live and draft versions, history", "auth": "staff", "permission": "notifications.templates.view", "params": { "id": "uuid" }, "response": "TemplateDetail", "screens": ["admin/notifications"] },
-    { "id": "createDraftVersion", "area": "admin", "method": "POST", "path": "/templates/{id}/versions", "summary": "Start a draft (from the live version, or restore an older one)", "auth": "staff", "permission": "notifications.templates.edit", "params": { "id": "uuid" }, "body": { "fromVersionId": "uuid?" }, "response": "TemplateVersion", "status": 201, "errors": ["DRAFT_EXISTS"], "screens": ["admin/notifications"] },
-    { "id": "updateDraftVersion", "area": "admin", "method": "PATCH", "path": "/templates/{id}/versions/{versionId}", "summary": "Edit a draft (returns validation)", "auth": "staff", "permission": "notifications.templates.edit", "params": { "id": "uuid", "versionId": "uuid" }, "body": { "content": "TemplateContent", "note": "text?" }, "response": "TemplateVersion", "errors": ["ILLEGAL_TRANSITION"], "screens": ["admin/notifications"] },
-    { "id": "previewVersion", "area": "admin", "method": "POST", "path": "/templates/{id}/versions/{versionId}/preview", "summary": "Render with sample or real data on desktop or phone", "auth": "staff", "permission": "notifications.templates.view", "params": { "id": "uuid", "versionId": "uuid" }, "body": { "device": "enum(desktop|phone)?", "sampleContext": "json?", "linkedRef": { "type": "string?", "desc": "Render with a real record, e.g. MK-261008-12544" } }, "response": "RenderPreview", "screens": ["admin/notifications"] },
-    { "id": "testSendVersion", "area": "admin", "method": "POST", "path": "/templates/{id}/versions/{versionId}/test-send", "summary": "Send a test to my own email (or an allowed staff address)", "auth": "staff", "permission": "notifications.templates.edit", "params": { "id": "uuid", "versionId": "uuid" }, "body": { "to": "email?", "sampleContext": "json?" }, "response": "Delivery", "status": 202, "errors": ["TEST_RECIPIENT_NOT_ALLOWED"], "screens": ["admin/notifications"] },
-    { "id": "publishVersion", "area": "admin", "method": "POST", "path": "/templates/{id}/versions/{versionId}/publish", "summary": "Publish a draft as the live version", "auth": "staff", "permission": "notifications.templates.publish", "params": { "id": "uuid", "versionId": "uuid" }, "body": { "note": "text?" }, "response": "TemplateVersion", "errors": ["ILLEGAL_TRANSITION", "TEMPLATE_INVALID"], "audited": true, "events": ["notifications.template.published"], "screens": ["admin/notifications"] },
-    { "id": "discardDraftVersion", "area": "admin", "method": "POST", "path": "/templates/{id}/versions/{versionId}/discard", "summary": "Discard a draft", "auth": "staff", "permission": "notifications.templates.edit", "params": { "id": "uuid", "versionId": "uuid" }, "response": "TemplateVersion", "errors": ["ILLEGAL_TRANSITION"], "screens": ["admin/notifications"] },
-    { "id": "listDeliveries", "area": "admin", "method": "GET", "path": "/deliveries", "summary": "Delivery log", "auth": "staff", "permission": "notifications.deliveries.view", "paging": true, "query": { "channel": "enum(email|sms|push)?", "status": "enum(queued|sending|sent|delivered|retrying|failed|bounced|complained|suppressed|skipped)?", "topicKey": "string?", "accountId": "uuid?", "address": { "type": "string?", "desc": "Exact email or phone; matched by hash" }, "linkedRef": "string?", "from": "datetime?", "to": "datetime?" }, "response": "Delivery", "screens": ["admin/notifications", "admin/customers", "admin/seller"] },
-    { "id": "getDelivery", "area": "admin", "method": "GET", "path": "/deliveries/{id}", "summary": "One delivery with provider events", "auth": "staff", "permission": "notifications.deliveries.view", "params": { "id": "uuid" }, "response": "DeliveryDetail", "screens": ["admin/notifications", "admin/customers"] },
-    { "id": "retryDelivery", "area": "admin", "method": "POST", "path": "/deliveries/{id}/retry", "summary": "Retry a failed delivery", "desc": "Not allowed for sensitive topics whose content expired (codes, reset links): the person must request a new one.", "auth": "staff", "permission": "notifications.deliveries.retry", "params": { "id": "uuid" }, "body": { "reason": "text" }, "response": "Delivery", "errors": ["ILLEGAL_TRANSITION", "ADDRESS_SUPPRESSED", "NOT_RETRYABLE"], "audited": true, "screens": ["admin/notifications", "admin/customers"] },
-    { "id": "getDeliveryStats", "area": "admin", "method": "GET", "path": "/stats", "summary": "Delivery rate, bounces, failures, queue size", "auth": "staff", "permission": "notifications.templates.view", "query": { "days": "int?" }, "response": "DeliveryStats", "screens": ["admin/notifications"] },
-    { "id": "listSuppressions", "area": "admin", "method": "GET", "path": "/suppressions", "summary": "Bounced, complained or blocked addresses", "auth": "staff", "permission": "notifications.suppressions.manage", "paging": true, "query": { "channel": "enum(email|sms|push)?", "reason": "enum(hard_bounce|complaint|invalid|manual)?", "accountId": "uuid?", "address": "string?", "active": "bool?" }, "response": "Suppression", "screens": ["admin/notifications", "admin/customers"] },
-    { "id": "removeSuppression", "area": "admin", "method": "POST", "path": "/suppressions/{id}/remove", "summary": "Allow sending again (address fixed or confirmed by the person)", "auth": "staff", "permission": "notifications.suppressions.manage", "params": { "id": "uuid" }, "body": { "reason": "text" }, "response": "Suppression", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "events": ["notifications.suppression.removed"], "screens": ["admin/customers", "admin/notifications"] },
-    { "id": "listBroadcasts", "area": "admin", "method": "GET", "path": "/broadcasts", "summary": "Promotional broadcasts", "auth": "staff", "permission": "notifications.broadcasts.manage", "paging": true, "query": { "status": "enum(draft|scheduled|sending|sent|cancelled)?", "audience": "enum(customers|sellers)?" }, "response": "Broadcast", "screens": ["admin/notifications", "admin/promotions"] },
-    { "id": "createBroadcast", "area": "admin", "method": "POST", "path": "/broadcasts", "summary": "Draft a broadcast to opted-in customers or sellers", "desc": "Only promotional topics; the response estimates recipients after consent and suppressions.", "auth": "staff", "permission": "notifications.broadcasts.manage", "body": "BroadcastInput", "response": "Broadcast", "status": 201, "errors": ["TOPIC_NOT_PROMOTIONAL", "TEMPLATE_INVALID"], "screens": ["admin/notifications", "admin/promotions"] },
-    { "id": "scheduleBroadcast", "area": "admin", "method": "POST", "path": "/broadcasts/{id}/schedule", "summary": "Schedule a broadcast", "auth": "staff", "permission": "notifications.broadcasts.manage", "params": { "id": "uuid" }, "body": { "scheduledAt": "datetime" }, "response": "Broadcast", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "events": ["notifications.broadcast.scheduled"], "screens": ["admin/notifications", "admin/promotions"] },
-    { "id": "cancelBroadcast", "area": "admin", "method": "POST", "path": "/broadcasts/{id}/cancel", "summary": "Cancel a draft or scheduled broadcast", "auth": "staff", "permission": "notifications.broadcasts.manage", "params": { "id": "uuid" }, "body": { "reason": "text" }, "response": "Broadcast", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "screens": ["admin/notifications"] },
-    { "id": "listAnnouncements", "area": "admin", "method": "GET", "path": "/announcements", "summary": "Announcements sent to sellers, newest first", "auth": "staff", "permission": "notifications.announcements.send", "paging": true, "response": "Announcement", "screens": ["admin/notifications"] },
-    { "id": "sendAnnouncement", "area": "admin", "method": "POST", "path": "/announcements", "summary": "Send a message from Marketly to sellers (in-app and email)", "desc": "Topic seller.announcement (essential, not promotional: no consent check; owners always get the email, other members by their channel choice). To the chosen sellers, or with no sellerIds to every active seller (approved or restricted) when it is sent. Each seller workspace gets one notice (dedupe announcement:<id>) linking to the given Seller Center screen, else seller/notifications. The sends happen before the answer; 202 says the notices are created and their emails queued.", "auth": "staff", "permission": "notifications.announcements.send", "body": "AnnouncementInput", "response": { "announcement": "Announcement" }, "status": 202, "errors": ["VALIDATION_FAILED"], "audited": true, "screens": ["admin/notifications"] },
-
-    { "id": "emailProviderEvents", "area": "webhooks", "method": "POST", "path": "/email-events", "summary": "Delivery, bounce, complaint and open events from the email provider", "desc": "Signature-verified; idempotent per providerEventId. Hard bounces and complaints add suppressions.", "auth": "provider", "body": { "events": "ProviderEmailEvent[]" }, "response": null, "events": ["notifications.address.suppressed", "notifications.delivery.failed"] },
-    { "id": "smsProviderEvents", "area": "webhooks", "method": "POST", "path": "/sms-events", "summary": "SMS delivery receipts and STOP replies", "desc": "STOP adds an SMS suppression and is forwarded to customers as an SMS promotions opt-out.", "auth": "provider", "body": { "providerEventId": "string", "providerMessageId": "string?", "type": "enum(delivered|failed|stop|start)", "phone": "string", "at": "datetime" }, "response": null, "events": ["notifications.address.suppressed"], "phase": 2 },
-    { "id": "inboundEmail", "area": "webhooks", "method": "POST", "path": "/inbound-email", "summary": "Replies to case and message emails", "desc": "The reply-to address carries a signed token naming the module and record (case, conversation) and the recipient. Valid replies are published for support or messaging; attachments are stored through media.storeInboundFile (purpose message_attachment for conversations, case_evidence for cases; owner = the replying customer, seller or guest) and listed in attachmentAssetIds, refused files are named in the auto-reply. Unknown or expired tokens get an automatic 'please reply in your account' email.", "auth": "provider", "body": "InboundEmail", "response": null, "events": ["notifications.email_reply.received"] }
+    {
+      "id": "listInbox",
+      "area": "store",
+      "method": "GET",
+      "path": "/inbox",
+      "summary": "Customer notifications",
+      "desc": "Newest first; essential and promotional notices come in separate groups. Each notice links to its order, return or case.",
+      "auth": "customer",
+      "paging": true,
+      "query": {
+        "group": "enum(orders|returns_refunds|cases|account|promotions)?",
+        "unreadOnly": "bool?",
+        "archived": {
+          "type": "bool?",
+          "desc": "true: only archived notices; default: the inbox without them"
+        }
+      },
+      "response": "Notice",
+      "screens": [
+        "account/notifications",
+        "account/overview"
+      ]
+    },
+    {
+      "id": "getInboxSummary",
+      "area": "store",
+      "method": "GET",
+      "path": "/inbox/summary",
+      "summary": "Unread badge and counts per group",
+      "auth": "customer",
+      "response": "InboxSummary",
+      "screens": [
+        "account/overview",
+        "account/notifications",
+        "store/home"
+      ]
+    },
+    {
+      "id": "markRead",
+      "area": "store",
+      "method": "POST",
+      "path": "/inbox/{id}/read",
+      "summary": "Mark one notice as read",
+      "auth": "customer",
+      "params": {
+        "id": "uuid"
+      },
+      "response": "Notice",
+      "screens": [
+        "account/notifications"
+      ]
+    },
+    {
+      "id": "archiveNotice",
+      "area": "store",
+      "method": "POST",
+      "path": "/inbox/{id}/archive",
+      "summary": "Archive one notice (for me)",
+      "desc": "Hides it from the inbox and its counts; it stays listed with archived=true until it expires. An open action notice is archived once its work is done.",
+      "auth": "customer",
+      "params": {
+        "id": "uuid"
+      },
+      "response": "Notice",
+      "errors": [
+        "NOTICE_ACTION_OPEN"
+      ],
+      "screens": [
+        "account/notifications"
+      ]
+    },
+    {
+      "id": "archiveAllNotices",
+      "area": "store",
+      "method": "POST",
+      "path": "/inbox/archive-all",
+      "summary": "Archive all (or one group) for me",
+      "desc": "Open action notices stay in the inbox.",
+      "auth": "customer",
+      "body": {
+        "group": "string?",
+        "readOnly": {
+          "type": "bool?",
+          "desc": "Only notices I have read"
+        }
+      },
+      "response": {
+        "updated": "int"
+      },
+      "screens": [
+        "account/notifications"
+      ]
+    },
+    {
+      "id": "markAllRead",
+      "area": "store",
+      "method": "POST",
+      "path": "/inbox/read-all",
+      "summary": "Mark all (or one group) as read",
+      "auth": "customer",
+      "body": {
+        "group": "string?"
+      },
+      "response": {
+        "updated": "int"
+      },
+      "screens": [
+        "account/notifications"
+      ]
+    },
+    {
+      "id": "getCustomerPreferences",
+      "area": "store",
+      "method": "GET",
+      "path": "/preferences",
+      "summary": "What we send and where to change it",
+      "desc": "Essential notices are always on; promotional consent is changed through customers (PromotionalPointer); push settings per Android device from phase 3.",
+      "auth": "customer",
+      "response": "CustomerNotificationPreferences",
+      "screens": [
+        "account/profile",
+        "account/notifications"
+      ]
+    },
+    {
+      "id": "updateCustomerPushPreference",
+      "area": "store",
+      "method": "PUT",
+      "path": "/preferences/push",
+      "summary": "Turn order-update push notices on or off",
+      "auth": "customer",
+      "body": {
+        "orderUpdates": "bool"
+      },
+      "response": "PushPreference",
+      "screens": [
+        "account/profile"
+      ],
+      "phase": 3
+    },
+    {
+      "id": "registerPushDevice",
+      "area": "store",
+      "method": "POST",
+      "path": "/push-devices",
+      "summary": "Register the Android app for push notices",
+      "desc": "Upsert by installationId; a token moving to another account is reassigned.",
+      "auth": "customer",
+      "body": "PushDeviceInput",
+      "response": "PushDevice",
+      "status": 201,
+      "phase": 3
+    },
+    {
+      "id": "removePushDevice",
+      "area": "store",
+      "method": "DELETE",
+      "path": "/push-devices/{id}",
+      "summary": "Stop push notices on a device (sign-out)",
+      "auth": "customer",
+      "params": {
+        "id": "uuid"
+      },
+      "response": null,
+      "phase": 3
+    },
+    {
+      "id": "listSellerInbox",
+      "area": "seller",
+      "method": "GET",
+      "path": "/inbox",
+      "summary": "Seller workspace notifications",
+      "desc": "Only topics the member may see (permission) and has not turned off; owner-only topics (payouts and holds) only for the owner.",
+      "auth": "seller",
+      "paging": true,
+      "query": {
+        "group": "enum(orders|returns_cases|products|account_finance)?",
+        "unreadOnly": "bool?",
+        "actionRequired": "bool?",
+        "archived": {
+          "type": "bool?",
+          "desc": "true: only archived notices; default: the inbox without them"
+        }
+      },
+      "response": "Notice",
+      "screens": [
+        "seller/notifications",
+        "seller/dashboard"
+      ]
+    },
+    {
+      "id": "getSellerInboxSummary",
+      "area": "seller",
+      "method": "GET",
+      "path": "/inbox/summary",
+      "summary": "Unread, needs action (sorted by deadline)",
+      "auth": "seller",
+      "response": "InboxSummary",
+      "screens": [
+        "seller/notifications",
+        "seller/dashboard"
+      ]
+    },
+    {
+      "id": "streamSellerInbox",
+      "area": "seller",
+      "method": "GET",
+      "path": "/stream",
+      "summary": "Live notices for my Seller Center inbox (Server-Sent Events)",
+      "desc": "The notices GET /inbox shows this member (workspace notices whose topic the member receives, and notices to the member), as they are created. Events: `notice` (id: the notice id; data: one Notice exactly as GET /inbox returns it to this caller), sent only after the notice is saved; `ready` (data { at, caughtUp }) once the catch-up is sent; `end` (data { reason }) just before the server closes the stream. A `: ping` comment every 25 s keeps proxies from closing the line. With the Last-Event-ID header (the id of the last notice received), first the notices of this inbox created after that one, only from the last 15 minutes, at most 20, oldest first; an unknown id catches up nothing. End reasons: `signed_out` (the session or account was revoked: stop; the next request leads to sign-in), `restart` (the server is shutting down: reconnect after retry), `max_age` (after 60 minutes, so permissions and topics are read again: reconnect at once). Wire format and client rules: docs/api/README.md, \"Live notifications\".",
+      "auth": "seller",
+      "response": "event-stream",
+      "screens": [
+        "seller/notifications"
+      ]
+    },
+    {
+      "id": "markSellerRead",
+      "area": "seller",
+      "method": "POST",
+      "path": "/inbox/{id}/read",
+      "summary": "Mark one notice as read (for me)",
+      "auth": "seller",
+      "params": {
+        "id": "uuid"
+      },
+      "response": "Notice",
+      "screens": [
+        "seller/notifications"
+      ]
+    },
+    {
+      "id": "archiveSellerNotice",
+      "area": "seller",
+      "method": "POST",
+      "path": "/inbox/{id}/archive",
+      "summary": "Archive one notice (for me)",
+      "desc": "Hides it from the inbox and its counts; it stays listed with archived=true until it expires. An open action notice is archived once its work is done.",
+      "auth": "seller",
+      "params": {
+        "id": "uuid"
+      },
+      "response": "Notice",
+      "errors": [
+        "NOTICE_ACTION_OPEN"
+      ],
+      "screens": [
+        "seller/notifications"
+      ]
+    },
+    {
+      "id": "archiveAllSellerNotices",
+      "area": "seller",
+      "method": "POST",
+      "path": "/inbox/archive-all",
+      "summary": "Archive all (or one group) for me",
+      "desc": "Open action notices stay in the inbox.",
+      "auth": "seller",
+      "body": {
+        "group": "string?",
+        "readOnly": {
+          "type": "bool?",
+          "desc": "Only notices I have read"
+        }
+      },
+      "response": {
+        "updated": "int"
+      },
+      "screens": [
+        "seller/notifications"
+      ]
+    },
+    {
+      "id": "markAllSellerRead",
+      "area": "seller",
+      "method": "POST",
+      "path": "/inbox/read-all",
+      "summary": "Mark all as read (for me)",
+      "auth": "seller",
+      "body": {
+        "group": "string?"
+      },
+      "response": {
+        "updated": "int"
+      },
+      "screens": [
+        "seller/notifications"
+      ]
+    },
+    {
+      "id": "getSellerPreferences",
+      "area": "seller",
+      "method": "GET",
+      "path": "/preferences",
+      "summary": "Who hears about what (all members)",
+      "auth": "seller",
+      "response": "SellerPreferences",
+      "screens": [
+        "seller/staff",
+        "seller/notifications"
+      ]
+    },
+    {
+      "id": "updateMemberPreferences",
+      "area": "seller",
+      "method": "PUT",
+      "path": "/preferences/members/{memberId}",
+      "summary": "Set one member's topics and channel",
+      "desc": "The owner (notifications.preferences.manage) sets anyone's; members may change their own channel and non-essential groups. Essential groups stay on for the owner; owner-only groups cannot be given to staff. An invited member's preferences open once they accept the invitation (409 MEMBER_NOT_JOINED until then).",
+      "auth": "seller",
+      "params": {
+        "memberId": "uuid"
+      },
+      "body": "MemberPreferenceInput",
+      "response": "MemberPreference",
+      "errors": [
+        "FORBIDDEN",
+        "GROUP_LOCKED",
+        "MEMBER_NOT_JOINED"
+      ],
+      "audited": true,
+      "screens": [
+        "seller/staff"
+      ],
+      "scope": "own-member",
+      "permissionWhen": [
+        {
+          "if": {
+            "params.memberId": "!self-member"
+          },
+          "permission": "notifications.preferences.manage"
+        }
+      ]
+    },
+    {
+      "id": "registerSellerPushDevice",
+      "area": "seller",
+      "method": "POST",
+      "path": "/push-devices",
+      "summary": "Register the Android app for seller push notices",
+      "auth": "seller",
+      "body": "PushDeviceInput",
+      "response": "PushDevice",
+      "status": 201,
+      "phase": 3
+    },
+    {
+      "id": "removeSellerPushDevice",
+      "area": "seller",
+      "method": "DELETE",
+      "path": "/push-devices/{id}",
+      "summary": "Stop seller push notices on a device",
+      "auth": "seller",
+      "params": {
+        "id": "uuid"
+      },
+      "response": null,
+      "phase": 3
+    },
+    {
+      "id": "listStaffInbox",
+      "area": "admin",
+      "method": "GET",
+      "path": "/inbox",
+      "summary": "My staff notices (routed by role, including roles I cover as backup)",
+      "auth": "staff",
+      "paging": true,
+      "query": {
+        "view": "enum(all|needs_my_action|mentions)?",
+        "area": "string?",
+        "unreadOnly": "bool?",
+        "archived": {
+          "type": "bool?",
+          "desc": "true: only archived notices; default: the inbox without them"
+        }
+      },
+      "response": "Notice",
+      "screens": [
+        "admin/inbox",
+        "admin/dashboard"
+      ]
+    },
+    {
+      "id": "getStaffInboxSummary",
+      "area": "admin",
+      "method": "GET",
+      "path": "/inbox/summary",
+      "summary": "Counts and today's routing for my roles",
+      "auth": "staff",
+      "response": "StaffInboxSummary",
+      "screens": [
+        "admin/inbox",
+        "admin/dashboard"
+      ]
+    },
+    {
+      "id": "streamStaffInbox",
+      "area": "admin",
+      "method": "GET",
+      "path": "/stream",
+      "summary": "Live notices for my Admin Center inbox (Server-Sent Events)",
+      "desc": "The notices GET /inbox shows this staff member (routed to them by role, as a backup or directly), as they are created, with their own reason and cover. Events: `notice` (id: the notice id; data: one Notice exactly as GET /inbox returns it to this caller), sent only after the notice is saved; `ready` (data { at, caughtUp }) once the catch-up is sent; `end` (data { reason }) just before the server closes the stream. A `: ping` comment every 25 s keeps proxies from closing the line. With the Last-Event-ID header (the id of the last notice received), first the notices of this inbox created after that one, only from the last 15 minutes, at most 20, oldest first; an unknown id catches up nothing. The open stream is not activity: the connect request counts once, and staffIdleMinutes still signs out a person who only has the stream open. End reasons: `signed_out` (the session or account was revoked, or the session expired: stop), `session_idle` (the staff session went idle: stop), `restart` (the server is shutting down: reconnect after retry). No maximum age. Wire format and client rules: docs/api/README.md, \"Live notifications\".",
+      "auth": "staff",
+      "response": "event-stream",
+      "screens": [
+        "admin/inbox"
+      ]
+    },
+    {
+      "id": "markStaffRead",
+      "area": "admin",
+      "method": "POST",
+      "path": "/inbox/{id}/read",
+      "summary": "Mark one notice as read (for me)",
+      "auth": "staff",
+      "params": {
+        "id": "uuid"
+      },
+      "response": "Notice",
+      "screens": [
+        "admin/inbox"
+      ]
+    },
+    {
+      "id": "archiveStaffNotice",
+      "area": "admin",
+      "method": "POST",
+      "path": "/inbox/{id}/archive",
+      "summary": "Archive one notice (for me)",
+      "desc": "Hides it from the inbox and its counts; it stays listed with archived=true until it expires. An open action notice is archived once its work is done.",
+      "auth": "staff",
+      "params": {
+        "id": "uuid"
+      },
+      "response": "Notice",
+      "errors": [
+        "NOTICE_ACTION_OPEN"
+      ],
+      "screens": [
+        "admin/inbox"
+      ]
+    },
+    {
+      "id": "archiveAllStaffNotices",
+      "area": "admin",
+      "method": "POST",
+      "path": "/inbox/archive-all",
+      "summary": "Archive all (or one area) for me",
+      "desc": "Open action notices stay in the inbox.",
+      "auth": "staff",
+      "body": {
+        "area": "string?",
+        "readOnly": {
+          "type": "bool?",
+          "desc": "Only notices I have read"
+        }
+      },
+      "response": {
+        "updated": "int"
+      },
+      "screens": [
+        "admin/inbox"
+      ]
+    },
+    {
+      "id": "markStaffUnread",
+      "area": "admin",
+      "method": "POST",
+      "path": "/inbox/{id}/unread",
+      "summary": "Mark one notice as unread (for me)",
+      "auth": "staff",
+      "params": {
+        "id": "uuid"
+      },
+      "response": "Notice",
+      "screens": [
+        "admin/inbox"
+      ]
+    },
+    {
+      "id": "markAllStaffRead",
+      "area": "admin",
+      "method": "POST",
+      "path": "/inbox/read-all",
+      "summary": "Mark all as read (for me)",
+      "auth": "staff",
+      "body": {
+        "area": "string?"
+      },
+      "response": {
+        "updated": "int"
+      },
+      "screens": [
+        "admin/inbox"
+      ]
+    },
+    {
+      "id": "getMyStaffPreferences",
+      "area": "admin",
+      "method": "GET",
+      "path": "/my-preferences",
+      "summary": "My email preferences for staff notices",
+      "auth": "staff",
+      "response": "StaffPreferences",
+      "screens": [
+        "admin/inbox"
+      ]
+    },
+    {
+      "id": "updateMyStaffPreferences",
+      "area": "admin",
+      "method": "PUT",
+      "path": "/my-preferences",
+      "summary": "Change my email preferences",
+      "desc": "In-app is always on. Urgent topics (overdue, failed payouts, integrity alerts) are emailed regardless of the digest.",
+      "auth": "staff",
+      "body": {
+        "emailByArea": "map<bool>",
+        "emailForMentions": "bool",
+        "dailyDigest": "bool"
+      },
+      "response": "StaffPreferences",
+      "screens": [
+        "admin/inbox"
+      ]
+    },
+    {
+      "id": "getTopicMatrix",
+      "area": "admin",
+      "method": "GET",
+      "path": "/topics",
+      "summary": "Audience × event × channel matrix with delivery stats",
+      "auth": "staff",
+      "permission": "notifications.templates.view",
+      "response": "TopicMatrix",
+      "screens": [
+        "admin/notifications"
+      ]
+    },
+    {
+      "id": "updateTopicChannels",
+      "area": "admin",
+      "method": "PUT",
+      "path": "/topics/{key}/channels",
+      "summary": "Turn channels on or off for a topic",
+      "desc": "In-app cannot be turned off for essential topics; channels before their phase are unavailable.",
+      "auth": "staff",
+      "permission": "notifications.routing.manage",
+      "params": {
+        "key": "string"
+      },
+      "body": {
+        "channels": "ChannelSetting[]",
+        "reason": {
+          "type": "text?",
+          "desc": "Recorded in the audit log; default 'Notification channels changed in the Admin Center'"
+        }
+      },
+      "response": "Topic",
+      "errors": [
+        "CHANNEL_LOCKED",
+        "CHANNEL_NOT_AVAILABLE"
+      ],
+      "audited": true,
+      "events": [
+        "notifications.topic.changed"
+      ],
+      "screens": [
+        "admin/notifications"
+      ]
+    },
+    {
+      "id": "listTemplates",
+      "area": "admin",
+      "method": "GET",
+      "path": "/templates",
+      "summary": "Templates",
+      "auth": "staff",
+      "permission": "notifications.templates.view",
+      "paging": true,
+      "query": {
+        "topicKey": "string?",
+        "audience": "enum(customer|seller|staff|external)?",
+        "channel": "enum(email|in_app|sms|push)?",
+        "hasDraft": "bool?",
+        "q": "string?"
+      },
+      "response": "Template",
+      "screens": [
+        "admin/notifications"
+      ]
+    },
+    {
+      "id": "getTemplate",
+      "area": "admin",
+      "method": "GET",
+      "path": "/templates/{id}",
+      "summary": "Template editor: topic, variables, live and draft versions, history",
+      "auth": "staff",
+      "permission": "notifications.templates.view",
+      "params": {
+        "id": "uuid"
+      },
+      "response": "TemplateDetail",
+      "screens": [
+        "admin/notifications"
+      ]
+    },
+    {
+      "id": "createDraftVersion",
+      "area": "admin",
+      "method": "POST",
+      "path": "/templates/{id}/versions",
+      "summary": "Start a draft (from the live version, or restore an older one)",
+      "auth": "staff",
+      "permission": "notifications.templates.edit",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "fromVersionId": "uuid?"
+      },
+      "response": "TemplateVersion",
+      "status": 201,
+      "errors": [
+        "DRAFT_EXISTS"
+      ],
+      "screens": [
+        "admin/notifications"
+      ]
+    },
+    {
+      "id": "updateDraftVersion",
+      "area": "admin",
+      "method": "PATCH",
+      "path": "/templates/{id}/versions/{versionId}",
+      "summary": "Edit a draft (returns validation)",
+      "auth": "staff",
+      "permission": "notifications.templates.edit",
+      "params": {
+        "id": "uuid",
+        "versionId": "uuid"
+      },
+      "body": {
+        "content": "TemplateContent",
+        "note": "text?"
+      },
+      "response": "TemplateVersion",
+      "errors": [
+        "ILLEGAL_TRANSITION"
+      ],
+      "screens": [
+        "admin/notifications"
+      ]
+    },
+    {
+      "id": "previewVersion",
+      "area": "admin",
+      "method": "POST",
+      "path": "/templates/{id}/versions/{versionId}/preview",
+      "summary": "Render with sample or real data on desktop or phone",
+      "auth": "staff",
+      "permission": "notifications.templates.view",
+      "params": {
+        "id": "uuid",
+        "versionId": "uuid"
+      },
+      "body": {
+        "device": "enum(desktop|phone)?",
+        "sampleContext": "json?",
+        "linkedRef": {
+          "type": "string?",
+          "desc": "Render with a real record, e.g. MK-261008-12544"
+        }
+      },
+      "response": "RenderPreview",
+      "screens": [
+        "admin/notifications"
+      ]
+    },
+    {
+      "id": "testSendVersion",
+      "area": "admin",
+      "method": "POST",
+      "path": "/templates/{id}/versions/{versionId}/test-send",
+      "summary": "Send a test to my own email (or an allowed staff address)",
+      "auth": "staff",
+      "permission": "notifications.templates.edit",
+      "params": {
+        "id": "uuid",
+        "versionId": "uuid"
+      },
+      "body": {
+        "to": "email?",
+        "sampleContext": "json?"
+      },
+      "response": "Delivery",
+      "status": 202,
+      "errors": [
+        "TEST_RECIPIENT_NOT_ALLOWED"
+      ],
+      "screens": [
+        "admin/notifications"
+      ]
+    },
+    {
+      "id": "publishVersion",
+      "area": "admin",
+      "method": "POST",
+      "path": "/templates/{id}/versions/{versionId}/publish",
+      "summary": "Publish a draft as the live version",
+      "auth": "staff",
+      "permission": "notifications.templates.publish",
+      "params": {
+        "id": "uuid",
+        "versionId": "uuid"
+      },
+      "body": {
+        "note": "text?"
+      },
+      "response": "TemplateVersion",
+      "errors": [
+        "ILLEGAL_TRANSITION",
+        "TEMPLATE_INVALID"
+      ],
+      "audited": true,
+      "events": [
+        "notifications.template.published"
+      ],
+      "screens": [
+        "admin/notifications"
+      ]
+    },
+    {
+      "id": "discardDraftVersion",
+      "area": "admin",
+      "method": "POST",
+      "path": "/templates/{id}/versions/{versionId}/discard",
+      "summary": "Discard a draft",
+      "auth": "staff",
+      "permission": "notifications.templates.edit",
+      "params": {
+        "id": "uuid",
+        "versionId": "uuid"
+      },
+      "response": "TemplateVersion",
+      "errors": [
+        "ILLEGAL_TRANSITION"
+      ],
+      "screens": [
+        "admin/notifications"
+      ]
+    },
+    {
+      "id": "listDeliveries",
+      "area": "admin",
+      "method": "GET",
+      "path": "/deliveries",
+      "summary": "Delivery log",
+      "auth": "staff",
+      "permission": "notifications.deliveries.view",
+      "paging": true,
+      "query": {
+        "channel": "enum(email|sms|push)?",
+        "status": "enum(queued|sending|sent|delivered|retrying|failed|bounced|complained|suppressed|skipped)?",
+        "topicKey": "string?",
+        "accountId": "uuid?",
+        "address": {
+          "type": "string?",
+          "desc": "Exact email or phone; matched by hash"
+        },
+        "linkedRef": "string?",
+        "from": "datetime?",
+        "to": "datetime?"
+      },
+      "response": "Delivery",
+      "screens": [
+        "admin/notifications",
+        "admin/customers",
+        "admin/seller"
+      ]
+    },
+    {
+      "id": "getDelivery",
+      "area": "admin",
+      "method": "GET",
+      "path": "/deliveries/{id}",
+      "summary": "One delivery with provider events",
+      "auth": "staff",
+      "permission": "notifications.deliveries.view",
+      "params": {
+        "id": "uuid"
+      },
+      "response": "DeliveryDetail",
+      "screens": [
+        "admin/notifications",
+        "admin/customers"
+      ]
+    },
+    {
+      "id": "retryDelivery",
+      "area": "admin",
+      "method": "POST",
+      "path": "/deliveries/{id}/retry",
+      "summary": "Retry a failed delivery",
+      "desc": "Not allowed for sensitive topics whose content expired (codes, reset links): the person must request a new one.",
+      "auth": "staff",
+      "permission": "notifications.deliveries.retry",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "reason": "text"
+      },
+      "response": "Delivery",
+      "errors": [
+        "ILLEGAL_TRANSITION",
+        "ADDRESS_SUPPRESSED",
+        "NOT_RETRYABLE"
+      ],
+      "audited": true,
+      "screens": [
+        "admin/notifications",
+        "admin/customers"
+      ]
+    },
+    {
+      "id": "getDeliveryStats",
+      "area": "admin",
+      "method": "GET",
+      "path": "/stats",
+      "summary": "Delivery rate, bounces, failures, queue size",
+      "auth": "staff",
+      "permission": "notifications.templates.view",
+      "query": {
+        "days": "int?"
+      },
+      "response": "DeliveryStats",
+      "screens": [
+        "admin/notifications"
+      ]
+    },
+    {
+      "id": "listSuppressions",
+      "area": "admin",
+      "method": "GET",
+      "path": "/suppressions",
+      "summary": "Bounced, complained or blocked addresses",
+      "auth": "staff",
+      "permission": "notifications.suppressions.manage",
+      "paging": true,
+      "query": {
+        "channel": "enum(email|sms|push)?",
+        "reason": "enum(hard_bounce|complaint|invalid|manual)?",
+        "accountId": "uuid?",
+        "address": "string?",
+        "active": "bool?"
+      },
+      "response": "Suppression",
+      "screens": [
+        "admin/notifications",
+        "admin/customers"
+      ]
+    },
+    {
+      "id": "removeSuppression",
+      "area": "admin",
+      "method": "POST",
+      "path": "/suppressions/{id}/remove",
+      "summary": "Allow sending again (address fixed or confirmed by the person)",
+      "auth": "staff",
+      "permission": "notifications.suppressions.manage",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "reason": "text"
+      },
+      "response": "Suppression",
+      "errors": [
+        "ILLEGAL_TRANSITION"
+      ],
+      "audited": true,
+      "events": [
+        "notifications.suppression.removed"
+      ],
+      "screens": [
+        "admin/customers",
+        "admin/notifications"
+      ]
+    },
+    {
+      "id": "listBroadcasts",
+      "area": "admin",
+      "method": "GET",
+      "path": "/broadcasts",
+      "summary": "Promotional broadcasts",
+      "auth": "staff",
+      "permission": "notifications.broadcasts.manage",
+      "paging": true,
+      "query": {
+        "status": "enum(draft|scheduled|sending|sent|cancelled)?",
+        "audience": "enum(customers|sellers)?"
+      },
+      "response": "Broadcast",
+      "screens": [
+        "admin/notifications",
+        "admin/promotions"
+      ]
+    },
+    {
+      "id": "createBroadcast",
+      "area": "admin",
+      "method": "POST",
+      "path": "/broadcasts",
+      "summary": "Draft a broadcast to opted-in customers or sellers",
+      "desc": "Only promotional topics; the response estimates recipients after consent and suppressions.",
+      "auth": "staff",
+      "permission": "notifications.broadcasts.manage",
+      "body": "BroadcastInput",
+      "response": "Broadcast",
+      "status": 201,
+      "errors": [
+        "TOPIC_NOT_PROMOTIONAL",
+        "TEMPLATE_INVALID"
+      ],
+      "screens": [
+        "admin/notifications",
+        "admin/promotions"
+      ]
+    },
+    {
+      "id": "scheduleBroadcast",
+      "area": "admin",
+      "method": "POST",
+      "path": "/broadcasts/{id}/schedule",
+      "summary": "Schedule a broadcast",
+      "auth": "staff",
+      "permission": "notifications.broadcasts.manage",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "scheduledAt": "datetime"
+      },
+      "response": "Broadcast",
+      "errors": [
+        "ILLEGAL_TRANSITION"
+      ],
+      "audited": true,
+      "events": [
+        "notifications.broadcast.scheduled"
+      ],
+      "screens": [
+        "admin/notifications",
+        "admin/promotions"
+      ]
+    },
+    {
+      "id": "cancelBroadcast",
+      "area": "admin",
+      "method": "POST",
+      "path": "/broadcasts/{id}/cancel",
+      "summary": "Cancel a draft or scheduled broadcast",
+      "auth": "staff",
+      "permission": "notifications.broadcasts.manage",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "reason": "text"
+      },
+      "response": "Broadcast",
+      "errors": [
+        "ILLEGAL_TRANSITION"
+      ],
+      "audited": true,
+      "screens": [
+        "admin/notifications"
+      ]
+    },
+    {
+      "id": "listAnnouncements",
+      "area": "admin",
+      "method": "GET",
+      "path": "/announcements",
+      "summary": "Announcements sent to sellers, newest first",
+      "auth": "staff",
+      "permission": "notifications.announcements.send",
+      "paging": true,
+      "response": "Announcement",
+      "screens": [
+        "admin/notifications"
+      ]
+    },
+    {
+      "id": "sendAnnouncement",
+      "area": "admin",
+      "method": "POST",
+      "path": "/announcements",
+      "summary": "Send a message from Marketly to sellers (in-app and email)",
+      "desc": "Topic seller.announcement (essential, not promotional: no consent check; owners always get the email, other members by their channel choice). To the chosen sellers, or with no sellerIds to every active seller (approved or restricted) when it is sent. Each seller workspace gets one notice (dedupe announcement:<id>) linking to the given Seller Center screen, else seller/notifications. The sends happen before the answer; 202 says the notices are created and their emails queued.",
+      "auth": "staff",
+      "permission": "notifications.announcements.send",
+      "body": "AnnouncementInput",
+      "response": {
+        "announcement": "Announcement"
+      },
+      "status": 202,
+      "errors": [
+        "VALIDATION_FAILED"
+      ],
+      "audited": true,
+      "screens": [
+        "admin/notifications"
+      ]
+    },
+    {
+      "id": "emailProviderEvents",
+      "area": "webhooks",
+      "method": "POST",
+      "path": "/email-events",
+      "summary": "Delivery, bounce, complaint and open events from the email provider",
+      "desc": "Signature-verified; idempotent per providerEventId. Hard bounces and complaints add suppressions.",
+      "auth": "provider",
+      "body": {
+        "events": "ProviderEmailEvent[]"
+      },
+      "response": null,
+      "events": [
+        "notifications.address.suppressed",
+        "notifications.delivery.failed"
+      ]
+    },
+    {
+      "id": "smsProviderEvents",
+      "area": "webhooks",
+      "method": "POST",
+      "path": "/sms-events",
+      "summary": "SMS delivery receipts and STOP replies",
+      "desc": "STOP adds an SMS suppression and is forwarded to customers as an SMS promotions opt-out.",
+      "auth": "provider",
+      "body": {
+        "providerEventId": "string",
+        "providerMessageId": "string?",
+        "type": "enum(delivered|failed|stop|start)",
+        "phone": "string",
+        "at": "datetime"
+      },
+      "response": null,
+      "events": [
+        "notifications.address.suppressed"
+      ],
+      "phase": 2
+    },
+    {
+      "id": "inboundEmail",
+      "area": "webhooks",
+      "method": "POST",
+      "path": "/inbound-email",
+      "summary": "Replies to case and message emails",
+      "desc": "The reply-to address carries a signed token naming the module and record (case, conversation) and the recipient. Valid replies are published for support or messaging; attachments are stored through media.storeInboundFile (purpose message_attachment for conversations, case_evidence for cases; owner = the replying customer, seller or guest) and listed in attachmentAssetIds, refused files are named in the auto-reply. Unknown or expired tokens get an automatic 'please reply in your account' email.",
+      "auth": "provider",
+      "body": "InboundEmail",
+      "response": null,
+      "events": [
+        "notifications.email_reply.received"
+      ]
+    }
   ],
   "events": {
     "publishes": [
-      { "name": "notifications.delivery.failed", "when": "A delivery gives up after retries or fails permanently", "payload": { "deliveryId": "uuid", "topicKey": "string", "channel": "string", "recipientKind": "string", "accountId": "uuid?", "linkedRef": "string?", "error": "string" } },
-      { "name": "notifications.address.suppressed", "when": "An address is suppressed (hard bounce, complaint, SMS STOP)", "payload": { "channel": "enum(email|sms|push)", "accountId": "uuid?", "addressMasked": "string", "reason": "enum(hard_bounce|complaint|invalid|manual|stop)" } },
-      { "name": "notifications.suppression.removed", "when": "Staff allow an address again", "payload": { "suppressionId": "uuid", "accountId": "uuid?", "channel": "string" } },
-      { "name": "notifications.template.published", "when": "A template version goes live", "payload": { "templateId": "uuid", "topicKey": "string", "channel": "string", "version": "int", "by": "Actor" } },
-      { "name": "notifications.topic.changed", "when": "Channels of a topic are switched", "payload": { "topicKey": "string", "channels": "ChannelSetting[]", "by": "Actor" } },
-      { "name": "notifications.broadcast.scheduled", "when": "A broadcast is scheduled", "payload": { "broadcastId": "uuid", "audience": "string", "scheduledAt": "datetime", "campaignId": "uuid?" } },
-      { "name": "notifications.broadcast.sent", "when": "A broadcast finishes sending", "payload": { "broadcastId": "uuid", "stats": "BroadcastStats", "campaignId": "uuid?" } },
-      { "name": "notifications.email_reply.received", "when": "A valid email reply arrives for a case or conversation", "payload": { "module": "enum(support|messaging)", "refId": "uuid", "fromEmail": "email", "accountId": "uuid?", "text": "text", "attachmentAssetIds": "uuid[]", "receivedAt": "datetime" } }
+      {
+        "name": "notifications.delivery.failed",
+        "when": "A delivery gives up after retries or fails permanently",
+        "payload": {
+          "deliveryId": "uuid",
+          "topicKey": "string",
+          "channel": "string",
+          "recipientKind": "string",
+          "accountId": "uuid?",
+          "linkedRef": "string?",
+          "error": "string"
+        }
+      },
+      {
+        "name": "notifications.address.suppressed",
+        "when": "An address is suppressed (hard bounce, complaint, SMS STOP)",
+        "payload": {
+          "channel": "enum(email|sms|push)",
+          "accountId": "uuid?",
+          "addressMasked": "string",
+          "reason": "enum(hard_bounce|complaint|invalid|manual|stop)"
+        }
+      },
+      {
+        "name": "notifications.suppression.removed",
+        "when": "Staff allow an address again",
+        "payload": {
+          "suppressionId": "uuid",
+          "accountId": "uuid?",
+          "channel": "string"
+        }
+      },
+      {
+        "name": "notifications.template.published",
+        "when": "A template version goes live",
+        "payload": {
+          "templateId": "uuid",
+          "topicKey": "string",
+          "channel": "string",
+          "version": "int",
+          "by": "Actor"
+        }
+      },
+      {
+        "name": "notifications.topic.changed",
+        "when": "Channels of a topic are switched",
+        "payload": {
+          "topicKey": "string",
+          "channels": "ChannelSetting[]",
+          "by": "Actor"
+        }
+      },
+      {
+        "name": "notifications.broadcast.scheduled",
+        "when": "A broadcast is scheduled",
+        "payload": {
+          "broadcastId": "uuid",
+          "audience": "string",
+          "scheduledAt": "datetime",
+          "campaignId": "uuid?"
+        }
+      },
+      {
+        "name": "notifications.broadcast.sent",
+        "when": "A broadcast finishes sending",
+        "payload": {
+          "broadcastId": "uuid",
+          "stats": "BroadcastStats",
+          "campaignId": "uuid?"
+        }
+      },
+      {
+        "name": "notifications.email_reply.received",
+        "when": "A valid email reply arrives for a case or conversation",
+        "payload": {
+          "module": "enum(support|messaging)",
+          "refId": "uuid",
+          "fromEmail": "email",
+          "accountId": "uuid?",
+          "text": "text",
+          "attachmentAssetIds": "uuid[]",
+          "receivedAt": "datetime"
+        }
+      }
     ],
     "consumes": [
-      { "name": "identity.verification.code_issued", "does": "Email (or text, phase 2) the code: registration, email change, phone, 2-step. 'You already have an account' email when existingAccount. Code never stored in the delivery log." },
-      { "name": "identity.password_reset.requested", "does": "Email the reset link (customer.account.password_reset / staff variant)" },
-      { "name": "identity.password.changed", "does": "Security alert: password changed (email + in-app, account group)" },
-      { "name": "identity.session.new_device", "does": "Security alert: new sign-in on a device" },
-      { "name": "identity.email.changed", "does": "Alert to the old and new address" },
-      { "name": "identity.two_step.changed", "does": "Security alert: 2-step verification turned on/off or reset" },
-      { "name": "identity.account.locked", "does": "Alert the account owner; staff accounts also notify the Platform Administrator role" },
-      { "name": "identity.invitation.created", "does": "Email the staff or seller-member invitation link" },
-      { "name": "identity.user.verified", "does": "Welcome notice in the new customer's inbox" },
-      { "name": "customers.marketing_preferences.changed", "does": "Refresh the consent cache used for promotional sends and broadcasts" },
-      { "name": "customers.account.closed", "does": "Stop all promotional sends, remove push devices, keep essential notices for open obligations only" },
-      { "name": "customers.data_export.ready", "does": "Email the customer the export download link" },
-      { "name": "orders.order.accepted", "does": "Customer: order accepted (confirmation only after acceptance). Seller: new order per seller group with fulfilledBy seller (orders group, members with order permission), with the dispatch reminder effect; Fulfilled by Marketly groups get no new-order notice or dispatch reminder (fulfillment-service sends seller.fulfillment.order_received). Official Store groups (ownerType official): staff (topic staff.official_store.order_new, Official Store Manager role), one notice per group" },
-      { "name": "orders.cancellation.requested", "does": "Seller (fulfilledBy seller; orders group, action required until respondBy): a customer asks to cancel items. Official Store and Fulfilled by Marketly groups: staff (order_manager role) decide it instead; no seller notice" },
-      { "name": "orders.item.cancelled", "does": "Customer: cancellation update for the item, skipped when the payload's notifyCustomer is false (staff cancelled without telling the customer); seller: item cancelled (always)" },
-      { "name": "orders.item.delayed", "does": "Customer: delay notice with the new estimate and options (wait, cancel, contact support)" },
-      { "name": "orders.cancellation.decided", "does": "Customer: result of a cancellation request" },
-      { "name": "payments.payment.captured", "does": "Customer: payment accepted (combined with order accepted when simultaneous); for orders paid fully with store credit (amount 0, creditAmount set) the notice says paid with store credit" },
-      { "name": "payments.payment.failed", "does": "Customer: payment failed, retry link" },
-      { "name": "payments.payment.pending_check", "does": "Customer: payment result is being checked; link to order status" },
-      { "name": "payments.refund.sent", "does": "Customer: refund sent, with destination and expected timing" },
-      { "name": "payments.refund.failed", "does": "Customer: refund problem and next steps; staff: Finance Manager notice" },
-      { "name": "payments.chargeback.opened", "does": "Staff: unusual financial activity notice to Finance Manager; seller: dispute opened on an order" },
-      { "name": "shipping.shipment.dispatched", "does": "Customer: package dispatched with contents, carrier and tracking; cancels the seller dispatch reminder" },
-      { "name": "shipping.shipment.delivered", "does": "Customer: package delivered" },
-      { "name": "shipping.shipment.exception", "does": "Customer: delivery problem with next steps; staff: Shipping Manager. No seller notice for Fulfilled by Marketly groups (fulfilledBy marketly_service)" },
-      { "name": "shipping.dispatch.overdue", "does": "Seller (fulfilledBy seller only): dispatch overdue (action required); staff: overdue shipping to Shipping Manager (lead or backup). Fulfilled by Marketly groups: no seller notice; the staff notice names the Marketly warehouse and goes to warehouse_manager" },
-      { "name": "returns.return.requested", "does": "Seller: new return request with response deadline. Official Store returns (ownerType official): staff (topic staff.official_store.return_requested, Official Store Manager role), action required until the return is approved or rejected (return:<returnId>:respond)" },
-      { "name": "returns.return.info_requested", "does": "Customer: more information needed for the return" },
-      { "name": "returns.return.approved", "does": "Customer: return approved with label or drop-off instructions" },
-      { "name": "returns.return.rejected", "does": "Customer: return declined with the reason and how to ask for help" },
-      { "name": "returns.label.created", "does": "Customer: return label ready; schedules a drop-off reminder" },
-      { "name": "returns.return.received", "does": "Customer: return received; seller: inspect by deadline" },
-      { "name": "returns.return.inspected", "does": "Customer: inspection outcome" },
-      { "name": "returns.return.escalated", "does": "Staff: Returns Manager; seller: platform support stepped in" },
-      { "name": "returns.refund.approved", "does": "Customer: refund approved and processing (never says the money has arrived). Seller (topic seller.refund.approved, returns_cases group, members with returns.refunds.issue): a refund on one of its orders was approved and handed to payments, unless a seller member approved it (approvedBy kind seller); links to the return, the case, else the seller order list. Official Store refunds (ownerType official): staff (topic staff.official_store.refund_approved, Official Store Manager role). Neither says the money has arrived" },
-      { "name": "returns.replacement.created", "does": "Customer: replacement on its way (its own shipment)" },
-      { "name": "support.case.opened", "does": "Customer: acknowledgment with expected reply time; seller: case opened on an order. A seller's support request (kind seller_request): staff (topic staff.seller.support_request) of the role of the case's team (seller_management: Seller Manager, the default), action required until a staff owner is assigned (support.case.assigned) or the case is decided or resolved (seller-request:<caseId>)" },
-      { "name": "support.case.message_added", "does": "Customer or seller: case reply (email carries a reply-to token)" },
-      { "name": "support.case.escalated", "does": "Staff: escalated case to Customer Support Manager (or Returns Manager by category)" },
-      { "name": "support.case.overdue", "does": "Staff: case past its response target to the queue lead and backup" },
-      { "name": "support.case.decided", "does": "Customer and seller: decision and remedy, with the appeal deadline. Nothing is sent when the payload's notified is false (staff decided without notifying the parties)" },
-      { "name": "support.case.resolved", "does": "Customer: case resolved" },
-      { "name": "messaging.message.sent", "does": "Recipient (customer or seller members with customer permission): new message, reply-to token in email. When the recipient seller is the Official Store (OFFICIAL_STORE_ID) the notice goes to staff instead (topic staff.official_store.message_received, Official Store Manager role through access, action required until the conversation is answered)" },
-      { "name": "sellers.invitation.sent", "does": "Email the invited business its invitation code and how to apply (code never stored in the delivery log)" },
-      { "name": "sellers.application.submitted", "does": "Staff: new application to Seller Manager" },
-      { "name": "sellers.application.information_requested", "does": "Applicant: information required, with deadline" },
-      { "name": "sellers.application.decided", "does": "Applicant: application result (approved with next steps, or reasons)" },
-      { "name": "sellers.seller.restricted", "does": "Seller owner: restriction with reason, affected activity and appeal route" },
-      { "name": "sellers.seller.suspended", "does": "Seller owner: suspension with reason, what stays open and appeal route" },
-      { "name": "sellers.seller.reinstated", "does": "Seller owner: account reinstated" },
-      { "name": "sellers.warning.issued", "does": "Seller owner: performance or policy warning" },
-      { "name": "sellers.appeal.decided", "does": "Seller owner: appeal result" },
-      { "name": "sellers.payout_account.changed", "does": "Seller owner: security notice that the payout destination changed (always email). A change of an existing account (not isInitial) also goes to staff (topic staff.finance.payout_account_review, Finance Manager role): the change waits for the Finance review; action required until verified or rejected (payout-account-review:<sellerId>)" },
-      { "name": "sellers.change_request.decided", "does": "Seller owner (essential, account_finance group, topic seller.change_request.decided): the requested change (legal details, bank, brand, category, return terms) was approved or rejected, with the reason and any impact on selling or payouts (e.g. new legal name shown from today; category opens for listings)" },
-      { "name": "sellers.verification.changed", "does": "Seller owner (essential, topic seller.verification.changed): the Verified seller label was granted, lapsed or revoked, what it changes on the storefront and what to submit to get it back" },
-      { "name": "sellers.launch_review.decided", "does": "Seller owner (essential, topic seller.launch_review.decided): launch review passed (eligible offers are now live) or needs changes (what to fix; offers stay inactive until it passes)" },
-      { "name": "finance.destination.verified", "does": "Seller owner (essential, owner-only, always email, topic seller.payout_destination.verified): the new payout destination is verified and the next payout goes there" },
-      { "name": "finance.destination.rejected", "does": "Seller owner (essential, owner-only, always email, topic seller.payout_destination.rejected): the payout destination was rejected with the reason; payouts continue to the previous verified account or stay held until one is added" },
-      { "name": "catalog.product.changes_requested", "does": "Seller: requested corrections with field comments and resubmit deadline" },
-      { "name": "catalog.product.approved", "does": "Seller: product approved" },
-      { "name": "catalog.product.rejected", "does": "Seller: product rejected with reason" },
-      { "name": "catalog.images.recrop_needed", "does": "Seller: product images to re-crop after the product image aspect ratio changed (topic seller.product.recrop_needed; products stay live)" },
-      { "name": "inventory.stock.low", "does": "Seller: low stock (own offers), skipped when serviceManaged (fulfillment-service sends seller.fulfillment.stock_low); staff: stock shortage to Inventory Manager for the Official Store" },
-      { "name": "finance.payout.paid", "does": "Seller owner: payout paid (after bank confirmation)" },
-      { "name": "finance.payout.failed", "does": "Seller owner: payout failed and what to fix; staff: failed payout to Finance Manager" },
-      { "name": "finance.hold.placed", "does": "Seller owner: hold with amount, reason and review date" },
-      { "name": "finance.hold.released", "does": "Seller owner: hold released" },
-      { "name": "finance.balance.negative", "does": "Seller owner: amount owed; staff: Finance Manager" },
-      { "name": "finance.statement.issued", "does": "Seller owner: statement available" },
-      { "name": "finance.reconciliation.mismatch_found", "does": "Staff: unusual financial activity to Finance Manager" },
-      { "name": "promotions.participation.invited", "does": "Seller: invitation to join a campaign with expected earnings impact" },
-      { "name": "advertising.campaign.status_changed", "does": "Seller: sponsored campaign approved, rejected, live, paused or finished; staff: waiting approvals to Advertising/Content roles" },
-      { "name": "reviews.invite.due", "does": "Customer: review invitation (optional category, can be turned off)" },
-      { "name": "reviews.report.created", "does": "Staff: reported content to the moderation queue role" },
-      { "name": "trust.report.created", "does": "Staff: new risk report to Trust and Risk Manager" },
-      { "name": "wishlist.alert.triggered", "does": "Customer: price drop or back in stock (promotional, consent required)" },
-      { "name": "access.approval.requested", "does": "Staff: waiting approval to eligible approvers (nominated reviewer first), action required with due date" },
-      { "name": "access.approval.partially_approved", "does": "Staff: second approval needed, to remaining eligible approvers" },
-      { "name": "access.approval.returned", "does": "Staff: request sent back to the requester with the comment" },
-      { "name": "access.approval.decided", "does": "Staff: outcome to the requester; resolves the approvers' action notices" },
-      { "name": "access.approval.reminder_sent", "does": "Staff: reminder to the listed reviewers" },
-      { "name": "access.coverage.changed", "does": "Re-route open staff action notices of that role to the new receivers" },
-      { "name": "access.away.ended", "does": "Give the returning lead the notices received by the backup while away" },
-      { "name": "workqueues.item.overdue", "does": "Staff: overdue work item to the queue lead and backup" },
-      { "name": "workqueues.item.escalated", "does": "Staff: escalated item to the next role on the escalation route" },
-      { "name": "workqueues.item.resolved", "does": "Resolve the action notices for that work item" },
-      { "name": "settings.change.scheduled", "does": "Sellers (seller-visible changes): upcoming platform change with its effective date" },
-      { "name": "audit.integrity.failed", "does": "Staff: urgent notice to Platform Administrator and Business Owner" },
-      { "name": "reports.export.ready", "does": "Export ready to the requester (staff or seller member), including audit, orders and module list exports" },
-      { "name": "reports.scheduled_report.ready", "does": "Phase 2: each staff recipient (staff_member, topic staff.report.scheduled, in-app and email): the scheduled report with a link to its export in the Admin Center (scheduled reports go to staff only; no outside addresses)" },
-      { "name": "purchasing.purchase_order.sent", "does": "Supplier (external_email, topic supplier.purchase_order.sent, email only) when emailSupplier is true and supplierEmail is set: the purchase order with its lines, the delivery address from the payload's shipTo (location name and address) and the buyer's message; in-app copy to the Purchasing Manager role" },
-      { "name": "wallet.credit.expiring", "does": "Customer (account group, topic customer.credit.expiring): unused store credit amount and expiry date, with a link to shop" },
-      { "name": "workqueues.day_end.prepared", "does": "Staff (topic staff.day_end.summary, to roleKeys): reminder that today's day-end review is open, with open and overdue counts and the due time; action required (resolved when the review is completed). workqueues does not publish it once the review is completed" },
-      { "name": "advertising.campaign.ending_soon", "does": "Seller (members with advertising permission, topic seller.campaign.ending_soon) for seller campaigns; staff (ownerStaffId, else the Advertising Manager role; topic staff.campaign.ending_soon) for own and brand campaigns: ends on endsAt, renew or let it finish" },
-      { "name": "content.article.review_due", "does": "Staff (ownerStaffId, else the Content Manager role; topic staff.article.review_due): help article due for review, action required" },
-      { "name": "reviews.moderation.decided", "does": "Reporters (topic customer.review_report.decided, seller variant for sellers): reporterOutcome; author (topic customer.review.moderated, seller.content.moderated for responses and answers): kept, edited or removed with the reason and appealUntil" },
-      { "name": "trust.report.resolved", "does": "Each reporter (customers and sellers in-app and email, rights owners by external_email; topic trust.report.resolved): the reporterOutcome text, never the reported party's details" },
-      { "name": "reviews.review.published", "does": "Seller (topic seller.review.new, products group, members with reviews.responses.post): a new product review on its product, once per review (an edited, kept or reinstated review sends nothing again). Official Store reviews (sellerId OFFICIAL_STORE_ID): staff (topic staff.official_store.review_new, Official Store Manager role)" },
-      { "name": "reviews.feedback.published", "does": "Seller (topic seller.feedback.new, products group, members with reviews.responses.post): new store feedback, once per feedback. Official Store feedback: staff (topic staff.official_store.feedback_new, Official Store Manager role)" },
-      { "name": "reviews.question.asked", "does": "Each seller in sellerIds (topic seller.question.asked, products group, members with reviews.responses.post), action required until that seller answers (question:<questionId>:<sellerId>); officialStore: staff (topic staff.official_store.question_asked, Official Store Manager role), action required until Marketly staff answer (question:<questionId>:official-store)" },
-      { "name": "reviews.answer.published", "does": "Resolve the question notice of whoever answered: a seller answer resolves question:<questionId>:<sellerId>, a Marketly staff answer question:<questionId>:official-store; customer answers resolve nothing. Sends nothing" },
-      { "name": "support.case.assigned", "does": "Resolve the staff notice of a seller's support request (seller-request:<caseId>) once a staff owner is assigned. Sends nothing" },
-      { "name": "trust.rights_report.received", "does": "Rights owner (external_email, topic rights_owner.report.received): confirmation with the TR reference and what happens next" },
-      { "name": "trust.evidence.requested", "does": "The asked party: customer (topic customer.trust.evidence_requested, cases group) or seller owner (topic seller.trust.evidence_requested): Trust and Risk needs proof, what to send and by when; action required until trust records the answer (resolve by the request's dedupe key)" },
-      { "name": "trust.appeal.decided", "does": "The appellant: customer (topic customer.trust.appeal_decided) or seller owner (topic seller.trust.appeal_decided): the appeal outcome and what changes (restriction lifted or kept)" },
-      { "name": "payments.refund.destination_requested", "does": "Customer (by the payload's customerId, else the order email; topic customer.refund.destination_needed, returns_refunds group): the refund could not go back to the original payment method; choose where to receive it, with the deadline; action required" },
-      { "name": "customers.closure.delayed", "does": "Customer (topic customer.account.closure_delayed, account group): the account closure is waiting because new obligations appeared (blockers listed), and when it is checked again" },
-      { "name": "offers.offer.missing_items_stale", "does": "Ask the seller to review the offer's missing-items list after the product's box contents changed (topic seller.offer.missing_items_review, members with offers.offers.manage); Official Store offers go to staff (topic staff.offer.missing_items_review, Catalog Manager role). Action notices (dedupe offer-missing-items:<offerId>), resolved by offers.offer.missing_items_reviewed" },
-      { "name": "offers.offer.missing_items_reviewed", "does": "Resolve the seller's or staff's missing-items review notice of the offer (offer-missing-items:<offerId>); sends nothing" },
-      { "name": "inventory.stock.low_digest", "does": "Daily digest of items at or below their reorder point: Official Store items to staff (topic staff.inventory.low_stock_digest, Inventory Manager role); each seller's own items to that seller (topic seller.stock.low_digest, members with the stock permission). Replaces one notice per item for non-urgent low stock" },
-      { "name": "sellers.application.information_reminder", "does": "Applicant (topic seller.application.information_reminder, owner only): reminder that requested information is still missing, with the deadline; same action notice as the original request" },
-      { "name": "sellers.member.invited", "does": "Remember the invited member (invited_members): their notification preferences answer 409 MEMBER_NOT_JOINED until they accept; sends nothing" },
-      { "name": "sellers.member.joined", "does": "Forget the invitation (invited_members): the member's preferences open; sends nothing" },
-      { "name": "sellers.member.removed", "does": "Forget a revoked invitation (invited_members); sends nothing" },
-      { "name": "workqueues.day_end.completed", "does": "Staff (topic staff.day_end.completed, to the payload's roleKeys): the day-end summary (who completed it, open and overdue counts, items with notes); resolves the staff.day_end.summary action notices" },
-      { "name": "catalog.product.submitted", "does": "Staff (topic staff.catalog.product_submitted, Catalog Manager role): a new, resubmitted or changed product to review, with the review deadline; action required until the product is approved, sent back or rejected (product-review:<productId>)" },
-      { "name": "catalog.brand.requested", "does": "Staff (topic staff.catalog.brand_requested, Catalog Manager role): a seller submitted a product with a brand that is not listed; action required until the brand's status is decided (brand-request:<brandId>)" },
-      { "name": "catalog.brand.changed", "does": "Resolve the brand request notice (brand-request:<brandId>) when the brand's status is decided; sends nothing" },
-      { "name": "catalog.correction.suggested", "does": "Staff (topic staff.catalog.correction_suggested, Catalog Manager role): a seller suggested a correction to shared product content; action required until decided (correction:<suggestionId>)" },
-      { "name": "catalog.correction.decided", "does": "Resolve the correction notice (correction:<suggestionId>); sends nothing" },
-      { "name": "sellers.change_request.submitted", "does": "Staff (topic staff.seller.change_requested, Seller Manager role): a store name, tagline, storefront claim, brand request or business change waits for review; action required until decided (change-request:<changeRequestId>)" },
-      { "name": "sellers.launch_review.requested", "does": "Staff (topic staff.seller.launch_review_requested, Seller Manager role): a seller asks for the launch readiness review; action required until decided (launch-review:<sellerId>)" },
-      { "name": "sellers.application.information_provided", "does": "Staff (topic staff.seller.application_information_provided, Seller Manager role): the applicant answered the information request; same action notice as the application (seller-application:<applicationId>)" },
-      { "name": "sellers.appeal.submitted", "does": "Staff (topic staff.seller.appeal_submitted, Seller Manager role): a seller appeal to decide by its deadline; action required until decided (seller-appeal:<appealId>)" },
-      { "name": "sellers.restriction.evidence_submitted", "does": "Staff (topic staff.seller.restriction_evidence, Seller Manager role): a seller uploaded documents to lift a restriction; action required until the restriction is lifted (restriction-evidence:<restrictionId>)" },
-      { "name": "sellers.restriction.lifted", "does": "Resolve the restriction evidence notice (restriction-evidence:<restrictionId>); sends nothing" },
-      { "name": "trust.appeal.submitted", "does": "Staff (topic staff.trust.appeal_submitted, Trust and Risk Manager role): an appeal against a trust enforcement to decide by its deadline; action required until trust.appeal.decided (trust-appeal-review:<appealId>)" },
-      { "name": "reviews.appeal.submitted", "does": "Staff (topic staff.moderation.appeal_submitted, Content Manager role): an author appeals a moderation decision; action required until decided (moderation-appeal:<appealId>)" },
-      { "name": "reviews.appeal.decided", "does": "Resolve the moderation appeal notice (moderation-appeal:<appealId>); sends nothing" }
+      {
+        "name": "identity.verification.code_issued",
+        "does": "Email (or text, phase 2) the code: registration, email change, phone, 2-step. 'You already have an account' email when existingAccount. Code never stored in the delivery log."
+      },
+      {
+        "name": "identity.password_reset.requested",
+        "does": "Email the reset link (customer.account.password_reset / staff variant)"
+      },
+      {
+        "name": "identity.password.changed",
+        "does": "Security alert: password changed (email + in-app, account group)"
+      },
+      {
+        "name": "identity.session.new_device",
+        "does": "Security alert: new sign-in on a device"
+      },
+      {
+        "name": "identity.email.changed",
+        "does": "Alert to the old and new address"
+      },
+      {
+        "name": "identity.two_step.changed",
+        "does": "Security alert: 2-step verification turned on/off or reset"
+      },
+      {
+        "name": "identity.account.locked",
+        "does": "Alert the account owner; staff accounts also notify the Platform Administrator role"
+      },
+      {
+        "name": "identity.invitation.created",
+        "does": "Email the staff or seller-member invitation link"
+      },
+      {
+        "name": "identity.user.verified",
+        "does": "Welcome notice in the new customer's inbox"
+      },
+      {
+        "name": "customers.marketing_preferences.changed",
+        "does": "Refresh the consent cache used for promotional sends and broadcasts"
+      },
+      {
+        "name": "customers.account.closed",
+        "does": "Stop all promotional sends, remove push devices, keep essential notices for open obligations only"
+      },
+      {
+        "name": "customers.data_export.ready",
+        "does": "Email the customer the export download link"
+      },
+      {
+        "name": "orders.order.accepted",
+        "does": "Customer: order accepted (confirmation only after acceptance). Seller: new order per seller group with fulfilledBy seller (orders group, members with order permission), with the dispatch reminder effect; Fulfilled by Marketly groups get no new-order notice or dispatch reminder (fulfillment-service sends seller.fulfillment.order_received). Official Store groups (ownerType official): staff (topic staff.official_store.order_new, Official Store Manager role), one notice per group"
+      },
+      {
+        "name": "orders.cancellation.requested",
+        "does": "Seller (fulfilledBy seller; orders group, action required until respondBy): a customer asks to cancel items. Official Store and Fulfilled by Marketly groups: staff (order_manager role) decide it instead; no seller notice"
+      },
+      {
+        "name": "orders.item.cancelled",
+        "does": "Customer: cancellation update for the item, skipped when the payload's notifyCustomer is false (staff cancelled without telling the customer); seller: item cancelled (always)"
+      },
+      {
+        "name": "orders.item.delayed",
+        "does": "Customer: delay notice with the new estimate and options (wait, cancel, contact support)"
+      },
+      {
+        "name": "orders.cancellation.decided",
+        "does": "Customer: result of a cancellation request"
+      },
+      {
+        "name": "payments.payment.captured",
+        "does": "Customer: payment accepted (combined with order accepted when simultaneous); for orders paid fully with store credit (amount 0, creditAmount set) the notice says paid with store credit"
+      },
+      {
+        "name": "payments.payment.failed",
+        "does": "Customer: payment failed, retry link"
+      },
+      {
+        "name": "payments.payment.pending_check",
+        "does": "Customer: payment result is being checked; link to order status"
+      },
+      {
+        "name": "payments.refund.sent",
+        "does": "Customer: refund sent, with destination and expected timing"
+      },
+      {
+        "name": "payments.refund.failed",
+        "does": "Customer: refund problem and next steps; staff: Finance Manager notice"
+      },
+      {
+        "name": "payments.chargeback.opened",
+        "does": "Staff: unusual financial activity notice to Finance Manager; seller: dispute opened on an order"
+      },
+      {
+        "name": "shipping.shipment.dispatched",
+        "does": "Customer: package dispatched with contents, carrier and tracking; cancels the seller dispatch reminder"
+      },
+      {
+        "name": "shipping.shipment.delivered",
+        "does": "Customer: package delivered"
+      },
+      {
+        "name": "shipping.shipment.exception",
+        "does": "Customer: delivery problem with next steps; staff: Shipping Manager. No seller notice for Fulfilled by Marketly groups (fulfilledBy marketly_service)"
+      },
+      {
+        "name": "shipping.dispatch.overdue",
+        "does": "Seller (fulfilledBy seller only): dispatch overdue (action required); staff: overdue shipping to Shipping Manager (lead or backup). Fulfilled by Marketly groups: no seller notice; the staff notice names the Marketly warehouse and goes to warehouse_manager"
+      },
+      {
+        "name": "returns.return.requested",
+        "does": "Seller: new return request with response deadline. Official Store returns (ownerType official): staff (topic staff.official_store.return_requested, Official Store Manager role), action required until the return is approved or rejected (return:<returnId>:respond)"
+      },
+      {
+        "name": "returns.return.info_requested",
+        "does": "Customer: more information needed for the return"
+      },
+      {
+        "name": "returns.return.approved",
+        "does": "Customer: return approved with label or drop-off instructions"
+      },
+      {
+        "name": "returns.return.rejected",
+        "does": "Customer: return declined with the reason and how to ask for help"
+      },
+      {
+        "name": "returns.label.created",
+        "does": "Customer: return label ready; schedules a drop-off reminder"
+      },
+      {
+        "name": "returns.return.received",
+        "does": "Customer: return received; seller: inspect by deadline"
+      },
+      {
+        "name": "returns.return.inspected",
+        "does": "Customer: inspection outcome"
+      },
+      {
+        "name": "returns.return.escalated",
+        "does": "Staff: Returns Manager; seller: platform support stepped in"
+      },
+      {
+        "name": "returns.refund.approved",
+        "does": "Customer: refund approved and processing (never says the money has arrived). Seller (topic seller.refund.approved, returns_cases group, members with returns.refunds.issue): a refund on one of its orders was approved and handed to payments, unless a seller member approved it (approvedBy kind seller); links to the return, the case, else the seller order list. Official Store refunds (ownerType official): staff (topic staff.official_store.refund_approved, Official Store Manager role). Neither says the money has arrived"
+      },
+      {
+        "name": "returns.replacement.created",
+        "does": "Customer: replacement on its way (its own shipment)"
+      },
+      {
+        "name": "support.case.opened",
+        "does": "Customer: acknowledgment with expected reply time; seller: case opened on an order. A seller's support request (kind seller_request): staff (topic staff.seller.support_request) of the role of the case's team (seller_management: Seller Manager, the default), action required until a staff owner is assigned (support.case.assigned) or the case is decided or resolved (seller-request:<caseId>)"
+      },
+      {
+        "name": "support.case.message_added",
+        "does": "Customer or seller: case reply (email carries a reply-to token)"
+      },
+      {
+        "name": "support.case.escalated",
+        "does": "Staff: escalated case to Customer Support Manager (or Returns Manager by category)"
+      },
+      {
+        "name": "support.case.overdue",
+        "does": "Staff: case past its response target to the queue lead and backup"
+      },
+      {
+        "name": "support.case.decided",
+        "does": "Customer and seller: decision and remedy, with the appeal deadline. Nothing is sent when the payload's notified is false (staff decided without notifying the parties)"
+      },
+      {
+        "name": "support.case.resolved",
+        "does": "Customer: case resolved"
+      },
+      {
+        "name": "messaging.message.sent",
+        "does": "Recipient (customer or seller members with customer permission): new message, reply-to token in email. When the recipient seller is the Official Store (OFFICIAL_STORE_ID) the notice goes to staff instead (topic staff.official_store.message_received, Official Store Manager role through access, action required until the conversation is answered)"
+      },
+      {
+        "name": "sellers.invitation.sent",
+        "does": "Email the invited business its invitation code and how to apply (code never stored in the delivery log)"
+      },
+      {
+        "name": "sellers.application.submitted",
+        "does": "Staff: new application to Seller Manager"
+      },
+      {
+        "name": "sellers.application.information_requested",
+        "does": "Applicant: information required, with deadline"
+      },
+      {
+        "name": "sellers.application.decided",
+        "does": "Applicant: application result (approved with next steps, or reasons)"
+      },
+      {
+        "name": "sellers.seller.restricted",
+        "does": "Seller owner: restriction with reason, affected activity and appeal route"
+      },
+      {
+        "name": "sellers.seller.suspended",
+        "does": "Seller owner: suspension with reason, what stays open and appeal route"
+      },
+      {
+        "name": "sellers.seller.reinstated",
+        "does": "Seller owner: account reinstated"
+      },
+      {
+        "name": "sellers.warning.issued",
+        "does": "Seller owner: performance or policy warning"
+      },
+      {
+        "name": "sellers.appeal.decided",
+        "does": "Seller owner: appeal result"
+      },
+      {
+        "name": "sellers.payout_account.changed",
+        "does": "Seller owner: security notice that the payout destination changed (always email). A change of an existing account (not isInitial) also goes to staff (topic staff.finance.payout_account_review, Finance Manager role): the change waits for the Finance review; action required until verified or rejected (payout-account-review:<sellerId>)"
+      },
+      {
+        "name": "sellers.change_request.decided",
+        "does": "Seller owner (essential, account_finance group, topic seller.change_request.decided): the requested change (legal details, bank, brand, category, return terms) was approved or rejected, with the reason and any impact on selling or payouts (e.g. new legal name shown from today; category opens for listings)"
+      },
+      {
+        "name": "sellers.verification.changed",
+        "does": "Seller owner (essential, topic seller.verification.changed): the Verified seller label was granted, lapsed or revoked, what it changes on the storefront and what to submit to get it back"
+      },
+      {
+        "name": "sellers.launch_review.decided",
+        "does": "Seller owner (essential, topic seller.launch_review.decided): launch review passed (eligible offers are now live) or needs changes (what to fix; offers stay inactive until it passes)"
+      },
+      {
+        "name": "finance.destination.verified",
+        "does": "Seller owner (essential, owner-only, always email, topic seller.payout_destination.verified): the new payout destination is verified and the next payout goes there"
+      },
+      {
+        "name": "finance.destination.rejected",
+        "does": "Seller owner (essential, owner-only, always email, topic seller.payout_destination.rejected): the payout destination was rejected with the reason; payouts continue to the previous verified account or stay held until one is added"
+      },
+      {
+        "name": "catalog.product.changes_requested",
+        "does": "Seller: requested corrections with field comments and resubmit deadline"
+      },
+      {
+        "name": "catalog.product.approved",
+        "does": "Seller: product approved"
+      },
+      {
+        "name": "catalog.product.rejected",
+        "does": "Seller: product rejected with reason"
+      },
+      {
+        "name": "catalog.images.recrop_needed",
+        "does": "Seller: product images to re-crop after the product image aspect ratio changed (topic seller.product.recrop_needed; products stay live)"
+      },
+      {
+        "name": "inventory.stock.low",
+        "does": "Seller: low stock (own offers), skipped when serviceManaged (fulfillment-service sends seller.fulfillment.stock_low); staff: stock shortage to Inventory Manager for the Official Store"
+      },
+      {
+        "name": "finance.payout.paid",
+        "does": "Seller owner: payout paid (after bank confirmation)"
+      },
+      {
+        "name": "finance.payout.failed",
+        "does": "Seller owner: payout failed and what to fix; staff: failed payout to Finance Manager"
+      },
+      {
+        "name": "finance.hold.placed",
+        "does": "Seller owner: hold with amount, reason and review date"
+      },
+      {
+        "name": "finance.hold.released",
+        "does": "Seller owner: hold released"
+      },
+      {
+        "name": "finance.balance.negative",
+        "does": "Seller owner: amount owed; staff: Finance Manager"
+      },
+      {
+        "name": "finance.statement.issued",
+        "does": "Seller owner: statement available"
+      },
+      {
+        "name": "finance.reconciliation.mismatch_found",
+        "does": "Staff: unusual financial activity to Finance Manager"
+      },
+      {
+        "name": "promotions.participation.invited",
+        "does": "Seller: invitation to join a campaign with expected earnings impact"
+      },
+      {
+        "name": "advertising.campaign.status_changed",
+        "does": "Seller: sponsored campaign approved, rejected, live, paused or finished; staff: waiting approvals to Advertising/Content roles"
+      },
+      {
+        "name": "reviews.invite.due",
+        "does": "Customer: review invitation (optional category, can be turned off)"
+      },
+      {
+        "name": "reviews.report.created",
+        "does": "Staff: reported content to the moderation queue role"
+      },
+      {
+        "name": "trust.report.created",
+        "does": "Staff: new risk report to Trust and Risk Manager"
+      },
+      {
+        "name": "wishlist.alert.triggered",
+        "does": "Customer: price drop or back in stock (promotional, consent required)"
+      },
+      {
+        "name": "services.request.status_changed",
+        "does": "Customer: their service request or booking was confirmed, started, completed, declined or cancelled"
+      },
+      {
+        "name": "food.order.status_changed",
+        "does": "Customer: their food order was accepted, is on the way, was delivered, declined or cancelled, or its payment failed (in-app, topic customer.food.order)"
+      },
+      {
+        "name": "software.purchase.paid",
+        "does": "Customer: a software purchase is paid; the app (or the pack's apps) and the licence key are in Softwares › My apps (in-app, topic customer.software.purchase)"
+      },
+      {
+        "name": "software.licence.reissued",
+        "does": "Customer: staff replaced their licence key for an app; the old key no longer works (in-app, topic customer.software.licence)"
+      },
+      {
+        "name": "rewards.reward.redeemed",
+        "does": "Customer: the coupon they got for Daily rewards points is ready, with its code (in-app, topic customer.rewards.coupon)"
+      },
+      {
+        "name": "farm.order.placed",
+        "does": "Customer: their farm order was placed and waits for the dealer to confirm the delivery date (in-app, topic customer.farm.order)"
+      },
+      {
+        "name": "farm.order.status_changed",
+        "does": "Customer: their farm order was confirmed (and what was charged), rescheduled, sent out, delivered, rejected or cancelled, or its payment failed (in-app, topic customer.farm.order)"
+      },
+      {
+        "name": "services.device.verified",
+        "does": "Customer: their registered device is verified, with its Post-sale cover date (in-app, topic customer.services.device)"
+      },
+      {
+        "name": "services.device.rejected",
+        "does": "Customer: their registered device couldn't be verified (or its verification was withdrawn), with the reason (in-app, topic customer.services.device)"
+      },
+      {
+        "name": "departments.blog.followed_author_posted",
+        "does": "Customer: a blog author they follow published a post (in-app, topic customer.blogs.followed_author; optional)"
+      },
+      {
+        "name": "departments.play.prize_awarded",
+        "does": "Customer: they won a Play center prize week and their coupon is in Account › Coupons (in-app, topic customer.play.prize)"
+      },
+      {
+        "name": "access.approval.requested",
+        "does": "Staff: waiting approval to eligible approvers (nominated reviewer first), action required with due date"
+      },
+      {
+        "name": "access.approval.partially_approved",
+        "does": "Staff: second approval needed, to remaining eligible approvers"
+      },
+      {
+        "name": "access.approval.returned",
+        "does": "Staff: request sent back to the requester with the comment"
+      },
+      {
+        "name": "access.approval.decided",
+        "does": "Staff: outcome to the requester; resolves the approvers' action notices"
+      },
+      {
+        "name": "access.approval.reminder_sent",
+        "does": "Staff: reminder to the listed reviewers"
+      },
+      {
+        "name": "access.coverage.changed",
+        "does": "Re-route open staff action notices of that role to the new receivers"
+      },
+      {
+        "name": "access.away.ended",
+        "does": "Give the returning lead the notices received by the backup while away"
+      },
+      {
+        "name": "workqueues.item.overdue",
+        "does": "Staff: overdue work item to the queue lead and backup"
+      },
+      {
+        "name": "workqueues.item.escalated",
+        "does": "Staff: escalated item to the next role on the escalation route"
+      },
+      {
+        "name": "workqueues.item.resolved",
+        "does": "Resolve the action notices for that work item"
+      },
+      {
+        "name": "settings.change.scheduled",
+        "does": "Sellers (seller-visible changes): upcoming platform change with its effective date"
+      },
+      {
+        "name": "audit.integrity.failed",
+        "does": "Staff: urgent notice to Platform Administrator and Business Owner"
+      },
+      {
+        "name": "reports.export.ready",
+        "does": "Export ready to the requester (staff or seller member), including audit, orders and module list exports"
+      },
+      {
+        "name": "reports.scheduled_report.ready",
+        "does": "Phase 2: each staff recipient (staff_member, topic staff.report.scheduled, in-app and email): the scheduled report with a link to its export in the Admin Center (scheduled reports go to staff only; no outside addresses)"
+      },
+      {
+        "name": "purchasing.purchase_order.sent",
+        "does": "Supplier (external_email, topic supplier.purchase_order.sent, email only) when emailSupplier is true and supplierEmail is set: the purchase order with its lines, the delivery address from the payload's shipTo (location name and address) and the buyer's message; in-app copy to the Purchasing Manager role"
+      },
+      {
+        "name": "wallet.credit.expiring",
+        "does": "Customer (account group, topic customer.credit.expiring): unused store credit amount and expiry date, with a link to shop"
+      },
+      {
+        "name": "workqueues.day_end.prepared",
+        "does": "Staff (topic staff.day_end.summary, to roleKeys): reminder that today's day-end review is open, with open and overdue counts and the due time; action required (resolved when the review is completed). workqueues does not publish it once the review is completed"
+      },
+      {
+        "name": "advertising.campaign.ending_soon",
+        "does": "Seller (members with advertising permission, topic seller.campaign.ending_soon) for seller campaigns; staff (ownerStaffId, else the Advertising Manager role; topic staff.campaign.ending_soon) for own and brand campaigns: ends on endsAt, renew or let it finish"
+      },
+      {
+        "name": "content.article.review_due",
+        "does": "Staff (ownerStaffId, else the Content Manager role; topic staff.article.review_due): help article due for review, action required"
+      },
+      {
+        "name": "reviews.moderation.decided",
+        "does": "Reporters (topic customer.review_report.decided, seller variant for sellers): reporterOutcome; author (topic customer.review.moderated, seller.content.moderated for responses and answers): kept, edited or removed with the reason and appealUntil"
+      },
+      {
+        "name": "trust.report.resolved",
+        "does": "Each reporter (customers and sellers in-app and email, rights owners by external_email; topic trust.report.resolved): the reporterOutcome text, never the reported party's details"
+      },
+      {
+        "name": "reviews.review.published",
+        "does": "Seller (topic seller.review.new, products group, members with reviews.responses.post): a new product review on its product, once per review (an edited, kept or reinstated review sends nothing again). Official Store reviews (sellerId OFFICIAL_STORE_ID): staff (topic staff.official_store.review_new, Official Store Manager role)"
+      },
+      {
+        "name": "reviews.feedback.published",
+        "does": "Seller (topic seller.feedback.new, products group, members with reviews.responses.post): new store feedback, once per feedback. Official Store feedback: staff (topic staff.official_store.feedback_new, Official Store Manager role)"
+      },
+      {
+        "name": "reviews.question.asked",
+        "does": "Each seller in sellerIds (topic seller.question.asked, products group, members with reviews.responses.post), action required until that seller answers (question:<questionId>:<sellerId>); officialStore: staff (topic staff.official_store.question_asked, Official Store Manager role), action required until Marketly staff answer (question:<questionId>:official-store)"
+      },
+      {
+        "name": "reviews.answer.published",
+        "does": "Resolve the question notice of whoever answered: a seller answer resolves question:<questionId>:<sellerId>, a Marketly staff answer question:<questionId>:official-store; customer answers resolve nothing. Sends nothing"
+      },
+      {
+        "name": "support.case.assigned",
+        "does": "Resolve the staff notice of a seller's support request (seller-request:<caseId>) once a staff owner is assigned. Sends nothing"
+      },
+      {
+        "name": "trust.rights_report.received",
+        "does": "Rights owner (external_email, topic rights_owner.report.received): confirmation with the TR reference and what happens next"
+      },
+      {
+        "name": "trust.evidence.requested",
+        "does": "The asked party: customer (topic customer.trust.evidence_requested, cases group) or seller owner (topic seller.trust.evidence_requested): Trust and Risk needs proof, what to send and by when; action required until trust records the answer (resolve by the request's dedupe key)"
+      },
+      {
+        "name": "trust.appeal.decided",
+        "does": "The appellant: customer (topic customer.trust.appeal_decided) or seller owner (topic seller.trust.appeal_decided): the appeal outcome and what changes (restriction lifted or kept)"
+      },
+      {
+        "name": "payments.refund.destination_requested",
+        "does": "Customer (by the payload's customerId, else the order email; topic customer.refund.destination_needed, returns_refunds group): the refund could not go back to the original payment method; choose where to receive it, with the deadline; action required"
+      },
+      {
+        "name": "customers.closure.delayed",
+        "does": "Customer (topic customer.account.closure_delayed, account group): the account closure is waiting because new obligations appeared (blockers listed), and when it is checked again"
+      },
+      {
+        "name": "offers.offer.missing_items_stale",
+        "does": "Ask the seller to review the offer's missing-items list after the product's box contents changed (topic seller.offer.missing_items_review, members with offers.offers.manage); Official Store offers go to staff (topic staff.offer.missing_items_review, Catalog Manager role). Action notices (dedupe offer-missing-items:<offerId>), resolved by offers.offer.missing_items_reviewed"
+      },
+      {
+        "name": "offers.offer.missing_items_reviewed",
+        "does": "Resolve the seller's or staff's missing-items review notice of the offer (offer-missing-items:<offerId>); sends nothing"
+      },
+      {
+        "name": "inventory.stock.low_digest",
+        "does": "Daily digest of items at or below their reorder point: Official Store items to staff (topic staff.inventory.low_stock_digest, Inventory Manager role); each seller's own items to that seller (topic seller.stock.low_digest, members with the stock permission). Replaces one notice per item for non-urgent low stock"
+      },
+      {
+        "name": "sellers.application.information_reminder",
+        "does": "Applicant (topic seller.application.information_reminder, owner only): reminder that requested information is still missing, with the deadline; same action notice as the original request"
+      },
+      {
+        "name": "sellers.member.invited",
+        "does": "Remember the invited member (invited_members): their notification preferences answer 409 MEMBER_NOT_JOINED until they accept; sends nothing"
+      },
+      {
+        "name": "sellers.member.joined",
+        "does": "Forget the invitation (invited_members): the member's preferences open; sends nothing"
+      },
+      {
+        "name": "sellers.member.removed",
+        "does": "Forget a revoked invitation (invited_members); sends nothing"
+      },
+      {
+        "name": "workqueues.day_end.completed",
+        "does": "Staff (topic staff.day_end.completed, to the payload's roleKeys): the day-end summary (who completed it, open and overdue counts, items with notes); resolves the staff.day_end.summary action notices"
+      },
+      {
+        "name": "catalog.product.submitted",
+        "does": "Staff (topic staff.catalog.product_submitted, Catalog Manager role): a new, resubmitted or changed product to review, with the review deadline; action required until the product is approved, sent back or rejected (product-review:<productId>)"
+      },
+      {
+        "name": "catalog.brand.requested",
+        "does": "Staff (topic staff.catalog.brand_requested, Catalog Manager role): a seller submitted a product with a brand that is not listed; action required until the brand's status is decided (brand-request:<brandId>)"
+      },
+      {
+        "name": "catalog.brand.changed",
+        "does": "Resolve the brand request notice (brand-request:<brandId>) when the brand's status is decided; sends nothing"
+      },
+      {
+        "name": "catalog.correction.suggested",
+        "does": "Staff (topic staff.catalog.correction_suggested, Catalog Manager role): a seller suggested a correction to shared product content; action required until decided (correction:<suggestionId>)"
+      },
+      {
+        "name": "catalog.correction.decided",
+        "does": "Resolve the correction notice (correction:<suggestionId>); sends nothing"
+      },
+      {
+        "name": "sellers.change_request.submitted",
+        "does": "Staff (topic staff.seller.change_requested, Seller Manager role): a store name, tagline, storefront claim, brand request or business change waits for review; action required until decided (change-request:<changeRequestId>)"
+      },
+      {
+        "name": "sellers.launch_review.requested",
+        "does": "Staff (topic staff.seller.launch_review_requested, Seller Manager role): a seller asks for the launch readiness review; action required until decided (launch-review:<sellerId>)"
+      },
+      {
+        "name": "sellers.application.information_provided",
+        "does": "Staff (topic staff.seller.application_information_provided, Seller Manager role): the applicant answered the information request; same action notice as the application (seller-application:<applicationId>)"
+      },
+      {
+        "name": "sellers.appeal.submitted",
+        "does": "Staff (topic staff.seller.appeal_submitted, Seller Manager role): a seller appeal to decide by its deadline; action required until decided (seller-appeal:<appealId>)"
+      },
+      {
+        "name": "sellers.restriction.evidence_submitted",
+        "does": "Staff (topic staff.seller.restriction_evidence, Seller Manager role): a seller uploaded documents to lift a restriction; action required until the restriction is lifted (restriction-evidence:<restrictionId>)"
+      },
+      {
+        "name": "sellers.restriction.lifted",
+        "does": "Resolve the restriction evidence notice (restriction-evidence:<restrictionId>); sends nothing"
+      },
+      {
+        "name": "trust.appeal.submitted",
+        "does": "Staff (topic staff.trust.appeal_submitted, Trust and Risk Manager role): an appeal against a trust enforcement to decide by its deadline; action required until trust.appeal.decided (trust-appeal-review:<appealId>)"
+      },
+      {
+        "name": "reviews.appeal.submitted",
+        "does": "Staff (topic staff.moderation.appeal_submitted, Content Manager role): an author appeals a moderation decision; action required until decided (moderation-appeal:<appealId>)"
+      },
+      {
+        "name": "reviews.appeal.decided",
+        "does": "Resolve the moderation appeal notice (moderation-appeal:<appealId>); sends nothing"
+      }
     ]
   },
   "permissions": [
-    { "key": "notifications.templates.view", "audience": "staff", "desc": "View the notification matrix, templates, previews and delivery stats" },
-    { "key": "notifications.templates.edit", "audience": "staff", "desc": "Draft templates, preview and test-send" },
-    { "key": "notifications.templates.publish", "audience": "staff", "desc": "Publish template versions (Content Manager)" },
-    { "key": "notifications.routing.manage", "audience": "staff", "desc": "Turn channels on or off per topic (Platform Administrator)" },
-    { "key": "notifications.deliveries.view", "audience": "staff", "desc": "Read the delivery log (support, Platform Administrator)" },
-    { "key": "notifications.deliveries.retry", "audience": "staff", "desc": "Retry failed deliveries" },
-    { "key": "notifications.suppressions.manage", "audience": "staff", "desc": "View and remove suppressed addresses" },
-    { "key": "notifications.broadcasts.manage", "audience": "staff", "desc": "Create, schedule and cancel promotional broadcasts (Marketing Manager)" },
-    { "key": "notifications.announcements.send", "audience": "staff", "desc": "Send announcements from Marketly to sellers and read the ones sent (Seller Manager, Platform Administrator)" },
-    { "key": "notifications.preferences.manage", "audience": "seller", "desc": "Set notification preferences for every seller member (owner by default)" }
+    {
+      "key": "notifications.templates.view",
+      "audience": "staff",
+      "desc": "View the notification matrix, templates, previews and delivery stats"
+    },
+    {
+      "key": "notifications.templates.edit",
+      "audience": "staff",
+      "desc": "Draft templates, preview and test-send"
+    },
+    {
+      "key": "notifications.templates.publish",
+      "audience": "staff",
+      "desc": "Publish template versions (Content Manager)"
+    },
+    {
+      "key": "notifications.routing.manage",
+      "audience": "staff",
+      "desc": "Turn channels on or off per topic (Platform Administrator)"
+    },
+    {
+      "key": "notifications.deliveries.view",
+      "audience": "staff",
+      "desc": "Read the delivery log (support, Platform Administrator)"
+    },
+    {
+      "key": "notifications.deliveries.retry",
+      "audience": "staff",
+      "desc": "Retry failed deliveries"
+    },
+    {
+      "key": "notifications.suppressions.manage",
+      "audience": "staff",
+      "desc": "View and remove suppressed addresses"
+    },
+    {
+      "key": "notifications.broadcasts.manage",
+      "audience": "staff",
+      "desc": "Create, schedule and cancel promotional broadcasts (Marketing Manager)"
+    },
+    {
+      "key": "notifications.announcements.send",
+      "audience": "staff",
+      "desc": "Send announcements from Marketly to sellers and read the ones sent (Seller Manager, Platform Administrator)"
+    },
+    {
+      "key": "notifications.preferences.manage",
+      "audience": "seller",
+      "desc": "Set notification preferences for every seller member (owner by default)"
+    }
   ],
   "jobs": [
-    { "name": "notifications.dispatch", "schedule": "every minute", "does": "Also started at once after notices are queued. Render and send queued deliveries per channel with provider rate limits; mark sent" },
-    { "name": "notifications.retry", "schedule": "every minute", "does": "Re-send retrying deliveries whose nextAttemptAt passed; give up after maxDeliveryAttempts (notifications.delivery.failed)" },
-    { "name": "notifications.send-scheduled", "schedule": "every minute", "does": "Send scheduled notices due now (dispatch deadline reminders 4 h before, drop-off reminders, approval due reminders)" },
-    { "name": "notifications.send-broadcasts", "schedule": "every minute", "does": "Start scheduled broadcasts, resolve consenting recipients, respect quiet hours for SMS and push, publish notifications.broadcast.sent" },
-    { "name": "notifications.staff-digest", "schedule": "daily 08:00 market time", "does": "Email the daily digest to staff who chose it (08:00 is the start of business hours; on closed days it waits for the next open day)" },
-    { "name": "notifications.purge", "schedule": "daily", "does": "Delete notices older than noticeRetentionMonths and delivery rows older than deliveryLogRetentionDays; mark unresolved action notices expired (expired_at, not resolved_at) actionNoticeExpiryDays after their deadline, or after they were created when they have no deadline" }
+    {
+      "name": "notifications.dispatch",
+      "schedule": "every minute",
+      "does": "Also started at once after notices are queued. Render and send queued deliveries per channel with provider rate limits; mark sent"
+    },
+    {
+      "name": "notifications.retry",
+      "schedule": "every minute",
+      "does": "Re-send retrying deliveries whose nextAttemptAt passed; give up after maxDeliveryAttempts (notifications.delivery.failed)"
+    },
+    {
+      "name": "notifications.send-scheduled",
+      "schedule": "every minute",
+      "does": "Send scheduled notices due now (dispatch deadline reminders 4 h before, drop-off reminders, approval due reminders)"
+    },
+    {
+      "name": "notifications.send-broadcasts",
+      "schedule": "every minute",
+      "does": "Start scheduled broadcasts, resolve consenting recipients, respect quiet hours for SMS and push, publish notifications.broadcast.sent"
+    },
+    {
+      "name": "notifications.staff-digest",
+      "schedule": "daily 08:00 market time",
+      "does": "Email the daily digest to staff who chose it (08:00 is the start of business hours; on closed days it waits for the next open day)"
+    },
+    {
+      "name": "notifications.purge",
+      "schedule": "daily",
+      "does": "Delete notices older than noticeRetentionMonths and delivery rows older than deliveryLogRetentionDays; mark unresolved action notices expired (expired_at, not resolved_at) actionNoticeExpiryDays after their deadline, or after they were created when they have no deadline"
+    }
   ],
   "settings": [
-    { "key": "actionNoticeExpiryDays", "type": "duration", "default": 30, "desc": "An unresolved action notice is marked expired (No longer needed) this many days after its deadline, or after it was created when it has no deadline", "unit": "days", "min": 1, "max": 365 },
-    { "key": "noticeRetentionMonths", "type": "duration", "default": 12, "desc": "Notices are kept for 12 months (seller inbox copy)", "unit": "months", "min": 1 },
-    { "key": "deliveryLogRetentionDays", "type": "duration", "default": 180, "desc": "Delivery log retention", "unit": "days", "min": 30 },
-    { "key": "maxDeliveryAttempts", "type": "int", "default": 6, "desc": "Attempts before a delivery fails", "min": 1, "max": 20 },
-    { "key": "retryBackoffMinutes", "type": "json", "default": [1, 5, 15, 60, 240], "desc": "Delay before each retry" },
-    { "key": "dedupeWindowMinutes", "type": "duration", "default": 30, "desc": "Same dedupeKey and recipient is sent once in this window", "unit": "minutes", "min": 0 },
-    { "key": "senders", "type": "json", "default": { "orders": "Marketly Orders <orders@marketly.example>", "account": "Marketly <no-reply@marketly.example>", "sellers": "Marketly Seller Center <sellers@marketly.example>", "promotions": "Marketly Deals <deals@marketly.example>" }, "desc": "From addresses per topic family", "approval": "second_reviewer" },
-    { "key": "replyDomain", "type": "string", "default": "reply.marketly.example", "desc": "Domain for reply-to tokens on case and message emails", "approval": "second_reviewer" },
-    { "key": "testSendDomains", "type": "json", "default": ["marketly.example"], "desc": "Test sends only to these domains", "approval": "second_reviewer" },
-    { "key": "sellerDispatchReminderHours", "type": "duration", "default": 4, "desc": "Hours before the dispatch deadline for the seller reminder (scheduled when shipping or orders call schedule)", "unit": "hours", "min": 1, "sellerVisible": true },
-    { "key": "promotionalQuietHours", "type": "json", "default": { "from": "21:00", "to": "08:00" }, "desc": "No promotional SMS or push in this local window", "approval": "second_reviewer" }
+    {
+      "key": "actionNoticeExpiryDays",
+      "type": "duration",
+      "default": 30,
+      "desc": "An unresolved action notice is marked expired (No longer needed) this many days after its deadline, or after it was created when it has no deadline",
+      "unit": "days",
+      "min": 1,
+      "max": 365
+    },
+    {
+      "key": "noticeRetentionMonths",
+      "type": "duration",
+      "default": 12,
+      "desc": "Notices are kept for 12 months (seller inbox copy)",
+      "unit": "months",
+      "min": 1
+    },
+    {
+      "key": "deliveryLogRetentionDays",
+      "type": "duration",
+      "default": 180,
+      "desc": "Delivery log retention",
+      "unit": "days",
+      "min": 30
+    },
+    {
+      "key": "maxDeliveryAttempts",
+      "type": "int",
+      "default": 6,
+      "desc": "Attempts before a delivery fails",
+      "min": 1,
+      "max": 20
+    },
+    {
+      "key": "retryBackoffMinutes",
+      "type": "json",
+      "default": [
+        1,
+        5,
+        15,
+        60,
+        240
+      ],
+      "desc": "Delay before each retry"
+    },
+    {
+      "key": "dedupeWindowMinutes",
+      "type": "duration",
+      "default": 30,
+      "desc": "Same dedupeKey and recipient is sent once in this window",
+      "unit": "minutes",
+      "min": 0
+    },
+    {
+      "key": "senders",
+      "type": "json",
+      "default": {
+        "orders": "Marketly Orders <orders@marketly.example>",
+        "account": "Marketly <no-reply@marketly.example>",
+        "sellers": "Marketly Seller Center <sellers@marketly.example>",
+        "promotions": "Marketly Deals <deals@marketly.example>"
+      },
+      "desc": "From addresses per topic family",
+      "approval": "second_reviewer"
+    },
+    {
+      "key": "replyDomain",
+      "type": "string",
+      "default": "reply.marketly.example",
+      "desc": "Domain for reply-to tokens on case and message emails",
+      "approval": "second_reviewer"
+    },
+    {
+      "key": "testSendDomains",
+      "type": "json",
+      "default": [
+        "marketly.example"
+      ],
+      "desc": "Test sends only to these domains",
+      "approval": "second_reviewer"
+    },
+    {
+      "key": "sellerDispatchReminderHours",
+      "type": "duration",
+      "default": 4,
+      "desc": "Hours before the dispatch deadline for the seller reminder (scheduled when shipping or orders call schedule)",
+      "unit": "hours",
+      "min": 1,
+      "sellerVisible": true
+    },
+    {
+      "key": "promotionalQuietHours",
+      "type": "json",
+      "default": {
+        "from": "21:00",
+        "to": "08:00"
+      },
+      "desc": "No promotional SMS or push in this local window",
+      "approval": "second_reviewer"
+    }
   ],
   "integrations": [
-    { "name": "Transactional email provider (e.g. Amazon SES, Postmark)", "purpose": "Send email, delivery/bounce/complaint webhooks, inbound parse for replies; DKIM/SPF/DMARC on the sending domains; List-Unsubscribe headers on promotional mail" },
-    { "name": "SMS provider (e.g. Twilio)", "purpose": "Phase 2: 2-step codes, delivery problems and opted-in SMS promotions; STOP handling" },
-    { "name": "Firebase Cloud Messaging", "purpose": "Phase 3: Android push for customers and sellers; invalid tokens are dropped" },
-    { "name": "Template rendering", "purpose": "Mustache-style variables with escaping; MJML layout for responsive email; plain-text alternative always generated" }
+    {
+      "name": "Transactional email provider (e.g. Amazon SES, Postmark)",
+      "purpose": "Send email, delivery/bounce/complaint webhooks, inbound parse for replies; DKIM/SPF/DMARC on the sending domains; List-Unsubscribe headers on promotional mail"
+    },
+    {
+      "name": "SMS provider (e.g. Twilio)",
+      "purpose": "Phase 2: 2-step codes, delivery problems and opted-in SMS promotions; STOP handling"
+    },
+    {
+      "name": "Firebase Cloud Messaging",
+      "purpose": "Phase 3: Android push for customers and sellers; invalid tokens are dropped"
+    },
+    {
+      "name": "Template rendering",
+      "purpose": "Mustache-style variables with escaping; MJML layout for responsive email; plain-text alternative always generated"
+    }
   ],
   "errorCodes": {
-    "GROUP_LOCKED": { "status": 409, "meaning": "That topic group cannot be changed for this member (essential for the owner, or owner-only)." },
-    "CHANNEL_LOCKED": { "status": 409, "meaning": "In-app cannot be turned off for essential topics." },
-    "CHANNEL_NOT_AVAILABLE": { "status": 409, "meaning": "The channel is planned for a later phase (SMS 2, push 3)." },
-    "DRAFT_EXISTS": { "status": 409, "meaning": "This template already has a draft (details.versionId)." },
-    "TEMPLATE_INVALID": { "status": 422, "meaning": "Blocking validation issues, e.g. missing required link variable. details.issues." },
-    "TEST_RECIPIENT_NOT_ALLOWED": { "status": 403, "meaning": "Test sends only go to staff addresses (testSendDomains)." },
-    "ADDRESS_SUPPRESSED": { "status": 409, "meaning": "The address is suppressed; remove the suppression first." },
-    "NOT_RETRYABLE": { "status": 409, "meaning": "Sensitive content (codes, links) expired; the person must request a new one." },
-    "TOPIC_NOT_PROMOTIONAL": { "status": 400, "meaning": "Broadcasts can only use promotional topics." },
-    "MEMBER_NOT_JOINED": { "status": 409, "meaning": "The member has been invited and has not accepted yet; notification preferences open once they join." },
-    "NOTICE_ACTION_OPEN": { "status": 409, "meaning": "The notice still needs action; it can be archived once the work is done." }
+    "GROUP_LOCKED": {
+      "status": 409,
+      "meaning": "That topic group cannot be changed for this member (essential for the owner, or owner-only)."
+    },
+    "CHANNEL_LOCKED": {
+      "status": 409,
+      "meaning": "In-app cannot be turned off for essential topics."
+    },
+    "CHANNEL_NOT_AVAILABLE": {
+      "status": 409,
+      "meaning": "The channel is planned for a later phase (SMS 2, push 3)."
+    },
+    "DRAFT_EXISTS": {
+      "status": 409,
+      "meaning": "This template already has a draft (details.versionId)."
+    },
+    "TEMPLATE_INVALID": {
+      "status": 422,
+      "meaning": "Blocking validation issues, e.g. missing required link variable. details.issues."
+    },
+    "TEST_RECIPIENT_NOT_ALLOWED": {
+      "status": 403,
+      "meaning": "Test sends only go to staff addresses (testSendDomains)."
+    },
+    "ADDRESS_SUPPRESSED": {
+      "status": 409,
+      "meaning": "The address is suppressed; remove the suppression first."
+    },
+    "NOT_RETRYABLE": {
+      "status": 409,
+      "meaning": "Sensitive content (codes, links) expired; the person must request a new one."
+    },
+    "TOPIC_NOT_PROMOTIONAL": {
+      "status": 400,
+      "meaning": "Broadcasts can only use promotional topics."
+    },
+    "MEMBER_NOT_JOINED": {
+      "status": 409,
+      "meaning": "The member has been invited and has not accepted yet; notification preferences open once they join."
+    },
+    "NOTICE_ACTION_OPEN": {
+      "status": 409,
+      "meaning": "The notice still needs action; it can be archived once the work is done."
+    }
   },
   "notes": [
     "Coverage (plan ch. 19). Customer essential: order accepted, payment result, dispatch with tracking, delays, delivery, cancellation, return updates, refund updates, case replies, security alerts. Seller essential: application result, requested corrections, new orders, dispatch deadline reminder and overdue, returns, cases, restrictions, payout results (plus holds, negative balance, payout destination change and its verification result, change-request decisions, Verified seller label changes and the launch review result: plan ch. 10 material changes with their impact on selling or payouts). Staff essential: overdue shipping, stock shortages, waiting approvals, escalated cases, failed payouts, unusual financial activity (plus overdue work items, integrity alerts). Promotional: customer newsletter and coupons (weekly), price-drop and back-in-stock alerts (phase 3 with wishlist), seller tips and campaigns (monthly).",

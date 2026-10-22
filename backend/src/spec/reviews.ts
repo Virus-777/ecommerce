@@ -1125,6 +1125,8 @@ export interface ReviewsReviewPublishedEvent {
   reviewId: string;
   productId: string;
   sellerId: string;
+  /** The author (customers-module id); Daily rewards counts new reviews by it */
+  customerId?: string | null;
   rating: number;
   verified: boolean;
 }
@@ -1133,6 +1135,7 @@ export const ReviewsReviewPublishedEvent: z.ZodType<ReviewsReviewPublishedEvent>
   reviewId: z.uuid(),
   productId: z.uuid(),
   sellerId: z.uuid(),
+  customerId: z.uuid().describe("The author (customers-module id); Daily rewards counts new reviews by it").nullish(),
   rating: z.number().int(),
   verified: z.boolean(),
 });

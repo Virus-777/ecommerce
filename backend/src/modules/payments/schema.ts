@@ -8,12 +8,16 @@
 import { Schema } from 'mongoose';
 import { collectionOptions, DATE, integer } from '../../kernel/mongo/schemas.js';
 
-/** One per checkout payment attempt */
+/** One per checkout payment attempt, or per purchase payment attempt (software, food, farm) */
 const intents = new Schema(
   {
     _id: { type: String, required: true }, // id
     ref: { type: String, required: true },
-    checkout_session_id: { type: String, required: true },
+    purpose: { type: String, required: true, enum: ["checkout","purchase"] },
+    purchase_module: { type: String, default: null }, // software|food|farm; purchase intents only
+    purchase_ref_id: { type: String, default: null }, // the purchase, food order or farm order id in that module
+    purchase_ref: { type: String, default: null },
+    checkout_session_id: { type: String, default: null }, // null for purchase intents
     attempt_no: { type: Number, required: true, validate: integer },
     order_id: { type: String, default: null },
     customer_id: { type: String, default: null },
@@ -48,13 +52,15 @@ const intents = new Schema(
 intents.index({"ref":1}, {"name":"intents_ref_8cef23","unique":true});
 intents.index({"idempotency_key":1}, {"name":"intents_idempotency_key_b82ef6","unique":true});
 intents.index({"checkout_session_id":1,"attempt_no":1}, {"name":"intents_checkout_session_id_attempt_no_9fbb91"});
-intents.index({"checkout_session_id":1}, {"name":"intents_checkout_session_id_4b4e1b","unique":true,"partialFilterExpression":{"status":{"$in":["created","authorizing","requires_action","pending_check","authorized","partially_captured","captured"]}}});
+intents.index({"checkout_session_id":1}, {"name":"intents_checkout_session_id_825e93","unique":true,"partialFilterExpression":{"status":{"$in":["created","authorizing","requires_action","pending_check","authorized","partially_captured","captured"]},"checkout_session_id":{"$gte":""}}});
 intents.index({"order_id":1}, {"name":"intents_order_id_4c5e85"});
 intents.index({"status":1,"next_check_at":1}, {"name":"intents_status_next_check_at_dd88c3"});
 intents.index({"provider":1,"provider_ref":1}, {"name":"intents_provider_provider_ref_178b7f"});
 intents.index({"status":1,"updated_at":1,"_id":1}, {"name":"intents_status_updated_at__id_3b6830"});
 intents.index({"customer_id":1,"status":1,"updated_at":1}, {"name":"intents_customer_id_status_updated_at_bc92c4"});
 intents.index({"idempotency_key":1}, {"name":"intents_idempotency_key_c702b4"});
+intents.index({"purchase_module":1,"purchase_ref_id":1}, {"name":"intents_purchase_module_purchase_ref_id_58d7b6"});
+intents.index({"purchase_module":1,"purchase_ref_id":1}, {"name":"intents_purchase_module_purchase_ref_id_eb34be","unique":true,"partialFilterExpression":{"status":{"$in":["created","authorizing","requires_action","pending_check","authorized","captured"]},"purchase_module":{"$gte":""},"purchase_ref_id":{"$gte":""}}});
 
 /** Captured money per seller group */
 const allocations = new Schema(

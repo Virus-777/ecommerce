@@ -10,7 +10,7 @@ import type { AdBudget, AdvertiserRef, Audience, CreativeFormat, DismissalRule, 
 
 /* ------------------------------------------------------------------ pages */
 
-export const PAGE_TYPES = ['home', 'category', 'search', 'product', 'campaign', 'collection', 'deals', 'brand', 'seller_store', 'official_store', 'cart', 'checkout', 'payment_result', 'order_tracking', 'returns', 'account', 'help'] as const;
+export const PAGE_TYPES = ['home', 'category', 'search', 'product', 'campaign', 'collection', 'deals', 'brand', 'seller_store', 'official_store', 'cart', 'checkout', 'payment_result', 'order_tracking', 'returns', 'account', 'help', 'companies', 'play', 'software', 'food'] as const;
 export type PageTypeName = (typeof PAGE_TYPES)[number];
 export const isPageType = (p: unknown): p is PageTypeName => typeof p === 'string' && (PAGE_TYPES as readonly string[]).includes(p);
 
@@ -35,6 +35,10 @@ const PAGE_LABEL: Record<string, string> = {
   returns: 'Returns',
   account: 'Account',
   help: 'Help',
+  companies: 'Companies',
+  play: 'Play center',
+  software: 'Softwares',
+  food: 'Food delivery',
 };
 
 export const pagesLabel = (pages: readonly string[]): string => (pages.length ? pages.map((p) => PAGE_LABEL[p] ?? p).join(', ') : 'No pages');
@@ -262,6 +266,82 @@ export const PLACEMENT_SEEDS: readonly PlacementSeed[] = [
     rotation: rotation('priority_then_even'),
     dismissal: { mode: 'not_dismissible', label: 'Videos cannot be closed' },
     maxPerPage: 1,
+    positions: null,
+    label: 'Ad',
+  },
+  {
+    id: '0ad0a000-0000-4000-8000-00000000000b',
+    key: 'companies_top',
+    name: 'Companies carousel',
+    description: 'A carousel of banners at the top of the Companies page in the app.',
+    kind: 'inline',
+    enabled: true,
+    availability: 'launch',
+    eligiblePages: ['companies'],
+    formats: [fmt('phone', 750, 400)],
+    frequencyCap: null,
+    trigger: null,
+    // a carousel of every live ad, like home_banner
+    rotation: rotation('carousel', { carouselSeconds: 6, pauseOnHoverAndFocus: true }),
+    dismissal: { mode: 'not_dismissible', label: 'Banners cannot be closed' },
+    maxPerPage: null,
+    positions: null,
+    label: 'Ad',
+  },
+  {
+    id: '0ad0a000-0000-4000-8000-00000000000c',
+    key: 'play_top',
+    name: 'Play center carousel',
+    description: 'A carousel of banners at the top of the Play center in the app.',
+    kind: 'inline',
+    enabled: true,
+    availability: 'launch',
+    eligiblePages: ['play'],
+    formats: [fmt('phone', 750, 400)],
+    frequencyCap: null,
+    trigger: null,
+    // a carousel of every live ad, like home_banner
+    rotation: rotation('carousel', { carouselSeconds: 6, pauseOnHoverAndFocus: true }),
+    dismissal: { mode: 'not_dismissible', label: 'Banners cannot be closed' },
+    maxPerPage: null,
+    positions: null,
+    label: 'Ad',
+  },
+  {
+    id: '0ad0a000-0000-4000-8000-00000000000d',
+    key: 'software_top',
+    name: 'Softwares carousel',
+    description: 'A carousel of banners at the top of the Softwares page in the app.',
+    kind: 'inline',
+    enabled: true,
+    availability: 'launch',
+    eligiblePages: ['software'],
+    formats: [fmt('phone', 750, 400)],
+    frequencyCap: null,
+    trigger: null,
+    // a carousel of every live ad, like home_banner
+    rotation: rotation('carousel', { carouselSeconds: 6, pauseOnHoverAndFocus: true }),
+    dismissal: { mode: 'not_dismissible', label: 'Banners cannot be closed' },
+    maxPerPage: null,
+    positions: null,
+    label: 'Ad',
+  },
+  {
+    id: '0ad0a000-0000-4000-8000-00000000000e',
+    key: 'food_top',
+    name: 'Food delivery carousel',
+    description: 'A carousel of banners at the top of the Food delivery page in the app.',
+    kind: 'inline',
+    enabled: true,
+    availability: 'launch',
+    eligiblePages: ['food'],
+    formats: [fmt('phone', 750, 400)],
+    frequencyCap: null,
+    trigger: null,
+    // a carousel of every live ad, like home_banner
+    rotation: rotation('carousel', { carouselSeconds: 6, pauseOnHoverAndFocus: true }),
+    dismissal: { mode: 'not_dismissible', label: 'Banners cannot be closed' },
+    maxPerPage: null,
     positions: null,
     label: 'Ad',
   },

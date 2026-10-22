@@ -10,7 +10,10 @@ import { spec as catalog } from './catalog.js';
 import { spec as checkout } from './checkout.js';
 import { spec as content } from './content.js';
 import { spec as customers } from './customers.js';
+import { spec as departments } from './departments.js';
+import { spec as farm } from './farm.js';
 import { spec as finance } from './finance.js';
+import { spec as food } from './food.js';
 import { spec as fulfillmentService } from './fulfillment-service.js';
 import { spec as identity } from './identity.js';
 import { spec as inventory } from './inventory.js';
@@ -25,10 +28,13 @@ import { spec as purchasing } from './purchasing.js';
 import { spec as reports } from './reports.js';
 import { spec as returns } from './returns.js';
 import { spec as reviews } from './reviews.js';
+import { spec as rewards } from './rewards.js';
 import { spec as search } from './search.js';
 import { spec as sellers } from './sellers.js';
+import { spec as services } from './services.js';
 import { spec as settings } from './settings.js';
 import { spec as shipping } from './shipping.js';
+import { spec as software } from './software.js';
 import { spec as support } from './support.js';
 import { spec as trust } from './trust.js';
 import { spec as wallet } from './wallet.js';
@@ -46,7 +52,10 @@ export const specs = {
   "checkout": checkout,
   "content": content,
   "customers": customers,
+  "departments": departments,
+  "farm": farm,
   "finance": finance,
+  "food": food,
   "fulfillment-service": fulfillmentService,
   "identity": identity,
   "inventory": inventory,
@@ -61,10 +70,13 @@ export const specs = {
   "reports": reports,
   "returns": returns,
   "reviews": reviews,
+  "rewards": rewards,
   "search": search,
   "sellers": sellers,
+  "services": services,
   "settings": settings,
   "shipping": shipping,
+  "software": software,
   "support": support,
   "trust": trust,
   "wallet": wallet,

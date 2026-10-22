@@ -1042,7 +1042,7 @@ Indexes: `(state, due_at)`, `(customer_id)`
 
 | Publishes | When | Payload | Consumed by |
 |---|---|---|---|
-| `reviews.review.published` | A product review becomes visible (new, edited, kept or reinstated) | `{ reviewId: uuid, productId: uuid, sellerId: uuid, rating: int, verified: bool }` | notifications, search, trust |
+| `reviews.review.published` | A product review becomes visible (new, edited, kept or reinstated) | `{ reviewId: uuid, productId: uuid, sellerId: uuid, customerId: uuid?, rating: int, verified: bool }` | notifications, rewards, search, trust |
 | `reviews.review.updated` | An author edits a review | `{ reviewId: uuid, productId: uuid }` | - |
 | `reviews.review.removed` | A review is removed by moderation or a trust enforcement, or deleted by its author | `{ reviewId: uuid, productId: uuid, sellerId: uuid, customerId: uuid, byModeration: bool, reasonCode: string?, trustEnforcementId: uuid? }` | - |
 | `reviews.report.created` | Content is reported | `{ reportId: uuid, targetType: string, targetId: uuid, reason: string, reporterKind: string }` | notifications |

@@ -16,7 +16,7 @@ import { schemas } from './schema.js';
  */
 export default defineModule({
   spec,
-  version: '2.0.1',
+  version: '2.0.2',
   schemas,
   register(ctx) {
     const service = new ReviewsService({ repo: new ReviewsRepository(ctx.mongo), ctx });

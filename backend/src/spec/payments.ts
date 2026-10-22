@@ -120,6 +120,73 @@ export const AuthorizeInput: z.ZodType<AuthorizeInput> = z.object({
   returnUrl: z.url().describe("Where the provider sends the customer back after a bank challenge"),
 }).register(common.apiTypes, { id: "payments.AuthorizeInput" });
 
+export interface PurchaseAuthorizeInput {
+  /** The module that owns the purchase */
+  module: "software" | "food" | "farm";
+  /** The purchase, food order or farm order id in that module */
+  refId: string;
+  /** Its customer-facing reference, e.g. SW-4K7Q2, FD-9QX3M or FM-7KQ2D */
+  ref: string;
+  /** Customers-module id */
+  customerId: string;
+  amount: common.Money;
+  method: MethodSelection;
+  /** Shown on the provider's records, e.g. PixelCraft Studio */
+  description: string;
+  /** Where the provider sends the customer back after a bank challenge */
+  returnUrl: string;
+}
+
+export const PurchaseAuthorizeInput: z.ZodType<PurchaseAuthorizeInput> = z.object({
+  module: z.enum(["software", "food", "farm"]).describe("The module that owns the purchase"),
+  refId: z.uuid().describe("The purchase, food order or farm order id in that module"),
+  ref: z.string().describe("Its customer-facing reference, e.g. SW-4K7Q2, FD-9QX3M or FM-7KQ2D"),
+  customerId: z.uuid().describe("Customers-module id"),
+  get amount() {
+    return common.Money;
+  },
+  get method() {
+    return MethodSelection;
+  },
+  description: z.string().describe("Shown on the provider's records, e.g. PixelCraft Studio"),
+  returnUrl: z.url().describe("Where the provider sends the customer back after a bank challenge"),
+}).register(common.apiTypes, { id: "payments.PurchaseAuthorizeInput" });
+
+export interface PurchasePaymentStatus {
+  intentId: string;
+  module: "software" | "food" | "farm";
+  refId: string;
+  /** accepted: authorized, not captured yet */
+  state: "accepted" | "pending" | "failed" | "requires_action" | "captured" | "voided";
+  title: string;
+  message: string;
+  methodLabel: string;
+  amount: common.Money;
+  decline?: Decline | null;
+  nextAction?: NextAction | null;
+  retryAllowed: boolean;
+}
+
+export const PurchasePaymentStatus: z.ZodType<PurchasePaymentStatus> = z.object({
+  intentId: z.uuid(),
+  module: z.enum(["software", "food", "farm"]),
+  refId: z.uuid(),
+  state: z.enum(["accepted", "pending", "failed", "requires_action", "captured", "voided"]).describe("accepted: authorized, not captured yet"),
+  title: z.string(),
+  message: z.string(),
+  methodLabel: z.string(),
+  get amount() {
+    return common.Money;
+  },
+  get decline() {
+    return Decline.nullish();
+  },
+  get nextAction() {
+    return NextAction.nullish();
+  },
+  retryAllowed: z.boolean(),
+}).register(common.apiTypes, { id: "payments.PurchasePaymentStatus" });
+
 export interface AuthorizeResult {
   intentId: string;
   state: "accepted" | "failed" | "pending_check" | "requires_action";
@@ -1016,6 +1083,88 @@ export const PaymentsPaymentOrphanedEvent: z.ZodType<PaymentsPaymentOrphanedEven
   action: z.enum(["voided", "refund_started", "needs_review"]),
 });
 
+/** payments.purchase.authorized: A purchase intent is authorized (directly, after a bank challenge or after a pending check) */
+export interface PaymentsPurchaseAuthorizedEvent {
+  intentId: string;
+  module: "software" | "food" | "farm";
+  refId: string;
+  customerId: string;
+  amount: common.Money;
+  methodLabel: string;
+  at: string;
+}
+
+export const PaymentsPurchaseAuthorizedEvent: z.ZodType<PaymentsPurchaseAuthorizedEvent> = z.object({
+  intentId: z.uuid(),
+  module: z.enum(["software", "food", "farm"]),
+  refId: z.uuid(),
+  customerId: z.uuid(),
+  get amount() {
+    return common.Money;
+  },
+  methodLabel: z.string(),
+  at: z.iso.datetime({ offset: true }),
+});
+
+/** payments.purchase.failed: A purchase intent is declined, its bank challenge fails, or a pending check ends declined */
+export interface PaymentsPurchaseFailedEvent {
+  intentId: string;
+  module: "software" | "food" | "farm";
+  refId: string;
+  customerId: string;
+  declineCategory: string;
+  afterPendingCheck: boolean;
+  at: string;
+}
+
+export const PaymentsPurchaseFailedEvent: z.ZodType<PaymentsPurchaseFailedEvent> = z.object({
+  intentId: z.uuid(),
+  module: z.enum(["software", "food", "farm"]),
+  refId: z.uuid(),
+  customerId: z.uuid(),
+  declineCategory: z.string(),
+  afterPendingCheck: z.boolean(),
+  at: z.iso.datetime({ offset: true }),
+});
+
+/** payments.purchase.captured: A purchase intent is captured */
+export interface PaymentsPurchaseCapturedEvent {
+  intentId: string;
+  module: "software" | "food" | "farm";
+  refId: string;
+  customerId: string;
+  amount: common.Money;
+  providerRef?: string | null;
+  capturedAt: string;
+}
+
+export const PaymentsPurchaseCapturedEvent: z.ZodType<PaymentsPurchaseCapturedEvent> = z.object({
+  intentId: z.uuid(),
+  module: z.enum(["software", "food", "farm"]),
+  refId: z.uuid(),
+  customerId: z.uuid(),
+  get amount() {
+    return common.Money;
+  },
+  providerRef: z.string().nullish(),
+  capturedAt: z.iso.datetime({ offset: true }),
+});
+
+/** payments.purchase.voided: A purchase authorization is released without capture */
+export interface PaymentsPurchaseVoidedEvent {
+  intentId: string;
+  module: "software" | "food" | "farm";
+  refId: string;
+  reason: string;
+}
+
+export const PaymentsPurchaseVoidedEvent: z.ZodType<PaymentsPurchaseVoidedEvent> = z.object({
+  intentId: z.uuid(),
+  module: z.enum(["software", "food", "farm"]),
+  refId: z.uuid(),
+  reason: z.string(),
+});
+
 /** payments.refund.status_changed: Any refund status change (requested, processing, sent, failed, cancelled) */
 export interface PaymentsRefundStatusChangedEvent {
   refundId: string;
@@ -1239,18 +1388,24 @@ export const PaymentsMethodRemovedEvent: z.ZodType<PaymentsMethodRemovedEvent> =
 
 /** What other modules may call in-process: `ctx.use('payments')` (or `ctx.tryUse` for an optional dependency). */
 export interface PaymentsPublicApi {
-  /** Accepted brands, saved methods, wallet availability and a setup session for a new card Used by: checkout. */
+  /** Accepted brands, saved methods, wallet availability and a setup session for a new card Used by: checkout, software, food, farm. */
   listOptions(owner: { customerId?: string, guestSessionId?: string }, amount: common.Money): Promise<PaymentOptions>;
   /** Create an intent for a checkout attempt and authorize it. Returns accepted, failed (with decline), pending_check (uncertain) or requires_action. Only one non-failed intent per checkout session at a time; the same key returns the first result. Used by: checkout. */
   authorize(input: AuthorizeInput, idempotencyKey: string): Promise<AuthorizeResult>;
   /** Attach the created order and its seller-group allocations. Also done on orders.order.placed. Used by: checkout. */
   linkOrder(intentId: string, orderId: string, allocations: Allocation[]): Promise<void>;
-  /** Finish an authorization after a bank challenge or wallet confirmation (checkout calls it from POST /sessions/{id}/complete-action) Used by: checkout. */
+  /** Finish an authorization after a bank challenge or wallet confirmation (checkout calls it from POST /sessions/{id}/complete-action; software, food and farm call it for purchase intents) Used by: checkout, software, food, farm. */
   completeAction(intentId: string, resultToken: string, idempotencyKey: string): Promise<AuthorizeResult>;
   /** Current customer-facing state; refresh asks the provider first Used by: checkout. */
   getIntentStatus(intentId: string, refresh?: boolean): Promise<PaymentStatusView>;
-  /** Release an authorization (abandoned checkout, order cancelled before capture) Used by: checkout. */
+  /** Release an authorization (abandoned checkout, order cancelled before capture, a food order declined or cancelled before delivery, a farm order rejected, cancelled or expired before the dealer confirms) Used by: checkout, software, food, farm. */
   voidIntent(intentId: string, reason: string): Promise<void>;
+  /** Create a purchase intent (a payment that is not a checkout order: a software purchase, a food order, or a farm order paid in full or its pay-on-delivery deposit, 2026-10-22) and authorize it on the card. Returns accepted, failed, pending_check or requires_action like authorize. Only one non-failed intent per (module, refId) at a time; the same key returns the first result. Publishes payments.purchase.authorized or payments.purchase.failed, never the payments.payment.* events (those belong to checkout orders). Used by: software, food, farm. */
+  authorizePurchase(input: PurchaseAuthorizeInput, idempotencyKey: string): Promise<AuthorizeResult>;
+  /** Capture the whole authorized amount of a purchase intent (software right after authorization; food when the order is delivered; farm when the dealer confirms the order). Publishes payments.purchase.captured. Fails with ILLEGAL_TRANSITION unless the intent is an authorized purchase intent. Used by: software, food, farm. */
+  capturePurchase(intentId: string): Promise<void>;
+  /** Customer-facing state of a purchase intent; refresh asks the provider first Used by: software, food, farm. */
+  getPurchaseStatus(intentId: string, refresh?: boolean): Promise<PurchasePaymentStatus>;
   /** Per item: paid, refunded, in flight (requested, processing and failed refunds) and remaining. The cap for every refund. Used by: returns, orders, support, finance. */
   remainingRefundable(orderId: string, orderItemIds?: string[]): Promise<RefundableSummary>;
   /** Hand over an approved refund for execution. Fails with REFUND_EXCEEDS_REFUNDABLE or DUPLICATE_REFUND. Returns the existing refund for the same key or origin. Used by: returns, finance, support. */
@@ -1277,11 +1432,18 @@ export interface PaymentsPublicApi {
 
 /** Rows of this module's spec tables, as repositories read them from its collections (`payments.<table>`, ctx.mongo.table(name)). */
 export interface PaymentsDb {
-  /** One per checkout payment attempt */
+  /** One per checkout payment attempt, or per purchase payment attempt (software, food, farm) */
   intents: {
     id: string;
     ref: string;
-    checkout_session_id: string;
+    purpose: 'checkout' | 'purchase';
+    /** software|food|farm; purchase intents only */
+    purchase_module: string | null;
+    /** the purchase, food order or farm order id in that module */
+    purchase_ref_id: string | null;
+    purchase_ref: string | null;
+    /** null for purchase intents */
+    checkout_session_id: string | null;
     attempt_no: number;
     order_id: string | null;
     customer_id: string | null;
@@ -2149,7 +2311,7 @@ export const spec = defineModuleSpec({
   summary: "Charging customers through provider adapters (card, digital wallet): payment intents per checkout attempt, authorization and capture per order and seller group, declines with retry, uncertain results resolved by a status-check job, refund execution (Requested → Processing → Sent / Failed) capped at the remaining refundable amount, chargebacks and payment disputes, saved payment methods and provider webhooks.",
   dependsOn: ["orders"],
   optionalDeps: ["access","customers","media","wallet","audit","checkout","inventory","promotions","support","trust","identity"],
-  publicApi: ["listOptions","authorize","linkOrder","completeAction","getIntentStatus","voidIntent","remainingRefundable","startRefund","getRefund","methodLabel","getPaymentForOrder","listRefundsForOrder","listDisputesForOrder","listSavedMethods","listFailedPaymentsForCustomer","exportCustomerData"],
+  publicApi: ["listOptions","authorize","linkOrder","completeAction","getIntentStatus","voidIntent","authorizePurchase","capturePurchase","getPurchaseStatus","remainingRefundable","startRefund","getRefund","methodLabel","getPaymentForOrder","listRefundsForOrder","listDisputesForOrder","listSavedMethods","listFailedPaymentsForCustomer","exportCustomerData"],
   permissions: [
     {
       "key": "payments.payments.view",
@@ -2371,6 +2533,10 @@ export const spec = defineModuleSpec({
       "payments.payment.pending_check": { when: "The provider's answer is uncertain; the status-check job takes over", payload: () => PaymentsPaymentPendingCheckEvent },
       "payments.payment.voided": { when: "An authorization is released without capture", payload: () => PaymentsPaymentVoidedEvent },
       "payments.payment.orphaned": { when: "Money was authorized or captured but no order exists after the grace period", payload: () => PaymentsPaymentOrphanedEvent },
+      "payments.purchase.authorized": { when: "A purchase intent is authorized (directly, after a bank challenge or after a pending check)", payload: () => PaymentsPurchaseAuthorizedEvent },
+      "payments.purchase.failed": { when: "A purchase intent is declined, its bank challenge fails, or a pending check ends declined", payload: () => PaymentsPurchaseFailedEvent },
+      "payments.purchase.captured": { when: "A purchase intent is captured", payload: () => PaymentsPurchaseCapturedEvent },
+      "payments.purchase.voided": { when: "A purchase authorization is released without capture", payload: () => PaymentsPurchaseVoidedEvent },
       "payments.refund.status_changed": { when: "Any refund status change (requested, processing, sent, failed, cancelled)", payload: () => PaymentsRefundStatusChangedEvent },
       "payments.refund.sent": { when: "The provider confirms the refund was sent (or store credit was granted)", payload: () => PaymentsRefundSentEvent },
       "payments.refund.failed": { when: "A refund attempt failed", payload: () => PaymentsRefundFailedEvent },
@@ -2548,6 +2714,10 @@ export const spec = defineModuleSpec({
       "columns": [
         "id",
         "ref",
+        "purpose",
+        "purchase_module",
+        "purchase_ref_id",
+        "purchase_ref",
         "checkout_session_id",
         "attempt_no",
         "order_id",
@@ -2577,6 +2747,10 @@ export const spec = defineModuleSpec({
         "updated_at"
       ],
       "nullable": [
+        "purchase_module",
+        "purchase_ref_id",
+        "purchase_ref",
+        "checkout_session_id",
         "order_id",
         "customer_id",
         "guest_email",
@@ -2607,7 +2781,7 @@ export const spec = defineModuleSpec({
           "required": [
             "_id",
             "ref",
-            "checkout_session_id",
+            "purpose",
             "attempt_no",
             "amount",
             "currency",
@@ -2638,8 +2812,36 @@ export const spec = defineModuleSpec({
             "ref": {
               "bsonType": "string"
             },
+            "purpose": {
+              "bsonType": "string",
+              "enum": [
+                "checkout",
+                "purchase"
+              ]
+            },
+            "purchase_module": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "purchase_ref_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "purchase_ref": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
             "checkout_session_id": {
-              "bsonType": "string"
+              "bsonType": [
+                "string",
+                "null"
+              ]
             },
             "attempt_no": {
               "bsonType": [
@@ -2801,7 +3003,7 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "intents_checkout_session_id_4b4e1b",
+          "name": "intents_checkout_session_id_825e93",
           "key": {
             "checkout_session_id": 1
           },
@@ -2817,6 +3019,9 @@ export const spec = defineModuleSpec({
                 "partially_captured",
                 "captured"
               ]
+            },
+            "checkout_session_id": {
+              "$gte": ""
             }
           }
         },
@@ -2860,6 +3065,39 @@ export const spec = defineModuleSpec({
           "name": "intents_idempotency_key_c702b4",
           "key": {
             "idempotency_key": 1
+          }
+        },
+        {
+          "name": "intents_purchase_module_purchase_ref_id_58d7b6",
+          "key": {
+            "purchase_module": 1,
+            "purchase_ref_id": 1
+          }
+        },
+        {
+          "name": "intents_purchase_module_purchase_ref_id_eb34be",
+          "key": {
+            "purchase_module": 1,
+            "purchase_ref_id": 1
+          },
+          "unique": true,
+          "partial": {
+            "status": {
+              "$in": [
+                "created",
+                "authorizing",
+                "requires_action",
+                "pending_check",
+                "authorized",
+                "captured"
+              ]
+            },
+            "purchase_module": {
+              "$gte": ""
+            },
+            "purchase_ref_id": {
+              "$gte": ""
+            }
           }
         }
       ],
@@ -4279,6 +4517,10 @@ declare module '../kernel/events/event-map.js' {
     "payments.payment.pending_check": PaymentsPaymentPendingCheckEvent;
     "payments.payment.voided": PaymentsPaymentVoidedEvent;
     "payments.payment.orphaned": PaymentsPaymentOrphanedEvent;
+    "payments.purchase.authorized": PaymentsPurchaseAuthorizedEvent;
+    "payments.purchase.failed": PaymentsPurchaseFailedEvent;
+    "payments.purchase.captured": PaymentsPurchaseCapturedEvent;
+    "payments.purchase.voided": PaymentsPurchaseVoidedEvent;
     "payments.refund.status_changed": PaymentsRefundStatusChangedEvent;
     "payments.refund.sent": PaymentsRefundSentEvent;
     "payments.refund.failed": PaymentsRefundFailedEvent;

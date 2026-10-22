@@ -2,8 +2,10 @@ import type { EventPayload } from '../../kernel/events/index.js';
 import type * as common from '../../spec/common.js';
 import type {
   AddressValidation,
+  CustomerLocation,
   CustomerSnapshot,
   CustomersPublicApi,
+  GeoPoint,
   MarketingPreferences,
   RecentlyViewedItem,
   SavedAddress,
@@ -18,6 +20,7 @@ import { DataRequests } from './service/data-requests.js';
 import { GuestOrders } from './service/guest-orders.js';
 import { Admin } from './service/admin.js';
 import { AccountActions } from './service/account-actions.js';
+import { Geocoding } from './service/geocoding.js';
 
 export type { CustomersServiceDeps, StaffBy } from './service/core.js';
 
@@ -39,11 +42,13 @@ export class CustomersService implements CustomersPublicApi {
   readonly guestOrders: GuestOrders;
   readonly admin: Admin;
   readonly accountActions: AccountActions;
+  readonly geocoding: Geocoding;
 
   constructor(deps: CustomersServiceDeps) {
     this.core = new Core(deps);
     this.profiles = new Profiles(this.core);
-    this.addresses = new Addresses(this.core, this.profiles);
+    this.geocoding = new Geocoding(this.core);
+    this.addresses = new Addresses(this.core, this.profiles, this.geocoding);
     this.marketing = new Marketing(this.core, this.profiles);
     this.recentlyViewed = new RecentlyViewed(this.core, this.profiles, this.marketing);
     this.dataRequests = new DataRequests(this.core, this.profiles, this.marketing);
@@ -118,6 +123,16 @@ export class CustomersService implements CustomersPublicApi {
     page: common.PageInput,
   ): Promise<common.Page<CustomerSnapshot>> {
     return this.admin.searchCustomers(filter, page);
+  }
+
+  /** The customer's point from their geocoded default delivery address, or null (the store then shows the city without a distance) */
+  customerLocation(customerId: string): Promise<CustomerLocation | null> {
+    return this.geocoding.customerLocation(customerId);
+  }
+
+  /** A point for an address through the geocoder provider (ZIP centroid, city fallback), or null when unknown or not configured */
+  geocodeAddress(input: { line1?: string; city: string; region: string; postalCode?: string; country?: string }): Promise<GeoPoint | null> {
+    return this.geocoding.geocodeAddress(input);
   }
 
   /** Export rows for reports dataset customers.admin.accounts (the filtered customer list) */
@@ -206,5 +221,10 @@ export class CustomersService implements CustomersPublicApi {
   /** customers.prune-recently-viewed: views older than recentlyViewedRetentionDays, and guest views whose session has expired */
   pruneRecentlyViewed(): Promise<{ deleted: number }> {
     return this.recentlyViewed.pruneRecentlyViewed();
+  }
+
+  /** customers.geocode-addresses: backfill points for saved addresses never geocoded (or not placed for a week) */
+  geocodeAddresses(): Promise<{ geocoded: number; notFound: number; failed: number }> {
+    return this.geocoding.geocodeAddresses();
   }
 }

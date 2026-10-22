@@ -6,6 +6,7 @@ Discounts and sales campaigns: markdowns, percentage and fixed coupons, minimum-
 
 - **Group:** Growth · **Launch phase:** 1 · **Plan chapters:** 15, 14, 6, 5
 - **Depends on:** [catalog](../catalog/README.md), [offers](../offers/README.md) · **Optional:** [sellers](../sellers/README.md), [inventory](../inventory/README.md), [orders](../orders/README.md), [customers](../customers/README.md), [access](../access/README.md), [notifications](../notifications/README.md), [reports](../reports/README.md), [advertising](../advertising/README.md), [audit](../audit/README.md), [content](../content/README.md), [finance](../finance/README.md), [reviews](../reviews/README.md), [search](../search/README.md), [settings](../settings/README.md)
+- **Required by:** [rewards](../rewards/README.md)
 
 ## Owns
 - Campaigns: name, period with time zone, participating categories, products, offers or sellers, exclusions, eligible customers, discount type and value
@@ -761,6 +762,16 @@ Discounts and sales campaigns: markdowns, percentage and fixed coupons, minimum-
 | upcomingEvents | `UpcomingEvent[]` |
 | rules | `string[]` e.g. Coupons can't be combined with flash sale prices unless the coupon says so. One coupon per seller per order. |
 
+### IssuedCoupon
+
+| Field | Type |
+|---|---|
+| codeId | `uuid` |
+| code | `string` |
+| campaignId | `uuid` |
+| title | `string` The coupon's customer-facing title, e.g. $5 off orders over $50 |
+| endsAt | `datetime?` |
+
 ### AccountCoupons
 
 | Field | Type |
@@ -1157,10 +1168,11 @@ Indexes: `unique (campaign_id, offer_id)`, `(offer_id, state)`
 | max_redemptions | int? |
 | redemptions | int |
 | assigned_customer_id | uuid? |
+| issue_key | text? (issueCode idempotency key) |
 | active | bool |
 | created_at | timestamptz |
 
-Indexes: `unique (upper(code)) where active`, `(campaign_id, created_at)`, `(assigned_customer_id)`
+Indexes: `unique (upper(code)) where active`, `(campaign_id, created_at)`, `(assigned_customer_id)`, `unique (issue_key)`
 
 **coupon_clips**: Coupons a customer clipped; applied automatically at checkout
 
@@ -1334,6 +1346,7 @@ Indexes: `unique (campaign_id, day)`
 | listClearance | `(paging: PageInput) => Paged<DealProduct>`<br>Clearance products page by page (GET /deals/clearance). | graphql |
 | getFlashSale | `(campaignId: uuid) => FlashSaleBlock | null`<br>One flash sale with live claimed meters, deal stock and countdown (GET /flash-sales/{campaignId}). | graphql |
 | couponsForProduct | `(productIds: uuid[], ctx: { customerId?: uuid }) => map<CouponCard[]>`<br>Clippable coupons that cover each product, with the customer's clipped state (the coupons part of GET /products/{productId}). Batched per request. | graphql |
+| issueCode | `(campaignId: uuid, customerId: uuid, idempotencyKey: string) => IssuedCoupon`<br>Give one customer their own single-use code of a coupon campaign (a Daily rewards redemption, 2026-10-22). The campaign must be a coupon campaign that is scheduled or running (CAMPAIGN_NOT_ACTIVE otherwise); the code is unique, max_redemptions 1, assigned to the customer, and shows in their coupons. The same key returns the same code. | rewards, departments |
 | couponsForCustomer | `(customerId: uuid) => AccountCoupons`<br>My coupons: available and clipped, used and expired, with the rules line (GET /coupons). | graphql |
 | activeSellerPromotions | `(sellerIds: uuid[], ctx: { customerId?: uuid, at?: datetime }) => map<PromoBanner[]>`<br>Live seller-funded promotions for the storefront (automatic or by code), soonest ending first. Same eligibility and period rules as priceOffers; platform campaigns are not included. | sellers, graphql |
 | exportRows | `(dataset: string, filters: json, principal: identity.Principal, cursor?: string) => { rows: json[], nextCursor?: string }`<br>Export rows for reports dataset promotions.admin.campaigns (campaign results) | reports |
@@ -1362,6 +1375,7 @@ Checked through the access module (limits per role, second reviewer).
 
 | Code | Status | Meaning |
 |---|---|---|
+| `CAMPAIGN_NOT_ACTIVE` | 409 | The coupon campaign is not scheduled or running, or is not a coupon campaign. |
 | `COUPON_NOT_FOUND` | 404 | No active campaign has this code. |
 | `COUPON_NOT_ELIGIBLE` | 422 | The customer or cart does not meet the coupon's conditions. details.reason uses RejectedCode.reason. |
 | `BUDGET_EXHAUSTED` | 409 | The campaign budget is used up; the revised total must be shown before ordering. |

@@ -114,7 +114,7 @@ describe('uncertain results (scenario 3)', () => {
     const guestSession = newId();
     const r = await h.service.authorize(authorizeInput({ amount: 3000, token: 'tok_declined' }), newId());
     const intent = (await h.service.core.repo.get('intents', r.intentId))!;
-    h.sessions.set(intent.checkout_session_id, { orderId: null, status: 'payment', customerId: null, guestSessionId: guestSession });
+    h.sessions.set(intent.checkout_session_id!, { orderId: null, status: 'payment', customerId: null, guestSessionId: guestSession });
     const mine = await h.call('GET', `/api/store/payments/intents/${r.intentId}`, tokens.visitor(guestSession));
     expect(mine.status, JSON.stringify(mine.body)).toBe(200);
     expect(mine.body).toMatchObject({ state: 'failed', retryAllowed: true, decline: { code: '05' } });
@@ -303,7 +303,7 @@ describe('voids and orphans', () => {
 
   it('voids an order-less authorization and refunds an order-less capture after the grace period', async () => {
     const auth = await h.service.authorize(authorizeInput({ amount: 7000 }), newId());
-    const csAuth = (await h.service.core.repo.get('intents', auth.intentId))!.checkout_session_id;
+    const csAuth = (await h.service.core.repo.get('intents', auth.intentId))!.checkout_session_id!;
     h.sessions.set(csAuth, { orderId: null, status: 'expired', customerId: null });
     // captured by the processor on its own (timeout, then confirm_captured)
     const cap = await h.service.authorize(authorizeInput({ amount: 7007 }), newId());
@@ -313,7 +313,7 @@ describe('voids and orphans', () => {
     expect((await h.service.core.repo.get('intents', cap.intentId))!.status).toBe('captured');
     // a session still being placed is left alone
     const active = await h.service.authorize(authorizeInput({ amount: 7000 }), newId());
-    h.sessions.set((await h.service.core.repo.get('intents', active.intentId))!.checkout_session_id, { orderId: null, status: 'placing', customerId: null });
+    h.sessions.set((await h.service.core.repo.get('intents', active.intentId))!.checkout_session_id!, { orderId: null, status: 'placing', customerId: null });
 
     const mine = [auth.intentId, cap.intentId, active.intentId];
     await h.run('payments.detect-orphans'); // inside the grace period

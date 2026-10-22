@@ -4,7 +4,7 @@
  */
 import { randomInt } from 'node:crypto';
 import { AppError } from '../../../kernel/errors/index.js';
-import { newId } from '../../../kernel/lib/ids.js';
+import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import { pageOf, type PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import { OFFICIAL_STORE_ID, OFFICIAL_STORE_NAME } from '../../../spec/common.js';
@@ -20,6 +20,7 @@ import type {
   DailyPoint,
   FlashItem,
   FlashItemInput,
+  IssuedCoupon,
   ParticipationOffer,
   PricePreview,
   PromotionsDashboard,
@@ -32,6 +33,7 @@ import { flashItemMachine, promotionCampaignMachine } from '../domain/state-mach
 import {
   budgetIssues,
   codeIssues,
+  COUPON_KINDS,
   discountIssues,
   discountLabel,
   earningsImpact,
@@ -47,18 +49,24 @@ import {
   platformShareBps,
   PRICE_KINDS,
   scopeCheck,
+  SHIPPING_KINDS,
   unitDiscount,
   type CampaignModel,
   type Issue,
 } from '../domain/rules.js';
 import { decodeActor, encodeActor, iso, isoOrNull, periodOf, toCode, toFundingReview, toLogEntry, toRedemption, toSummary, unitsPerRedemption } from '../mappers.js';
-import type { CampaignRec, EligibleRec, FlashItemRec, FundingReviewRec, ResultRec, TargetRec } from '../ports.js';
+import type { CampaignRec, CodeRec, EligibleRec, FlashItemRec, FundingReviewRec, ResultRec, TargetRec } from '../ports.js';
 import type { PromotionsRepository } from '../repository.js';
 import { invalid, notFound, Part, SYSTEM, type By, type OfferCard } from './core.js';
 
 const CLOSED = ['ended', 'cancelled'];
 const DATASET = 'promotions.admin.campaigns';
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+/** A random unique code: 8 characters without look-alikes (0/O, 1/I), after the prefix when there is one */
+const randomCode = (prefix?: string | null) => {
+  const rand = Array.from({ length: 8 }, () => CODE_ALPHABET[randomInt(CODE_ALPHABET.length)]).join('');
+  return prefix ? `${prefix}-${rand}` : rand;
+};
 
 export interface ListCampaignsQuery {
   q?: string;
@@ -160,7 +168,7 @@ export class CampaignsPart extends Part {
     await repo.updateWhere('coupon_codes', { campaign_id: campaignId, kind: 'shared', active: true }, { active: false });
     if (!code) return;
     try {
-      await repo.insert('coupon_codes', { id: newId(), campaign_id: campaignId, code, kind: 'shared', max_redemptions: null, redemptions: 0, assigned_customer_id: null, active: true, created_at: this.now() });
+      await repo.insert('coupon_codes', { id: newId(), campaign_id: campaignId, code, kind: 'shared', max_redemptions: null, redemptions: 0, assigned_customer_id: null, issue_key: null, active: true, created_at: this.now() });
     } catch (err) {
       if (/unique|duplicate/i.test(String((err as Error).message))) throw this.ctx.error('CODE_TAKEN', `The code ${code} is already used by another campaign`);
       throw err;
@@ -967,16 +975,44 @@ export class CampaignsPart extends Part {
     if (body.maxRedemptionsEach != null && body.maxRedemptionsEach < 1) issues.push({ path: 'maxRedemptionsEach', message: 'Must be at least 1' });
     if (issues.length) throw invalid(issues);
     const now = this.now();
-    const rows = Array.from({ length: count }, (_, i) => {
-      const rand = Array.from({ length: 8 }, () => CODE_ALPHABET[randomInt(CODE_ALPHABET.length)]).join('');
-      return { id: newId(), campaign_id: id, code: prefix ? `${prefix}-${rand}` : rand, kind: 'unique' as const, max_redemptions: body.maxRedemptionsEach ?? 1, redemptions: 0, assigned_customer_id: assigned[i] ?? null, active: true, created_at: now };
-    });
+    const rows = Array.from({ length: count }, (_, i) => ({ id: newId(), campaign_id: id, code: randomCode(prefix), kind: 'unique' as const, max_redemptions: body.maxRedemptionsEach ?? 1, redemptions: 0, assigned_customer_id: assigned[i] ?? null, issue_key: null, active: true, created_at: now }));
     await this.repo.transaction(async (tx) => {
       await tx.insertMany('coupon_codes', rows);
       await this.core.log(tx, id, 'codes.generated', by, null, { count, prefix, assigned: assigned.length });
     });
     await this.core.audit({ action: 'promotions.codes.generate', actionLabel: `Generated ${count} unique codes`, category: 'other', target: { type: 'campaign', id, ref: c.ref, label: c.name }, after: { count, prefix, maxRedemptionsEach: body.maxRedemptionsEach ?? 1 } }, by);
     return { created: count, sample: rows.slice(0, 10).map(toCode) };
+  }
+
+  /**
+   * One customer's own single-use code of a coupon campaign (a Daily rewards redemption). The campaign must be a coupon
+   * campaign that is scheduled or running; the same key always answers the same code.
+   */
+  async issueCode(campaignId: string, customerId: string, key: string): Promise<IssuedCoupon> {
+    const issued = async (code: CodeRec): Promise<IssuedCoupon> => {
+      const { model: c } = await this.core.campaign(code.campaign_id);
+      return { codeId: code.id, code: code.code, campaignId: c.id, title: c.description ?? c.name, endsAt: c.endsAt.toISOString() };
+    };
+    const before = await this.repo.findOne('coupon_codes', { issue_key: key });
+    if (before) return issued(before);
+    const row = isUuid(campaignId) ? await this.repo.get('campaigns', campaignId) : undefined;
+    const c = row ? (await this.core.models([row]))[0] : undefined;
+    const now = this.now();
+    if (!c || ![...COUPON_KINDS, ...SHIPPING_KINDS].includes(c.kind) || !['scheduled', 'live'].includes(c.status) || c.endsAt.getTime() <= now.getTime())
+      throw this.ctx.error('CAMPAIGN_NOT_ACTIVE', "This coupon campaign isn't running");
+    // a new random code clashes with an active one very rarely: try again with another
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const code: CodeRec = { id: newId(), campaign_id: c.id, code: randomCode(), kind: 'unique', max_redemptions: 1, redemptions: 0, assigned_customer_id: customerId, issue_key: key, active: true, created_at: now };
+      const inserted = await this.repo.transaction(async (tx) => {
+        if (!(await tx.insertIfAbsent('coupon_codes', code))) return false;
+        await this.core.log(tx, c.id, 'code.issued', { actor: SYSTEM }, null, { codeId: code.id, customerId });
+        return true;
+      });
+      if (inserted) return issued(code);
+      const same = await this.repo.findOne('coupon_codes', { issue_key: key });
+      if (same) return issued(same);
+    }
+    throw new AppError('CONFLICT', "Couldn't create a code. Try again.");
   }
 
   async listCodes(id: string, q: { q?: string; active?: boolean }, page: PageRequest): Promise<common.Page<CouponCode>> {

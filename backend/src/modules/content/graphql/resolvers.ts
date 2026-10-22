@@ -63,6 +63,7 @@ function mappers(service: ContentService) {
     banner: banner(s.banner),
     products: async (args: { limit?: number | null }) => tiles(args?.limit ? s.products.slice(0, Math.max(args.limit, 0)) : s.products),
     categories: () => shortcuts(s.categories),
+    departments: s.departments.map((d) => ({ ...d, link: link(d.link) })),
     sellers: () => sellersOut(s.sellers.map((x) => x.sellerId)),
     brands: s.brands.map(brandOut),
     collection: () => collectionOut(s.meta.collectionId),

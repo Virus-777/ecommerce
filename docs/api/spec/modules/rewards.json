@@ -1,0 +1,123 @@
+{
+  "name": "rewards",
+  "title": "Daily rewards",
+  "group": "Growth",
+  "phase": 2,
+  "chapters": [],
+  "summary": "The app's Daily rewards department: customers check in every day for points (a 7-day streak with a bonus on day 7), earn points for daily tasks, and swap points for coupons. Staff set the check-in schedule, the tasks and the reward catalogue in Admin › Departments › Daily rewards, and can adjust a customer's points. Each coupon is a single-use code of a promotions coupon campaign given to the customer.",
+  "owns": [
+    "The check-in schedule (points for days 1–7) and each customer's streak",
+    "Daily tasks (visit a store page, share a product, write a review, place an order) and each customer's progress per day",
+    "The points ledger and balance per customer",
+    "The reward catalogue (coupons for points) and redemptions"
+  ],
+  "notOwns": [
+    "Coupons: promotions campaigns and codes (issueCode); customers use them from My coupons and at checkout",
+    "Wallet loyalty points (wallet module, switched off): Daily rewards keeps its own ledger"
+  ],
+  "dependsOn": ["promotions"],
+  "optionalDeps": ["customers", "audit", "notifications"],
+  "publicApi": [
+    { "name": "exportCustomerData", "signature": "(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]", "desc": "The customer's points history, check-ins and redemptions for the personal data export", "usedBy": ["customers"] }
+  ],
+  "types": {
+    "CheckInDay": { "day": { "type": "int", "desc": "1 to 7" }, "label": { "type": "string", "desc": "Day 1 … Day 7, or Today" }, "points": "int", "state": { "type": "enum(done|today|open|missed)", "desc": "today: the day to check in now (done once checked in)" }, "bonus": { "type": "bool", "desc": "The gift day (day 7)" } },
+    "RewardTask": {
+      "key": "string", "kind": "enum(visit_store|share_product|write_review|place_order)", "title": { "type": "string", "desc": "e.g. Write a review" },
+      "points": "int", "target": "int", "progress": "int",
+      "state": { "type": "enum(todo|ready|claimed)", "desc": "ready: done, points waiting to be claimed" },
+      "path": { "type": "string?", "desc": "Where Go takes the customer, e.g. /account/orders" }
+    },
+    "RewardOffer": {
+      "id": "uuid", "title": { "type": "string", "desc": "e.g. $5 off" }, "condition": { "type": "string", "desc": "e.g. On orders over $50" },
+      "cost": "int", "tint": { "type": "enum(deal|brand|info|neutral)", "desc": "Colour band of the card" },
+      "canRedeem": "bool", "missing": { "type": "int", "desc": "Points still needed; 0 when enough" }, "available": { "type": "bool", "desc": "False when sold out or the campaign ended" }
+    },
+    "RewardsSummary": {
+      "balance": "int", "streak": { "type": "int", "desc": "Days in a row checked in, 0 to 7" },
+      "checkedInToday": "bool", "todayPoints": { "type": "int", "desc": "Points for today's check-in" },
+      "week": "CheckInDay[]", "bonusLabel": { "type": "string?", "desc": "e.g. 3 more days to the 100-point bonus on day 7" },
+      "tasks": "RewardTask[]", "rewards": "RewardOffer[]"
+    },
+    "CheckInResult": { "points": "int", "summary": "RewardsSummary" },
+    "TaskProgressInput": { "refId": { "type": "string?", "desc": "What was visited or shared (a store slug, a product id); the same refId counts once a day" } },
+    "PointsEntry": { "id": "uuid", "points": { "type": "int", "desc": "Positive earned, negative spent" }, "kind": "enum(check_in|task|redeem|adjust)", "title": { "type": "string", "desc": "e.g. Day 5 check-in, Write a review, $5 off coupon" }, "at": "datetime", "balanceAfter": "int" },
+    "Redemption": { "id": "uuid", "rewardId": "uuid", "title": "string", "condition": "string", "cost": "int", "code": "string", "endsAt": "datetime?", "at": "datetime" },
+    "ProgramAdmin": { "checkInPoints": { "type": "int[]", "desc": "Seven values, day 1 to day 7" }, "enabled": "bool", "updatedAt": "datetime?" },
+    "ProgramInput": { "checkInPoints": "int[]", "enabled": "bool" },
+    "TaskAdmin": { "key": "string", "kind": "enum(visit_store|share_product|write_review|place_order)", "title": "string", "points": "int", "target": "int", "path": "string?", "visible": "bool", "position": "int", "claimedToday": "int" },
+    "TaskInput": { "kind": "enum(visit_store|share_product|write_review|place_order)", "key": "string?", "title": "string", "points": { "type": "int", "desc": "1 to 1,000" }, "target": { "type": "int", "desc": "1 to 20" }, "path": "string?", "visible": "bool?", "position": "int?" },
+    "RewardAdmin": { "id": "uuid", "title": "string", "condition": "string", "cost": "int", "tint": "enum(deal|brand|info|neutral)", "campaignId": "uuid", "campaignName": "string?", "campaignActive": "bool", "stock": { "type": "int?", "desc": "Redemptions left; null for no limit" }, "redeemed": "int", "visible": "bool", "position": "int", "updatedAt": "datetime" },
+    "RewardInput": { "title": "string", "condition": "string", "cost": { "type": "int", "desc": "Points, 1 to 100,000" }, "tint": "enum(deal|brand|info|neutral)?", "campaignId": { "type": "uuid", "desc": "A promotions coupon campaign" }, "stock": "int?", "visible": "bool?", "position": "int?" },
+    "RedemptionAdmin": { "id": "uuid", "reward": { "id": "uuid", "title": "string" }, "customer": { "id": "uuid", "name": "string?", "email": "email?" }, "cost": "int", "code": "string", "at": "datetime" },
+    "CustomerPoints": { "customerId": "uuid", "name": "string?", "email": "email?", "balance": "int", "streak": "int", "lastCheckIn": "date?", "entries": { "type": "PointsEntry[]", "desc": "Newest 50" } },
+    "AdjustmentInput": { "customerId": "uuid", "points": { "type": "int", "desc": "Positive adds, negative removes; the balance never goes below 0" }, "reason": "string" }
+  },
+  "tables": [
+    { "name": "program", "desc": "One row: the check-in schedule", "columns": { "id": "text pk (always 'main')", "check_in_points": "jsonb", "enabled": "bool", "updated_at": "timestamptz", "updated_by": "text?" } },
+    { "name": "tasks", "columns": { "key": "text pk", "kind": "text (visit_store|share_product|write_review|place_order)", "title": "text", "points": "int", "target": "int", "path": "text?", "visible": "bool", "position": "int", "updated_at": "timestamptz" }, "indexes": ["(visible, position)"] },
+    { "name": "accounts", "desc": "Balance and streak per customer", "columns": { "customer_id": "uuid pk", "balance": "int", "streak": "int", "last_check_in": "date?", "updated_at": "timestamptz" } },
+    { "name": "entries", "desc": "The points ledger", "columns": { "id": "uuid pk", "customer_id": "uuid", "points": "int", "kind": "text (check_in|task|redeem|adjust)", "title": "text", "ref": "text? (task key, redemption id, day)", "dedupe_key": "text unique (e.g. check_in:2026-10-22, task:review:2026-10-22)", "balance_after": "int", "by": "text?", "at": "timestamptz" }, "indexes": ["(customer_id, at)"] },
+    { "name": "progress", "desc": "A customer's progress on a task on one market day", "columns": { "id": "uuid pk", "customer_id": "uuid", "task_key": "text", "day": "date", "count": "int", "refs": "jsonb", "claimed": "bool", "updated_at": "timestamptz" }, "indexes": ["unique (customer_id, task_key, day)"] },
+    { "name": "rewards", "columns": { "id": "uuid pk", "title": "text", "condition": "text", "cost": "int", "tint": "text", "campaign_id": "uuid", "stock": "int?", "redeemed": "int", "visible": "bool", "position": "int", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(visible, position)"] },
+    { "name": "redemptions", "columns": { "id": "uuid pk", "customer_id": "uuid", "reward_id": "uuid → rewards", "title": "text", "condition": "text", "cost": "int", "code_id": "uuid", "code": "text", "ends_at": "timestamptz?", "idempotency_key": "text unique", "at": "timestamptz" }, "indexes": ["(customer_id, at)", "(reward_id, at)"] }
+  ],
+  "endpoints": [
+    { "id": "getSummary", "area": "store", "method": "GET", "path": "/summary", "summary": "Points, streak, this week's check-ins, today's tasks and the rewards", "auth": "customer", "response": "RewardsSummary", "screens": ["store/rewards"] },
+    { "id": "checkIn", "area": "store", "method": "POST", "path": "/check-ins", "summary": "Check in today", "desc": "Once per market day. Checking in the day after the last check-in continues the streak (day 8 starts again at day 1); a missed day starts again at day 1.", "auth": "customer", "response": "CheckInResult", "status": 201, "errors": ["ALREADY_CHECKED_IN", "PROGRAM_OFF"], "screens": ["store/rewards"] },
+    { "id": "reportTask", "area": "store", "method": "POST", "path": "/tasks/{key}/progress", "summary": "Tell the server the customer did a task in the app (visit a store page, share a product)", "desc": "Only for visit_store and share_product tasks; the others count from events. Answers the task; extra reports past the target are ignored.", "auth": "customer", "params": { "key": "string" }, "body": "TaskProgressInput", "response": "RewardTask", "errors": ["NOT_FOUND", "NOT_REPORTABLE"], "screens": ["store/rewards", "store/seller", "store/product"] },
+    { "id": "claimTask", "area": "store", "method": "POST", "path": "/tasks/{key}/claim", "summary": "Claim a done task's points", "auth": "customer", "params": { "key": "string" }, "response": "RewardsSummary", "errors": ["NOT_FOUND", "TASK_NOT_DONE", "ALREADY_CLAIMED", "PROGRAM_OFF"], "screens": ["store/rewards"] },
+    { "id": "redeemReward", "area": "store", "method": "POST", "path": "/rewards/{id}/redeem", "summary": "Swap points for a coupon", "desc": "Takes the points and asks promotions.issueCode for the customer's own code; the coupon shows in My coupons.", "auth": "customer", "params": { "id": "uuid" }, "response": "Redemption", "status": 201, "idempotent": true, "errors": ["NOT_FOUND", "NOT_ENOUGH_POINTS", "SOLD_OUT", "CAMPAIGN_NOT_ACTIVE"], "events": ["rewards.reward.redeemed"], "screens": ["store/rewards"] },
+    { "id": "listHistory", "area": "store", "method": "GET", "path": "/history", "summary": "My points history, newest first", "auth": "customer", "paging": true, "response": "PointsEntry", "screens": ["store/rewards"] },
+    { "id": "listMyRedemptions", "area": "store", "method": "GET", "path": "/redemptions", "summary": "Coupons I got for points, newest first", "auth": "customer", "paging": true, "response": "Redemption", "screens": ["store/rewards"] },
+
+    { "id": "getProgram", "area": "admin", "method": "GET", "path": "/program", "summary": "The check-in schedule", "auth": "staff", "permission": "rewards.view", "response": "ProgramAdmin", "screens": ["admin/departments-rewards"] },
+    { "id": "setProgram", "area": "admin", "method": "PUT", "path": "/program", "summary": "Change the check-in schedule or turn Daily rewards off", "auth": "staff", "permission": "rewards.manage", "body": "ProgramInput", "response": "ProgramAdmin", "errors": ["VALIDATION_FAILED"], "audited": true, "screens": ["admin/departments-rewards"] },
+    { "id": "listTasksAdmin", "area": "admin", "method": "GET", "path": "/tasks", "summary": "Daily tasks in order", "auth": "staff", "permission": "rewards.view", "response": "TaskAdmin[]", "screens": ["admin/departments-rewards"] },
+    { "id": "createTask", "area": "admin", "method": "POST", "path": "/tasks", "summary": "Add a daily task", "auth": "staff", "permission": "rewards.manage", "body": "TaskInput", "response": "TaskAdmin", "status": 201, "errors": ["SLUG_TAKEN", "VALIDATION_FAILED"], "audited": true, "screens": ["admin/departments-rewards"] },
+    { "id": "updateTask", "area": "admin", "method": "PATCH", "path": "/tasks/{key}", "summary": "Change, reorder, hide or show a daily task", "auth": "staff", "permission": "rewards.manage", "params": { "key": "string" }, "body": "TaskInput", "response": "TaskAdmin", "errors": ["NOT_FOUND", "VALIDATION_FAILED"], "audited": true, "screens": ["admin/departments-rewards"] },
+    { "id": "deleteTask", "area": "admin", "method": "DELETE", "path": "/tasks/{key}", "summary": "Delete a daily task", "desc": "Points already earned stay.", "auth": "staff", "permission": "rewards.manage", "params": { "key": "string" }, "response": null, "errors": ["NOT_FOUND"], "audited": true, "screens": ["admin/departments-rewards"] },
+    { "id": "listRewardsAdmin", "area": "admin", "method": "GET", "path": "/rewards", "summary": "The reward catalogue in order", "auth": "staff", "permission": "rewards.view", "response": "RewardAdmin[]", "screens": ["admin/departments-rewards"] },
+    { "id": "createReward", "area": "admin", "method": "POST", "path": "/rewards", "summary": "Add a coupon to the catalogue", "auth": "staff", "permission": "rewards.manage", "body": "RewardInput", "response": "RewardAdmin", "status": 201, "errors": ["VALIDATION_FAILED", "CAMPAIGN_NOT_ACTIVE"], "audited": true, "screens": ["admin/departments-rewards"] },
+    { "id": "updateReward", "area": "admin", "method": "PATCH", "path": "/rewards/{id}", "summary": "Change, reorder, hide or show a reward", "auth": "staff", "permission": "rewards.manage", "params": { "id": "uuid" }, "body": "RewardInput", "response": "RewardAdmin", "errors": ["NOT_FOUND", "VALIDATION_FAILED"], "audited": true, "screens": ["admin/departments-rewards"] },
+    { "id": "deleteReward", "area": "admin", "method": "DELETE", "path": "/rewards/{id}", "summary": "Delete a reward nobody redeemed", "desc": "Redeemed rewards can only be hidden.", "auth": "staff", "permission": "rewards.manage", "params": { "id": "uuid" }, "response": null, "errors": ["NOT_FOUND", "IN_USE"], "audited": true, "screens": ["admin/departments-rewards"] },
+    { "id": "listRedemptionsAdmin", "area": "admin", "method": "GET", "path": "/redemptions", "summary": "Redemptions, newest first", "auth": "staff", "permission": "rewards.view", "paging": true, "query": { "rewardId": "uuid?", "q": { "type": "string?", "desc": "Code or customer email" } }, "response": "RedemptionAdmin", "screens": ["admin/departments-rewards"] },
+    { "id": "getCustomerPoints", "area": "admin", "method": "GET", "path": "/customers/{customerId}", "summary": "A customer's points, streak and latest history", "auth": "staff", "permission": "rewards.view", "params": { "customerId": "uuid" }, "response": "CustomerPoints", "errors": ["NOT_FOUND"], "screens": ["admin/departments-rewards"] },
+    { "id": "searchCustomerPoints", "area": "admin", "method": "GET", "path": "/customers", "summary": "Customers with points, highest balance first", "auth": "staff", "permission": "rewards.view", "paging": true, "query": { "q": { "type": "string?", "desc": "Customer email or name" } }, "response": "CustomerPoints", "screens": ["admin/departments-rewards"] },
+    { "id": "adjustPoints", "area": "admin", "method": "POST", "path": "/adjustments", "summary": "Add or remove a customer's points", "auth": "staff", "permission": "rewards.manage", "body": "AdjustmentInput", "response": "CustomerPoints", "status": 201, "errors": ["NOT_FOUND", "VALIDATION_FAILED"], "audited": true, "screens": ["admin/departments-rewards"] }
+  ],
+  "events": {
+    "publishes": [
+      { "name": "rewards.reward.redeemed", "when": "A customer swaps points for a coupon", "payload": { "redemptionId": "uuid", "customerId": "uuid", "title": "string", "code": "string", "cost": "int" } }
+    ],
+    "consumes": [
+      { "name": "reviews.review.published", "does": "Count a write_review task for the author (customerId) on the market day, once per review" },
+      { "name": "orders.order.placed", "does": "Count a place_order task for the customer on the market day, once per order" }
+    ]
+  },
+  "permissions": [
+    { "key": "rewards.view", "audience": "staff", "desc": "See the check-in schedule, tasks, rewards, redemptions and customers' points in Admin › Departments › Daily rewards" },
+    { "key": "rewards.manage", "audience": "staff", "desc": "Change the schedule, tasks and rewards; adjust a customer's points" }
+  ],
+  "settings": [],
+  "integrations": [],
+  "errorCodes": {
+    "SLUG_TAKEN": { "status": 409, "meaning": "Another task already uses this key." },
+    "IN_USE": { "status": 409, "meaning": "Customers already redeemed it; hide it instead." },
+    "ALREADY_CHECKED_IN": { "status": 409, "meaning": "You already checked in today. Come back tomorrow." },
+    "PROGRAM_OFF": { "status": 409, "meaning": "Daily rewards is turned off." },
+    "NOT_REPORTABLE": { "status": 409, "meaning": "This task counts by itself; it can't be reported from the app." },
+    "TASK_NOT_DONE": { "status": 409, "meaning": "Finish the task first." },
+    "ALREADY_CLAIMED": { "status": 409, "meaning": "You already claimed these points today." },
+    "NOT_ENOUGH_POINTS": { "status": 409, "meaning": "Not enough points. details.missing." },
+    "SOLD_OUT": { "status": 409, "meaning": "This reward is no longer available." },
+    "CAMPAIGN_NOT_ACTIVE": { "status": 409, "meaning": "The coupon campaign behind this reward isn't running." }
+  },
+  "notes": [
+    "Days are market days (the market time zone); tasks reset at midnight.",
+    "Default schedule: 10, 10, 15, 15, 20, 20, 100 points (day 7 is the bonus). Default tasks: Visit a store page (visit_store, 5 points, path /official), Write a review (write_review, 30 points, path /account/orders), Share a product (share_product, 10 points), Place an order (place_order, 25 points, hidden).",
+    "Redeeming: the points come off and the code is issued in one step (promotions.issueCode with the redemption id as key). When issueCode fails the points are given back and nothing is recorded.",
+    "A visit_store task counts store pages (the Official Store and /shop/{slug}); share_product counts products shared from the product page. The app reports them; the same refId counts once a day.",
+    "Customers are customers-module ids (the store principal's customerId), as promotions uses."
+  ]
+}

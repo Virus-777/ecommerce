@@ -30,7 +30,7 @@ describe('writing a review', () => {
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     expect(res.body).toMatchObject({ status: 'published', statusLabel: 'Published', visibleToShoppers: true, orderItemId: b.itemId, canEdit: true, canDelete: true, canAppeal: false });
     expect(res.body.review).toMatchObject({ productId: b.productId, rating: 4, author: { kind: 'customer', displayName: 'Sam R.', verifiedPurchase: true }, variantLabel: 'Color: Midnight black' });
-    expect(k.of('reviews.review.published')).toEqual([{ reviewId: res.body.review.id, productId: b.productId, sellerId: expect.any(String), rating: 4, verified: true }]);
+    expect(k.of('reviews.review.published')).toEqual([{ reviewId: res.body.review.id, productId: b.productId, sellerId: expect.any(String), customerId: expect.any(String), rating: 4, verified: true }]);
     expect(k.of('reviews.rating.changed')).toContainEqual({ productId: b.productId, sellerId: null, average: 4, count: 1 });
     const summary = await k.call('GET', `${STORE}/products/${b.productId}/rating-summary`, tokens.visitor());
     expect(summary.body).toMatchObject({ productId: b.productId, hasReviews: true, average: 4, ratingCount: 1, writtenCount: 1, withPhotos: 0 });

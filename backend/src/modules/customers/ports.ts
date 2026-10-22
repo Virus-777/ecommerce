@@ -1,8 +1,9 @@
 /**
  * Row types and search filters of the customers module (its collections are read and written by repository.ts),
- * and the address validation provider it may call.
+ * and the providers it may call (address validation, geocoder).
  */
 import type * as common from '../../spec/common.js';
+import type { GeoPoint } from '../../kernel/lib/geo.js';
 import type { CustomersDb } from '../../spec/customers.js';
 
 export type CustomerRow = CustomersDb['customers'];
@@ -65,4 +66,31 @@ export interface AddressValidationProvider {
   readonly name: string;
   /** A normalised copy of the address, or null when the provider does not know it (not_found) */
   normalise(address: common.Address): Promise<{ address: common.Address; poBox: boolean } | null>;
+}
+
+/** What the geocoder is asked: a US address, or as much of it as is known (city and state at least) */
+export interface GeocodeQuery {
+  line1?: string | null;
+  city: string;
+  region: string;
+  postalCode?: string | null;
+  country?: string | null;
+}
+
+/** A point and how exact it is: the ZIP's centroid or only the city's */
+export interface GeocodeResult {
+  point: GeoPoint;
+  precision: 'zip' | 'city';
+}
+
+/**
+ * Geocoder provider (port): places an address on the map. Development uses the built-in centroid tables
+ * (providers/geocoder.ts); production has no provider configured yet and answers null, so addresses keep no point.
+ */
+export interface Geocoder {
+  readonly name: string;
+  /** False for the production stub: callers skip the work and the backfill leaves addresses alone */
+  readonly configured: boolean;
+  /** The point for an address, or null when the provider does not know it */
+  geocode(query: GeocodeQuery): Promise<GeocodeResult | null>;
 }

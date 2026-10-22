@@ -30,6 +30,6 @@ describe('module loader', () => {
 
   it('knows what a module needs and what needs it', () => {
     expect(withDependencies(['cart'])).toEqual(['access', 'cart', 'catalog', 'identity', 'inventory', 'media', 'offers', 'sellers']);
-    expect(dependentsOf('payments', enabledModules)).toEqual(['checkout', 'finance', 'returns']);
+    expect(dependentsOf('payments', enabledModules)).toEqual(['checkout', 'farm', 'finance', 'food', 'returns', 'software']);
   });
 });

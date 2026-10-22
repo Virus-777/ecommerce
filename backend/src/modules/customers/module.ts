@@ -5,6 +5,7 @@ import { storeRoutes } from './http/store.js';
 import { adminRoutes } from './http/admin.js';
 import { publicRoutes } from './http/public.js';
 import { devAddressProvider } from './providers/address.js';
+import { devGeocoder, unconfiguredGeocoder } from './providers/geocoder.js';
 import { CustomersRepository } from './repository.js';
 import { CustomersService } from './service.js';
 import { schemas } from './schema.js';
@@ -17,12 +18,14 @@ import { schemas } from './schema.js';
  */
 export default defineModule({
   spec,
-  version: '2.0.2',
+  version: '2.1.0',
   schemas,
   register(ctx) {
     // Address validation provider: the deterministic dev adapter in development and tests; none is wired for production yet (format rules only)
     const addressProvider = ctx.config.devTokens ? devAddressProvider : undefined;
-    const service = new CustomersService({ repo: new CustomersRepository(ctx.mongo), ctx, addressProvider });
+    // Geocoder: built-in ZIP and city centroids in development and tests; production has no provider yet (not configured, no points)
+    const geocoder = ctx.config.devTokens ? devGeocoder : unconfiguredGeocoder;
+    const service = new CustomersService({ repo: new CustomersRepository(ctx.mongo), ctx, addressProvider, geocoder });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), adminRoutes(service), publicRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
@@ -47,5 +50,6 @@ export default defineModule({
     ctx.jobs.handle("customers.expire-export-links", () => service.expireExportLinks());
     ctx.jobs.handle("customers.complete-closures", () => service.completeClosures());
     ctx.jobs.handle("customers.prune-recently-viewed", () => service.pruneRecentlyViewed());
+    ctx.jobs.handle("customers.geocode-addresses", () => service.geocodeAddresses());
   },
 });

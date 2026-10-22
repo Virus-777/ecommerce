@@ -167,7 +167,8 @@ export class PaymentsRepository {
   /* ---------------------------------------------------------------- lists */
 
   async listIntents(f: PaymentListFilter, page: PageRequest): Promise<common.Page<Recs['intents']>> {
-    const conds: Filter[] = [];
+    // checkout payments: purchase intents (software, food) are shown by their own modules
+    const conds: Filter[] = [{ checkout_session_id: { $ne: null } }];
     if (f.status) conds.push({ status: f.status });
     const days = zonedDayRange(f, f.timeZone ?? 'UTC');
     if (days.start) conds.push({ created_at: { $gte: days.start } });

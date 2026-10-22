@@ -59,6 +59,7 @@ import {
   fileTypeOf,
   isEvidenceKind,
   isGeneratedPurpose,
+  isSoftwareType,
   kindOf,
   limitFor,
   purposeFitsUsage,
@@ -1105,10 +1106,31 @@ export class MediaService implements MediaPublicApi {
     else this.publishRejected(row, outcome.result === 'rejected' ? outcome.reason : 'Rejected', { actor: SYSTEM_ACTOR });
   }
 
+  /**
+   * Software packages (apps and databases, up to 4 GB): scanned like documents, but read as a stream and never held
+   * in memory. Installers and archives have no header the platform reads, so the type is the declared one (content type,
+   * else the extension), checked against the purpose's types. Private, no renditions, never served inline.
+   */
+  private async softwarePipeline(asset: AssetRow, step: (s: ProcessingJobRow['step']) => Promise<unknown>): Promise<ProcessingOutcome> {
+    await step('scan');
+    const object = await this.storage.open(asset.storage_bucket, asset.storage_key);
+    if (!object) return { result: 'rejected', reason: 'The uploaded file is missing. Upload it again.' };
+    const scan = await this.providers.scanner.scanStream({ fileName: asset.file_name, contentType: asset.content_type, body: object.stream() });
+    if (!scan.clean) return { result: 'rejected', reason: `Malware found in the file${scan.threat ? ` (${scan.threat})` : ''}`, eraseOriginal: true };
+
+    await step('probe');
+    const type = fileTypeOf(asset.content_type, asset.file_name);
+    const limits = limitFor('software_package', (await this.ctx.settings.get('limitsByPurpose')) as unknown as Record<string, PurposeLimit>);
+    if (!type || !isSoftwareType(type) || !limits.types.includes(type)) return { result: 'rejected', reason: `This type of file isn't accepted for a ${label(asset.purpose)}.` };
+    return { result: 'ready', patch: { kind: 'software', content_type: MIME_OF[type], width: null, height: null, duration_seconds: null, page_count: null }, renditions: [] };
+  }
+
   /** scan → probe → strip → renditions → check, or → transcode for videos */
   private async pipeline(asset: AssetRow, job: ProcessingJobRow): Promise<ProcessingOutcome> {
     const { processor, scanner } = this.providers;
     const step = (s: ProcessingJobRow['step']) => this.repo.updateProcessingJob(job.id, { step: s });
+
+    if (asset.purpose === 'software_package') return this.softwarePipeline(asset, step);
 
     await step('scan');
     const body = await this.storage.get(asset.storage_bucket, asset.storage_key);

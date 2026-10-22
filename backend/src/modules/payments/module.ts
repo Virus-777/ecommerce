@@ -7,6 +7,7 @@ import { storeRoutes } from './http/store.js';
 import { adminRoutes } from './http/admin.js';
 import { webhooksRoutes } from './http/webhooks.js';
 import { createDevCardProcessor } from './providers/card-processor.js';
+import { mongoMigrations } from './migrations.js';
 import { PaymentsRepository } from './repository.js';
 import { PaymentsService } from './service.js';
 import { schemas } from './schema.js';
@@ -20,8 +21,9 @@ import { schemas } from './schema.js';
  */
 export default defineModule({
   spec,
-  version: '2.0.1',
+  version: '2.1.0',
   schemas,
+  mongoMigrations,
   register(ctx) {
     const service = new PaymentsService({ repo: new PaymentsRepository(ctx.mongo), ctx, provider: createDevCardProcessor() });
     ctx.provide(service);

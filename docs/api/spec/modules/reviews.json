@@ -477,7 +477,7 @@
   ],
   "events": {
     "publishes": [
-      { "name": "reviews.review.published", "when": "A product review becomes visible (new, edited, kept or reinstated)", "payload": { "reviewId": "uuid", "productId": "uuid", "sellerId": "uuid", "rating": "int", "verified": "bool" } },
+      { "name": "reviews.review.published", "when": "A product review becomes visible (new, edited, kept or reinstated)", "payload": { "reviewId": "uuid", "productId": "uuid", "sellerId": "uuid", "customerId": { "type": "uuid?", "desc": "The author (customers-module id); Daily rewards counts new reviews by it" }, "rating": "int", "verified": "bool" } },
       { "name": "reviews.review.updated", "when": "An author edits a review", "payload": { "reviewId": "uuid", "productId": "uuid" } },
       { "name": "reviews.review.removed", "when": "A review is removed by moderation or a trust enforcement, or deleted by its author", "payload": { "reviewId": "uuid", "productId": "uuid", "sellerId": { "type": "uuid", "desc": "Seller of the reviewed item (OFFICIAL_STORE_ID for the Official Store)" }, "customerId": { "type": "uuid", "desc": "Author (customers-module id)" }, "byModeration": "bool", "reasonCode": "string?", "trustEnforcementId": { "type": "uuid?", "desc": "Set when a trust remove_reviews enforcement removed it" } } },
       { "name": "reviews.report.created", "when": "Content is reported", "payload": { "reportId": "uuid", "targetType": "string", "targetId": "uuid", "reason": "string", "reporterKind": "string" } },

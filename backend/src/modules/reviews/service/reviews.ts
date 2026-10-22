@@ -174,7 +174,7 @@ export class ReviewsPart {
         if (status === 'held') await this.moderation.hold(tx, { type: 'product_review', id }, failures);
         if (status === 'published') {
           await this.core.touchProduct(tx, fx, item.productId);
-          fx.emit('reviews.review.published', { reviewId: id, productId: item.productId, sellerId: item.sellerId, rating: input.rating, verified: row.verified });
+          fx.emit('reviews.review.published', { reviewId: id, productId: item.productId, sellerId: item.sellerId, customerId, rating: input.rating, verified: row.verified });
         }
       });
     } catch (err) {
@@ -276,7 +276,7 @@ export class ReviewsPart {
       }
       if (from !== 'draft' || status !== 'draft') await this.core.touchProduct(tx, fx, row.product_id);
       if (from !== 'draft') fx.emit('reviews.review.updated', { reviewId: row.id, productId: row.product_id });
-      if (status === 'published') fx.emit('reviews.review.published', { reviewId: row.id, productId: row.product_id, sellerId: row.seller_id, rating: updated.rating, verified: updated.verified });
+      if (status === 'published') fx.emit('reviews.review.published', { reviewId: row.id, productId: row.product_id, sellerId: row.seller_id, customerId: row.customer_id, rating: updated.rating, verified: updated.verified });
     });
     await this.core.flush(fx, who);
     return this.mine(customerId, id);

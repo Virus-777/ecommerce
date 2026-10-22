@@ -11,12 +11,14 @@ import { checkAddress, cleanAddress, hardIssues, sameAddress } from '../domain/a
 import * as map from '../mappers.js';
 import type { AddressValidationProvider, CustomerRow } from '../ports.js';
 import { type Core, type By, invalid, notFound } from './core.js';
+import type { Geocoding } from './geocoding.js';
 import type { Profiles } from './profiles.js';
 
 export class Addresses {
   constructor(
     readonly core: Core,
     readonly profiles: Profiles,
+    readonly geocoding: Geocoding,
   ) {}
 
   async listAddresses(scope: Scope): Promise<SavedAddress[]> {
@@ -79,6 +81,8 @@ export class Addresses {
     const instructions = Addresses.instructions(input.deliveryInstructions);
     const max = await this.core.ctx.settings.get('maxAddresses');
     const now = this.core.now();
+    // placed on the map before the transaction (the provider may be remote); a failure leaves it to the backfill
+    const geo = await this.geocoding.columnsFor(address, now);
     const row = await this.core.repo.transaction(async (repo) => {
       await repo.getCustomer(c.id, { forUpdate: true });
       const n = await repo.countAddresses(c.id);
@@ -93,6 +97,7 @@ export class Addresses {
         delivery_instructions: instructions,
         is_default: makeDefault,
         validated_at: now,
+        ...geo,
         last_used_at: null,
         deleted_at: null,
         created_at: now,
@@ -116,6 +121,7 @@ export class Addresses {
     const label = Addresses.label(body.label);
     const instructions = Addresses.instructions(body.deliveryInstructions);
     const now = this.core.now();
+    const geo = await this.geocoding.columnsFor(address, now);
     const row = await this.core.repo.transaction(async (repo) => {
       const a = await repo.getAddress(c.id, id, { forUpdate: true });
       if (!a) throw notFound('Address');
@@ -129,6 +135,7 @@ export class Addresses {
         delivery_instructions: instructions,
         is_default: a.is_default || body.makeDefault === true,
         validated_at: now,
+        ...geo,
         updated_at: now,
       });
     });

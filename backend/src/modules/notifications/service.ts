@@ -591,6 +591,61 @@ export class NotificationsService implements NotificationsPublicApi {
     await this.consumers.handle('wishlist.alert.triggered', event, eventId);
   }
 
+  /** services.request.status_changed: Customer: their service request or booking was confirmed, started, completed, declined or cancelled */
+  async onRequestStatusChangedFromServices(event: EventPayload<'services.request.status_changed'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('services.request.status_changed', event, eventId);
+  }
+
+  /** food.order.status_changed: Customer: their food order was accepted, is on the way, was delivered, declined or cancelled, or its payment failed */
+  async onOrderStatusChangedFromFood(event: EventPayload<'food.order.status_changed'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('food.order.status_changed', event, eventId);
+  }
+
+  /** software.purchase.paid: Customer: a software purchase is paid and ready to download */
+  async onPurchasePaidFromSoftware(event: EventPayload<'software.purchase.paid'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('software.purchase.paid', event, eventId);
+  }
+
+  /** rewards.reward.redeemed: Customer: the coupon they got for Daily rewards points is ready */
+  async onRewardRedeemedFromRewards(event: EventPayload<'rewards.reward.redeemed'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('rewards.reward.redeemed', event, eventId);
+  }
+
+  /** software.licence.reissued: Customer: staff replaced their licence key for an app */
+  async onLicenceReissuedFromSoftware(event: EventPayload<'software.licence.reissued'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('software.licence.reissued', event, eventId);
+  }
+
+  /** farm.order.placed: Customer: their farm order was placed and waits for the dealer */
+  async onOrderPlacedFromFarm(event: EventPayload<'farm.order.placed'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('farm.order.placed', event, eventId);
+  }
+
+  /** farm.order.status_changed: Customer: their farm order was confirmed, rescheduled, sent out, delivered, rejected or cancelled, or its payment failed */
+  async onOrderStatusChangedFromFarm(event: EventPayload<'farm.order.status_changed'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('farm.order.status_changed', event, eventId);
+  }
+
+  /** services.device.verified: Customer: their registered device is verified */
+  async onDeviceVerifiedFromServices(event: EventPayload<'services.device.verified'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('services.device.verified', event, eventId);
+  }
+
+  /** services.device.rejected: Customer: their registered device couldn't be verified */
+  async onDeviceRejectedFromServices(event: EventPayload<'services.device.rejected'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('services.device.rejected', event, eventId);
+  }
+
+  /** departments.blog.followed_author_posted: Customer: an author they follow published a post */
+  async onBlogFollowedAuthorPostedFromDepartments(event: EventPayload<'departments.blog.followed_author_posted'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('departments.blog.followed_author_posted', event, eventId);
+  }
+
+  /** departments.play.prize_awarded: Customer: they won a Play center prize week */
+  async onPlayPrizeAwardedFromDepartments(event: EventPayload<'departments.play.prize_awarded'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('departments.play.prize_awarded', event, eventId);
+  }
+
   /** access.approval.requested: Staff: waiting approval to eligible approvers (nominated reviewer first), action required with due date */
   async onApprovalRequestedFromAccess(event: EventPayload<'access.approval.requested'>, eventId?: string): Promise<void> {
     await this.consumers.handle('access.approval.requested', event, eventId);

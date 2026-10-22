@@ -141,7 +141,7 @@ export const PopupTrigger: z.ZodType<PopupTrigger> = z.object({
 
 export interface Placement {
   id: string;
-  key: "opening_fullscreen" | "home_banner" | "category_banner" | "campaign_banner" | "popup" | "sponsored_product" | "sponsored_store" | "floating" | "interstitial" | "video";
+  key: "opening_fullscreen" | "home_banner" | "category_banner" | "campaign_banner" | "popup" | "sponsored_product" | "sponsored_store" | "floating" | "interstitial" | "video" | "companies_top" | "play_top" | "software_top" | "food_top";
   name: string;
   /** Shown on the ad type card when choosing a placement, e.g. Appears when a visitor opens the site. Close or skip always visible. */
   description: string;
@@ -172,7 +172,7 @@ export interface Placement {
 
 export const Placement: z.ZodType<Placement> = z.object({
   id: z.uuid(),
-  key: z.enum(["opening_fullscreen", "home_banner", "category_banner", "campaign_banner", "popup", "sponsored_product", "sponsored_store", "floating", "interstitial", "video"]),
+  key: z.enum(["opening_fullscreen", "home_banner", "category_banner", "campaign_banner", "popup", "sponsored_product", "sponsored_store", "floating", "interstitial", "video", "companies_top", "play_top", "software_top", "food_top"]),
   name: z.string(),
   description: z.string().describe("Shown on the ad type card when choosing a placement, e.g. Appears when a visitor opens the site. Close or skip always visible."),
   kind: z.enum(["overlay", "inline", "card", "strip"]),
@@ -1672,13 +1672,13 @@ export const AdvertisingCampaignEndingSoonEvent: z.ZodType<AdvertisingCampaignEn
 /** What other modules may call in-process: `ctx.use('advertising')` (or `ctx.tryUse` for an optional dependency). */
 export interface AdvertisingPublicApi {
   /** Sponsored product cards and their positions for a results list (max per page from the placement; relevance first, then priority). Only eligible, in-stock offers are returned. personalizationAllowed false: only page context (query, category, product) is used, frequency state is kept per session only and clicks are not kept for attribution by visitor; customerId (signed-in shopper) lets frequency caps and attribution follow the customer across devices when personalization is allowed. Used by: search, catalog. */
-  sponsoredForResults(ctx: { page: 'home' | 'category' | 'search' | 'product' | 'campaign' | 'collection' | 'deals' | 'brand' | 'seller_store' | 'official_store' | 'cart' | 'checkout' | 'payment_result' | 'order_tracking' | 'returns' | 'account' | 'help', query?: string, categoryId?: string, productId?: string, visitorId: string, sessionId: string, device: string, organicOfferIds: string[], personalizationAllowed: boolean, customerId?: string }): Promise<SponsoredProductSlot[]>;
+  sponsoredForResults(ctx: { page: 'home' | 'category' | 'search' | 'product' | 'campaign' | 'collection' | 'deals' | 'brand' | 'seller_store' | 'official_store' | 'cart' | 'checkout' | 'payment_result' | 'order_tracking' | 'returns' | 'account' | 'help' | 'companies' | 'play' | 'software' | 'food', query?: string, categoryId?: string, productId?: string, visitorId: string, sessionId: string, device: string, organicOfferIds: string[], personalizationAllowed: boolean, customerId?: string }): Promise<SponsoredProductSlot[]>;
   /** Ad positions on a page, so content can show them as locked markers in homepage sections. Used by: content. */
-  adPositionsFor(page: 'home' | 'category' | 'search' | 'product' | 'campaign' | 'collection' | 'deals' | 'brand' | 'seller_store' | 'official_store' | 'cart' | 'checkout' | 'payment_result' | 'order_tracking' | 'returns' | 'account' | 'help'): Promise<{ placementKey: string, name: string, enabled: boolean }[]>;
+  adPositionsFor(page: 'home' | 'category' | 'search' | 'product' | 'campaign' | 'collection' | 'deals' | 'brand' | 'seller_store' | 'official_store' | 'cart' | 'checkout' | 'payment_result' | 'order_tracking' | 'returns' | 'account' | 'help' | 'companies' | 'play' | 'software' | 'food'): Promise<{ placementKey: string, name: string, enabled: boolean }[]>;
   /** Ads linked to a promotion (shown on the promotion detail). Used by: promotions, graphql. */
   campaignsForPromotion(promotionId: string): Promise<AdCampaignSummary[]>;
   /** True for checkout, payment results, order tracking and returns; used by front-end shells to skip the serve call. Used by: content. */
-  isAdBlockedPage(page: 'home' | 'category' | 'search' | 'product' | 'campaign' | 'collection' | 'deals' | 'brand' | 'seller_store' | 'official_store' | 'cart' | 'checkout' | 'payment_result' | 'order_tracking' | 'returns' | 'account' | 'help'): Promise<boolean>;
+  isAdBlockedPage(page: 'home' | 'category' | 'search' | 'product' | 'campaign' | 'collection' | 'deals' | 'brand' | 'seller_store' | 'official_store' | 'cart' | 'checkout' | 'payment_result' | 'order_tracking' | 'returns' | 'account' | 'help' | 'companies' | 'play' | 'software' | 'food'): Promise<boolean>;
   /** Displays, clicks, dismissals, attributed purchases and spend per campaign and day, from the daily_stats read model (days still open are marked partial). Used by: reports. */
   dailyPerformance(range: common.DateRange, filter?: { campaignId?: string, sellerId?: string }): Promise<CampaignDayPerformance[]>;
   /** Read-only advertising summary for the Admin dashboard tile: live now (own and paid), starting in 7 days, ending soon, waiting approval, spend this month and short campaign lists. Records nothing; ad serving stays on POST /api/store/advertising/decisions. Used by: graphql, reports, workqueues. */

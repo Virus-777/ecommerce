@@ -43,7 +43,13 @@ export const enabledModules: string[] = [
   // Growth
   'advertising',
   'content',
+  'departments',
   'promotions',
+  'services',
+  'software',
+  'food',
+  'farm',
+  'rewards',
 
   // Later phases (off at launch)
   // 'wallet',              // phase 3: store credit and gift cards

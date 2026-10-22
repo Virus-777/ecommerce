@@ -6,8 +6,8 @@ import { AppError } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { pageOf, type PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
-import type { BannerBlock, HomeSection, HomeSectionAdmin, Homepage, HomepageAdmin, HomepageReview, LinkRef, NewsCard, PreviewRequest, ProductSource, PromiseItem, SectionInput, SectionProductRow, Version } from '../../../spec/content.js';
-import { DEFAULT_AD_POSITIONS, DEFAULT_RULES, HOMEPAGE_ID, inWindow, PRODUCT_KINDS, SECTION_KIND_LABEL } from '../domain/rules.js';
+import type { BannerBlock, DepartmentItem, DepartmentTile, HomeSection, HomeSectionAdmin, Homepage, HomepageAdmin, HomepageReview, LinkRef, NewsCard, PreviewRequest, ProductSource, PromiseItem, SectionInput, SectionProductRow, Version } from '../../../spec/content.js';
+import { DEFAULT_AD_POSITIONS, DEFAULT_RULES, DEPARTMENT_PAGES, HOMEPAGE_ID, inWindow, MAX_DEPARTMENTS, PRODUCT_KINDS, SECTION_KIND_LABEL } from '../domain/rules.js';
 import { contentPublicationMachine } from '../domain/state-machines.js';
 import type { SectionRow, VersionRow } from '../ports.js';
 import type { ContentRepository } from '../repository.js';
@@ -22,6 +22,8 @@ interface SectionConfig {
   sellerIds?: string[] | null;
   brandIds?: string[] | null;
   promiseItems?: PromiseItem[] | null;
+  /** Departments rail: every item in order, hidden ones included */
+  departments?: DepartmentItem[] | null;
   /** Ad positions: name from advertising */
   name?: string | null;
   /** Set when the linked promotion ended (the section stays hidden) */
@@ -71,7 +73,13 @@ export interface ResolvedHomepage {
 
 const AD_MANAGED = 'Managed in Advertisements';
 
-const bannerIds = (c: SectionConfig | null | undefined): { id: string; path: string }[] => (c?.banner?.images ?? []).map((img, i) => ({ id: img.id, path: `banner.images[${i}]` }));
+/** The uploaded files a section uses: banner images and Departments item pictures */
+const bannerIds = (c: SectionConfig | null | undefined): { id: string; path: string }[] => [
+  ...(c?.banner?.images ?? []).map((img, i) => ({ id: img.id, path: `banner.images[${i}]` })),
+  ...(c?.departments ?? []).flatMap((d, i) => (d.image ? [{ id: d.image.id, path: `departments[${i}].image` }] : [])),
+];
+
+const ICON_NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
 export class ContentHomepage extends ContentPages {
   /* ---------------------------------------------------------------- layout plumbing */
@@ -288,6 +296,8 @@ export class ContentHomepage extends ContentPages {
       ? AD_MANAGED
       : PRODUCT_KINDS.has(r.kind)
         ? `${productCount} ${productCount === 1 ? 'product' : 'products'} · ${modeLabel}`
+        : r.kind === 'departments'
+          ? this.departmentsLabel(s.config.departments ?? [])
         : r.kind === 'category_shortcuts'
           ? `${n(s.config.categoryIds)} categories`
           : r.kind === 'featured_sellers'
@@ -336,6 +346,7 @@ export class ContentHomepage extends ContentPages {
       categoryIds: c.categoryIds ?? null,
       sellerIds: c.sellerIds ?? null,
       brandIds: c.brandIds ?? null,
+      departments: c.departments ?? null,
       linkedPromotionId: r.linked_promotion_id,
       linkedPageId: r.linked_page_id,
       promiseItems: c.promiseItems ?? null,
@@ -429,6 +440,8 @@ export class ContentHomepage extends ContentPages {
         requireText(p.body, `promiseItems[${i}].body`);
       });
     } else if (input.promiseItems?.length) throw invalid('promiseItems', 'Only the Our promise strip has promises');
+    const departments = input.kind === 'departments' ? await this.checkDepartments(input.departments ?? []) : null;
+    if (input.kind !== 'departments' && input.departments?.length) throw invalid('departments', 'Only the Departments section has departments');
     if (input.kind === 'category_shortcuts' && !input.categoryIds?.length) throw invalid('categoryIds', 'Pick at least one category');
     if (input.kind === 'featured_sellers' && !input.sellerIds?.length) throw invalid('sellerIds', 'Pick at least one seller');
     if (input.kind === 'brand_collections' && !input.brandIds?.length) throw invalid('brandIds', 'Pick at least one brand');
@@ -450,11 +463,84 @@ export class ContentHomepage extends ContentPages {
         sellerIds: input.sellerIds ? unique(input.sellerIds) : null,
         brandIds: input.brandIds ? unique(input.brandIds) : null,
         promiseItems: input.promiseItems ?? null,
+        departments,
       },
       showFrom,
       removeAt,
       timeZone,
     };
+  }
+
+  /** Departments items as saved: trimmed, one destination each, ids kept (new items get one) */
+  private async checkDepartments(items: DepartmentItem[]): Promise<DepartmentItem[]> {
+    if (!items.length) throw invalid('departments', 'Add at least one department');
+    if (items.length > MAX_DEPARTMENTS) throw invalid('departments', `A Departments section holds at most ${MAX_DEPARTMENTS} items`);
+    // a hidden or empty category can be picked: its tile shows once customers can see the category
+    const categories = items.some((d) => d.destination?.kind === 'category') ? await this.categoryIndex({ includeHidden: true }) : new Map();
+    const seen = new Set<string>();
+    return items.map((d, i) => {
+      const at = `departments[${i}]`;
+      const title = requireText(d.title, `${at}.title`, 'Give the department a title');
+      if (title.length > 40) throw invalid(`${at}.title`, 'Use at most 40 characters');
+      const label = d.label?.trim() || null;
+      if (label && label.length > 24) throw invalid(`${at}.label`, 'Use at most 24 characters');
+      const icon = d.icon?.trim() || null;
+      if (icon && !ICON_NAME.test(icon)) throw invalid(`${at}.icon`, 'Use an icon name like smartphone or gamepad-2');
+      if (d.tint != null && (!Number.isInteger(d.tint) || d.tint < 1 || d.tint > 6)) throw invalid(`${at}.tint`, 'Pick a tint from 1 to 6');
+      const dest = d.destination;
+      const where = `${at}.destination`;
+      let destination: DepartmentItem['destination'];
+      if (dest?.kind === 'department') {
+        if (!dest.department || !(dest.department in DEPARTMENT_PAGES)) throw invalid(`${where}.department`, 'Pick a department page');
+        destination = { kind: 'department', department: dest.department };
+      } else if (dest?.kind === 'category') {
+        if (!dest.categoryId || !categories.has(dest.categoryId)) throw invalid(`${where}.categoryId`, 'Pick a category');
+        destination = { kind: 'category', categoryId: dest.categoryId };
+      } else if (dest?.kind === 'path') {
+        const path = dest.path?.trim() ?? '';
+        if (!path.startsWith('/') || path.startsWith('//') || /\s/.test(path)) throw invalid(`${where}.path`, 'Use a store path that starts with /, e.g. /deals');
+        destination = { kind: 'path', path };
+      } else if (dest?.kind === 'url') {
+        const url = dest.url?.trim() ?? '';
+        if (!/^https?:\/\/[^\s/]+\.[^\s]+$/i.test(url)) throw invalid(`${where}.url`, 'Use a full web address, e.g. https://example.com');
+        destination = { kind: 'url', url };
+      } else throw invalid(where, 'Pick where the department opens');
+      let id = d.id?.trim() || newId();
+      if (seen.has(id)) id = newId();
+      seen.add(id);
+      return { id, title, label, icon, image: d.image ?? null, tint: d.tint ?? null, destination, visible: d.visible !== false };
+    });
+  }
+
+  private departmentsLabel(items: DepartmentItem[]): string {
+    const shown = items.filter((d) => d.visible).length;
+    const hidden = items.length - shown;
+    return `${shown} ${shown === 1 ? 'department' : 'departments'}${hidden ? ` · ${hidden} hidden` : ''}`;
+  }
+
+  /** The tiles customers see: visible items whose destination still exists; department pages only in the app */
+  protected async departmentTiles(items: DepartmentItem[], opts: { app: boolean }): Promise<DepartmentTile[]> {
+    const shown = items.filter((d) => d.visible);
+    if (!shown.length) return [];
+    const [categories, refs] = await Promise.all([
+      shown.some((d) => d.destination.kind === 'category') ? this.categoryIndex() : Promise.resolve(new Map()),
+      this.refsMap(shown.flatMap((d) => (d.image ? [d.image.id] : []))),
+    ]);
+    const out: DepartmentTile[] = [];
+    for (const d of shown) {
+      const dest = d.destination;
+      let link: LinkRef | null = null;
+      if (dest.kind === 'department' && dest.department) {
+        if (opts.app) link = { label: d.title, url: DEPARTMENT_PAGES[dest.department].path, kind: 'department' };
+      } else if (dest.kind === 'category' && dest.categoryId) {
+        const c = categories.get(dest.categoryId);
+        if (c?.visible && c.slug) link = { label: d.title, url: `/c/${c.slug}`, kind: 'category' };
+      } else if (dest.kind === 'path' && dest.path) link = { label: d.title, url: dest.path, kind: 'page' };
+      else if (dest.kind === 'url' && dest.url) link = { label: d.title, url: dest.url, kind: 'external' };
+      if (!link) continue;
+      out.push({ id: d.id ?? link.url, title: d.title, label: d.label ?? null, icon: d.icon ?? null, image: d.image ? (refs.get(d.image.id) ?? null) : null, tint: d.tint ?? null, link });
+    }
+    return out;
   }
 
   private async liveFilesOf(sectionId: string): Promise<string[]> {
@@ -814,7 +900,8 @@ export class ContentHomepage extends ContentPages {
     return [];
   }
 
-  protected async resolveSection(s: SectionSnap, pages: Map<string, { kind: string; slug: string }>): Promise<ResolvedHomeSection> {
+  /** `app`: built for the app (device=app, or a staff preview), which has the department pages */
+  protected async resolveSection(s: SectionSnap, pages: Map<string, { kind: string; slug: string }>, opts: { app: boolean } = { app: false }): Promise<ResolvedHomeSection> {
     const base: ResolvedHomeSection = {
       id: s.id,
       position: 0,
@@ -825,6 +912,7 @@ export class ContentHomepage extends ContentPages {
       banner: null,
       products: [],
       categories: [],
+      departments: [],
       sellers: [],
       brands: [],
       deals: null,
@@ -849,6 +937,7 @@ export class ContentHomepage extends ContentPages {
       base.meta.collectionId = source?.mode === 'collection' ? (source.collectionId ?? null) : null;
     }
     if (s.kind === 'collection_teaser' && s.linkedPageId) base.meta.collectionId = s.linkedPageId;
+    if (s.kind === 'departments') base.departments = await this.departmentTiles(s.config.departments ?? [], opts);
     if (s.kind === 'category_shortcuts') base.categories = await this.categoryTiles(s.config.categoryIds ?? []);
     if (s.kind === 'featured_sellers') base.sellers = await this.sellerTiles(s.config.sellerIds ?? []);
     if (s.kind === 'brand_collections') base.brands = await this.brandTiles(s.config.brandIds ?? []);
@@ -861,7 +950,7 @@ export class ContentHomepage extends ContentPages {
     return base;
   }
 
-  protected async buildHomepage(layout: LayoutSnapshot, version: number, at: Date): Promise<ResolvedHomepage> {
+  protected async buildHomepage(layout: LayoutSnapshot, version: number, at: Date, opts: { app: boolean } = { app: false }): Promise<ResolvedHomepage> {
     const promotions = this.ctx.tryUse('promotions');
     const asked = new Map<string, Promise<boolean>>();
     const campaignActive = (campaignId: string) => {
@@ -877,7 +966,7 @@ export class ContentHomepage extends ContentPages {
     const visible = layout.sections.filter((_, i) => shown[i]);
     const pageIds = unique(visible.flatMap((s) => [s.linkedPageId, s.config.productSource?.collectionId].filter((x): x is string => Boolean(x))));
     const pages = new Map((await this.repo.getPages(pageIds)).map((p) => [p.id, p]));
-    const sections = await Promise.all(visible.map((s) => this.resolveSection(s, pages)));
+    const sections = await Promise.all(visible.map((s) => this.resolveSection(s, pages, opts)));
     sections.forEach((s, i) => (s.position = i + 1));
     return { version, generatedAt: this.now().toISOString(), sections };
   }
@@ -907,7 +996,7 @@ export class ContentHomepage extends ContentPages {
     }
     const { live } = await this.homepageVersions();
     const layout = this.layoutOf(live);
-    const page = await this.buildHomepage(layout, live?.number ?? 0, at ?? this.now());
+    const page = await this.buildHomepage(layout, live?.number ?? 0, at ?? this.now(), { app: device === 'app' });
     if (!at) {
       // valid for five minutes, or until the next section appears or goes
       const next = layout.sections.flatMap((s) => [s.showFrom, s.removeAt]).map((t) => (t ? new Date(t).getTime() : NaN)).filter((t) => t > nowMs);
@@ -923,9 +1012,10 @@ export class ContentHomepage extends ContentPages {
       const layout = this.draftLayout(await this.repo.listSections());
       // a section published now shows as published in the preview; scheduled ones appear at their time
       const asPublished = { sections: layout.sections.map((s) => (s.status === 'draft' || s.status === 'unpublished' ? { ...s, status: 'published' } : s)) };
-      return this.buildHomepage(asPublished, draft?.number ?? (live?.number ?? 0) + 1, at);
+      // staff see every Departments tile (the app's department pages too)
+      return this.buildHomepage(asPublished, draft?.number ?? (live?.number ?? 0) + 1, at, { app: true });
     }
-    return this.buildHomepage(this.layoutOf(live), live?.number ?? 0, at);
+    return this.buildHomepage(this.layoutOf(live), live?.number ?? 0, at, { app: true });
   }
 
   /* ---------------------------------------------------------------- schedule job and consumers */

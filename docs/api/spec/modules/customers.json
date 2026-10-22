@@ -25,7 +25,7 @@
     "Abuse reports about customers: trust (shown read-only in the admin detail)"
   ],
   "dependsOn": ["identity"],
-  "optionalDeps": ["orders", "returns", "support", "messaging", "wallet", "reviews", "wishlist", "payments", "catalog", "offers", "trust", "reports", "notifications", "access", "audit", "media", "workqueues"],
+  "optionalDeps": ["orders", "returns", "support", "messaging", "wallet", "reviews", "wishlist", "payments", "catalog", "offers", "trust", "reports", "notifications", "access", "audit", "media", "workqueues", "software", "food", "rewards", "services", "departments"],
   "publicApi": [
     { "name": "getCustomer", "signature": "(customerId: uuid) => CustomerSnapshot | null", "desc": "Name, email, phone, account status and what the customer may do now", "usedBy": ["orders", "support", "messaging", "trust", "checkout", "reviews", "graphql"] },
     { "name": "getCustomerByUserId", "signature": "(userId: uuid) => CustomerSnapshot | null", "desc": "Resolve the customer for an identity session", "usedBy": ["checkout", "cart", "wishlist", "graphql"] },
@@ -40,7 +40,9 @@
     { "name": "listRecentlyViewed", "signature": "(owner: { customerId?: uuid, guestSessionId?: string }, limit: int) => uuid[]", "desc": "Product ids, newest first, for recommendations and the phase-3 wishlist", "usedBy": ["wishlist", "search"] },
     { "name": "listRecentlyViewedItems", "signature": "(owner: { customerId?: uuid, guestSessionId?: string }, limit: int) => RecentlyViewedItem[]", "desc": "Recently viewed rows, newest first, with the title and image snapshot and availability (same rows as GET /recently-viewed). In GraphQL the current price comes from offers through RecentlyViewedItem.product.", "usedBy": ["graphql"] },
     { "name": "searchCustomers", "signature": "(filter: { search?: string, statuses?: string[], verification?: string, joinedFrom?: date, joinedTo?: date }, page: PageInput) => Page<CustomerSnapshot>", "desc": "Admin customer list with the same filters and permission rules as GET /api/admin/customers/customers", "usedBy": ["graphql", "search"] },
-    { "name": "exportRows", "signature": "(dataset: string, filters: json, principal: identity.Principal, cursor?: string) => { rows: json[], nextCursor?: string }", "desc": "Export rows for reports dataset customers.admin.accounts (the filtered customer list)", "usedBy": ["reports"] }
+    { "name": "exportRows", "signature": "(dataset: string, filters: json, principal: identity.Principal, cursor?: string) => { rows: json[], nextCursor?: string }", "desc": "Export rows for reports dataset customers.admin.accounts (the filtered customer list)", "usedBy": ["reports"] },
+    { "name": "customerLocation", "signature": "(customerId: uuid) => CustomerLocation | null", "desc": "The customer's point from their geocoded default delivery address (city and label from that address), or null when they have no default address or it could not be geocoded. The store then shows the city without a distance. No device location is used.", "usedBy": ["food", "services", "farm", "departments"] },
+    { "name": "geocodeAddress", "signature": "(input: { line1?: string, city: string, region: string, postalCode?: string, country?: string }) => GeoPoint | null", "desc": "A point for an address through the geocoder provider (ZIP centroid, falling back to the city centroid), or null when unknown or no provider is configured. Other modules geocode staff-entered addresses (restaurants, providers, dealers) with it.", "usedBy": ["food", "services", "farm", "departments"] }
   ],
   "types": {
     "CustomerSnapshot": {
@@ -65,6 +67,15 @@
     "SavedAddress": {
       "id": "uuid", "label": { "type": "string?", "desc": "e.g. Home, Work" }, "address": "Address",
       "deliveryInstructions": "text?", "isDefault": "bool", "lastUsedAt": "datetime?", "createdAt": "datetime", "updatedAt": "datetime"
+    },
+    "GeoPoint": { "lat": { "type": "number", "desc": "WGS84 degrees" }, "lng": { "type": "number", "desc": "WGS84 degrees" } },
+    "CustomerLocation": {
+      "point": "GeoPoint",
+      "city": "string",
+      "region": { "type": "string", "desc": "State code, e.g. OR" },
+      "addressId": { "type": "uuid", "desc": "The default address the point comes from" },
+      "label": { "type": "string", "desc": "The address's first line, e.g. 1120 SW 5th Ave" },
+      "precision": { "type": "enum(zip|city)?", "desc": "How exact the point is: the ZIP centroid or only the city's" }
     },
     "AddressInput": {
       "label": "string?", "address": "Address", "deliveryInstructions": "text?", "makeDefault": "bool?"
@@ -218,7 +229,7 @@
   },
   "tables": [
     { "name": "customers", "desc": "One row per identity user who shops", "columns": { "id": "uuid pk", "user_id": "uuid unique", "ref": "text unique (CU-NNNNNN)", "first_name": "text", "last_name": "text", "email": "text (mirror of identity, lower-case)", "email_verified_at": "timestamptz?", "phone": "text?", "phone_verified_at": "timestamptz?", "account_status": "text", "default_address_id": "uuid? → addresses", "order_count": "int (read model from orders events)", "total_spend_minor": "bigint", "currency": "text", "closed_at": "timestamptz?", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(account_status, id)", "(email)", "(created_at, id)", "gin(to_tsvector(first_name || ' ' || last_name || ' ' || email))"] },
-    { "name": "addresses", "desc": "Saved addresses. Soft-deleted so past checkout references stay explainable; orders hold their own copy.", "columns": { "id": "uuid pk", "customer_id": "uuid → customers", "label": "text?", "name": "text", "line1": "text", "line2": "text?", "city": "text", "region": "text", "postal_code": "text", "country": "text", "phone": "text?", "delivery_instructions": "text?", "is_default": "bool", "validated_at": "timestamptz?", "last_used_at": "timestamptz?", "deleted_at": "timestamptz?", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(customer_id)", "unique(customer_id) where is_default and deleted_at is null"] },
+    { "name": "addresses", "desc": "Saved addresses. Soft-deleted so past checkout references stay explainable; orders hold their own copy.", "columns": { "id": "uuid pk", "customer_id": "uuid → customers", "label": "text?", "name": "text", "line1": "text", "line2": "text?", "city": "text", "region": "text", "postal_code": "text", "country": "text", "phone": "text?", "delivery_instructions": "text?", "is_default": "bool", "validated_at": "timestamptz?", "lat": "numeric(9,6)? (WGS84 latitude from the geocoder; internal, never in store responses)", "lng": "numeric(9,6)? (WGS84 longitude)", "geocoded_at": "timestamptz? (last geocoding attempt; set with null lat/lng when the address could not be placed)", "geocode_precision": "text? (zip|city)", "last_used_at": "timestamptz?", "deleted_at": "timestamptz?", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(customer_id)", "unique(customer_id) where is_default and deleted_at is null", "(geocoded_at)"] },
     { "name": "marketing_preferences", "columns": { "customer_id": "uuid pk → customers", "email_promotions": "bool", "sms_promotions": "bool", "push_promotions": "bool", "wishlist_alerts": "bool", "personalized_recommendations": "bool", "recent_searches": "bool", "updated_at": "timestamptz" } },
     { "name": "consent_log", "desc": "Append-only history of every consent change (proof of opt-in and opt-out)", "columns": { "id": "uuid pk", "customer_id": "uuid → customers", "channel": "text", "granted": "bool", "source": "text", "actor_kind": "text", "actor_id": "text?", "ip": "inet?", "at": "timestamptz" }, "indexes": ["(customer_id, at desc)"] },
     { "name": "recently_viewed", "desc": "One row per owner and product; upserted on each view", "columns": { "id": "uuid pk", "owner_kind": "text (customer|guest)", "owner_id": "text", "product_id": "uuid", "variant_id": "uuid?", "title": "text (snapshot at view time)", "image_media_id": "uuid?", "viewed_at": "timestamptz" }, "indexes": ["unique(owner_kind, owner_id, product_id)", "(owner_kind, owner_id, viewed_at desc)", "(viewed_at)"] },
@@ -349,7 +360,8 @@
     { "name": "customers.build-data-exports", "schedule": "every 5 min", "does": "Process requested exports: call exportCustomerData on every enabled module that declares it (orders, returns, support, messaging, reviews, wishlist, wallet, payments…) with the customerId and accountId, write one file per section plus the customer's attachments into a ZIP in media, mark ready, publish customers.data_export.ready. A module that throws fails the export (retried), never silently left out; one that declares the hook but is off is listed in the README under notIncluded. There is no list-based fallback: a module holding customer data must declare the hook" },
     { "name": "customers.expire-export-links", "schedule": "hourly", "does": "Expire ready exports after exportLinkValidDays and delete the file" },
     { "name": "customers.complete-closures", "schedule": "daily 02:00 market time", "does": "For closures past the cooling-off date, re-check obligations; close the account, anonymise profile and addresses, keep order references. When obligations block it, keep the request and publish customers.closure.delayed (once per new set of blockers)" },
-    { "name": "customers.prune-recently-viewed", "schedule": "daily", "does": "Delete rows older than recentlyViewedRetentionDays and guest rows whose session expired" }
+    { "name": "customers.prune-recently-viewed", "schedule": "daily", "does": "Delete rows older than recentlyViewedRetentionDays and guest rows whose session expired" },
+    { "name": "customers.geocode-addresses", "schedule": "every 10 min", "does": "Backfill: geocode saved addresses that were never geocoded (addresses saved before geocoding existed, or while the geocoder failed), and retry addresses the geocoder could not place after a week. Batches of 200; defaults first" }
   ],
   "settings": [
     { "key": "maxAddresses", "type": "int", "default": 20, "desc": "Saved addresses per customer", "min": 1 },
@@ -363,7 +375,8 @@
     { "key": "overviewSourceTimeoutMs", "type": "duration", "default": 300, "desc": "Per-module budget for the account overview aggregate", "unit": "milliseconds", "min": 50 }
   ],
   "integrations": [
-    { "name": "Address validation provider (optional)", "purpose": "Normalise US addresses and detect PO boxes; format rules only when not configured" }
+    { "name": "Address validation provider (optional)", "purpose": "Normalise US addresses and detect PO boxes; format rules only when not configured" },
+    { "name": "Geocoder (geocoder port)", "purpose": "A point (lat/lng) for each saved address and for addresses other modules pass to geocodeAddress. Development: a built-in table of ZIP centroids for the Portland–Vancouver–Salem metro and city centroids for the seed data (CA, OR, WA), city fallback. Production: no provider is configured yet, so addresses keep no point and the store shows the city without distances" }
   ],
   "errorCodes": {
     "ADDRESS_LIMIT_REACHED": { "status": 409, "meaning": "The customer already has maxAddresses saved addresses" },
@@ -384,6 +397,7 @@
     "Approval action registered with access: customers.accounts.close-with-obligations (limit none, secondReviewer always; see approvalActions) for staff closures while orders, returns or cases are still open.",
     "Account actions call identity in-process: send_password_reset uses the forced-reset tool, sign_out_everywhere uses revokeSessions, completed closure uses closeAccount.",
     "Customer restrictions applied directly by staff are appealed through a support case (route stated in appealRoute). Restrictions that come from a trust enforcement are appealed in trust (POST /api/store/trust/appeals).",
-    "Address changes never alter accepted orders: checkout copies the address via getAddressForOrder and orders store that copy."
+    "Address changes never alter accepted orders: checkout copies the address via getAddressForOrder and orders store that copy.",
+    "Customer location (owner decision 2026-10-22): the customer's point is their saved default delivery address, geocoded on the server when it is saved (create, edit, checkout save) and by the customers.geocode-addresses backfill. No device location permission. Coordinates stay internal: store address responses do not carry them; modules that show distances read customerLocation and use kernel/lib/geo.ts. A failed geocode never fails the save."
   ]
 }

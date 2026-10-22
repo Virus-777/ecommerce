@@ -117,6 +117,75 @@ export type Routes = { [N in Consumed]: EventRoute<EventPayload<N>> };
 
 const L = (kind: string, id: string, screen: string, label?: string, ref?: string | null, url?: string | null): NoticeLink => ({ kind, id, screen, ...(label ? { label } : {}), ...(ref ? { ref } : {}), ...(url ? { url } : {}) });
 
+/** How a request status reads in a notice: Your request SR-… was confirmed */
+const REQUEST_STATUS: Record<string, string> = { confirmed: 'confirmed', in_progress: 'started', completed: 'completed', declined: 'declined', cancelled: 'cancelled' };
+
+/** "Out of stock." → "Out of stock": a note inside a sentence */
+const clause = (note: string | null | undefined) => note?.trim().replace(/[.\s]+$/, '') || null;
+/** A food order notice by status: the headline and what happens next (statuses the customer caused themselves send nothing) */
+const FOOD_NOTICE: Record<string, (p: { ref: string; restaurantName: string; note?: string | null }) => { headline: string; next: string }> = {
+  accepted: (p) => ({ headline: `${p.restaurantName} accepted your order ${p.ref}`, next: "We'll let you know when it's on the way." }),
+  on_the_way: (p) => ({ headline: `Your order ${p.ref} is on the way`, next: `${p.restaurantName} sent it out for delivery.` }),
+  delivered: (p) => ({ headline: `Your order ${p.ref} was delivered`, next: `Enjoy your meal! You can rate ${p.restaurantName} from the order.` }),
+  declined: (p) => ({ headline: `Your order ${p.ref} was declined`, next: `${p.restaurantName} couldn't take it${clause(p.note) ? `: ${clause(p.note)}` : ''}. You won't be charged.` }),
+  cancelled: (p) => ({ headline: `Your order ${p.ref} was cancelled`, next: `${clause(p.note) ? `${clause(p.note)}. ` : ''}You won't be charged for it.` }),
+  payment_failed: (p) => ({ headline: `The payment for your order ${p.ref} didn't go through`, next: 'Open the order to try again with another card.' }),
+};
+
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** A calendar date (YYYY-MM-DD, no time zone) as a delivery day: "Tue, Nov 3" */
+const dayLabel = (date: string) => {
+  const d = new Date(`${date.slice(0, 10)}T00:00:00Z`);
+  return Number.isNaN(d.getTime()) ? date : `${WEEKDAYS[d.getUTCDay()]}, ${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`;
+};
+/** A calendar date as a month: "Oct 2027" */
+const monthLabel = (date: string) => {
+  const d = new Date(`${date.slice(0, 10)}T00:00:00Z`);
+  return Number.isNaN(d.getTime()) ? date : `${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+};
+
+interface FarmNoticeInput {
+  ref: string;
+  dealerName: string;
+  machineName: string;
+  status: string;
+  paymentOption: string;
+  total: Money;
+  cardAmount: Money;
+  deliveryDate: string;
+  rescheduled: boolean;
+  note?: string | null;
+}
+/** A farm order notice by status (headline + the full sentence); a move the customer can't act on still tells them */
+function farmNotice(p: FarmNoticeInput, f: Fmt): { headline: string; text: string } | null {
+  const note = clause(p.note);
+  if (p.rescheduled) return { headline: `Order ${p.ref}: new delivery date`, text: `Delivery of ${p.ref} moved to ${dayLabel(p.deliveryDate)}` };
+  switch (p.status) {
+    case 'confirmed': {
+      let paid = '';
+      if (p.cardAmount.amount > 0 && p.paymentOption === 'pay_in_full') paid = ' Your card was charged.';
+      if (p.cardAmount.amount > 0 && p.paymentOption === 'pay_on_delivery') {
+        const balance = { ...p.total, amount: Math.max(0, p.total.amount - p.cardAmount.amount) };
+        paid = ` Your ${f.money(p.cardAmount)} deposit was charged; pay the rest (${f.money(balance)}) when it arrives.`;
+      }
+      return { headline: `Order ${p.ref} confirmed`, text: `${p.dealerName} confirmed your ${p.machineName} · delivery ${dayLabel(p.deliveryDate)}.${paid}` };
+    }
+    case 'out_for_delivery':
+      return { headline: `Order ${p.ref} is on its way`, text: `Your ${p.machineName} is on its way` };
+    case 'delivered':
+      return { headline: `Order ${p.ref} delivered`, text: `${p.machineName} delivered` };
+    case 'rejected':
+      return { headline: `Order ${p.ref} wasn't accepted`, text: `${p.dealerName} couldn't take order ${p.ref}${note ? `: ${note}` : ''}. Nothing was charged.` };
+    case 'cancelled':
+      return { headline: `Order ${p.ref} was cancelled`, text: `Order ${p.ref} was cancelled${note ? `: ${note}` : ''}` };
+    case 'payment_failed':
+      return { headline: `Payment for ${p.ref} didn't go through`, text: `Payment for ${p.ref} didn't go through — try again` };
+    default:
+      return null; // payment pending, placed (farm.order.placed tells it)
+  }
+}
+
 const orderLink = (orderId: string, ref?: string | null) => L('order', orderId, 'account/order', 'View order', ref);
 const returnLink = (returnId: string, ref?: string | null, label = 'View return') => L('return', returnId, 'account/return', label, ref);
 const caseLink = (caseId: string, ref?: string | null) => L('case', caseId, 'help/case', 'View case', ref);
@@ -1294,6 +1363,161 @@ export const ROUTES: Routes = {
         link: L('product', p.productId, 'store/product', 'View product'),
         context: { wishlist: { product: p.kind === 'back_in_stock' ? 'An item on your wishlist is back in stock' : 'An item on your wishlist', price: p.price ? f.money(p.price) : 'available again' } },
         dedupe: `wishlist:${p.alertId}`,
+      },
+    ],
+  },
+
+  /* ---------------------------------------------------------------- services (department pages) */
+  'services.request.status_changed': {
+    // the customer made the request themselves: they hear about what the provider or staff do with it
+    sends: (p) =>
+      p.status === 'requested'
+        ? []
+        : [
+            {
+              topic: 'customer.services.request',
+              // services keeps customers by their account id (the store principal's accountId), not a customers record id
+              to: [{ kind: 'customer', accountId: p.customerId }],
+              link: L('service_request', p.requestId, 'store/my-request', 'View request', p.ref),
+              context: { request: { ref: p.ref, status: REQUEST_STATUS[p.status] ?? p.status.replace('_', ' ') } },
+              dedupe: `service-request:${p.requestId}:${p.status}`,
+            },
+          ],
+  },
+
+  /* ---------------------------------------------------------------- food, software and Daily rewards (department pages) */
+  // these modules keep customers by their customers-module id (the store principal's customerId), unlike services
+  'food.order.status_changed': {
+    sends: (p) => {
+      const notice = FOOD_NOTICE[p.status];
+      if (!notice) return []; // placed, payment pending, preparing: nothing to tell
+      return [
+        {
+          topic: 'customer.food.order',
+          to: [customer(p.customerId)],
+          link: L('food_order', p.orderId, 'store/food-order', 'View order', p.ref),
+          context: { food: notice(p) },
+          dedupe: `food-order:${p.orderId}:${p.status}`,
+        },
+      ];
+    },
+  },
+  'software.purchase.paid': {
+    sends: (p, f) => [
+      {
+        topic: 'customer.software.purchase',
+        to: [customer(p.customerId)],
+        // the payload has no app slug: the purchase screen lists the apps with their downloads
+        link: L('software_purchase', p.purchaseId, 'store/software-purchase', 'Download', p.ref),
+        context: {
+          software: {
+            title: p.title,
+            amount: f.money(p.amount),
+            // a pack's purchase names several apps; every paid app comes with its own licence key
+            next: p.appIds.length > 1 ? 'Its apps and their licence keys are in Softwares › My apps.' : 'Your licence key is in Softwares › My apps.',
+          },
+        },
+        dedupe: `software-purchase:${p.purchaseId}`,
+      },
+    ],
+  },
+  'software.licence.reissued': {
+    sends: (p) => [
+      {
+        topic: 'customer.software.licence',
+        to: [customer(p.customerId)],
+        // My apps lists the owned apps with their keys; the id is the app's slug
+        link: L('software_licence', p.slug, 'store/software-library', 'Open My apps'),
+        context: { software: { title: p.title } },
+        dedupe: `software-licence:${p.entitlementId}`,
+      },
+    ],
+  },
+  'rewards.reward.redeemed': {
+    sends: (p) => [
+      {
+        topic: 'customer.rewards.coupon',
+        to: [customer(p.customerId)],
+        link: L('reward', p.redemptionId, 'account/coupons', 'View my coupons', p.code),
+        context: { reward: { title: p.title, code: p.code, cost: p.cost.toLocaleString('en-US') } },
+        dedupe: `reward-redemption:${p.redemptionId}`,
+      },
+    ],
+  },
+
+  /* ---------------------------------------------------------------- farm orders, registered devices, blogs and Play center (Phase 4) */
+  // farm, services devices and departments keep customers by their customers-module id, like food
+  'farm.order.placed': {
+    sends: (p) => [
+      {
+        topic: 'customer.farm.order',
+        to: [customer(p.customerId)],
+        link: L('farm_order', p.orderId, 'store/farm-order-detail', 'View order', p.ref),
+        context: { farm: { headline: `Order ${p.ref} placed`, text: `Order ${p.ref} placed — ${p.dealerName} will confirm your delivery date` } },
+        dedupe: `farm-order:${p.orderId}:placed`,
+      },
+    ],
+  },
+  'farm.order.status_changed': {
+    sends: (p, f) => {
+      const notice = farmNotice(p, f);
+      if (!notice) return [];
+      return [
+        {
+          topic: 'customer.farm.order',
+          to: [customer(p.customerId)],
+          link: L('farm_order', p.orderId, 'store/farm-order-detail', 'View order', p.ref),
+          context: { farm: notice },
+          dedupe: p.rescheduled ? `farm-order:${p.orderId}:rescheduled:${p.deliveryDate}` : `farm-order:${p.orderId}:${p.status}`,
+        },
+      ];
+    },
+  },
+  'services.device.verified': {
+    sends: (p) => [
+      {
+        topic: 'customer.services.device',
+        to: [customer(p.customerId)],
+        link: L('device', p.deviceId, 'store/devices', 'Your devices'),
+        context: { device: { headline: `Your ${p.label} is verified`, text: `Your ${p.label} is verified. Post-sale cover runs to ${monthLabel(p.coveredUntil)}.` } },
+        dedupe: `device:${p.deviceId}:verified:${p.coveredUntil}`,
+      },
+    ],
+  },
+  'services.device.rejected': {
+    sends: (p) => [
+      {
+        topic: 'customer.services.device',
+        to: [customer(p.customerId)],
+        link: L('device', p.deviceId, 'store/devices', 'Your devices'),
+        context: { device: { headline: `We couldn't verify your ${p.label}`, text: `We couldn't verify your ${p.label}: ${clause(p.reason) ?? 'see the device for details'}. Check it in Phones › Your devices.` } },
+        dedupe: `device:${p.deviceId}:rejected`,
+      },
+    ],
+  },
+  'departments.blog.followed_author_posted': {
+    // one event per follower; a post is told once per follower, however often it is published again
+    sends: (p) => [
+      {
+        topic: 'customer.blogs.followed_author',
+        to: [customer(p.customerId)],
+        link: L('blog_post', p.postSlug, 'store/blog-post', 'Read the post'),
+        context: { blog: { author: p.authorName, title: p.postTitle } },
+        dedupe: `blog-post:${p.postId}:${p.customerId}`,
+        once: true,
+      },
+    ],
+  },
+  'departments.play.prize_awarded': {
+    sends: (p) => [
+      {
+        topic: 'customer.play.prize',
+        to: [customer(p.customerId)],
+        link: L('play_prize', p.gameSlug, 'account/coupons', 'View my coupons', p.code),
+        // "$10 coupon" → "a $10 coupon"; "Free delivery for a month" → "free delivery for a month"
+        context: { prize: { reward: /^[$€£\d]/.test(p.reward.trim()) ? `a ${p.reward.trim()}` : p.reward.trim().replace(/^\w/, (ch) => ch.toLowerCase()), game: p.gameTitle, rank: String(p.rank) } },
+        dedupe: `play-prize:${p.gameId}:${p.week}:${p.customerId}`,
+        once: true,
       },
     ],
   },

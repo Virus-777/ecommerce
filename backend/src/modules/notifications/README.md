@@ -1049,6 +1049,17 @@ Indexes: `(sent_at desc)`
 | `reviews.report.created` | reviews | Staff: reported content to the moderation queue role |
 | `trust.report.created` | trust | Staff: new risk report to Trust and Risk Manager |
 | `wishlist.alert.triggered` | wishlist | Customer: price drop or back in stock (promotional, consent required) |
+| `services.request.status_changed` | services | Customer: their service request or booking was confirmed, started, completed, declined or cancelled |
+| `food.order.status_changed` | food | Customer: their food order was accepted, is on the way, was delivered, declined or cancelled, or its payment failed (in-app, topic customer.food.order) |
+| `software.purchase.paid` | software | Customer: a software purchase is paid; the app (or the pack's apps) and the licence key are in Softwares › My apps (in-app, topic customer.software.purchase) |
+| `software.licence.reissued` | software | Customer: staff replaced their licence key for an app; the old key no longer works (in-app, topic customer.software.licence) |
+| `rewards.reward.redeemed` | rewards | Customer: the coupon they got for Daily rewards points is ready, with its code (in-app, topic customer.rewards.coupon) |
+| `farm.order.placed` | farm | Customer: their farm order was placed and waits for the dealer to confirm the delivery date (in-app, topic customer.farm.order) |
+| `farm.order.status_changed` | farm | Customer: their farm order was confirmed (and what was charged), rescheduled, sent out, delivered, rejected or cancelled, or its payment failed (in-app, topic customer.farm.order) |
+| `services.device.verified` | services | Customer: their registered device is verified, with its Post-sale cover date (in-app, topic customer.services.device) |
+| `services.device.rejected` | services | Customer: their registered device couldn't be verified (or its verification was withdrawn), with the reason (in-app, topic customer.services.device) |
+| `departments.blog.followed_author_posted` | departments | Customer: a blog author they follow published a post (in-app, topic customer.blogs.followed_author; optional) |
+| `departments.play.prize_awarded` | departments | Customer: they won a Play center prize week and their coupon is in Account › Coupons (in-app, topic customer.play.prize) |
 | `access.approval.requested` | access | Staff: waiting approval to eligible approvers (nominated reviewer first), action required with due date |
 | `access.approval.partially_approved` | access | Staff: second approval needed, to remaining eligible approvers |
 | `access.approval.returned` | access | Staff: request sent back to the requester with the comment |
