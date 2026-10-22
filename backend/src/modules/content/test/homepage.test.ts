@@ -231,7 +231,8 @@ describe('section schedules', () => {
 
 describe('store homepage resolution', () => {
   it('resolves category, seller, rule and deals sections through their modules', async () => {
-    const cat = (await h.call('POST', '/api/admin/catalog/categories', { name: `Lighting ${newId().slice(0, 4)}` })).json();
+    // shoppers only see a category with stock or marked coming soon
+    const cat = (await h.call('POST', '/api/admin/catalog/categories', { name: `Lighting ${newId().slice(0, 4)}`, comingSoon: true })).json();
     const sellerOk = newId();
     const sellerSuspended = newId();
     h.sellers.set(sellerOk, { name: 'Casa Verde Home', status: 'approved' });
