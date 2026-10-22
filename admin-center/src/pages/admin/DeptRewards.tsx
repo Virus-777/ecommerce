@@ -8,7 +8,7 @@ import { href } from '@marketly/web-shared/routes';
 import { Alert, announce, Badge, Button, Drawer, EmptyState, Field, KeyValue, PageHeader, Pager, SearchInput, Select, Switch, TableWrap, Tabs, TextInput } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { date, dateTime, LoadError, SkeletonLines } from '@/app/parts';
-import { codeOf, DeptPage, fieldErrorsOf, PAGE_SIZE, plural, TASK_KIND, TINTS, totalPagesOf, type CustomerPoints, type Reward, type RewardTask, type RewardTint, type TaskKind } from './data/departments';
+import { codeOf, DeptPage, fieldErrorsOf, PAGE_SIZE, plural, TASK_KIND, TINTS, totalPagesOf, useCouponCampaigns, type CustomerPoints, type Reward, type RewardTask, type RewardTint, type TaskKind } from './data/departments';
 
 // Admin › Departments › Daily rewards (designed in React from the Marketly Departments canvas: DailyRewards; no admin
 // artboard, so the DeptServices pattern). Tabs: Check-in | Tasks | Rewards | Redemptions | Customers.
@@ -371,20 +371,6 @@ function TasksTab({ notify, canManage, adding, setAdding }: Ctx & Adding) {
 
 type RewardDraft = { id: string; title: string; condition: string; cost: string; tint: RewardTint; campaignId: string; stock: string; visible: boolean; position: string };
 const rewardDraftOf = (r?: Reward, position = 1): RewardDraft => ({ id: r?.id ?? '', title: r?.title ?? '', condition: r?.condition ?? '', cost: r ? String(r.cost) : '', tint: r?.tint ?? 'deal', campaignId: r?.campaignId ?? '', stock: r?.stock != null ? String(r.stock) : '', visible: r?.visible ?? true, position: String(r?.position ?? position) });
-
-/** Platform coupon campaigns (percent and fixed amount): the codes a reward hands out */
-function useCouponCampaigns(enabled: boolean) {
-  const { api } = useApi();
-  const get = (kind: string) => call(api.GET('/api/admin/promotions/campaigns', { params: { query: { kind, ownerKind: 'platform', limit: 100 } } }));
-  return useQuery({
-    queryKey: ['promotions', 'campaigns', 'coupons'],
-    enabled,
-    queryFn: async () => {
-      const [pct, fixed] = await Promise.all([get('percent_coupon'), get('fixed_coupon')]);
-      return [...pct.items, ...fixed.items].sort((a, b) => a.name.localeCompare(b.name));
-    },
-  });
-}
 
 function RewardsTab({ notify, canManage, adding, setAdding }: Ctx & Adding) {
   const { api } = useApi();

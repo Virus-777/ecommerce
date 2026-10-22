@@ -1,25 +1,27 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
+import { useSearchParams } from 'react-router';
 import { call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { formatMoney, num } from '@marketly/web-shared/lib/format';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, announce, Badge, Button, Dialog, Drawer, EmptyState, Field, IconButton, Img, KeyValue, PageHeader, Pager, SearchInput, Select, StatusBadge, Switch, TableWrap, Tabs, Textarea, TextInput } from '@marketly/web-shared/ui';
+import { Alert, announce, Badge, Button, CopyButton, Dialog, Drawer, EmptyState, Field, IconButton, Img, KeyValue, PageHeader, Pager, SearchInput, Select, StatusBadge, Switch, TableWrap, Tabs, Textarea, TextInput } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { dateTime, LoadError, shortDate, SkeletonLines } from '@/app/parts';
 import { statusLabel } from './data/ads';
 import {
   APP_STATUS, codeOf, DeptPage, fieldErrorsOf, HideReviewDialog, moneyText, newKey, PAGE_SIZE, platformLabel, PLATFORMS, plural, PURCHASE_STATUS, slugify, toMoney, totalPagesOf,
-  type AppReview, type AppRow, type AppStatus, type Pack, type PackInput, type Platform, type PurchaseStatus, type Rail, type SoftwareCategory, type SoftwarePurchase,
+  type AppReview, type AppRow, type Entitlement, type AppStatus, type Pack, type PackInput, type Platform, type PurchaseStatus, type Rail, type SoftwareCategory, type SoftwarePurchase,
 } from './data/departments';
 
 // Admin › Departments › Softwares (designed from the Marketly Departments canvas: AdminSoftwareApps; the app editor is
-// DeptSoftwareApp). Tabs: Apps | Categories | Deals and packs | Carousel ads | Recommendations | Purchases | Reviews.
+// DeptSoftwareApp). Tabs: Apps | Categories | Deals and packs | Carousel ads | Recommendations | Purchases | Owners and licences | Reviews.
 // API: /api/admin/software/{apps,categories,packs,rails,purchases,entitlements,reviews}. Paid apps and packs are bought
 // with a card in their own payment flow (no cart); staff can give an app to a customer (support goodwill, a payment
-// settled elsewhere). The carousel above the department is an ad placement (software_top) run from Advertisements.
+// settled elsewhere). Owning a paid app comes with a licence key staff can look up and reissue. The carousel above the
+// department is an ad placement (software_top) run from Advertisements.
 
-type Tab = '' | 'categories' | 'deals' | 'ads' | 'rails' | 'purchases' | 'reviews';
+type Tab = '' | 'categories' | 'deals' | 'ads' | 'rails' | 'purchases' | 'licences' | 'reviews';
 type Notify = (title: string, tone?: 'success' | 'danger') => void;
 type Ctx = { notify: Notify; canManage: boolean };
 type Adding = { adding: boolean; setAdding: (v: boolean) => void };
@@ -78,6 +80,7 @@ export default function DeptSoftware() {
           { value: 'ads', label: 'Carousel ads', count: ads.data?.total ?? undefined },
           { value: 'rails', label: 'Recommendations', count: rails.data?.length },
           { value: 'purchases', label: 'Purchases' },
+          { value: 'licences', label: 'Owners and licences' },
           { value: 'reviews', label: 'Reviews' },
         ]}
         active={view}
@@ -99,6 +102,8 @@ export default function DeptSoftware() {
         <RailsTab {...ctx} />
       ) : view === 'purchases' ? (
         <PurchasesTab {...ctx} adding={adding} setAdding={setAdding} />
+      ) : view === 'licences' ? (
+        <LicencesTab {...ctx} />
       ) : view === 'reviews' ? (
         <ReviewsTab {...ctx} />
       ) : (
@@ -1354,6 +1359,180 @@ function PurchasesTab({ notify, canManage, adding, setAdding }: Ctx & Adding) {
         </Field>
         <Field label="Reason" hint="Kept with the customer’s library" error={tried ? giveErrs.reason : undefined}>
           <Textarea id="swg-reason" rows={2} value={give.reason} onChange={(e) => setGive({ ...give, reason: e.target.value })} />
+        </Field>
+      </Dialog>
+    </>
+  );
+}
+
+/* ---------------- Owners and licences ---------------- */
+
+const SOURCE: Record<Entitlement['source'], string> = { purchase: 'Bought', pack: 'Bought in a pack', free: 'Free app', staff: 'Given by staff' };
+
+function LicencesTab({ notify, canManage }: Ctx) {
+  const { api } = useApi();
+  const qc = useQueryClient();
+  const all = useAllApps();
+  const [params] = useSearchParams();
+  const [appId, setAppId] = useState(() => params.get('app') ?? '');
+  const [q, setQ] = useState('');
+  const [page, setPage] = useState(1);
+  const [reissuing, setReissuing] = useState<Entitlement | null>(null);
+  const [reason, setReason] = useState('');
+  const [tried, setTried] = useState(false);
+  const [error, setError] = useState('');
+  const term = q.trim();
+  // a customer id searches that customer's apps; anything else is a licence key, SW- reference or email
+  const query = { appId: appId || undefined, customerId: UUID.test(term) ? term : undefined, q: term && !UUID.test(term) ? term : undefined };
+  const list = useQuery({
+    queryKey: ['software', 'entitlements', query, page],
+    queryFn: () => call(api.GET('/api/admin/software/entitlements', { params: { query: { ...query, page, limit: PAGE_SIZE } } })),
+    placeholderData: keepPreviousData,
+  });
+  const rows = list.data?.items ?? [];
+  const apps = all.data?.items ?? [];
+  const closeReissue = () => (setReissuing(null), setReason(''), setTried(false), setError(''));
+  const reissue = useMutation({
+    mutationFn: (e: Entitlement) => call(api.POST('/api/admin/software/entitlements/{id}/reissue-licence', { params: { path: { id: e.id } }, body: { reason: reason.trim() } })),
+    onSuccess: (e) => {
+      void qc.invalidateQueries({ queryKey: ['software', 'entitlements'] });
+      notify(`New licence key for ${e.customer.name ?? e.customer.email ?? 'the customer'}’s ${e.app.title}: ${e.licenceKey ?? ''}. The old key stopped working and the customer was told.`);
+      closeReissue();
+    },
+    onError: (e) => setError(codeOf(e) === 'NO_LICENCE' ? 'This app is free now, so the owner has no licence key.' : Object.values(fieldErrorsOf(e)).join(' ') || errorMessage(e)),
+  });
+
+  return (
+    <>
+      <section className="card">
+        <div className="card-body">
+          <div className="toolbar">
+            <SearchInput id="swl-q" placeholder="Licence key, SW- reference, email or customer id" value={q} onChange={(v) => (setQ(v), setPage(1))} label="Search owners" />
+            <select className="select" id="swl-app" aria-label="App" value={appId} onChange={(e) => (setAppId(e.target.value), setPage(1))}>
+              <option value="">All apps</option>
+              {appId && !apps.some((a) => a.id === appId) && <option value={appId}>This app</option>}
+              {apps.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.title}
+                  {a.price.free ? ' (free)' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        {list.isError && (
+          <div className="card-body">
+            <LoadError error={list.error} onRetry={() => void list.refetch()} />
+          </div>
+        )}
+        <TableWrap label="Owners and licences table">
+          <table className="table">
+            <thead>
+              <tr>
+                <th scope="col">Customer</th>
+                <th scope="col">App</th>
+                <th scope="col">How</th>
+                <th scope="col">Licence key</th>
+                <th scope="col">Owned since</th>
+                <th scope="col">
+                  <span className="sr-only">Actions</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.isPending && (
+                <tr>
+                  <td colSpan={6}>
+                    <SkeletonLines rows={5} />
+                  </td>
+                </tr>
+              )}
+              {rows.map((e) => (
+                <tr key={e.id}>
+                  <td>
+                    <span className="stack gap-0">
+                      <span className="small strong">{e.customer.name ?? 'Customer'}</span>
+                      <span className="xs muted">{e.customer.email ?? e.customer.id}</span>
+                    </span>
+                  </td>
+                  <td>
+                    <span className="row nowrap gap-2">
+                      <Img icon="app-window" src={e.app.icon?.url} alt="" className="tiny" />
+                      <span className="small">{e.app.title}</span>
+                    </span>
+                  </td>
+                  <td>
+                    <span className="stack gap-0">
+                      <span className="small">{SOURCE[e.source]}</span>
+                      {e.purchaseRef && <span className="xs muted mono">{e.purchaseRef}</span>}
+                      {e.source === 'staff' && e.grantedBy && <span className="xs muted">by {e.grantedBy}</span>}
+                    </span>
+                  </td>
+                  <td>
+                    {e.licenceKey ? (
+                      <span className="stack gap-0">
+                        <span className="row gap-1 nowrap items-center">
+                          <span className="mono small strong">{e.licenceKey}</span>
+                          <CopyButton text={e.licenceKey} label={`Copy ${e.customer.name ?? 'the customer'}’s licence key`} />
+                        </span>
+                        <span className="xs muted">
+                          {e.licenceIssuedAt ? `Issued ${dateTime(e.licenceIssuedAt)}` : ''}
+                          {e.licenceReissues ? ` · reissued ${e.licenceReissues === 1 ? 'once' : `${e.licenceReissues} times`}` : ''}
+                        </span>
+                      </span>
+                    ) : (
+                      <span className="small muted">{e.free ? 'Free: no key' : '—'}</span>
+                    )}
+                  </td>
+                  <td className="small nowrap">{dateTime(e.ownedAt)}</td>
+                  <td>
+                    {canManage && e.licenceKey && (
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => (setError(''), setTried(false), setReason(''), setReissuing(e))}>
+                        Reissue licence<span className="sr-only"> of {e.customer.name ?? 'the customer'} for {e.app.title}</span>
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {list.isSuccess && rows.length === 0 && (
+                <tr>
+                  <td colSpan={6}>
+                    <EmptyState icon="key-round" title={term || appId ? 'No owners match' : 'Nobody owns an app yet'}>
+                      {term || appId ? 'Check the licence key (XXXXX-XXXXX-XXXXX-XXXXX), the SW- reference or the email.' : 'Customers who get a free app or buy a paid one show up here.'}
+                    </EmptyState>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </TableWrap>
+        <div className="card-foot between">
+          <span className="xs muted">A paid app’s licence key unlocks it on as many devices as its licence says · reissuing gives a new key and the old one stops working.</span>
+          <Pager page={page} total={totalPagesOf(list.data)} onPage={setPage} />
+        </div>
+      </section>
+
+      <Dialog
+        open={!!reissuing}
+        onClose={closeReissue}
+        title={`Reissue the ${reissuing?.app.title ?? 'app'} licence key?`}
+        foot={
+          <>
+            <Button variant="ghost" onClick={closeReissue}>
+              Cancel
+            </Button>
+            <Button icon="key-round" onClick={() => (setTried(true), reason.trim() && reissuing && reissue.mutate(reissuing))} disabled={reissue.isPending}>
+              Reissue licence
+            </Button>
+          </>
+        }
+      >
+        {error && <Alert tone="danger" title={error} />}
+        <p className="small sub" style={{ margin: 0 }}>
+          {reissuing?.customer.name ?? 'The customer'} gets a new key at once and is told; the key ending {reissuing?.licenceKey?.slice(-5) ?? ''} stops working on every device.
+        </p>
+        <Field label="Reason" hint="Kept in the action history, e.g. The customer’s key leaked (case CS-104882)" error={tried && !reason.trim() ? 'Say why the key is replaced.' : undefined}>
+          <Textarea id="swl-reason" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
         </Field>
       </Dialog>
     </>

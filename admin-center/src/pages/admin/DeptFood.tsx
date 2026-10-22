@@ -452,7 +452,12 @@ function RestaurantsTab({ notify, canManage, adding, setAdding }: Ctx & Adding) 
                   </span>
                 </td>
                 <td className="small">{r.cuisine}</td>
-                <td className="small">{r.city ?? '—'}</td>
+                <td>
+                  <span className="stack gap-0">
+                    <span className="small">{[r.city, r.region].filter(Boolean).join(', ') || '—'}</span>
+                    {!r.point && <span className="xs t-warning-text">Not on the map</span>}
+                  </span>
+                </td>
                 <td className="small nowrap">{ratingText(r.ratings)}</td>
                 <td className="r small">{num(r.itemCount)}</td>
                 <td className="r small">{r.openOrders ? <Badge tone="brand">{r.openOrders}</Badge> : '0'}</td>
@@ -488,7 +493,7 @@ function RestaurantsTab({ notify, canManage, adding, setAdding }: Ctx & Adding) 
 }
 
 type RestaurantDraft = {
-  name: string; slug: string; cuisine: string; categoryIds: string[]; image: MediaRef | null; logo: MediaRef | null; photos: MediaRef[]; address: string; city: string; phone: string; days: FoodDay[]; timeZone: string;
+  name: string; slug: string; cuisine: string; categoryIds: string[]; image: MediaRef | null; logo: MediaRef | null; photos: MediaRef[]; address: string; city: string; region: string; postalCode: string; pin: 'address' | 'staff'; lat: string; lng: string; phone: string; days: FoodDay[]; timeZone: string;
   deliveryMin: string; deliveryMax: string; fee: string; freeOver: string; minOrder: string; promoText: string; promoBadge: string; status: RestaurantStatus; position: string;
 };
 const DEFAULT_DAYS: FoodDay[] = WEEKDAYS.map((w) => ({ weekday: w.value, open: true, from: '11:00', to: '22:00' }));
@@ -502,6 +507,11 @@ const restaurantDraftOf = (r?: Restaurant): RestaurantDraft => ({
   photos: r?.photos ?? [],
   address: r?.address ?? '',
   city: r?.city ?? '',
+  region: r?.region ?? '',
+  postalCode: r?.postalCode ?? '',
+  pin: r?.pointSource === 'staff' ? 'staff' : 'address',
+  lat: r?.pointSource === 'staff' && r.point ? String(r.point.lat) : '',
+  lng: r?.pointSource === 'staff' && r.point ? String(r.point.lng) : '',
   phone: r?.phone ?? '',
   days: WEEKDAYS.map((w) => r?.hours.find((d) => d.weekday === w.value) ?? (r ? { weekday: w.value, open: false, from: null, to: null } : DEFAULT_DAYS.find((d) => d.weekday === w.value)!)),
   timeZone: r?.timeZone ?? '',
@@ -515,6 +525,10 @@ const restaurantDraftOf = (r?: Restaurant): RestaurantDraft => ({
   status: r?.status ?? 'draft',
   position: r ? String(r.position) : '',
 });
+/** A coordinate typed in a field: a number within ±limit (a typed minus sign − is read as -) */
+const coord = (v: string) => Number(v.trim().replace('−', '-'));
+const inRange = (v: string, limit: number) => v.trim() !== '' && Number.isFinite(coord(v)) && Math.abs(coord(v)) <= limit;
+const osmHref = (p: { lat: number; lng: number }) => `https://www.openstreetmap.org/?mlat=${p.lat}&mlon=${p.lng}#map=17/${p.lat}/${p.lng}`;
 const badMoney = (v: string, required = false) => (v.trim() ? Number.isNaN(Number(v)) || Number(v) < 0 : required);
 function restaurantProblems(d: RestaurantDraft) {
   const min = Number(d.deliveryMin);
@@ -527,6 +541,8 @@ function restaurantProblems(d: RestaurantDraft) {
     freeOver: badMoney(d.freeOver) ? 'Enter the free-delivery threshold in dollars.' : '',
     minOrder: badMoney(d.minOrder) ? 'Enter the minimum order in dollars.' : '',
     hours: d.days.some((x) => x.open && !(TIME.test(x.from ?? '') && TIME.test(x.to ?? ''))) ? 'Each open day needs an opening and a closing time (HH:MM).' : '',
+    region: d.region.trim() && !/^[A-Za-z]{2}$/.test(d.region.trim()) ? 'Enter the state as its two-letter code, e.g. OR.' : '',
+    pin: d.pin === 'staff' && !(inRange(d.lat, 90) && inRange(d.lng, 180)) ? 'Enter the pin’s latitude (−90 to 90) and longitude (−180 to 180), e.g. 45.5231 and −122.6765.' : '',
   };
 }
 
@@ -555,6 +571,10 @@ function RestaurantEditor({ restaurant, categories, notify, canManage, onSaved, 
         photoIds: x.photos.map((p) => p.id),
         address: x.address.trim() || null,
         city: x.city.trim() || null,
+        region: x.region.trim().toUpperCase() || null,
+        postalCode: x.postalCode.trim() || null,
+        // a staff pin is sent; going back to the address drops a saved pin (null); otherwise the point is left to the geocoder
+        ...(x.pin === 'staff' ? { point: { lat: coord(x.lat), lng: coord(x.lng) } } : restaurant?.pointSource === 'staff' ? { point: null } : {}),
         phone: x.phone.trim() || null,
         hours: x.days.map((y) => (y.open ? y : { ...y, from: null, to: null })),
         timeZone: x.timeZone.trim() || null,
@@ -692,13 +712,22 @@ function RestaurantEditor({ restaurant, categories, notify, canManage, onSaved, 
               <Field label="Phone" optional>
                 <TextInput id="fr-phone" type="tel" value={d.phone} onChange={(e) => setD({ phone: e.target.value })} />
               </Field>
-              <Field label="City" optional hint="Cards show the city">
+              <Field label="City" optional hint="Cards show the city when the customer’s distance isn’t known">
                 <TextInput id="fr-city" value={d.city} onChange={(e) => setD({ city: e.target.value })} />
               </Field>
             </div>
-            <Field label="Address" optional>
+            <Field label="Address" optional hint="Street and number; with the city, state and ZIP code it places the restaurant on the map">
               <Textarea id="fr-addr" rows={2} value={d.address} onChange={(e) => setD({ address: e.target.value })} />
             </Field>
+            <div className="grid md2 gap-3">
+              <Field label="State" optional hint="Two-letter code, e.g. OR" error={errs?.region}>
+                <TextInput id="fr-region" value={d.region} maxLength={2} error={!!errs?.region} onChange={(e) => setD({ region: e.target.value })} />
+              </Field>
+              <Field label="ZIP code" optional>
+                <TextInput id="fr-zip" inputMode="numeric" value={d.postalCode} onChange={(e) => setD({ postalCode: e.target.value })} />
+              </Field>
+            </div>
+            <MapPinField restaurant={restaurant} draft={d} error={errs?.pin} disabled={!canManage} onChange={setD} />
             <div className="stack gap-2">
               <span className="label">Opening hours</span>
               <span className="xs sub">In the restaurant’s time zone. A closing time before the opening time runs past midnight.</span>
@@ -764,6 +793,67 @@ function RestaurantEditor({ restaurant, categories, notify, canManage, onSaved, 
         </p>
       </Dialog>
     </>
+  );
+}
+
+/** Where the restaurant is on the map: placed from the address (geocoded) or a pin staff set. Distances on the app's
+ * cards are measured from it. */
+function MapPinField({ restaurant, draft: d, error, disabled, onChange }: { restaurant?: Restaurant; draft: RestaurantDraft; error?: string; disabled: boolean; onChange: (p: Partial<RestaurantDraft>) => void }) {
+  const point = restaurant?.point ?? null;
+  const source = restaurant?.pointSource ?? null;
+  const fmt = (p: { lat: number; lng: number }) => `${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}`;
+  return (
+    <div className="stack gap-2">
+      <span className="label">Map pin</span>
+      <span className="xs sub">Distances on the app’s restaurant cards (1.2 mi) are measured from this point to the customer’s default delivery address.</span>
+      {restaurant && (
+        <span className="row gap-2 wrap items-center small">
+          {point ? (
+            <>
+              <Badge tone={source === 'staff' ? 'info' : 'success'} icon="map-pin">
+                {source === 'staff' ? 'Pin set by staff' : 'From the address'}
+              </Badge>
+              <span className="mono xs">{fmt(point)}</span>
+              <a className="xs" href={osmHref(point)} target="_blank" rel="noreferrer">
+                Open the map<span className="sr-only"> (opens in a new tab)</span>
+              </a>
+            </>
+          ) : (
+            <>
+              <Badge tone="warning" icon="map-pin-off">
+                Not on the map yet
+              </Badge>
+              <span className="xs muted">The address couldn’t be placed: check it, or set a pin. Cards show the city meanwhile.</span>
+            </>
+          )}
+        </span>
+      )}
+      <SegmentedControl
+        label="Map pin"
+        items={[
+          { value: 'address', label: 'Use the address' },
+          { value: 'staff', label: 'Set a pin' },
+        ]}
+        active={d.pin}
+        onChange={(v) => !disabled && onChange(v === 'staff' ? { pin: 'staff', lat: d.lat || (point ? String(point.lat) : ''), lng: d.lng || (point ? String(point.lng) : '') } : { pin: 'address' })}
+      />
+      {d.pin === 'staff' ? (
+        <>
+          <div className="grid md2 gap-3">
+            <Field label="Latitude" hint="e.g. 45.5231">
+              <TextInput id="fr-lat" inputMode="decimal" value={d.lat} error={!!error} onChange={(e) => onChange({ lat: e.target.value })} />
+            </Field>
+            <Field label="Longitude" hint="e.g. −122.6765 (west is negative)">
+              <TextInput id="fr-lng" inputMode="decimal" value={d.lng} error={!!error} onChange={(e) => onChange({ lng: e.target.value })} />
+            </Field>
+          </div>
+          {error && <span className="xs t-danger-text">{error}</span>}
+          <span className="xs sub">The pin stays until you switch back to the address.</span>
+        </>
+      ) : (
+        <span className="xs sub">{source === 'staff' ? 'Saving drops the pin set by staff and places the restaurant from its address again.' : 'Placed from the address, city, state and ZIP code when you save.'}</span>
+      )}
+    </div>
   );
 }
 

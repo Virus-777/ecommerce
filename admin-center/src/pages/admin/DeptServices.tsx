@@ -346,7 +346,7 @@ type ServiceDraft = {
   id: string; title: string; slug: string; summary: string; image: MediaRef | null; photos: MediaRef[]; categoryId: string; providerId: string; badge: string;
   fromPrice: string; priceUnit: Service['priceUnit']; durationLabel: string; supportedLabel: string; coverage: string; tags: string[]; description: string;
   included: string[]; requirements: string[]; supported: string[]; osVersions: string[]; handover: Array<{ mode: HandoverOption['mode']; fee: string; note: string }>;
-  priceTable: PriceRow[]; priceTableTitle: string; terms: string[]; steps: ServiceStep[]; slotMinutes: string; durationMinutes: string; status: Service['status']; position: string;
+  priceTable: PriceRow[]; priceTableTitle: string; terms: string[]; fullTerms: string; coveredByWarranty: boolean; steps: ServiceStep[]; slotMinutes: string; durationMinutes: string; status: Service['status']; position: string;
 };
 const serviceDraftOf = (s?: Service): ServiceDraft => ({
   id: s?.id ?? '',
@@ -373,6 +373,8 @@ const serviceDraftOf = (s?: Service): ServiceDraft => ({
   priceTable: s?.priceTable ?? [],
   priceTableTitle: s?.priceTableTitle ?? '',
   terms: s?.terms ?? [],
+  fullTerms: s?.fullTerms ?? '',
+  coveredByWarranty: s?.coveredByWarranty ?? false,
   steps: s?.steps ?? [],
   slotMinutes: s?.slotMinutes ? String(s.slotMinutes) : '',
   durationMinutes: s?.durationMinutes ? String(s.durationMinutes) : '',
@@ -391,6 +393,7 @@ function serviceProblems(d: ServiceDraft, area: ServiceArea) {
     handover: d.handover.some((h) => money(h.fee)) ? 'Enter hand-over fees in dollars.' : '',
     priceTable: d.priceTable.some((r) => !r.label.trim() || !r.price.trim()) ? 'Every price row needs a label and a price.' : '',
     steps: d.steps.some((s) => !s.title.trim()) ? 'Every step needs a title.' : '',
+    fullTerms: d.fullTerms.length > 20000 ? `Keep the full terms to 20,000 characters (now ${num(d.fullTerms.length)}).` : '',
   };
 }
 
@@ -450,6 +453,8 @@ function ServicesTab({ area, notify, canManage, adding, setAdding }: Ctx & { add
         priceTable: d.priceTable.map((r) => ({ label: r.label.trim(), detail: r.detail?.trim() || null, price: r.price.trim() })),
         priceTableTitle: d.priceTableTitle.trim() || null,
         terms: d.terms,
+        fullTerms: d.fullTerms.trim() || null,
+        ...(area === 'post_sale' ? { coveredByWarranty: d.coveredByWarranty } : {}),
         steps: d.steps.map((s) => ({ title: s.title.trim(), detail: s.detail?.trim() || null })),
         slotMinutes: d.slotMinutes.trim() ? Number(d.slotMinutes) : null,
         durationMinutes: d.durationMinutes.trim() ? Number(d.durationMinutes) : null,
@@ -683,6 +688,12 @@ function ServicesTab({ area, notify, canManage, adding, setAdding }: Ctx & { add
             <HandoverField rows={editing.handover} error={errs?.handover} disabled={!canManage} onChange={(handover) => setD({ handover })} />
             <PriceTableField title={editing.priceTableTitle} rows={editing.priceTable} error={errs?.priceTable} disabled={!canManage} onTitle={(priceTableTitle) => setD({ priceTableTitle })} onChange={(priceTable) => setD({ priceTable })} />
             <LinesField id="ss-terms" label={area === 'post_sale' ? 'Warranty terms' : 'Terms'} lines={editing.terms} disabled={!canManage} onChange={(terms) => setD({ terms })} />
+            <Field label="Full terms" optional hint={`Plain text behind “Read full terms”; a blank line starts a new paragraph · ${num(editing.fullTerms.length)} of 20,000 characters`} error={errs?.fullTerms}>
+              <Textarea id="ss-fullterms" rows={8} value={editing.fullTerms} onChange={(e) => setD({ fullTerms: e.target.value })} />
+            </Field>
+            {area === 'post_sale' && (
+              <Switch id="ss-warranty" label="Covered by warranty: $0 for a customer’s verified device while its cover runs" checked={editing.coveredByWarranty} onChange={(e) => setD({ coveredByWarranty: e.target.checked })} />
+            )}
             <StepsField steps={editing.steps} error={errs?.steps} disabled={!canManage} onChange={(steps) => setD({ steps })} />
             <div className="grid md2 gap-3">
               <Field label="Status">
@@ -791,7 +802,7 @@ function StepsField({ steps, onChange, error, disabled }: { steps: ServiceStep[]
 
 type ProviderDraft = {
   id: string; name: string; slug: string; logo: MediaRef | null; cover: MediaRef | null; kind: string; categoryId: string; city: string; verified: boolean; photos: MediaRef[];
-  description: string; since: string; phone: string; email: string; website: string; address: string; lat: string; lng: string; days: OpeningDay[]; staff: ProviderStaff[]; replyTime: string; status: Provider['status'];
+  description: string; since: string; phone: string; email: string; website: string; address: string; lat: string; lng: string; point: Provider['point']; pointSource: Provider['pointSource']; days: OpeningDay[]; staff: ProviderStaff[]; replyTime: string; status: Provider['status'];
 };
 const DEFAULT_DAYS: OpeningDay[] = WEEKDAYS.map((w) => (w.value === 'sun' ? { weekday: w.value, open: false, from: null, to: null } : { weekday: w.value, open: true, from: w.value === 'sat' ? '10:00' : '09:00', to: w.value === 'sat' ? '16:00' : '18:00' }));
 const providerDraftOf = (p?: Provider): ProviderDraft => ({
@@ -813,11 +824,22 @@ const providerDraftOf = (p?: Provider): ProviderDraft => ({
   address: p?.contacts.address ?? '',
   lat: p?.location ? String(p.location.lat) : '',
   lng: p?.location ? String(p.location.lng) : '',
+  point: p?.point ?? null,
+  pointSource: p?.pointSource ?? null,
   days: WEEKDAYS.map((w) => p?.hours.days.find((d) => d.weekday === w.value) ?? DEFAULT_DAYS.find((d) => d.weekday === w.value)!),
   staff: p?.staff ?? [],
   replyTime: p?.replyTime ?? '',
   status: p?.status ?? 'hidden',
 });
+
+/** Where the map places the provider now (pointSource): the pin, the geocoded address, or nowhere */
+function pointText(d: ProviderDraft) {
+  const at = d.point ? `${d.point.lat.toFixed(5)}, ${d.point.lng.toFixed(5)}` : '';
+  if (!d.id) return 'Without a pin the address and city are geocoded when you save.';
+  if (d.pointSource === 'pin') return `On the map at the pin (${at}). Clear both fields to place it by its address instead.`;
+  if (d.pointSource === 'address') return `On the map from its address, geocoded to ${at}. Set a pin to place it exactly.`;
+  return 'Not on the map: the address couldn’t be geocoded. Check the address and city, or set a pin. Customers see no distance.';
+}
 
 function providerProblems(d: ProviderDraft) {
   const year = new Date().getFullYear();
@@ -1085,13 +1107,14 @@ function ProvidersTab({ area, notify, canManage, adding, setAdding }: Ctx & { ad
               <Textarea id="sp-addr" rows={2} value={editing.address} onChange={(e) => setD({ address: e.target.value })} />
             </Field>
             <div className="grid md2 gap-3">
-              <Field label="Latitude" optional hint="For the map, e.g. 45.5231" error={errs?.location}>
+              <Field label="Pin latitude" optional hint="For the map and distances, e.g. 45.5231" error={errs?.location}>
                 <TextInput id="sp-lat" inputMode="decimal" value={editing.lat} error={!!errs?.location} onChange={(e) => setD({ lat: e.target.value })} />
               </Field>
-              <Field label="Longitude" optional hint="e.g. -122.6765">
+              <Field label="Pin longitude" optional hint="e.g. -122.6765">
                 <TextInput id="sp-lng" inputMode="decimal" value={editing.lng} error={!!errs?.location} onChange={(e) => setD({ lng: e.target.value })} />
               </Field>
             </div>
+            <span className="xs sub">{pointText(editing)}</span>
             <Field label="Reply time" optional hint="e.g. Replies within 1 hour">
               <TextInput id="sp-reply" value={editing.replyTime} onChange={(e) => setD({ replyTime: e.target.value })} />
             </Field>

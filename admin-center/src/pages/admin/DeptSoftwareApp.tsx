@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState, type DragEvent } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router';
+import { Link, useLocation, useNavigate, useParams } from 'react-router';
 import { assetPreview, call, errorMessage, uploadMedia, useApi } from '@marketly/web-shared/api';
 import { fromZonedInput, zonedInput } from '@marketly/web-shared/lib/dates';
 import { formatMoney, num } from '@marketly/web-shared/lib/format';
@@ -22,7 +22,7 @@ import {
 type FileDraft = { id: string; name: string; sizeBytes: number; uploadedAt: string | null };
 type Draft = {
   title: string; slug: string; companyName: string; companyId: string; categoryId: string; subcategory: string; brief: string; icon: MediaRef | null; screenshots: MediaRef[]; description: string; moreDescription: string; whatYouGet: string[];
-  free: boolean; price: string; salePrice: string; saleEndsAt: string; licenceLabel: string; pkg: FileDraft | null; databases: FileDraft[]; databasesNote: string;
+  free: boolean; price: string; salePrice: string; saleEndsAt: string; licenceLabel: string; licenceDevices: string; pkg: FileDraft | null; databases: FileDraft[]; databasesNote: string;
   version: string; releasedAt: string; whatsNew: string; versionHistory: VersionEntry[]; platforms: Platform[]; platformLabels: string[]; minRequirements: string; notice: string; permissions: AppPermission[];
   status: AppStatus; showInDepartment: boolean; allowReviews: boolean; position: string;
 };
@@ -50,6 +50,7 @@ const draftOf = (a?: AppAdmin): Draft => ({
   salePrice: moneyText(a?.price.saleAmount),
   saleEndsAt: zonedInput(a?.price.saleEndsAt, TZ),
   licenceLabel: a?.licenceLabel ?? '',
+  licenceDevices: a?.licenceDevices != null ? String(a.licenceDevices) : '',
   pkg: a?.files.package ? fileOf(a.files.package) : null,
   databases: (a?.files.databases ?? []).map(fileOf),
   databasesNote: a?.files.databasesNote ?? '',
@@ -82,6 +83,7 @@ function problemsOf(d: Draft): Partial<Record<FieldKey, string>> {
     price: d.free ? '' : !price || price.amount <= 0 ? 'Enter the price in dollars, e.g. 29.99.' : '',
     salePrice: d.free || !d.salePrice.trim() ? '' : !sale || sale.amount <= 0 ? 'Enter the sale price in dollars.' : price && sale.amount >= price.amount ? 'The sale price must be below the price.' : '',
     saleEndsAt: !d.free && d.salePrice.trim() && !d.saleEndsAt ? 'Pick when the sale ends.' : '',
+    licenceDevices: d.free || !d.licenceDevices.trim() || (/^\d+$/.test(d.licenceDevices.trim()) && Number(d.licenceDevices) >= 1 && Number(d.licenceDevices) <= 100) ? '' : 'Enter how many devices one licence key unlocks, 1 to 100, or leave it empty for no limit.',
     platforms: d.platforms.length ? '' : 'Tick the platforms it runs on.',
     pkg: d.status === 'published' && !d.pkg ? 'Publishing needs an app package.' : '',
     icon: d.status === 'published' && !d.icon ? 'Publishing needs a thumbnail.' : '',
@@ -185,6 +187,7 @@ function AppEditor({ app, canManage }: { app?: AppAdmin; canManage: boolean }) {
         salePrice: x.free ? null : toMoney(x.salePrice),
         saleEndsAt: x.free || !x.salePrice.trim() ? null : fromZonedInput(x.saleEndsAt, TZ),
         licenceLabel: x.licenceLabel.trim() || null,
+        licenceDevices: x.free || !x.licenceDevices.trim() ? null : Number(x.licenceDevices),
         packageId: x.pkg?.id ?? null,
         databaseIds: x.databases.map((f) => f.id),
         databasesNote: x.databasesNote.trim() || null,
@@ -380,9 +383,17 @@ function AppEditor({ app, canManage }: { app?: AppAdmin; canManage: boolean }) {
                       <TextInput id="a-lic" value={d.licenceLabel} onChange={(e) => setD({ licenceLabel: e.target.value })} />
                     </Field>
                   </div>
+                  <div className="grid md2 gap-4">
+                    <Field label="Devices per licence key" optional hint="How many devices one key unlocks, 1 to 100; empty for no limit" error={err('licenceDevices')}>
+                      <TextInput id="a-lic-dev" type="number" min={1} max={100} value={d.licenceDevices} placeholder="No limit" error={!!err('licenceDevices')} onChange={(e) => setD({ licenceDevices: e.target.value })} />
+                    </Field>
+                    <span className="xs sub" style={{ alignSelf: 'center' }}>
+                      Buying the app gives the customer a licence key (shown on the app page and in My apps) that unlocks it on {d.licenceDevices.trim() && /^\d+$/.test(d.licenceDevices.trim()) ? plural(Number(d.licenceDevices), 'device') : 'any number of devices'}.
+                    </span>
+                  </div>
                 </>
               )}
-              {d.free && <span className="xs sub">Customers get it with one tap and download it right away.</span>}
+              {d.free && <span className="xs sub">Customers get it with one tap; free apps need no licence key.</span>}
             </div>
           </section>
 
@@ -390,7 +401,7 @@ function AppEditor({ app, canManage }: { app?: AppAdmin; canManage: boolean }) {
             <div className="card-head">
               <div className="stack gap-0">
                 <h2 className="h4">Files</h2>
-                <span className="xs muted">Customers download these after buying (or right away when free)</span>
+                <span className="xs muted">Any signed-in customer can download these; a paid app needs its licence key to unlock</span>
               </div>
             </div>
             <div className="card-body stack gap-4">
@@ -529,7 +540,14 @@ function AppEditor({ app, canManage }: { app?: AppAdmin; canManage: boolean }) {
                   </div>
                   <div className="row between small">
                     <span className="muted">Owners</span>
-                    <span className="strong">{num(app.owners)}</span>
+                    <span className="row gap-2 items-center">
+                      <span className="strong">{num(app.owners)}</span>
+                      {app.owners > 0 && (
+                        <Link className="xs" to={href('admin/departments-software', 'licences', undefined, { app: app.id })}>
+                          {app.price.free ? 'See owners' : 'Owners and licence keys'}
+                        </Link>
+                      )}
+                    </span>
                   </div>
                   <div className="row between small">
                     <span className="muted">Rating</span>

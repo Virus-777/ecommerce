@@ -1,6 +1,7 @@
 import { slugify as slugText } from '@marketly/web-shared/lib/format';
+import { useQuery } from '@tanstack/react-query';
 import { useRef, useState, type ReactNode } from 'react';
-import { errorMessage, resolveProductImageSpec, uploadMedia, useApi, type components } from '@marketly/web-shared/api';
+import { call, errorMessage, resolveProductImageSpec, uploadMedia, useApi, type components } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { Alert, Breadcrumbs, Button, Dialog, Field, IconButton, ImageCropper, Img, Textarea, type CropWording, type IconName, type ProcessedImage } from '@marketly/web-shared/ui';
@@ -81,6 +82,14 @@ export type Reward = S['rewards.RewardAdmin'];
 export type RewardTint = Reward['tint'];
 export type Redemption = S['rewards.RedemptionAdmin'];
 export type CustomerPoints = S['rewards.CustomerPoints'];
+export type GamePrize = S['departments.GamePrizeAdmin'];
+export type GameKey = S['departments.GameKey'];
+export type PrizeAward = S['departments.PrizeAward'];
+export type PlayerLookup = S['departments.PlayerLookup'];
+export type DeptReview = S['departments.ReviewAdmin'];
+export type ReviewTargetType = DeptReview['target']['type'];
+export type Entitlement = S['software.EntitlementAdmin'];
+export type GeoPoint = S['customers.GeoPoint'];
 
 export const PAGE_SIZE = 20;
 
@@ -384,6 +393,22 @@ export function PhotosField({ photos, onChange, max, alt, disabled, label = 'Pho
       {files.length > 0 && <ImageCropper files={files} spec={SPEC.wide} wording={WORDING.wide} onProcessed={(img) => void upload(img)} onClose={() => setFiles([])} />}
     </div>
   );
+}
+
+/* ---------------- Coupon campaigns ---------------- */
+
+/** Platform coupon campaigns (percent and fixed amount): the codes a reward or a prize tier hands out */
+export function useCouponCampaigns(enabled: boolean) {
+  const { api } = useApi();
+  const get = (kind: string) => call(api.GET('/api/admin/promotions/campaigns', { params: { query: { kind, ownerKind: 'platform', limit: 100 } } }));
+  return useQuery({
+    queryKey: ['promotions', 'campaigns', 'coupons'],
+    enabled,
+    queryFn: async () => {
+      const [pct, fixed] = await Promise.all([get('percent_coupon'), get('fixed_coupon')]);
+      return [...pct.items, ...fixed.items].sort((a, b) => a.name.localeCompare(b.name));
+    },
+  });
 }
 
 /* ---------------- Review moderation ---------------- */
