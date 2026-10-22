@@ -56,6 +56,14 @@ export interface FakePromotion {
 
 export type Decision = 'allowed' | 'approval_required' | 'denied';
 
+export interface LinkTargetStub {
+  id: string;
+  label: string;
+  meta?: string | null;
+  path: string;
+  available: boolean;
+}
+
 export interface Kit {
   app: FastifyInstance;
   svc: AdvertisingService;
@@ -74,6 +82,8 @@ export interface Kit {
   adCharges: { sellerId: string; campaignId: string; amount: { amount: number; currency: string }; period: { from: string; to: string }; entryId: string }[];
   /** finance.creditSellerCharge calls (stubbed per src/spec/finance.ts: the same idempotencyKey returns the first entry) */
   chargeCredits: { sellerId: string; amount: { amount: number; currency: string }; originalEntryId: string; reason: string; idempotencyKey: string }[];
+  /** linkTargets answers of catalog (product, category, brand), sellers (seller_store) and promotions (deal), by kind */
+  targets: Map<string, LinkTargetStub[]>;
   staff: string;
   of(name: string): any[];
   call(method: string, url: string, token: string, body?: unknown, headers?: Record<string, string>): Promise<{ status: number; body: any }>;
@@ -131,6 +141,10 @@ export async function boot(): Promise<Kit> {
   const adCharges: Kit['adCharges'] = [];
   const chargeCredits: Kit['chargeCredits'] = [];
   const creditEntries = new Map<string, string>();
+  const targets = new Map<string, LinkTargetStub[]>();
+  /** A module's linkTargets: by ids or URL slugs (the last path segment; any availability) or by q (available ones) */
+  const linkTargets = async (input: { kind: string; q?: string; ids?: string[]; slugs?: string[]; limit?: number }) =>
+    (targets.get(input.kind) ?? []).filter((t) => (input.ids ? input.ids.includes(t.id) : input.slugs ? input.slugs.includes(t.path.split('?')[0]!.split('/').at(-1)!) : t.available && (!input.q || t.label.toLowerCase().includes(input.q.toLowerCase())))).slice(0, input.limit ?? 20).map((t) => ({ image: null, meta: null, ...t }));
   const byProduct = () => new Map([...offers.values()].map((o) => [o.productId, o]));
   const app = await buildTestApp({
     modules: withDependencies(['advertising', 'audit', 'offers', 'catalog', 'inventory', 'sellers', 'promotions', 'finance']),
@@ -147,6 +161,7 @@ export async function boot(): Promise<Kit> {
         },
       },
       catalog: {
+        linkTargets,
         getProduct: async (id: string) => {
           const o = byProduct().get(id);
           return o ? ({ id, title: o.title, images: [{ id: newId(), url: 'https://cdn.test/p.png' }], categoryId: o.categoryId, brand: null } as any) : null;
@@ -156,10 +171,12 @@ export async function boot(): Promise<Kit> {
         getAvailability: async (ids: string[]) => Object.fromEntries(ids.map((id) => [id, { available: [...offers.values()].find((o) => o.stockItemId === id)?.stock ?? 0, state: 'in_stock', lowStockThreshold: null, nextIncoming: null }])),
       },
       sellers: {
+        linkTargets,
         getSellers: async (ids: string[]) => ids.map((id) => ({ id, ref: 'SL-1', slug: 's', storeName: id === SELLER_A ? 'Casa Verde Home' : id === SELLER_B ? 'Northwind Audio' : 'Seller', status: 'approved', verified: true, canSellNew: true, activeRestrictionIds: [], launchReady: true }) as any),
         canSell: async (id: string) => (restricted.has(id) ? { allowed: false, reason: restricted.get(id) } : { allowed: true }),
       },
       promotions: {
+        linkTargets,
         getPublicCampaign: async (id: string) => {
           const p = promotions.get(id);
           return p ? ({ id, name: p.name, code: p.code, status: p.status, period: { startsAt: p.startsAt, endsAt: p.endsAt, timeZone: 'America/Los_Angeles', display: '' } } as any) : null;
@@ -240,6 +257,7 @@ export async function boot(): Promise<Kit> {
     roles,
     adCharges,
     chargeCredits,
+    targets,
     staff: callers.staff(),
     of: (name) => events.filter((e) => e.name === name).map((e) => e.payload),
     async call(method, url, token, body, headers = {}) {

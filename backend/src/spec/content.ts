@@ -2095,6 +2095,8 @@ export const ContentPolicyEffectiveEvent: z.ZodType<ContentPolicyEffectiveEvent>
 
 /** What other modules may call in-process: `ctx.use('content')` (or `ctx.tryUse` for an optional dependency). */
 export interface ContentPublicApi {
+  /** Link targets for ad destination pickers (search by q, or resolve ids or URL slugs): collections and campaign pages (/collection/{slug}; available while published), each with its store path the app opens, a label, a short meta line, an image and whether it is shown in the store. Unknown ids are left out. Used by: advertising. */
+  linkTargets(input: { kind: 'collection', q?: string, ids?: string[], slugs?: string[], limit?: number }): Promise<common.LinkTarget[]>;
   /** Policy versions in effect at a moment. Checkout and orders store these ids on the order so the order keeps the purchase terms and return policy accepted at purchase (plan ch. 3, 8). Used by: checkout, orders, returns, sellers. */
   currentPolicyVersions(keys: string[], at?: string): Promise<PolicyVersionRef[]>;
   /** Exact text of a version, e.g. for order details and disputes. Used by: orders, support, returns. */
@@ -4082,7 +4084,7 @@ export const spec = defineModuleSpec({
   summary: "Store content managed by the Content Manager: ordered and scheduled homepage sections, campaign pages and curated collections, Help Center articles and categories, news posts and their categories, policies with versions and effective dates, the About page and footer links. Every item has an owner, a preview, a publication status and schedule, a version history with restore, and a correction or removal action.",
   dependsOn: ["media","access"],
   optionalDeps: ["catalog","offers","inventory","promotions","advertising","sellers","search","reports","notifications","audit","settings","shipping","wishlist","support","returns","reviews"],
-  publicApi: ["currentPolicyVersions","getPolicyVersion","helpArticlesFor","pageLink","getHomePage","previewHomePage","getStorePage","previewPage","collectionProducts","getHelpCenter","getHelpArticle","countHelpArticlesForPolicy","sellerAnnouncements","contentForCampaign"],
+  publicApi: ["linkTargets","currentPolicyVersions","getPolicyVersion","helpArticlesFor","pageLink","getHomePage","previewHomePage","getStorePage","previewPage","collectionProducts","getHelpCenter","getHelpArticle","countHelpArticlesForPolicy","sellerAnnouncements","contentForCampaign"],
   permissions: [
     {
       "key": "content.homepage.manage",

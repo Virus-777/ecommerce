@@ -2,6 +2,7 @@ import type { EventPayload } from '../../kernel/events/index.js';
 import { newId } from '../../kernel/lib/ids.js';
 import type * as catalog from '../../spec/catalog.js';
 import { format as formatMoney } from '../../kernel/lib/money.js';
+import type * as common from '../../spec/common.js';
 import { OFFICIAL_STORE_ID, OFFICIAL_STORE_NAME } from '../../spec/common.js';
 import type { Check, ContentPublicApi, FooterGroup, HelpCategory, LinkRef, OfficialStoreProfile, PageDraftInput, SellerAnnouncement, ServiceStrip, SiteNavigation } from '../../spec/content.js';
 import type * as sellers from '../../spec/sellers.js';
@@ -307,6 +308,32 @@ export class ContentService extends ContentNews implements ContentPublicApi {
         url: `/policy-versions/${v.id}`,
       };
     });
+  }
+
+  /**
+   * Link targets for advertising destination pickers: collections and campaign pages (the app opens both as
+   * /collection/{slug}) by title or slug, or by id; available while published and live.
+   */
+  async linkTargets(input: { kind: 'collection'; q?: string; ids?: string[]; slugs?: string[]; limit?: number }): Promise<common.LinkTarget[]> {
+    if (input.kind !== 'collection') return [];
+    const limit = Math.min(Math.max(input.limit ?? 20, 1), 100);
+    const q = (input.q ?? '').trim().toLowerCase();
+    const rows = input.ids
+      ? await this.repo.getPages(input.ids)
+      : input.slugs
+        ? (await Promise.all([...new Set(input.slugs)].map((s) => this.repo.pageBySlug(s)))).filter((p): p is PageRow => Boolean(p))
+      : (await this.repo.listPages({ statuses: ['published', 'scheduled'] })).filter((p) => p.kind !== 'about' && (!q || p.title.toLowerCase().includes(q) || p.slug.includes(q))).slice(0, limit);
+    const at = this.now();
+    return rows
+      .filter((p) => p.kind !== 'about')
+      .map((p) => ({
+        id: p.id,
+        label: p.title,
+        meta: `${p.kind === 'collection' ? 'Collection' : 'Page'}${p.status === 'scheduled' ? ' · scheduled' : ''}`,
+        path: `/collection/${p.slug}`,
+        image: null,
+        available: this.pageIsLive(p, at),
+      }));
   }
 
   /** Homepage sections and pages linked to a promotion (linkedPromotionId, or a deals source limited to it) */

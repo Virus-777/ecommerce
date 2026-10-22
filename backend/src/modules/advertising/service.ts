@@ -14,6 +14,7 @@ import { ReportsPart } from './service/reports.js';
 import { SellerPart } from './service/sellers.js';
 import { ServingPart } from './service/serving.js';
 import { SetupPart } from './service/setup.js';
+import { StaffAdsPart } from './service/staff-ads.js';
 import { registerAdvertisingSettingsSection } from './service/settings-section.js';
 import { ViewsPart } from './service/views.js';
 
@@ -34,6 +35,7 @@ export class AdvertisingService implements AdvertisingPublicApi {
   readonly billing: BillingPart;
   readonly reports: ReportsPart;
   readonly ops: OpsPart;
+  readonly staffAds: StaffAdsPart;
 
   constructor(deps: AdvertisingServiceDeps) {
     this.core = new Core(deps);
@@ -46,7 +48,8 @@ export class AdvertisingService implements AdvertisingPublicApi {
     this.billing = new BillingPart(this.core);
     this.reports = new ReportsPart(this.core);
     this.ops = new OpsPart(this.core);
-    this.core.parts = { views: this.views, campaigns: this.campaigns, creatives: this.creatives, setup: this.setup, serving: this.serving, sellers: this.sellers, billing: this.billing, reports: this.reports, ops: this.ops };
+    this.staffAds = new StaffAdsPart(this.core);
+    this.core.parts = { views: this.views, campaigns: this.campaigns, creatives: this.creatives, setup: this.setup, serving: this.serving, sellers: this.sellers, billing: this.billing, reports: this.reports, ops: this.ops, staffAds: this.staffAds };
   }
 
   /** Install seed on boot: the launch placements and global rules version 1, each only when absent (domain/seed.ts) */

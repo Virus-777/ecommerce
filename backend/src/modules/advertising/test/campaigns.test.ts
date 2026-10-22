@@ -106,7 +106,7 @@ describe('creatives', () => {
 
   it('runs link and automatic checks, lists, counts and edits (approved returns to draft)', async () => {
     const c = await creative(k, 'home_banner', 'desktop', [1200, 300], { link: 'http://example.com' });
-    expect(c).toMatchObject({ status: 'draft', linkCheck: { state: 'fail' }, formatLabel: 'Sponsored brand banner · desktop', media: { id: expect.any(String) } });
+    expect(c).toMatchObject({ status: 'draft', linkCheck: { state: 'fail' }, formatLabel: 'Home carousel · desktop', media: { id: expect.any(String) } });
     expect(c.autoChecks.map((x: any) => x.label)).toEqual(expect.arrayContaining(['Label', 'Format', 'Headline length', 'Claims', 'Link']));
     const edit = await k.call('PATCH', `${ADMIN}/creatives/${c.id}`, k.staff, { link: '/collections/fall' });
     expect(edit.status).toBe(200);

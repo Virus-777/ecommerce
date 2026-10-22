@@ -63,6 +63,57 @@ const fmt = (device: CreativeFormat['device'], width: number, height: number, ma
 });
 const rotation = (mode: RotationRule['mode'], o: Partial<RotationRule> = {}): RotationRule => ({ mode, carouselSeconds: null, maxInRotation: null, pauseOnHoverAndFocus: false, ...o, label: o.label ?? rotationLabel({ mode, ...o } as RotationRule) });
 
+/* ------------------------------------------------------------------ the Advertisements page's slots (2026-10-23) */
+
+/** Placements on the Advertisements page (sponsored products and stores stay with seller ads) */
+export const STAFF_AD_SLOTS = ['opening_fullscreen', 'home_banner', 'software_top', 'food_top', 'companies_top', 'play_top', 'deals_top', 'category_banner', 'popup'] as const;
+export const isStaffSlot = (key: string) => (STAFF_AD_SLOTS as readonly string[]).includes(key);
+
+/** Slot names, as the Advertisements tabs say them */
+export const SLOT_NAMES: Record<string, string> = {
+  opening_fullscreen: 'Full-screen ad',
+  home_banner: 'Home carousel',
+  software_top: 'Softwares carousel',
+  food_top: 'Food delivery carousel',
+  companies_top: 'Companies carousel',
+  play_top: 'Play center carousel',
+  deals_top: 'Deals carousel',
+  category_banner: 'Category banner',
+  popup: 'Pop-up',
+};
+
+/**
+ * Pages each slot of the Advertisements page can be set to show on: the pages the app and website ask for it (the
+ * full-screen ad also shows after the app's splash). Other slots keep their launch pages (pageOptionsOf).
+ */
+const PAGE_OPTIONS: Record<string, PageTypeName[]> = {
+  opening_fullscreen: ['home', 'category', 'deals'],
+  home_banner: ['home'],
+  software_top: ['software'],
+  food_top: ['food'],
+  companies_top: ['companies'],
+  play_top: ['play'],
+  deals_top: ['deals'],
+  category_banner: ['category'],
+  popup: ['home', 'category', 'search', 'collection', 'deals'],
+};
+
+/** Carousels: how long each ad shows (seconds) and how many may be live */
+export const CAROUSEL_SECONDS = { min: 2, max: 15 } as const;
+export const CAROUSEL_MAX_LIVE = 10;
+export const CAROUSEL_LIVE_RANGE = { min: 1, max: 20 } as const;
+
+const TAKE_TURNS = 'Ads take turns in the order on Advertisements';
+const CATEGORY_FIRST = 'Ads for that category first, then the rest take turns in order';
+export const carouselLabel = (seconds: number | null | undefined) => `Each ad shows ${seconds ?? 6} s, in the order on Advertisements`;
+
+/** The rotation line of a slot: the Advertisements page's wording for its slots, the rule's own otherwise */
+export function slotRotationLabel(key: string, r: Pick<RotationRule, 'mode' | 'carouselSeconds' | 'maxInRotation'>): string {
+  if (!isStaffSlot(key)) return rotationLabel(r);
+  if (r.mode === 'carousel') return carouselLabel(r.carouselSeconds);
+  return key === 'category_banner' ? CATEGORY_FIRST : TAKE_TURNS;
+}
+
 export interface PlacementSeed {
   id: string;
   key: PlacementKey;
@@ -91,16 +142,16 @@ export const PLACEMENT_SEEDS: readonly PlacementSeed[] = [
   {
     id: '0ad0a000-0000-4000-8000-000000000001',
     key: 'opening_fullscreen',
-    name: 'Opening full-screen ad',
+    name: 'Full-screen ad',
     description: 'Appears when a visitor opens the site. Close or skip always visible.',
     kind: 'overlay',
     enabled: true,
     availability: 'launch',
-    eligiblePages: ['home', 'category', 'campaign', 'collection', 'deals'],
+    eligiblePages: ['home', 'category', 'deals'],
     formats: [fmt('desktop', 1600, 900), fmt('phone', 1080, 1920)],
     frequencyCap: { perSession: 1, perWindow: { count: 3, days: 7 }, label: 'Once per session · max 3 per visitor per 7 days' },
     trigger: null,
-    rotation: rotation('priority_then_even'),
+    rotation: rotation('priority_then_even', { label: TAKE_TURNS }),
     dismissal: { mode: 'session', label: 'Closing hides it for the rest of the visit' },
     maxPerPage: 1,
     positions: null,
@@ -109,7 +160,7 @@ export const PLACEMENT_SEEDS: readonly PlacementSeed[] = [
   {
     id: '0ad0a000-0000-4000-8000-000000000002',
     key: 'home_banner',
-    name: 'Sponsored brand banner',
+    name: 'Home carousel',
     description: 'A wide banner between homepage sections, rotating with other campaigns.',
     kind: 'inline',
     enabled: true,
@@ -118,10 +169,10 @@ export const PLACEMENT_SEEDS: readonly PlacementSeed[] = [
     formats: [fmt('desktop', 1200, 300), fmt('phone', 750, 400)],
     frequencyCap: null,
     trigger: null,
-    // every live ad is in the carousel (owner decision 2026-10-18); staff can still set a limit per placement
-    rotation: rotation('carousel', { carouselSeconds: 6, pauseOnHoverAndFocus: true }),
+    // every live ad is in the carousel, up to the slot's live-ad limit (owner decisions 2026-10-18, 2026-10-23)
+    rotation: rotation('carousel', { carouselSeconds: 6, pauseOnHoverAndFocus: true, label: carouselLabel(6) }),
     dismissal: { mode: 'not_dismissible', label: 'Banners cannot be closed' },
-    maxPerPage: null,
+    maxPerPage: CAROUSEL_MAX_LIVE,
     positions: null,
     label: 'Ad',
   },
@@ -137,7 +188,7 @@ export const PLACEMENT_SEEDS: readonly PlacementSeed[] = [
     formats: [fmt('desktop', 1200, 200), fmt('phone', 750, 300)],
     frequencyCap: null,
     trigger: null,
-    rotation: rotation('category_match_then_priority', { maxInRotation: 2 }),
+    rotation: rotation('category_match_then_priority', { maxInRotation: 2, label: CATEGORY_FIRST }),
     dismissal: { mode: 'not_dismissible', label: 'Banners cannot be closed' },
     maxPerPage: 1,
     positions: null,
@@ -164,16 +215,16 @@ export const PLACEMENT_SEEDS: readonly PlacementSeed[] = [
   {
     id: '0ad0a000-0000-4000-8000-000000000005',
     key: 'popup',
-    name: 'Promotional pop-up',
+    name: 'Pop-up',
     description: 'A small pop-up after some time or scrolling. Never in a visit where an opening ad showed.',
     kind: 'overlay',
     enabled: true,
     availability: 'launch',
-    eligiblePages: ['home', 'category', 'search', 'product', 'campaign', 'collection', 'deals'],
+    eligiblePages: ['home', 'category', 'search', 'collection', 'deals'],
     formats: [fmt('desktop', 600, 600), fmt('phone', 600, 600)],
     frequencyCap: { perSession: 1, perDay: 1, label: 'Once per session · once a day' },
     trigger: { afterSeconds: 8, scrollPct: 40, skipIfOverlayShownThisSession: true },
-    rotation: rotation('priority_then_even'),
+    rotation: rotation('priority_then_even', { label: TAKE_TURNS }),
     dismissal: { mode: 'days', days: 7, label: 'Closing hides that campaign for 7 days' },
     maxPerPage: 1,
     positions: null,
@@ -282,9 +333,9 @@ export const PLACEMENT_SEEDS: readonly PlacementSeed[] = [
     frequencyCap: null,
     trigger: null,
     // a carousel of every live ad, like home_banner
-    rotation: rotation('carousel', { carouselSeconds: 6, pauseOnHoverAndFocus: true }),
+    rotation: rotation('carousel', { carouselSeconds: 6, pauseOnHoverAndFocus: true, label: carouselLabel(6) }),
     dismissal: { mode: 'not_dismissible', label: 'Banners cannot be closed' },
-    maxPerPage: null,
+    maxPerPage: CAROUSEL_MAX_LIVE,
     positions: null,
     label: 'Ad',
   },
@@ -301,9 +352,9 @@ export const PLACEMENT_SEEDS: readonly PlacementSeed[] = [
     frequencyCap: null,
     trigger: null,
     // a carousel of every live ad, like home_banner
-    rotation: rotation('carousel', { carouselSeconds: 6, pauseOnHoverAndFocus: true }),
+    rotation: rotation('carousel', { carouselSeconds: 6, pauseOnHoverAndFocus: true, label: carouselLabel(6) }),
     dismissal: { mode: 'not_dismissible', label: 'Banners cannot be closed' },
-    maxPerPage: null,
+    maxPerPage: CAROUSEL_MAX_LIVE,
     positions: null,
     label: 'Ad',
   },
@@ -320,9 +371,9 @@ export const PLACEMENT_SEEDS: readonly PlacementSeed[] = [
     frequencyCap: null,
     trigger: null,
     // a carousel of every live ad, like home_banner
-    rotation: rotation('carousel', { carouselSeconds: 6, pauseOnHoverAndFocus: true }),
+    rotation: rotation('carousel', { carouselSeconds: 6, pauseOnHoverAndFocus: true, label: carouselLabel(6) }),
     dismissal: { mode: 'not_dismissible', label: 'Banners cannot be closed' },
-    maxPerPage: null,
+    maxPerPage: CAROUSEL_MAX_LIVE,
     positions: null,
     label: 'Ad',
   },
@@ -339,13 +390,36 @@ export const PLACEMENT_SEEDS: readonly PlacementSeed[] = [
     frequencyCap: null,
     trigger: null,
     // a carousel of every live ad, like home_banner
-    rotation: rotation('carousel', { carouselSeconds: 6, pauseOnHoverAndFocus: true }),
+    rotation: rotation('carousel', { carouselSeconds: 6, pauseOnHoverAndFocus: true, label: carouselLabel(6) }),
     dismissal: { mode: 'not_dismissible', label: 'Banners cannot be closed' },
-    maxPerPage: null,
+    maxPerPage: CAROUSEL_MAX_LIVE,
+    positions: null,
+    label: 'Ad',
+  },
+  {
+    id: '0ad0a000-0000-4000-8000-00000000000f',
+    key: 'deals_top',
+    name: 'Deals carousel',
+    description: 'A short carousel of banners at the top of the Deals tab in the app.',
+    kind: 'inline',
+    enabled: true,
+    availability: 'launch',
+    eligiblePages: ['deals'],
+    // short banners, 5:1 (owner decision 2026-10-23)
+    formats: [fmt('phone', 750, 150)],
+    frequencyCap: null,
+    trigger: null,
+    // a carousel of every live ad, like the department carousels
+    rotation: rotation('carousel', { carouselSeconds: 6, pauseOnHoverAndFocus: true, label: carouselLabel(6) }),
+    dismissal: { mode: 'not_dismissible', label: 'Banners cannot be closed' },
+    maxPerPage: CAROUSEL_MAX_LIVE,
     positions: null,
     label: 'Ad',
   },
 ];
+
+/** Page types a slot can be set to show on */
+export const pageOptionsOf = (key: string): string[] => [...(PAGE_OPTIONS[key] ?? PLACEMENT_SEEDS.find((p) => p.key === key)?.eligiblePages ?? [])];
 
 /* ------------------------------------------------------------------ global rules */
 

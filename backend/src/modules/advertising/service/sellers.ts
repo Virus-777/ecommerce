@@ -11,6 +11,7 @@ import type * as common from '../../../spec/common.js';
 import { billingLabel, EXAMPLE_RATES } from '../domain/rules.js';
 import { adCampaignMachine } from '../domain/state-machines.js';
 import { decodeActor, invalid, notFound, Part, type By } from './core.js';
+import { offerPath } from './serving.js';
 import type { Model } from './views.js';
 
 const AUDIENCE_NOTE = 'Shown to shoppers on the pages you chose, labelled Sponsored. No personal targeting; paid placement never changes the order of other results.';
@@ -179,6 +180,7 @@ export class SellerPart extends Part {
     if (issues.length) throw invalid(issues);
     const info = input.offerIds?.length ? await this.checkOffers(sellerId, input.offerIds) : new Map();
     const first = input.offerIds?.[0] ? info.get(input.offerIds[0]) : null;
+    const storeSlug = first ? null : ((await this.core.optional('sellers', (s) => s.getSeller(sellerId)))?.slug ?? null);
     const rate = EXAMPLE_RATES[input.type]?.[input.billing] ?? EXAMPLE_RATES.sponsored_product!.cpc;
     const creativeIds = [...(input.creativeIds ?? [])];
     if (!input.headline?.trim()) creativeIds.push(...(keep.textCreativeIds ?? []));
@@ -190,7 +192,7 @@ export class SellerPart extends Part {
       pages: input.pages,
       pageCategoryIds: input.categoryIds ?? [],
       audience: { mode: 'all', regions: [], visitors: 'all', signIn: 'everyone', categoryIds: [] },
-      destination: first ? { kind: 'offer', targetId: first.offer.id, url: `/product/${first.productId}?offer=${first.offer.id}` } : { kind: 'seller_store', targetId: sellerId, url: `/store/${sellerId}` },
+      destination: first ? { kind: 'offer', targetId: first.offer.id, url: offerPath(first) } : { kind: 'seller_store', targetId: sellerId, url: storeSlug ? `/shop/${storeSlug}` : '/' },
       promoted: [...(input.offerIds ?? []).map((id) => ({ kind: 'offer' as const, id, label: info.get(id)?.title ?? null })), ...(input.type === 'sponsored_store' ? [{ kind: 'seller_store' as const, id: sellerId, label: null }] : [])],
       startsAt: input.startsAt,
       endsAt: input.endsAt,

@@ -228,6 +228,31 @@ export const CustomerDataSection: z.ZodType<CustomerDataSection> = z.object({
   attachmentIds: z.array(z.uuid()).describe("Media assets the customer uploaded that belong in the ZIP (message attachments, review photos)").nullish(),
 }).register(apiTypes, { id: "CustomerDataSection" });
 
+export interface LinkTarget {
+  /** The record's id (uuid) */
+  id: string;
+  /** e.g. Halden Aurora ANC Wireless Headphones */
+  label: string;
+  /** Short second line, e.g. Product · $149.00, Restaurant · Pizza */
+  meta?: string | null;
+  /** Store path the website and the app open, e.g. /p/halden-aurora/{id} */
+  path: string;
+  image?: MediaRef | null;
+  /** Shown in the store now (published, active, approved) */
+  available: boolean;
+}
+
+export const LinkTarget: z.ZodType<LinkTarget> = z.object({
+  id: z.string().describe("The record's id (uuid)"),
+  label: z.string().describe("e.g. Halden Aurora ANC Wireless Headphones"),
+  meta: z.string().describe("Short second line, e.g. Product · $149.00, Restaurant · Pizza").nullish(),
+  path: z.string().describe("Store path the website and the app open, e.g. /p/halden-aurora/{id}"),
+  get image() {
+    return MediaRef.nullish();
+  },
+  available: z.boolean().describe("Shown in the store now (published, active, approved)"),
+}).register(apiTypes, { id: "LinkTarget" });
+
 /** Error codes shared by every module (common.json "errors"). */
 export const commonErrors = {
   "VALIDATION_FAILED": {

@@ -27,6 +27,7 @@
   "dependsOn": ["media", "access"],
   "optionalDeps": ["catalog", "offers", "inventory", "promotions", "advertising", "sellers", "search", "reports", "notifications", "audit", "settings", "shipping", "wishlist", "support", "returns", "reviews"],
   "publicApi": [
+    {"name":"linkTargets","signature":"(input: { kind: 'collection', q?: string, ids?: string[], slugs?: string[], limit?: int }) => LinkTarget[]","desc":"Link targets for ad destination pickers (search by q, or resolve ids or URL slugs): collections and campaign pages (/collection/{slug}; available while published), each with its store path the app opens, a label, a short meta line, an image and whether it is shown in the store. Unknown ids are left out.","usedBy":["advertising"]},
     { "name": "currentPolicyVersions", "signature": "(keys: string[], at?: datetime) => PolicyVersionRef[]", "desc": "Policy versions in effect at a moment. Checkout and orders store these ids on the order so the order keeps the purchase terms and return policy accepted at purchase (plan ch. 3, 8).", "usedBy": ["checkout", "orders", "returns", "sellers"] },
     { "name": "getPolicyVersion", "signature": "(versionId: uuid) => PolicyVersion", "desc": "Exact text of a version, e.g. for order details and disputes.", "usedBy": ["orders", "support", "returns"] },
     { "name": "helpArticlesFor", "signature": "(topic: string, limit: int) => HelpArticleSummary[]", "desc": "Suggested articles for an order problem or case category.", "usedBy": ["support", "graphql"] },

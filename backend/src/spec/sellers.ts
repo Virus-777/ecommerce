@@ -3167,6 +3167,8 @@ export const SellersInvitationSentEvent: z.ZodType<SellersInvitationSentEvent> =
 
 /** What other modules may call in-process: `ctx.use('sellers')` (or `ctx.tryUse` for an optional dependency). */
 export interface SellersPublicApi {
+  /** Link targets for ad destination pickers (search by q, or resolve ids or URL slugs): approved seller storefronts (/shop/{slug}), each with its store path the app opens, a label, a short meta line, an image and whether it is shown in the store. Unknown ids are left out. Used by: advertising. */
+  linkTargets(input: { kind: 'seller_store', q?: string, ids?: string[], slugs?: string[], limit?: number }): Promise<common.LinkTarget[]>;
   /** Store name, slug, status, verified label and whether new sales are allowed (marketplace sellers only; the Official Store is ownerType official with sellerId null and has no seller record) Used by: offers, orders, catalog, search, finance, returns, support, reviews, promotions, advertising, trust, reports, graphql, messaging, notifications. */
   getSeller(sellerId: string): Promise<SellerSnapshot | null>;
   /** Batch version for lists Used by: offers, search, orders, reports, wishlist, graphql, advertising, catalog, content, finance, fulfillment-service, promotions, reviews, shipping, trust. */
@@ -5483,7 +5485,7 @@ export const spec = defineModuleSpec({
   summary: "Seller admission and the seller account: the Sell with us programme and multi-step application, verification checks and review decisions, seller statuses with account status, product approval and payout readiness kept separate, setup and launch readiness, storefront profile and public storefront, seller members and permissions, performance against targets, warnings, restrictions, suspensions and appeals.",
   dependsOn: ["identity","access","media"],
   optionalDeps: ["catalog","offers","orders","shipping","returns","support","finance","reviews","trust","content","promotions","search","messaging","workqueues","reports","notifications","audit","settings"],
-  publicApi: ["getSeller","getSellers","canSell","getMemberAccess","listMembers","ownerOf","getPerformance","getStorefrontCard","requestRestriction","getApplicationParticipant","getStorefrontBySlug","searchSellers","exportRows"],
+  publicApi: ["linkTargets","getSeller","getSellers","canSell","getMemberAccess","listMembers","ownerOf","getPerformance","getStorefrontCard","requestRestriction","getApplicationParticipant","getStorefrontBySlug","searchSellers","exportRows"],
   permissions: [
     {
       "key": "sellers.accounts.view",

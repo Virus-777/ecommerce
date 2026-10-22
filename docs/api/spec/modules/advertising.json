@@ -25,7 +25,7 @@
     "Approval limits and second reviewers: access"
   ],
   "dependsOn": ["media", "access"],
-  "optionalDeps": ["promotions", "offers", "catalog", "inventory", "sellers", "orders", "content", "finance", "search", "reports", "notifications", "audit", "customers", "settings"],
+  "optionalDeps": ["promotions", "offers", "catalog", "inventory", "sellers", "orders", "content", "finance", "search", "reports", "notifications", "audit", "customers", "settings", "food", "departments"],
   "publicApi": [
     { "name": "sponsoredForResults", "signature": "(ctx: { page: 'home' | 'category' | 'search' | 'product' | 'campaign' | 'collection' | 'deals' | 'brand' | 'seller_store' | 'official_store' | 'cart' | 'checkout' | 'payment_result' | 'order_tracking' | 'returns' | 'account' | 'help' | 'companies' | 'play' | 'software' | 'food', query?: string, categoryId?: uuid, productId?: uuid, visitorId: string, sessionId: string, device: string, organicOfferIds: uuid[], personalizationAllowed: bool, customerId?: uuid }) => SponsoredProductSlot[]", "desc": "Sponsored product cards and their positions for a results list (max per page from the placement; relevance first, then priority). Only eligible, in-stock offers are returned. personalizationAllowed false: only page context (query, category, product) is used, frequency state is kept per session only and clicks are not kept for attribution by visitor; customerId (signed-in shopper) lets frequency caps and attribution follow the customer across devices when personalization is allowed.", "usedBy": ["search", "catalog"] },
     { "name": "adPositionsFor", "signature": "(page: 'home' | 'category' | 'search' | 'product' | 'campaign' | 'collection' | 'deals' | 'brand' | 'seller_store' | 'official_store' | 'cart' | 'checkout' | 'payment_result' | 'order_tracking' | 'returns' | 'account' | 'help' | 'companies' | 'play' | 'software' | 'food') => { placementKey: string, name: string, enabled: bool }[]", "desc": "Ad positions on a page, so content can show them as locked markers in homepage sections.", "usedBy": ["content"] },
@@ -61,7 +61,7 @@
     "PopupTrigger": { "afterSeconds": "int?", "scrollPct": "int?", "skipIfOverlayShownThisSession": "bool" },
     "Placement": {
       "id": "uuid",
-      "key": "enum(opening_fullscreen|home_banner|category_banner|campaign_banner|popup|sponsored_product|sponsored_store|floating|interstitial|video|companies_top|play_top|software_top|food_top)",
+      "key": "enum(opening_fullscreen|home_banner|category_banner|campaign_banner|popup|sponsored_product|sponsored_store|floating|interstitial|video|companies_top|play_top|software_top|food_top|deals_top)",
       "name": "string",
       "description": { "type": "string", "desc": "Shown on the ad type card when choosing a placement, e.g. Appears when a visitor opens the site. Close or skip always visible." },
       "kind": "enum(overlay|inline|card|strip)",
@@ -77,15 +77,17 @@
       "maxPerPage": "int?",
       "positions": { "type": "int[]?", "desc": "Fixed positions in results lists, e.g. [3, 8]" },
       "label": "enum(Ad|Sponsored)",
-      "liveCampaigns": "int",
+      "liveCampaigns": { "type": "int", "desc": "Live ads in the slot now (the Live count of its tab on Advertisements)" },
+      "inUse": { "type": "bool", "desc": "Managed on the Advertisements page (full-screen, home and department carousels, deals carousel, category banner, pop-up); false for seller-ad and later-phase slots" },
+      "pageOptions": { "type": "string[]", "desc": "Page types this slot can be set to show on (the pages the app and website ask for it); PlacementPatch.eligiblePages must stay within them" },
       "version": { "type": "int", "desc": "Increments on every change; PATCH must send the version it read (PlacementPatch.version), otherwise CONFLICT" },
       "updatedAt": "datetime", "updatedBy": "Actor?"
     },
     "PlacementPatch": {
       "enabled": "bool?", "eligiblePages": "string[]?", "formats": "CreativeFormat[]?",
       "frequencyCap": { "type": "FrequencyCapInput?", "desc": "The label is written by the server" }, "trigger": "PopupTrigger?",
-      "rotation": { "type": "RotationRuleInput?", "desc": "The label is written by the server" },
-      "dismissal": { "type": "DismissalRuleInput?", "desc": "The label is written by the server" }, "maxPerPage": "int?", "positions": "int[]?",
+      "rotation": { "type": "RotationRuleInput?", "desc": "The label is written by the server. Carousel slots: carouselSeconds 2–15 (how long each ad shows)" },
+      "dismissal": { "type": "DismissalRuleInput?", "desc": "The label is written by the server" }, "maxPerPage": { "type": "int?", "desc": "Carousel slots: live ads at most (1–20); ads approved beyond it wait as scheduled and start when one ends" }, "positions": "int[]?",
       "reason": "text", "version": "int"
     },
     "GlobalRules": {
@@ -114,7 +116,7 @@
       "categoryIds": { "type": "uuid[]", "desc": "Interest from browsing in this store only, when privacy choices allow" },
       "estimatedWeeklyReach": "int?"
     },
-    "Destination": { "kind": "enum(url|product|offer|seller_store|brand|collection|campaign_page)", "targetId": "uuid?", "url": "string" },
+    "Destination": { "kind": "enum(url|product|offer|seller_store|brand|collection|campaign_page|category|department|restaurant|deal|phone)", "targetId": { "type": "string?", "desc": "uuid, or a department key for kind department" }, "url": { "type": "string", "desc": "The store path (or https url) visitors open; for picked kinds the server writes the resolved path" } },
     "PromotedItem": { "kind": "enum(offer|product|seller_store|brand)", "id": "uuid", "label": "string?" },
     "AdBudget": {
       "billing": "enum(none|cpc|cpm|fixed_daily)",
@@ -275,7 +277,8 @@
       "popupTrigger": "PopupTrigger?",
       "slots": { "type": "map<AdImpression[]>", "desc": "placementKey → ads in rotation order" },
       "sponsoredProducts": "SponsoredProductSlot[]",
-      "rotationSeconds": "int?",
+      "rotationSeconds": { "type": "int?", "desc": "Seconds per ad of the first carousel in the decision (kept for older clients; use rotationBySlot)" },
+      "rotationBySlot": { "type": "map<int>", "desc": "placementKey → seconds each ad shows, for every carousel slot in the decision" },
       "ttlSeconds": { "type": "int", "desc": "Clients may reuse the decision this long (pausing takes effect within 1 minute)" }
     },
     "TrackEvent": { "impressionToken": "string", "kind": "enum(display|click|dismiss|close|video_play)", "at": { "type": "datetime?", "desc": "Client time, informational only: the server records its own time for frequency, attribution and charges" }, "visibleMs": "int?" },
@@ -336,12 +339,107 @@
       "metrics": "CampaignMetrics"
     },
     "PricingOption": { "billing": "enum(cpc|fixed_daily|cpm)", "rate": "Money", "label": "string", "isExample": "bool" },
-    "SellerAdsSummary": { "range": "DateRange", "spend": "Money", "clicks": "int", "attributedOrders": "int", "attributionDays": "int", "statementNote": "string" }
+    "SellerAdsSummary": { "range": "DateRange", "spend": "Money", "clicks": "int", "attributedOrders": "int", "attributionDays": "int", "statementNote": "string" },
+
+    "AdDestinationInput": {
+      "kind": { "type": "enum(product|category|department|restaurant|deal|collection|seller_store|brand|phone|url)", "desc": "What the ad opens; every kind but url is picked from GET /ads/destinations" },
+      "targetId": { "type": "string?", "desc": "The picked target's id (uuid). For department: the department key phones|farm|software|welfare|food|booking|blogs|companies|play|rewards. For deal: tab (or left out) is the Deals tab itself. seller_store 00000000-0000-7000-8000-000000000001 is the Official Store. Not used for url" },
+      "url": { "type": "string?", "desc": "kind url only: an https address (outside pages). A store path that names a target (e.g. /c/cookware) is saved as that target" }
+    },
+    "AdDestination": {
+      "kind": "enum(product|category|department|restaurant|deal|collection|seller_store|brand|phone|url)",
+      "targetId": "string?",
+      "label": { "type": "string", "desc": "e.g. Halden Aurora ANC Wireless Headphones" },
+      "meta": { "type": "string?", "desc": "e.g. Product · Halden; Collection or Page for kind collection; Web address or Store page for kind url (label Store page /x for a store path nothing names)" },
+      "path": { "type": "string", "desc": "The store path the app opens (e.g. /p/halden-aurora/…, /c/headphones, /food/restaurants/…), or the https url for kind url; what AdImpression.destination carries" },
+      "available": { "type": "bool", "desc": "The target still exists and is shown in the store (submit needs true)" }
+    },
+    "AdDestinationOption": {
+      "kind": "enum(product|category|department|restaurant|deal|collection|seller_store|brand|phone|url)",
+      "targetId": "string", "label": "string", "meta": "string?", "image": "MediaRef?",
+      "path": { "type": "string", "desc": "The store path the target opens" }
+    },
+    "AdImage": { "id": { "type": "uuid", "desc": "Media asset id" }, "url": "url", "width": "int?", "height": "int?" },
+    "AdReviewStep": {
+      "step": "enum(advertising|content)",
+      "state": "enum(waiting|approved|changes_requested|rejected)",
+      "by": "Actor?", "at": "datetime?", "note": "text?"
+    },
+    "AdReview": {
+      "steps": { "type": "AdReviewStep[]", "desc": "Empty until submitted" },
+      "canReview": { "type": "bool", "desc": "The caller may take an open step now (has the reviewing role, did not create the ad or the change, did not take the other step)" },
+      "submittedBy": "Actor?", "submittedAt": "datetime?"
+    },
+    "StaffAdChange": {
+      "state": { "type": "enum(draft|in_review|changes_requested)", "desc": "draft: saved, not submitted yet" },
+      "name": "string?", "image": "AdImage?", "webImage": "AdImage?", "alt": "string?",
+      "destination": "AdDestination?", "startsAt": "datetime?",
+      "dealId": "uuid?", "dealName": "string?", "stopWithDeal": "bool?",
+      "changedFields": { "type": "string[]", "desc": "Fields that differ from the live version: name, image, webImage, alt, destination, startsAt, deal" },
+      "review": "AdReview",
+      "createdBy": "Actor", "createdAt": "datetime"
+    },
+    "StaffAdStats": { "views": { "type": "int", "desc": "Displays" }, "taps": { "type": "int", "desc": "Clicks" } },
+    "StaffAd": {
+      "id": "uuid", "ref": { "type": "string", "desc": "AD-YYMMDD-NNNN" }, "name": "string",
+      "placementKey": "string", "placementName": "string",
+      "categoryId": { "type": "uuid?", "desc": "category_banner only: the category it shows on (null = every category)" },
+      "status": "enum(draft|in_review|changes_requested|scheduled|live|paused|ended|rejected)",
+      "image": { "type": "AdImage?", "desc": "Phone image (the placement's phone format, e.g. 750 × 400)" },
+      "webImage": { "type": "AdImage?", "desc": "opening_fullscreen only, optional: website image 1600 × 900" },
+      "alt": "string?",
+      "destination": "AdDestination?",
+      "startsAt": { "type": "datetime?", "desc": "null = as soon as approved" },
+      "endsAt": { "type": "datetime?", "desc": "Required to submit" },
+      "dealId": { "type": "uuid?", "desc": "Linked deal (promotions campaign)" }, "dealName": "string?",
+      "stopWithDeal": "bool",
+      "position": { "type": "int", "desc": "1-based order inside its placement's carousel (live and scheduled ads); serving order of carousel placements" },
+      "review": { "type": "AdReview", "desc": "The initial review (the latest submission of the ad itself)" },
+      "pendingChange": { "type": "StaffAdChange?", "desc": "An edit of a scheduled, live or paused ad waiting for review; the current version keeps running until the change is approved" },
+      "stats": "StaffAdStats",
+      "allowedActions": { "type": "string[]", "desc": "edit, submit, review, pause, resume, end, duplicate, delete" },
+      "statusNote": { "type": "string?", "desc": "e.g. Needs Content review; Changes requested: brighter image" },
+      "createdBy": "Actor", "createdAt": "datetime", "updatedAt": "datetime",
+      "version": { "type": "int", "desc": "PATCH sends it back; a stale version is CONFLICT" }
+    },
+    "StaffAdInput": {
+      "name": "string", "placementKey": "string",
+      "categoryId": { "type": "uuid?", "desc": "category_banner only" },
+      "imageId": { "type": "uuid?", "desc": "Media asset of the phone image (uploaded through media first; checked against the placement's phone format)" },
+      "webImageId": { "type": "uuid?", "desc": "opening_fullscreen only: website image 1600 × 900" },
+      "alt": "string?",
+      "destination": "AdDestinationInput?",
+      "startsAt": { "type": "datetime?", "desc": "null = as soon as approved" },
+      "endsAt": "datetime?",
+      "dealId": "uuid?", "stopWithDeal": "bool?"
+    },
+    "StaffAdPatch": {
+      "name": "string?", "categoryId": "uuid?", "imageId": "uuid?", "webImageId": "uuid?", "alt": "string?",
+      "destination": "AdDestinationInput?", "startsAt": "datetime?", "endsAt": "datetime?", "dealId": "uuid?", "stopWithDeal": "bool?",
+      "version": "int"
+    },
+    "StaffAdsOrderInput": { "placementKey": "string", "ids": { "type": "uuid[]", "desc": "Live and scheduled ads of the placement in the new order (every one of them)" } },
+    "StaffAdSlot": {
+      "name": "string", "enabled": "bool",
+      "live": { "type": "int", "desc": "Live ads now (equals Placement.liveCampaigns)" },
+      "maxLive": { "type": "int?", "desc": "Carousels: live ads at most" },
+      "carouselSeconds": { "type": "int?", "desc": "Carousels: seconds each ad shows" },
+      "rotationLabel": { "type": "string", "desc": "e.g. Each ad shows 6 s, in the order on Advertisements; Ads take turns in the order on Advertisements" }
+    },
+    "AdWaitingRef": { "id": "uuid", "name": "string", "placementKey": "string", "isChange": { "type": "bool", "desc": "A pending change of a running ad (else the ad's first review)" } },
+    "StaffAdsPage": {
+      "items": { "type": "StaffAd[]", "desc": "Ads of the asked placement(s): live and scheduled in position order, then paused, in review and drafts, ended and rejected last" },
+      "counts": { "type": "map<int>", "desc": "placementKey → ads not ended (for the slot tabs)" },
+      "statusCounts": { "type": "map<int>", "desc": "status → ads in the asked placement(s)" },
+      "waitingForMe": "int",
+      "waitingForMeAds": "AdWaitingRef[]",
+      "slots": { "type": "map<StaffAdSlot>", "desc": "placementKey → slot settings and live count, for every staff-ad slot" }
+    }
   },
   "tables": [
     { "name": "placements", "desc": "One row per placement type with its rules", "columns": { "id": "uuid pk", "key": "text unique", "name": "text", "kind": "text", "enabled": "bool", "availability": "text", "eligible_pages": "jsonb", "formats": "jsonb", "frequency_cap": "jsonb?", "trigger": "jsonb?", "rotation": "jsonb", "dismissal": "jsonb", "max_per_page": "int?", "positions": "jsonb?", "label": "text", "description": "text", "version": "int", "updated_by": "text?", "updated_at": "timestamptz" } },
     { "name": "global_rules", "desc": "Versioned global rules; current = highest effective version", "columns": { "version": "int pk", "rules": "jsonb", "effective_at": "timestamptz", "approval_request_id": "uuid?", "created_by": "text", "created_at": "timestamptz" } },
-    { "name": "campaigns", "columns": { "id": "uuid pk", "ref": "text unique", "name": "text", "origin": "text (staff|seller_request)", "advertiser_kind": "text", "seller_id": "uuid?", "brand_id": "uuid?", "goal": "text", "owner_staff_id": "uuid?", "linked_promotion_id": "uuid?", "placement_id": "uuid → placements", "pages": "jsonb", "page_category_ids": "jsonb", "audience": "jsonb", "destination": "jsonb", "starts_at": "timestamptz?", "ends_at": "timestamptz?", "time_zone": "text", "frequency_cap": "jsonb", "dismissal": "jsonb", "priority": "int", "billing": "text", "rate": "bigint?", "daily_limit": "bigint?", "total_limit": "bigint?", "delivery_cap": "int?", "spent": "bigint", "currency": "text", "stop_with_promotion": "bool", "after_approval": "text (schedule|activate)", "status": "text", "paused_reason": "text?", "paused_by": "text? (Actor kind:id of the last pause)", "paused_at": "timestamptz?", "pause_cause": "text? (promotion|offer|stock|product|availability|seller|trust) (automatic pauses only)", "rejected_reason": "text?", "finished_reason": "text?", "note_to_reviewers": "text?", "created_by": "text", "created_at": "timestamptz", "updated_at": "timestamptz", "version": "int" }, "indexes": ["(status, starts_at)", "(status, ends_at)", "(placement_id, status)", "(seller_id, status)", "(linked_promotion_id)"] },
+    { "name": "campaigns", "columns": { "id": "uuid pk", "ref": "text unique", "name": "text", "origin": "text (staff|seller_request)", "advertiser_kind": "text", "seller_id": "uuid?", "brand_id": "uuid?", "goal": "text", "owner_staff_id": "uuid?", "linked_promotion_id": "uuid?", "placement_id": "uuid → placements", "pages": "jsonb", "page_category_ids": "jsonb", "audience": "jsonb", "destination": "jsonb", "starts_at": "timestamptz?", "ends_at": "timestamptz?", "time_zone": "text", "frequency_cap": "jsonb", "dismissal": "jsonb", "priority": "int", "billing": "text", "rate": "bigint?", "daily_limit": "bigint?", "total_limit": "bigint?", "delivery_cap": "int?", "spent": "bigint", "currency": "text", "stop_with_promotion": "bool", "after_approval": "text (schedule|activate)", "status": "text", "paused_reason": "text?", "paused_by": "text? (Actor kind:id of the last pause)", "paused_at": "timestamptz?", "pause_cause": "text? (promotion|offer|stock|product|availability|seller|trust) (automatic pauses only)", "rejected_reason": "text?", "finished_reason": "text?", "note_to_reviewers": "text?", "position": "int? (staff ads: 1-based order in the placement carousel)", "alt": "text? (staff ads: image description)", "pending_change": "jsonb? (staff ads: an edit of a running ad waiting for review: StaffAdChange values, media ids, submission)", "created_by": "text", "created_at": "timestamptz", "updated_at": "timestamptz", "version": "int" }, "indexes": ["(status, starts_at)", "(status, ends_at)", "(placement_id, status)", "(seller_id, status)", "(linked_promotion_id)", "(placement_id, position)"] },
     { "name": "campaign_items", "desc": "Promoted offers, products, stores or brands", "columns": { "campaign_id": "uuid → campaigns", "kind": "text (offer|product|seller_store|brand)", "target_id": "uuid", "label": "text?", "product_id": "uuid? (the product: target_id for kind product, the offer's product for kind offer; null for stores and brands)" }, "indexes": ["(kind, target_id)", "(product_id)", "(campaign_id)"] },
     { "name": "campaign_creatives", "columns": { "campaign_id": "uuid → campaigns", "creative_id": "uuid → creatives", "device": "text" }, "indexes": ["unique (campaign_id, creative_id)", "(creative_id)"] },
     { "name": "approval_steps", "desc": "Required reviewers per campaign submission", "columns": { "id": "uuid pk", "campaign_id": "uuid → campaigns", "submission": "int", "role": "text", "reviewer_id": "text?", "state": "text", "note": "text?", "decided_at": "timestamptz?" }, "indexes": ["(campaign_id)"] },
@@ -416,7 +514,7 @@
     { "id": "requestAdChanges", "area": "admin", "method": "POST", "path": "/campaigns/{id}/request-changes", "summary": "Send back to the owner with a reason", "auth": "staff", "permission": "advertising.campaigns.review", "params": { "id": "uuid" }, "body": { "role": { "type": "enum(advertising|content|marketing)?", "desc": "Which review step to act on. The steps the caller may act on come from the caller's access roles (access.rolesOf: Advertising Manager → advertising, Content Manager → content, Marketing Manager → marketing; Business Owner any), never from this field alone. Needed only when the caller holds more than one reviewing role; a step the caller's roles do not cover is FORBIDDEN" }, "reason": "text" }, "response": "AdCampaign", "errors": ["ILLEGAL_TRANSITION", "FORBIDDEN"], "audited": true, "events": ["advertising.campaign.status_changed"], "screens": ["admin/ad-campaign"] },
     { "id": "rejectAdCampaign", "area": "admin", "method": "POST", "path": "/campaigns/{id}/reject", "summary": "Reject a request (e.g. promoted offer suspended)", "auth": "staff", "permission": "advertising.campaigns.review", "params": { "id": "uuid" }, "body": { "reason": "text" }, "response": "AdCampaign", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "events": ["advertising.campaign.status_changed"], "screens": ["admin/ads", "admin/ad-assets"] },
     { "id": "scheduleAdCampaign", "area": "admin", "method": "POST", "path": "/campaigns/{id}/schedule", "summary": "Schedule an approved campaign for its start time", "auth": "staff", "permission": "advertising.campaigns.publish", "params": { "id": "uuid" }, "response": "AdCampaign", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "events": ["advertising.campaign.status_changed"], "screens": ["admin/ad-campaign", "admin/ads"] },
-    { "id": "activateAdCampaign", "area": "admin", "method": "POST", "path": "/campaigns/{id}/activate", "summary": "Activate an approved campaign now", "auth": "staff", "permission": "advertising.campaigns.publish", "params": { "id": "uuid" }, "response": "AdCampaign", "errors": ["ILLEGAL_TRANSITION", "PROMOTION_NOT_STARTED"], "audited": true, "events": ["advertising.campaign.status_changed"], "screens": ["admin/ad-campaign"] },
+    { "id": "activateAdCampaign", "area": "admin", "method": "POST", "path": "/campaigns/{id}/activate", "summary": "Activate an approved campaign now", "auth": "staff", "permission": "advertising.campaigns.publish", "params": { "id": "uuid" }, "response": "AdCampaign", "errors": ["ILLEGAL_TRANSITION", "PROMOTION_NOT_STARTED", "SLOT_FULL"], "audited": true, "events": ["advertising.campaign.status_changed"], "screens": ["admin/ad-campaign"] },
     { "id": "pauseAdCampaign", "area": "admin", "method": "POST", "path": "/campaigns/{id}/pause", "summary": "Pause immediately (off the site within 1 minute)", "desc": "The reason is optional (G68): without one the history and the audit entry say 'Paused by the Advertising team'.", "auth": "staff", "permission": "advertising.campaigns.publish", "params": { "id": "uuid" }, "body": { "reason": "text?" }, "response": "AdCampaign", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "events": ["advertising.campaign.status_changed"], "screens": ["admin/ads"] },
     { "id": "resumeAdCampaign", "area": "admin", "method": "POST", "path": "/campaigns/{id}/resume", "summary": "Resume a paused campaign", "auth": "staff", "permission": "advertising.campaigns.publish", "params": { "id": "uuid" }, "body": { "reason": "text?" }, "response": "AdCampaign", "errors": ["ILLEGAL_TRANSITION", "AD_UNAVAILABLE"], "audited": true, "events": ["advertising.campaign.status_changed"], "screens": ["admin/ads"] },
     { "id": "finishAdCampaign", "area": "admin", "method": "POST", "path": "/campaigns/{id}/finish", "summary": "Finish a scheduled, live or paused campaign early", "desc": "Paid campaigns are charged only for delivery so far. The reason is optional (G68): without one the history and the audit entry say 'Finished early by the Advertising team'.", "auth": "staff", "permission": "advertising.campaigns.publish", "params": { "id": "uuid" }, "body": { "reason": "text?" }, "response": "AdCampaign", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "events": ["advertising.campaign.status_changed"], "screens": ["admin/ads"] },
@@ -425,6 +523,20 @@
     { "id": "renewAdCampaign", "area": "admin", "method": "POST", "path": "/campaigns/{id}/renew", "summary": "Create a new draft from a finished or ending campaign (renew deliberately)", "auth": "staff", "permission": "advertising.campaigns.manage", "params": { "id": "uuid" }, "body": { "startsAt": "datetime", "endsAt": "datetime" }, "response": "AdCampaign", "status": 201, "audited": true, "screens": ["admin/ads"] },
     { "id": "getAdCampaignReport", "area": "admin", "method": "GET", "path": "/campaigns/{id}/report", "summary": "Displays, clicks, dismissals, spend and attributed purchases by day", "auth": "staff", "permission": "advertising.reports.view", "params": { "id": "uuid" }, "query": { "from": "date?", "to": "date?" }, "response": "PerformanceReport", "screens": ["admin/ads", "admin/reports"] },
     { "id": "getAdPerformance", "area": "admin", "method": "GET", "path": "/reports/performance", "summary": "Performance across campaigns by placement, with the attribution period stated", "auth": "staff", "permission": "advertising.reports.view", "query": { "from": "date", "to": "date", "source": "enum(all|own|seller|brand)?" }, "response": "PerformanceReport", "screens": ["admin/ads", "admin/reports"] },
+
+    { "id": "listStaffAds", "area": "admin", "method": "GET", "path": "/ads", "summary": "Staff ads by slot: live and scheduled in carousel order, with counts and what waits for my review", "desc": "The simple Advertisements page (full-screen, home carousel, department carousels, deals, other). A staff ad is one own (platform) campaign with one placement. Needs advertising.campaigns.view, .manage or .review (checked by the handler). placement takes one key or a comma-separated list; without it every staff-ad slot is listed.", "auth": "staff", "query": { "placement": "string?", "status": { "type": "string?", "desc": "Comma-separated StaffAd statuses" } }, "response": "StaffAdsPage", "errors": ["FORBIDDEN"], "screens": ["admin/ads"] },
+    { "id": "createStaffAd", "area": "admin", "method": "POST", "path": "/ads", "summary": "Create a staff ad draft", "desc": "Drafts may be incomplete (name and placement are required). The phone image must match the placement's phone format (opening_fullscreen 1080 × 1920, home_banner and department carousels 750 × 400, deals_top 750 × 150, category_banner 750 × 300, popup 600 × 600); a website image only for opening_fullscreen. The destination is resolved to a store path.", "auth": "staff", "permission": "advertising.campaigns.manage", "body": "StaffAdInput", "response": "StaffAd", "status": 201, "errors": ["VALIDATION_FAILED", "PLACEMENT_DISABLED", "CREATIVE_FORMAT_INVALID"], "audited": true, "screens": ["admin/ads"] },
+    { "id": "getStaffAd", "area": "admin", "method": "GET", "path": "/ads/{id}", "summary": "A staff ad with its review, pending change and stats", "desc": "Needs advertising.campaigns.view, .manage or .review (checked by the handler). The id or the AD- ref.", "auth": "staff", "params": { "id": { "type": "string", "desc": "Ad id or ref (AD-…)" } }, "response": "StaffAd", "errors": ["NOT_FOUND", "FORBIDDEN"], "screens": ["admin/ads"] },
+    { "id": "updateStaffAd", "area": "admin", "method": "PATCH", "path": "/ads/{id}", "summary": "Edit a staff ad (a running ad gets a pending change)", "desc": "Fields left out keep their value; send null to clear. draft and changes_requested: edits the ad. scheduled, live and paused: endsAt applies at once (no review); every other change creates or replaces the pending change (state draft, submitted with POST /ads/{id}/submit) while the current version keeps running. in_review (first review) and a pending change in review: ILLEGAL_TRANSITION until the review is done. ended and rejected: duplicate instead.", "auth": "staff", "permission": "advertising.campaigns.manage", "params": { "id": "uuid" }, "body": "StaffAdPatch", "response": "StaffAd", "errors": ["ILLEGAL_TRANSITION", "CONFLICT", "VALIDATION_FAILED", "CREATIVE_FORMAT_INVALID"], "audited": true, "screens": ["admin/ads"] },
+    { "id": "submitStaffAd", "area": "admin", "method": "POST", "path": "/ads/{id}/submit", "summary": "Send the ad (or its pending change) for the two reviews", "desc": "draft or changes_requested → in_review; on a scheduled, live or paused ad: submits its pending change. Submit checks: a phone image of the placement's size, a description (alt), an available destination, endsAt in the future and at most 90 days after the start (or after now when startsAt is empty). Failed checks are CHECKS_FAILED with details.checks.", "auth": "staff", "permission": "advertising.campaigns.manage", "params": { "id": "uuid" }, "response": "StaffAd", "errors": ["ILLEGAL_TRANSITION", "CHECKS_FAILED"], "audited": true, "events": ["advertising.campaign.status_changed"], "screens": ["admin/ads"] },
+    { "id": "reviewStaffAd", "area": "admin", "method": "POST", "path": "/ads/{id}/review", "summary": "Approve, request changes or reject the open review step (first review or pending change)", "desc": "The step comes from the caller's access roles (Advertising Manager → advertising, Content or Marketing Manager → content, Business Owner either). The person who created the ad (or the change) reviews neither step, and one person cannot take both (SAME_REVIEWER). A note is required to request changes or reject. Last approval of the first review: scheduled for startsAt, or live at once when startsAt is empty or past. Last approval of a change: the change replaces the live version (images, destination, name, alt, start, deal) and the pending change is cleared. Request changes on a change: the change goes back to its author (state changes_requested). Reject of a change: the change is dropped and the live version keeps running; reject of a first review: the ad is rejected.", "auth": "staff", "permission": "advertising.campaigns.review", "params": { "id": "uuid" }, "body": { "decision": "enum(approve|request_changes|reject)", "note": "text?", "step": { "type": "enum(advertising|content)?", "desc": "Only when the caller holds both reviewing roles" } }, "response": "StaffAd", "errors": ["ILLEGAL_TRANSITION", "SAME_REVIEWER", "FORBIDDEN", "VALIDATION_FAILED"], "audited": true, "events": ["advertising.campaign.status_changed"], "screens": ["admin/ads"] },
+    { "id": "pauseStaffAd", "area": "admin", "method": "POST", "path": "/ads/{id}/pause", "summary": "Pause a scheduled or live ad (off the app within 1 minute)", "auth": "staff", "permission": "advertising.campaigns.publish", "params": { "id": "uuid" }, "body": { "reason": "text?" }, "response": "StaffAd", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "events": ["advertising.campaign.status_changed"], "screens": ["admin/ads"] },
+    { "id": "resumeStaffAd", "area": "admin", "method": "POST", "path": "/ads/{id}/resume", "summary": "Resume a paused ad", "auth": "staff", "permission": "advertising.campaigns.publish", "params": { "id": "uuid" }, "body": { "reason": "text?" }, "response": "StaffAd", "errors": ["ILLEGAL_TRANSITION", "AD_UNAVAILABLE"], "audited": true, "events": ["advertising.campaign.status_changed"], "screens": ["admin/ads"] },
+    { "id": "endStaffAd", "area": "admin", "method": "POST", "path": "/ads/{id}/end", "summary": "End a scheduled, live or paused ad now", "desc": "A pending change is dropped with it.", "auth": "staff", "permission": "advertising.campaigns.publish", "params": { "id": "uuid" }, "body": { "reason": "text?" }, "response": "StaffAd", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "events": ["advertising.campaign.status_changed"], "screens": ["admin/ads"] },
+    { "id": "duplicateStaffAd", "area": "admin", "method": "POST", "path": "/ads/{id}/duplicate", "summary": "Copy an ad into a new draft", "desc": "Same placement, images, description, destination and deal; no dates, no review.", "auth": "staff", "permission": "advertising.campaigns.manage", "params": { "id": "uuid" }, "response": "StaffAd", "status": 201, "audited": true, "screens": ["admin/ads"] },
+    { "id": "deleteStaffAd", "area": "admin", "method": "DELETE", "path": "/ads/{id}", "summary": "Delete a draft that never ran", "auth": "staff", "permission": "advertising.campaigns.manage", "params": { "id": "uuid" }, "response": null, "status": 204, "errors": ["ILLEGAL_TRANSITION", "CONFLICT"], "audited": true, "screens": ["admin/ads"] },
+    { "id": "reorderStaffAds", "area": "admin", "method": "PUT", "path": "/ads/order", "summary": "Set the carousel order of a placement's live and scheduled ads (applies at once)", "auth": "staff", "permission": "advertising.campaigns.manage", "body": "StaffAdsOrderInput", "response": "StaffAdsPage", "errors": ["VALIDATION_FAILED"], "audited": true, "screens": ["admin/ads"] },
+    { "id": "searchAdDestinations", "area": "admin", "method": "GET", "path": "/ads/destinations", "summary": "Search what an ad can open, for the destination pickers", "desc": "One search for every picker kind: product (active catalog products), category, department (the ten department pages), restaurant (food), deal (promotions live or scheduled), collection (content collections and campaign pages), seller_store (approved sellers), brand (active brands), phone (department phones). url has no options. A module that is off answers no options. Needs advertising.campaigns.view, .manage or .review (checked by the handler).", "auth": "staff", "query": { "kind": "enum(product|category|department|restaurant|deal|collection|seller_store|brand|phone|url)", "q": "string?", "limit": { "type": "int?", "desc": "1–50, default 20" } }, "response": { "items": "AdDestinationOption[]" }, "errors": ["FORBIDDEN"], "screens": ["admin/ads"] },
 
     { "id": "listPlacements", "area": "admin", "method": "GET", "path": "/placements", "summary": "Placements with pages, formats, caps, rotation and dismissal rules", "auth": "staff", "permission": "advertising.campaigns.view", "response": "Placement[]", "screens": ["admin/ad-placements", "admin/ad-campaign"] },
     { "id": "updatePlacement", "area": "admin", "method": "PATCH", "path": "/placements/{id}", "summary": "Edit a placement's rules or turn it on/off", "desc": "Takes effect for new displays immediately. Blocked pages from the global rules can never be added. Turning on a 'later' placement requires its phase feature flag. body.version must equal Placement.version (optimistic lock); a stale version is CONFLICT and nothing changes.", "auth": "staff", "permission": "advertising.placements.manage", "params": { "id": "uuid" }, "body": "PlacementPatch", "response": "Placement", "errors": ["PAGE_NOT_ELIGIBLE", "CONFLICT", "NOT_IMPLEMENTED"], "audited": true, "events": ["advertising.placement.updated"], "screens": ["admin/ad-placements"] },
@@ -533,6 +645,7 @@
     "CREATIVE_FORMAT_INVALID": { "status": 422, "meaning": "Size, dimensions, file type or text length does not match the placement format." },
     "INVALID_IMPRESSION_TOKEN": { "status": 400, "meaning": "The tracking token is missing, expired or tampered with." },
     "PAID_ADS_DISABLED": { "status": 409, "meaning": "Paid seller advertising is not enabled yet." },
+    "SLOT_FULL": { "status": 409, "meaning": "The carousel already has its most live ads (Placement.maxPerPage); schedule the ad instead: it starts when one ends." },
     "OFFER_NOT_PROMOTABLE": { "status": 422, "meaning": "The offer is not the seller's, not active or out of stock." }
   },
   "notes": [
@@ -547,6 +660,13 @@
     "Dependencies follow the architecture doc (media, access). promotions, offers, inventory, catalog, sellers, orders and content are optional: without them the related checks are skipped and the matching auto-pause rules do nothing.",
     "Global rules changes are versioned with an effective date and always need Business Owner approval (admin/ad-placements); the four blocked page types can never be unblocked.",
     "Reviewer roles: approve, request-changes and creative review take the reviewing step from the caller's access roles (access.rolesOf), so a Content Manager can never act on the Advertising step by sending role advertising.",
-    "Attribution privacy (decision: guest attribution only with personalizationAllowed): orders carry visitorId only when the shopper allowed personalization; clicks recorded without personalization keep no visitor key usable for attribution."
+    "Attribution privacy (decision: guest attribution only with personalizationAllowed): orders carry visitorId only when the shopper allowed personalization; clicks recorded without personalization keep no visitor key usable for attribution.",
+    "Staff ads (GET/POST /ads…, owner decision 2026-10-23): the simple Advertisements page. A staff ad is an own (platform) campaign with one placement, a phone image creative (plus an optional website image for opening_fullscreen), a picked destination resolved to a store path, a schedule, a carousel position and an optional linked deal (linkedPromotionId, stopWithPromotion). It uses the same lifecycle, review steps (advertising + content, never the creator, never one person for both), jobs, serving and stats as every campaign; the campaign endpoints keep working on the same records. Slots: Full-screen (opening_fullscreen), Home carousel (home_banner), Departments (software_top, food_top, companies_top, play_top), Deals (deals_top), Other (category_banner, popup).",
+    "Pending change: editing a scheduled, live or paused staff ad saves the edit as campaigns.pending_change and the current version keeps serving. Submitting it opens a new review submission (approval_steps.submission); the last approval applies it (new creatives replace the old ones, destination, name, alt, start and deal are copied) and clears it; reject drops it. End date and carousel position never need review.",
+    "Carousel order: carousel placements (rotation mode carousel) serve their ads by campaigns.position (1 first), then by creation. Every staff ad gets the next position of its placement when created; PUT /ads/order rewrites the order of the live and scheduled ones.",
+    "Destinations are picked (AdDestinationInput) and resolved server-side to app store paths through the owning modules' linkTargets public API: product /p/{slug}/{id}, category /c/{slug}, department /phones, /farm-machines, /software, /welfare, /food, /booking, /blogs, /companies, /play, /rewards, restaurant /food/restaurants/{slug}, deal /deals?campaign={id}, collection /collection/{slug}, seller_store /shop/{slug} (Official Store /official), brand /brand/{slug}, phone /phones/{slug}; url is kept as typed (https, or a store path). Promoted-offer impressions open /p/{slug}/{productId}?offer={offerId}.",
+    "Links saved before the pickers (kind url and the wizard's kinds) are read as the target their store path names (and converted by the 2026-10-23 destinations migration): /p/{slug}/{id} and /product/{id} product; /c/{slug} category; /pages, /collections and /collection/{slug} collection; /deals the Deals tab (kind deal, targetId tab) and /deals?campaign={id} a deal; the ten department paths (and the old /softwares) department; /phones/{slug} phone; /food/restaurants/{slug} restaurant; /shop/{slug} and /official seller_store; /brand/{slug} brand. A slug that is not found keeps its path with available false. Other store paths stay kind url labelled Store page; https addresses are Web address.",
+    "Slot settings (2026-10-23): carousel slots show every live ad in position order, each for rotation.carouselSeconds (2–15), with at most maxPerPage live ads (1–20, default 10). An ad that would go live in a full carousel (last approval, its start time, resume) waits as scheduled and starts when one ends (oldest start first); activating one by hand is SLOT_FULL. The single-ad slots (opening_fullscreen, popup, category_banner) let their ads take turns in position order per page view (category banner: ads for the page's category first). Slots on the Advertisements page show on the slot's pages (eligiblePages within pageOptions), not per-ad pages.",
+    "deals_top (2026-10-23): a short carousel at the top of the app's Deals tab, phone 750 × 150 (5:1), every live ad in position order, like the department carousels."
   ]
 }

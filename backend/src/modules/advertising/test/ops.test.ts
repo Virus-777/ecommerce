@@ -22,7 +22,7 @@ describe('placements', () => {
   it('lists placements with their rules and live counts; edits need the version and a reason', async () => {
     const list = await k.call('GET', `${ADMIN}/placements`, k.staff);
     expect(list.status).toBe(200);
-    expect(list.body.map((p: any) => p.key)).toEqual(['opening_fullscreen', 'home_banner', 'category_banner', 'campaign_banner', 'popup', 'sponsored_product', 'sponsored_store', 'floating', 'interstitial', 'video', 'companies_top', 'play_top', 'software_top', 'food_top']);
+    expect(list.body.map((p: any) => p.key)).toEqual(['opening_fullscreen', 'home_banner', 'category_banner', 'campaign_banner', 'popup', 'sponsored_product', 'sponsored_store', 'floating', 'interstitial', 'video', 'companies_top', 'play_top', 'software_top', 'food_top', 'deals_top']);
     // Placement.version is the optimistic lock PATCH sends back; the seeded placements start at version 1
     const popup = list.body.find((p: any) => p.key === 'popup');
     expect(popup).toMatchObject({ version: 1, kind: 'overlay', availability: 'launch', label: 'Ad', trigger: { afterSeconds: 8 }, dismissal: { mode: 'days', days: 7 }, pagesLabel: expect.stringContaining('Home') });

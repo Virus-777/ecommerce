@@ -32,7 +32,7 @@ export interface TransitionOptions {
 
 /** Normalized campaign values ready for the row */
 export interface CampaignValues {
-  row: Omit<CampaignRec, 'id' | 'ref' | 'status' | 'spent' | 'created_by' | 'created_at' | 'updated_at' | 'version' | 'paused_reason' | 'paused_by' | 'paused_at' | 'pause_cause' | 'rejected_reason' | 'finished_reason'>;
+  row: Omit<CampaignRec, 'id' | 'ref' | 'status' | 'spent' | 'created_by' | 'created_at' | 'updated_at' | 'version' | 'paused_reason' | 'paused_by' | 'paused_at' | 'pause_cause' | 'rejected_reason' | 'finished_reason' | 'position' | 'alt' | 'pending_change'>;
   items: Omit<ItemRec, 'campaign_id'>[];
   creatives: { creative_id: string; device: string }[];
   placement: PlacementRec;
@@ -371,8 +371,10 @@ export class CampaignsPart extends Part {
   }
 
   /** Inserts a campaign draft with its items and creatives */
-  async insertDraft(v: CampaignValues, by: By, logAction = 'create', reason: string | null = null): Promise<CampaignRec> {
+  async insertDraft(v: CampaignValues, by: By, logAction = 'create', reason: string | null = null, extra: Partial<Pick<CampaignRec, 'position' | 'alt'>> = {}): Promise<CampaignRec> {
     const ref = await this.ctx.refs.next('AD', { digits: 4 });
+    // every staff campaign gets the next carousel position of its placement (carousels serve by position)
+    const position = extra.position ?? (v.row.origin === 'staff' ? (await this.repo.maxPosition(v.row.placement_id)) + 1 : null);
     const now = this.now();
     const id = newId();
     const row = await this.repo.transaction(async (tx) => {
@@ -388,6 +390,9 @@ export class CampaignsPart extends Part {
         pause_cause: null,
         rejected_reason: null,
         finished_reason: null,
+        position,
+        alt: extra.alt ?? null,
+        pending_change: null,
         created_by: encodeActor(by.actor),
         created_at: now,
         updated_at: now,
@@ -602,8 +607,14 @@ export class CampaignsPart extends Part {
     const sys: By = { actor: SYSTEM };
     if (r.after_approval === 'activate') {
       const a = this.parts.views.activateInfo(r, await this.parts.views.linkedPromotion(r));
+      const full = await this.core.slotFull(r.placement_id, r.id);
+      if (a.allowed && full) {
+        // a full carousel: the ad waits as scheduled and starts when one ends (ops.startDue)
+        await this.transition(r.id, 'schedule', sys, { reason: `${full.name} is full (${full.live} live); it starts when one ends`, logAction: 'waiting_for_slot', ...(r.starts_at ? {} : { patch: { starts_at: this.now() } }) });
+        return;
+      }
       if (a.allowed) {
-        await this.transition(r.id, 'activate', sys, { reason: 'Activated as chosen before approval' });
+        await this.transition(r.id, 'activate', sys, { reason: 'Activated as chosen before approval', ...(r.starts_at ? {} : { patch: { starts_at: this.now() } }) });
         return;
       }
       await this.transition(r.id, 'schedule', sys, { reason: `Scheduled instead of activated: ${a.reason}`, logAction: 'after_approval_fallback' });
@@ -659,7 +670,9 @@ export class CampaignsPart extends Part {
     if (!adCampaignMachine.can(row.status as Status, 'activate')) adCampaignMachine.next(row.status as Status, 'activate');
     const a = this.parts.views.activateInfo(row, await this.parts.views.linkedPromotion(row));
     if (!a.allowed) throw this.ctx.error('PROMOTION_NOT_STARTED', `${a.reason}. Schedule it instead.`);
-    const { before } = await this.transition(id, 'activate', by);
+    const full = await this.core.slotFull(row.placement_id, row.id);
+    if (full) throw this.ctx.error('SLOT_FULL', `${full.name} already has ${full.live} live ads (at most ${full.max}). Schedule it instead: it starts when one ends.`, { live: full.live, max: full.max });
+    const { before } = await this.transition(id, 'activate', by, row.starts_at ? {} : { patch: { starts_at: this.now() } });
     await this.core.audit({ action: 'advertising.campaign.activate', actionLabel: `Activated ${before.ref}`, target: this.target(before) }, by);
     return this.view(id);
   }
@@ -683,7 +696,8 @@ export class CampaignsPart extends Part {
       const problem = await this.unavailability(row);
       if (problem) throw this.ctx.error('AD_UNAVAILABLE', problem);
     }
-    const to: Status = row.starts_at && row.starts_at.getTime() > this.now().getTime() ? 'scheduled' : 'live';
+    // back to live, unless the start is ahead or its carousel is full (then it waits as scheduled)
+    const to: Status = (row.starts_at && row.starts_at.getTime() > this.now().getTime()) || (await this.core.slotFull(row.placement_id, row.id)) ? 'scheduled' : 'live';
     const { before, after } = await this.transition(id, 'resume', by, { to, reason: reason?.trim() || null, patch: { paused_reason: null, paused_by: null, paused_at: null, pause_cause: null }, logAction: o.logAction ?? 'resume', ...(o.sellerId ? { sellerId: o.sellerId } : {}) });
     if (o.audit) await this.core.audit({ action: 'advertising.campaign.resume', actionLabel: `Resumed ${before.ref}`, target: this.target(before), reason: reason ?? null }, by);
     return after;
@@ -770,8 +784,8 @@ export class CampaignsPart extends Part {
     const endsAt = toDate(body.endsAt);
     if (!validDate(startsAt) || !validDate(endsAt) || endsAt!.getTime() <= startsAt!.getTime()) throw invalid([{ path: 'endsAt', message: 'The end must be after the start' }]);
     if (endsAt!.getTime() <= this.now().getTime()) throw invalid([{ path: 'endsAt', message: 'The end is in the past' }]);
-    const { id: _id, ref: _ref, status: _s, spent: _sp, created_by: _cb, created_at: _ca, updated_at: _ua, version: _v, paused_reason: _pr, paused_by: _pb, paused_at: _pa, pause_cause: _pc, rejected_reason: _rr, finished_reason: _fr, ...rest } = r;
-    const row = await this.insertDraft({ placement: m.placement, items: m.items.map(({ campaign_id: _c, ...i }) => i), creatives: m.creatives, row: { ...rest, starts_at: startsAt, ends_at: endsAt } }, by, 'renew', `Renewed from ${r.ref}`);
+    const { id: _id, ref: _ref, status: _s, spent: _sp, created_by: _cb, created_at: _ca, updated_at: _ua, version: _v, paused_reason: _pr, paused_by: _pb, paused_at: _pa, pause_cause: _pc, rejected_reason: _rr, finished_reason: _fr, position: _po, pending_change: _pch, alt, ...rest } = r;
+    const row = await this.insertDraft({ placement: m.placement, items: m.items.map(({ campaign_id: _c, ...i }) => i), creatives: m.creatives, row: { ...rest, starts_at: startsAt, ends_at: endsAt } }, by, 'renew', `Renewed from ${r.ref}`, { alt: alt ?? null });
     await this.core.audit({ action: 'advertising.campaign.renew', actionLabel: `Renewed ${r.ref} as ${row.ref}`, target: this.target(row), relatedTargets: [this.target(r)], after: { startsAt: body.startsAt, endsAt: body.endsAt } }, by);
     return this.view(row.id);
   }

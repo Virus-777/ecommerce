@@ -94,6 +94,31 @@ export class FoodCatalog extends FoodBase {
     return new Map((await this.repo.listRestaurants({ statuses: LISTED })).map((r) => [r.id, r]));
   }
 
+  /**
+   * Public API (advertising destination pickers): restaurants by name or id with their store path. Search lists
+   * listed restaurants only; resolving ids also returns the others, marked unavailable.
+   */
+  async linkTargets(input: { kind: 'restaurant'; q?: string; ids?: string[]; slugs?: string[]; limit?: number }): Promise<common.LinkTarget[]> {
+    if (input.kind !== 'restaurant') return [];
+    const limit = Math.min(Math.max(input.limit ?? 20, 1), 100);
+    let rows: RestaurantRow[];
+    if (input.ids) rows = input.ids.length ? await this.repo.restaurantsByIds([...new Set(input.ids)]) : [];
+    else if (input.slugs) rows = (await Promise.all([...new Set(input.slugs)].map((s) => this.repo.restaurantBySlug(s)))).filter((r): r is RestaurantRow => Boolean(r));
+    else {
+      const q = (input.q ?? '').trim().toLowerCase();
+      rows = (await this.repo.listRestaurants({ statuses: LISTED })).filter((r) => !q || r.name.toLowerCase().includes(q) || r.cuisine.toLowerCase().includes(q) || r.slug.includes(q)).slice(0, limit);
+    }
+    const refs = await this.refsMap(rows.map((r) => r.logo_id ?? r.image_id), 'thumb');
+    return rows.map((r) => ({
+      id: r.id,
+      label: r.name,
+      meta: `Restaurant · ${r.cuisine}`,
+      path: `/food/restaurants/${r.slug}`,
+      image: refs.get(r.logo_id ?? r.image_id ?? '') ?? null,
+      available: LISTED.includes(r.status),
+    }));
+  }
+
   /* ---------------------------------------------------------------- store */
 
   async listCategories(): Promise<FoodCategory[]> {

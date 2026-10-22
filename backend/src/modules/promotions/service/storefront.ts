@@ -573,4 +573,33 @@ export class StorefrontPart extends Part {
     }
     return { active: true };
   }
+
+  /**
+   * Link targets for advertising destination pickers: platform campaigns that are live or scheduled (by name or ref),
+   * or any campaign by id (only live and scheduled ones are available). They open the Deals tab (/deals?campaign={id}).
+   */
+  async linkTargets(input: { kind: 'deal'; q?: string; ids?: string[]; limit?: number }): Promise<common.LinkTarget[]> {
+    if (input.kind !== 'deal') return [];
+    const limit = Math.min(Math.max(input.limit ?? 20, 1), 100);
+    let rows;
+    if (input.ids) {
+      const ids = [...new Set(input.ids)].filter(isUuid);
+      rows = ids.length ? await this.repo.find('campaigns', { id: ids }) : [];
+    } else {
+      const q = (input.q ?? '').trim().toLowerCase();
+      rows = (await this.repo.find('campaigns', { owner_kind: 'platform', status: ['live', 'scheduled'] }, { orderBy: [['starts_at', 'asc']], limit: 500 }))
+        .filter((r) => !q || r.name.toLowerCase().includes(q) || r.ref.toLowerCase().includes(q))
+        .slice(0, limit);
+    }
+    const tz = this.core.ctx.config.market.timeZone || 'America/Los_Angeles';
+    const day = (d: Date) => new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: tz }).format(d);
+    return rows.map((r) => ({
+      id: r.id,
+      label: r.name,
+      meta: `Deal · ${r.status === 'scheduled' ? `starts ${day(r.starts_at)}` : r.status === 'live' ? `ends ${day(r.ends_at)}` : r.status}`,
+      path: `/deals?campaign=${r.id}`,
+      image: null,
+      available: r.status === 'live' || r.status === 'scheduled',
+    }));
+  }
 }

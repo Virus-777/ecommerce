@@ -153,6 +153,30 @@ export class DepartmentsPhones extends DepartmentsBase {
     return { id: row.id, slug: row.slug, brand: row.brand, name: row.name, meta: [first?.size, color?.name].filter(Boolean).join(' · '), price, ...dealOf(price, first?.was), image: ref ? { ...ref, alt: cover!.alt ?? ref.alt ?? null } : null };
   }
 
+  /**
+   * Public API (advertising destination pickers): phones by brand, name or id with their store path. Search lists
+   * published phones; resolving ids also returns hidden ones, marked unavailable.
+   */
+  async linkTargets(input: { kind: 'phone'; q?: string; ids?: string[]; slugs?: string[]; limit?: number }): Promise<common.LinkTarget[]> {
+    if (input.kind !== 'phone') return [];
+    const limit = Math.min(Math.max(input.limit ?? 20, 1), 100);
+    const slugs = input.slugs ? new Set(input.slugs) : null;
+    const wanted = input.ids ? new Set(input.ids) : null;
+    const q = (input.q ?? '').trim().toLowerCase();
+    const rows = (await this.repo.listPhones(wanted || slugs ? {} : { publishedOnly: true }))
+      .filter((r) => (wanted ? wanted.has(r.id) : slugs ? slugs.has(r.slug) : !q || `${r.brand} ${r.name} ${r.slug}`.toLowerCase().includes(q)))
+      .slice(0, wanted || slugs ? undefined : limit);
+    const covers = await this.refsMap(rows.map((r) => photosOf(r.photos)[0]?.id), 'thumb');
+    return rows.map((r) => ({
+      id: r.id,
+      label: `${r.brand} ${r.name}`.trim(),
+      meta: `Phone · ${r.brand}`,
+      path: `/phones/${r.slug}`,
+      image: covers.get(photosOf(r.photos)[0]?.id ?? '') ?? null,
+      available: r.status === 'published',
+    }));
+  }
+
   /* ---------------------------------------------------------------- store */
 
   async getPhones(): Promise<PhonesPage> {

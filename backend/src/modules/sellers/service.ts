@@ -101,6 +101,31 @@ export class SellersService implements SellersPublicApi {
     return this.accounts.exportRows(dataset, filters, principal, cursor);
   }
 
+  /**
+   * Link targets for advertising destination pickers: approved storefronts (/shop/{slug}) by name, or by id (any
+   * status; only approved ones are available).
+   */
+  async linkTargets(input: { kind: 'seller_store'; q?: string; ids?: string[]; slugs?: string[]; limit?: number }): Promise<common.LinkTarget[]> {
+    if (input.kind !== 'seller_store') return [];
+    const limit = Math.min(Math.max(input.limit ?? 20, 1), 100);
+    const bySlug = input.slugs ? (await Promise.all([...new Set(input.slugs)].map((s) => this.core.repo.sellerBySlug(s)))).flatMap((r) => (r ? [r.id] : [])) : null;
+    const ids = input.ids ?? bySlug;
+    const sellers = ids
+      ? ids.length
+        ? await this.getSellers([...new Set(ids)])
+        : []
+      : (await this.searchSellers({ ...(input.q?.trim() ? { search: input.q.trim() } : {}), statuses: ['approved'] }, { limit })).items;
+    const cards = new Map((sellers.length ? await this.getStorefrontCard(sellers.map((x) => x.id)) : []).map((c) => [c.id, c]));
+    return sellers.map((x) => ({
+      id: x.id,
+      label: x.storeName,
+      meta: `Store · ${x.ref}${x.verified ? ' · Verified' : ''}`,
+      path: `/shop/${x.slug}`,
+      image: cards.get(x.id)?.logo ?? null,
+      available: x.status === 'approved',
+    }));
+  }
+
   /* ---------------- events consumed */
 
   onInvitationAcceptedFromIdentity(event: EventPayload<'identity.invitation.accepted'>) {

@@ -124,6 +124,12 @@ export class AdvertisingRepository {
     return Object.fromEntries(rows.map((r) => [r._id, r.n]));
   }
 
+  /** The highest carousel position used in a placement (0 when none) */
+  async maxPosition(placementId: string): Promise<number> {
+    const top = await this.#campaigns.findOne({ placement_id: placementId, position: { $ne: null } }, { sort: { position: -1 } });
+    return (top?.position as number | null | undefined) ?? 0;
+  }
+
   /** Live campaigns whose period covers `at` */
   liveCampaigns(at: Date): Promise<CampaignRec[]> {
     return this.#campaigns.find({ status: 'live', starts_at: { $lte: at }, ends_at: { $gt: at } }, { sort: { id: 1 } });

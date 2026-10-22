@@ -141,7 +141,7 @@ export const PopupTrigger: z.ZodType<PopupTrigger> = z.object({
 
 export interface Placement {
   id: string;
-  key: "opening_fullscreen" | "home_banner" | "category_banner" | "campaign_banner" | "popup" | "sponsored_product" | "sponsored_store" | "floating" | "interstitial" | "video" | "companies_top" | "play_top" | "software_top" | "food_top";
+  key: "opening_fullscreen" | "home_banner" | "category_banner" | "campaign_banner" | "popup" | "sponsored_product" | "sponsored_store" | "floating" | "interstitial" | "video" | "companies_top" | "play_top" | "software_top" | "food_top" | "deals_top";
   name: string;
   /** Shown on the ad type card when choosing a placement, e.g. Appears when a visitor opens the site. Close or skip always visible. */
   description: string;
@@ -163,7 +163,12 @@ export interface Placement {
   /** Fixed positions in results lists, e.g. [3, 8] */
   positions?: number[] | null;
   label: "Ad" | "Sponsored";
+  /** Live ads in the slot now (the Live count of its tab on Advertisements) */
   liveCampaigns: number;
+  /** Managed on the Advertisements page (full-screen, home and department carousels, deals carousel, category banner, pop-up); false for seller-ad and later-phase slots */
+  inUse: boolean;
+  /** Page types this slot can be set to show on (the pages the app and website ask for it); PlacementPatch.eligiblePages must stay within them */
+  pageOptions: string[];
   /** Increments on every change; PATCH must send the version it read (PlacementPatch.version), otherwise CONFLICT */
   version: number;
   updatedAt: string;
@@ -172,7 +177,7 @@ export interface Placement {
 
 export const Placement: z.ZodType<Placement> = z.object({
   id: z.uuid(),
-  key: z.enum(["opening_fullscreen", "home_banner", "category_banner", "campaign_banner", "popup", "sponsored_product", "sponsored_store", "floating", "interstitial", "video", "companies_top", "play_top", "software_top", "food_top"]),
+  key: z.enum(["opening_fullscreen", "home_banner", "category_banner", "campaign_banner", "popup", "sponsored_product", "sponsored_store", "floating", "interstitial", "video", "companies_top", "play_top", "software_top", "food_top", "deals_top"]),
   name: z.string(),
   description: z.string().describe("Shown on the ad type card when choosing a placement, e.g. Appears when a visitor opens the site. Close or skip always visible."),
   kind: z.enum(["overlay", "inline", "card", "strip"]),
@@ -199,7 +204,9 @@ export const Placement: z.ZodType<Placement> = z.object({
   maxPerPage: z.number().int().nullish(),
   positions: z.array(z.number().int()).describe("Fixed positions in results lists, e.g. [3, 8]").nullish(),
   label: z.enum(["Ad", "Sponsored"]),
-  liveCampaigns: z.number().int(),
+  liveCampaigns: z.number().int().describe("Live ads in the slot now (the Live count of its tab on Advertisements)"),
+  inUse: z.boolean().describe("Managed on the Advertisements page (full-screen, home and department carousels, deals carousel, category banner, pop-up); false for seller-ad and later-phase slots"),
+  pageOptions: z.array(z.string()).describe("Page types this slot can be set to show on (the pages the app and website ask for it); PlacementPatch.eligiblePages must stay within them"),
   version: z.number().int().describe("Increments on every change; PATCH must send the version it read (PlacementPatch.version), otherwise CONFLICT"),
   updatedAt: z.iso.datetime({ offset: true }),
   get updatedBy() {
@@ -214,10 +221,11 @@ export interface PlacementPatch {
   /** The label is written by the server */
   frequencyCap?: FrequencyCapInput | null;
   trigger?: PopupTrigger | null;
-  /** The label is written by the server */
+  /** The label is written by the server. Carousel slots: carouselSeconds 2–15 (how long each ad shows) */
   rotation?: RotationRuleInput | null;
   /** The label is written by the server */
   dismissal?: DismissalRuleInput | null;
+  /** Carousel slots: live ads at most (1–20); ads approved beyond it wait as scheduled and start when one ends */
   maxPerPage?: number | null;
   positions?: number[] | null;
   reason: string;
@@ -242,7 +250,7 @@ export const PlacementPatch: z.ZodType<PlacementPatch> = z.object({
   get dismissal() {
     return DismissalRuleInput.nullish();
   },
-  maxPerPage: z.number().int().nullish(),
+  maxPerPage: z.number().int().describe("Carousel slots: live ads at most (1–20); ads approved beyond it wait as scheduled and start when one ends").nullish(),
   positions: z.array(z.number().int()).nullish(),
   reason: z.string(),
   version: z.number().int(),
@@ -331,15 +339,17 @@ export const Audience: z.ZodType<Audience> = z.object({
 }).register(common.apiTypes, { id: "advertising.Audience" });
 
 export interface Destination {
-  kind: "url" | "product" | "offer" | "seller_store" | "brand" | "collection" | "campaign_page";
+  kind: "url" | "product" | "offer" | "seller_store" | "brand" | "collection" | "campaign_page" | "category" | "department" | "restaurant" | "deal" | "phone";
+  /** uuid, or a department key for kind department */
   targetId?: string | null;
+  /** The store path (or https url) visitors open; for picked kinds the server writes the resolved path */
   url: string;
 }
 
 export const Destination: z.ZodType<Destination> = z.object({
-  kind: z.enum(["url", "product", "offer", "seller_store", "brand", "collection", "campaign_page"]),
-  targetId: z.uuid().nullish(),
-  url: z.string(),
+  kind: z.enum(["url", "product", "offer", "seller_store", "brand", "collection", "campaign_page", "category", "department", "restaurant", "deal", "phone"]),
+  targetId: z.string().describe("uuid, or a department key for kind department").nullish(),
+  url: z.string().describe("The store path (or https url) visitors open; for picked kinds the server writes the resolved path"),
 }).register(common.apiTypes, { id: "advertising.Destination" });
 
 export interface PromotedItem {
@@ -1159,7 +1169,10 @@ export interface ServeDecision {
   /** placementKey → ads in rotation order */
   slots: Record<string, AdImpression[]>;
   sponsoredProducts: SponsoredProductSlot[];
+  /** Seconds per ad of the first carousel in the decision (kept for older clients; use rotationBySlot) */
   rotationSeconds?: number | null;
+  /** placementKey → seconds each ad shows, for every carousel slot in the decision */
+  rotationBySlot: Record<string, number>;
   /** Clients may reuse the decision this long (pausing takes effect within 1 minute) */
   ttlSeconds: number;
 }
@@ -1178,7 +1191,8 @@ export const ServeDecision: z.ZodType<ServeDecision> = z.object({
   get sponsoredProducts() {
     return z.array(SponsoredProductSlot);
   },
-  rotationSeconds: z.number().int().nullish(),
+  rotationSeconds: z.number().int().describe("Seconds per ad of the first carousel in the decision (kept for older clients; use rotationBySlot)").nullish(),
+  rotationBySlot: z.record(z.string(), z.number().int()).describe("placementKey → seconds each ad shows, for every carousel slot in the decision"),
   ttlSeconds: z.number().int().describe("Clients may reuse the decision this long (pausing takes effect within 1 minute)"),
 }).register(common.apiTypes, { id: "advertising.ServeDecision" });
 
@@ -1542,6 +1556,400 @@ export const SellerAdsSummary: z.ZodType<SellerAdsSummary> = z.object({
   statementNote: z.string(),
 }).register(common.apiTypes, { id: "advertising.SellerAdsSummary" });
 
+export interface AdDestinationInput {
+  /** What the ad opens; every kind but url is picked from GET /ads/destinations */
+  kind: "product" | "category" | "department" | "restaurant" | "deal" | "collection" | "seller_store" | "brand" | "phone" | "url";
+  /** The picked target's id (uuid). For department: the department key phones|farm|software|welfare|food|booking|blogs|companies|play|rewards. For deal: tab (or left out) is the Deals tab itself. seller_store 00000000-0000-7000-8000-000000000001 is the Official Store. Not used for url */
+  targetId?: string | null;
+  /** kind url only: an https address (outside pages). A store path that names a target (e.g. /c/cookware) is saved as that target */
+  url?: string | null;
+}
+
+export const AdDestinationInput: z.ZodType<AdDestinationInput> = z.object({
+  kind: z.enum(["product", "category", "department", "restaurant", "deal", "collection", "seller_store", "brand", "phone", "url"]).describe("What the ad opens; every kind but url is picked from GET /ads/destinations"),
+  targetId: z.string().describe("The picked target's id (uuid). For department: the department key phones|farm|software|welfare|food|booking|blogs|companies|play|rewards. For deal: tab (or left out) is the Deals tab itself. seller_store 00000000-0000-7000-8000-000000000001 is the Official Store. Not used for url").nullish(),
+  url: z.string().describe("kind url only: an https address (outside pages). A store path that names a target (e.g. /c/cookware) is saved as that target").nullish(),
+}).register(common.apiTypes, { id: "advertising.AdDestinationInput" });
+
+export interface AdDestination {
+  kind: "product" | "category" | "department" | "restaurant" | "deal" | "collection" | "seller_store" | "brand" | "phone" | "url";
+  targetId?: string | null;
+  /** e.g. Halden Aurora ANC Wireless Headphones */
+  label: string;
+  /** e.g. Product · Halden; Collection or Page for kind collection; Web address or Store page for kind url (label Store page /x for a store path nothing names) */
+  meta?: string | null;
+  /** The store path the app opens (e.g. /p/halden-aurora/…, /c/headphones, /food/restaurants/…), or the https url for kind url; what AdImpression.destination carries */
+  path: string;
+  /** The target still exists and is shown in the store (submit needs true) */
+  available: boolean;
+}
+
+export const AdDestination: z.ZodType<AdDestination> = z.object({
+  kind: z.enum(["product", "category", "department", "restaurant", "deal", "collection", "seller_store", "brand", "phone", "url"]),
+  targetId: z.string().nullish(),
+  label: z.string().describe("e.g. Halden Aurora ANC Wireless Headphones"),
+  meta: z.string().describe("e.g. Product · Halden; Collection or Page for kind collection; Web address or Store page for kind url (label Store page /x for a store path nothing names)").nullish(),
+  path: z.string().describe("The store path the app opens (e.g. /p/halden-aurora/…, /c/headphones, /food/restaurants/…), or the https url for kind url; what AdImpression.destination carries"),
+  available: z.boolean().describe("The target still exists and is shown in the store (submit needs true)"),
+}).register(common.apiTypes, { id: "advertising.AdDestination" });
+
+export interface AdDestinationOption {
+  kind: "product" | "category" | "department" | "restaurant" | "deal" | "collection" | "seller_store" | "brand" | "phone" | "url";
+  targetId: string;
+  label: string;
+  meta?: string | null;
+  image?: common.MediaRef | null;
+  /** The store path the target opens */
+  path: string;
+}
+
+export const AdDestinationOption: z.ZodType<AdDestinationOption> = z.object({
+  kind: z.enum(["product", "category", "department", "restaurant", "deal", "collection", "seller_store", "brand", "phone", "url"]),
+  targetId: z.string(),
+  label: z.string(),
+  meta: z.string().nullish(),
+  get image() {
+    return common.MediaRef.nullish();
+  },
+  path: z.string().describe("The store path the target opens"),
+}).register(common.apiTypes, { id: "advertising.AdDestinationOption" });
+
+export interface AdImage {
+  /** Media asset id */
+  id: string;
+  url: string;
+  width?: number | null;
+  height?: number | null;
+}
+
+export const AdImage: z.ZodType<AdImage> = z.object({
+  id: z.uuid().describe("Media asset id"),
+  url: z.url(),
+  width: z.number().int().nullish(),
+  height: z.number().int().nullish(),
+}).register(common.apiTypes, { id: "advertising.AdImage" });
+
+export interface AdReviewStep {
+  step: "advertising" | "content";
+  state: "waiting" | "approved" | "changes_requested" | "rejected";
+  by?: common.Actor | null;
+  at?: string | null;
+  note?: string | null;
+}
+
+export const AdReviewStep: z.ZodType<AdReviewStep> = z.object({
+  step: z.enum(["advertising", "content"]),
+  state: z.enum(["waiting", "approved", "changes_requested", "rejected"]),
+  get by() {
+    return common.Actor.nullish();
+  },
+  at: z.iso.datetime({ offset: true }).nullish(),
+  note: z.string().nullish(),
+}).register(common.apiTypes, { id: "advertising.AdReviewStep" });
+
+export interface AdReview {
+  /** Empty until submitted */
+  steps: AdReviewStep[];
+  /** The caller may take an open step now (has the reviewing role, did not create the ad or the change, did not take the other step) */
+  canReview: boolean;
+  submittedBy?: common.Actor | null;
+  submittedAt?: string | null;
+}
+
+export const AdReview: z.ZodType<AdReview> = z.object({
+  get steps() {
+    return z.array(AdReviewStep);
+  },
+  canReview: z.boolean().describe("The caller may take an open step now (has the reviewing role, did not create the ad or the change, did not take the other step)"),
+  get submittedBy() {
+    return common.Actor.nullish();
+  },
+  submittedAt: z.iso.datetime({ offset: true }).nullish(),
+}).register(common.apiTypes, { id: "advertising.AdReview" });
+
+export interface StaffAdChange {
+  /** draft: saved, not submitted yet */
+  state: "draft" | "in_review" | "changes_requested";
+  name?: string | null;
+  image?: AdImage | null;
+  webImage?: AdImage | null;
+  alt?: string | null;
+  destination?: AdDestination | null;
+  startsAt?: string | null;
+  dealId?: string | null;
+  dealName?: string | null;
+  stopWithDeal?: boolean | null;
+  /** Fields that differ from the live version: name, image, webImage, alt, destination, startsAt, deal */
+  changedFields: string[];
+  review: AdReview;
+  createdBy: common.Actor;
+  createdAt: string;
+}
+
+export const StaffAdChange: z.ZodType<StaffAdChange> = z.object({
+  state: z.enum(["draft", "in_review", "changes_requested"]).describe("draft: saved, not submitted yet"),
+  name: z.string().nullish(),
+  get image() {
+    return AdImage.nullish();
+  },
+  get webImage() {
+    return AdImage.nullish();
+  },
+  alt: z.string().nullish(),
+  get destination() {
+    return AdDestination.nullish();
+  },
+  startsAt: z.iso.datetime({ offset: true }).nullish(),
+  dealId: z.uuid().nullish(),
+  dealName: z.string().nullish(),
+  stopWithDeal: z.boolean().nullish(),
+  changedFields: z.array(z.string()).describe("Fields that differ from the live version: name, image, webImage, alt, destination, startsAt, deal"),
+  get review() {
+    return AdReview;
+  },
+  get createdBy() {
+    return common.Actor;
+  },
+  createdAt: z.iso.datetime({ offset: true }),
+}).register(common.apiTypes, { id: "advertising.StaffAdChange" });
+
+export interface StaffAdStats {
+  /** Displays */
+  views: number;
+  /** Clicks */
+  taps: number;
+}
+
+export const StaffAdStats: z.ZodType<StaffAdStats> = z.object({
+  views: z.number().int().describe("Displays"),
+  taps: z.number().int().describe("Clicks"),
+}).register(common.apiTypes, { id: "advertising.StaffAdStats" });
+
+export interface StaffAd {
+  id: string;
+  /** AD-YYMMDD-NNNN */
+  ref: string;
+  name: string;
+  placementKey: string;
+  placementName: string;
+  /** category_banner only: the category it shows on (null = every category) */
+  categoryId?: string | null;
+  status: "draft" | "in_review" | "changes_requested" | "scheduled" | "live" | "paused" | "ended" | "rejected";
+  /** Phone image (the placement's phone format, e.g. 750 × 400) */
+  image?: AdImage | null;
+  /** opening_fullscreen only, optional: website image 1600 × 900 */
+  webImage?: AdImage | null;
+  alt?: string | null;
+  destination?: AdDestination | null;
+  /** null = as soon as approved */
+  startsAt?: string | null;
+  /** Required to submit */
+  endsAt?: string | null;
+  /** Linked deal (promotions campaign) */
+  dealId?: string | null;
+  dealName?: string | null;
+  stopWithDeal: boolean;
+  /** 1-based order inside its placement's carousel (live and scheduled ads); serving order of carousel placements */
+  position: number;
+  /** The initial review (the latest submission of the ad itself) */
+  review: AdReview;
+  /** An edit of a scheduled, live or paused ad waiting for review; the current version keeps running until the change is approved */
+  pendingChange?: StaffAdChange | null;
+  stats: StaffAdStats;
+  /** edit, submit, review, pause, resume, end, duplicate, delete */
+  allowedActions: string[];
+  /** e.g. Needs Content review; Changes requested: brighter image */
+  statusNote?: string | null;
+  createdBy: common.Actor;
+  createdAt: string;
+  updatedAt: string;
+  /** PATCH sends it back; a stale version is CONFLICT */
+  version: number;
+}
+
+export const StaffAd: z.ZodType<StaffAd> = z.object({
+  id: z.uuid(),
+  ref: z.string().describe("AD-YYMMDD-NNNN"),
+  name: z.string(),
+  placementKey: z.string(),
+  placementName: z.string(),
+  categoryId: z.uuid().describe("category_banner only: the category it shows on (null = every category)").nullish(),
+  status: z.enum(["draft", "in_review", "changes_requested", "scheduled", "live", "paused", "ended", "rejected"]),
+  get image() {
+    return AdImage.nullish();
+  },
+  get webImage() {
+    return AdImage.nullish();
+  },
+  alt: z.string().nullish(),
+  get destination() {
+    return AdDestination.nullish();
+  },
+  startsAt: z.iso.datetime({ offset: true }).describe("null = as soon as approved").nullish(),
+  endsAt: z.iso.datetime({ offset: true }).describe("Required to submit").nullish(),
+  dealId: z.uuid().describe("Linked deal (promotions campaign)").nullish(),
+  dealName: z.string().nullish(),
+  stopWithDeal: z.boolean(),
+  position: z.number().int().describe("1-based order inside its placement's carousel (live and scheduled ads); serving order of carousel placements"),
+  get review() {
+    return AdReview;
+  },
+  get pendingChange() {
+    return StaffAdChange.nullish();
+  },
+  get stats() {
+    return StaffAdStats;
+  },
+  allowedActions: z.array(z.string()).describe("edit, submit, review, pause, resume, end, duplicate, delete"),
+  statusNote: z.string().describe("e.g. Needs Content review; Changes requested: brighter image").nullish(),
+  get createdBy() {
+    return common.Actor;
+  },
+  createdAt: z.iso.datetime({ offset: true }),
+  updatedAt: z.iso.datetime({ offset: true }),
+  version: z.number().int().describe("PATCH sends it back; a stale version is CONFLICT"),
+}).register(common.apiTypes, { id: "advertising.StaffAd" });
+
+export interface StaffAdInput {
+  name: string;
+  placementKey: string;
+  /** category_banner only */
+  categoryId?: string | null;
+  /** Media asset of the phone image (uploaded through media first; checked against the placement's phone format) */
+  imageId?: string | null;
+  /** opening_fullscreen only: website image 1600 × 900 */
+  webImageId?: string | null;
+  alt?: string | null;
+  destination?: AdDestinationInput | null;
+  /** null = as soon as approved */
+  startsAt?: string | null;
+  endsAt?: string | null;
+  dealId?: string | null;
+  stopWithDeal?: boolean | null;
+}
+
+export const StaffAdInput: z.ZodType<StaffAdInput> = z.object({
+  name: z.string(),
+  placementKey: z.string(),
+  categoryId: z.uuid().describe("category_banner only").nullish(),
+  imageId: z.uuid().describe("Media asset of the phone image (uploaded through media first; checked against the placement's phone format)").nullish(),
+  webImageId: z.uuid().describe("opening_fullscreen only: website image 1600 × 900").nullish(),
+  alt: z.string().nullish(),
+  get destination() {
+    return AdDestinationInput.nullish();
+  },
+  startsAt: z.iso.datetime({ offset: true }).describe("null = as soon as approved").nullish(),
+  endsAt: z.iso.datetime({ offset: true }).nullish(),
+  dealId: z.uuid().nullish(),
+  stopWithDeal: z.boolean().nullish(),
+}).register(common.apiTypes, { id: "advertising.StaffAdInput" });
+
+export interface StaffAdPatch {
+  name?: string | null;
+  categoryId?: string | null;
+  imageId?: string | null;
+  webImageId?: string | null;
+  alt?: string | null;
+  destination?: AdDestinationInput | null;
+  startsAt?: string | null;
+  endsAt?: string | null;
+  dealId?: string | null;
+  stopWithDeal?: boolean | null;
+  version: number;
+}
+
+export const StaffAdPatch: z.ZodType<StaffAdPatch> = z.object({
+  name: z.string().nullish(),
+  categoryId: z.uuid().nullish(),
+  imageId: z.uuid().nullish(),
+  webImageId: z.uuid().nullish(),
+  alt: z.string().nullish(),
+  get destination() {
+    return AdDestinationInput.nullish();
+  },
+  startsAt: z.iso.datetime({ offset: true }).nullish(),
+  endsAt: z.iso.datetime({ offset: true }).nullish(),
+  dealId: z.uuid().nullish(),
+  stopWithDeal: z.boolean().nullish(),
+  version: z.number().int(),
+}).register(common.apiTypes, { id: "advertising.StaffAdPatch" });
+
+export interface StaffAdsOrderInput {
+  placementKey: string;
+  /** Live and scheduled ads of the placement in the new order (every one of them) */
+  ids: string[];
+}
+
+export const StaffAdsOrderInput: z.ZodType<StaffAdsOrderInput> = z.object({
+  placementKey: z.string(),
+  ids: z.array(z.uuid()).describe("Live and scheduled ads of the placement in the new order (every one of them)"),
+}).register(common.apiTypes, { id: "advertising.StaffAdsOrderInput" });
+
+export interface StaffAdSlot {
+  name: string;
+  enabled: boolean;
+  /** Live ads now (equals Placement.liveCampaigns) */
+  live: number;
+  /** Carousels: live ads at most */
+  maxLive?: number | null;
+  /** Carousels: seconds each ad shows */
+  carouselSeconds?: number | null;
+  /** e.g. Each ad shows 6 s, in the order on Advertisements; Ads take turns in the order on Advertisements */
+  rotationLabel: string;
+}
+
+export const StaffAdSlot: z.ZodType<StaffAdSlot> = z.object({
+  name: z.string(),
+  enabled: z.boolean(),
+  live: z.number().int().describe("Live ads now (equals Placement.liveCampaigns)"),
+  maxLive: z.number().int().describe("Carousels: live ads at most").nullish(),
+  carouselSeconds: z.number().int().describe("Carousels: seconds each ad shows").nullish(),
+  rotationLabel: z.string().describe("e.g. Each ad shows 6 s, in the order on Advertisements; Ads take turns in the order on Advertisements"),
+}).register(common.apiTypes, { id: "advertising.StaffAdSlot" });
+
+export interface AdWaitingRef {
+  id: string;
+  name: string;
+  placementKey: string;
+  /** A pending change of a running ad (else the ad's first review) */
+  isChange: boolean;
+}
+
+export const AdWaitingRef: z.ZodType<AdWaitingRef> = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  placementKey: z.string(),
+  isChange: z.boolean().describe("A pending change of a running ad (else the ad's first review)"),
+}).register(common.apiTypes, { id: "advertising.AdWaitingRef" });
+
+export interface StaffAdsPage {
+  /** Ads of the asked placement(s): live and scheduled in position order, then paused, in review and drafts, ended and rejected last */
+  items: StaffAd[];
+  /** placementKey → ads not ended (for the slot tabs) */
+  counts: Record<string, number>;
+  /** status → ads in the asked placement(s) */
+  statusCounts: Record<string, number>;
+  waitingForMe: number;
+  waitingForMeAds: AdWaitingRef[];
+  /** placementKey → slot settings and live count, for every staff-ad slot */
+  slots: Record<string, StaffAdSlot>;
+}
+
+export const StaffAdsPage: z.ZodType<StaffAdsPage> = z.object({
+  get items() {
+    return z.array(StaffAd);
+  },
+  counts: z.record(z.string(), z.number().int()).describe("placementKey → ads not ended (for the slot tabs)"),
+  statusCounts: z.record(z.string(), z.number().int()).describe("status → ads in the asked placement(s)"),
+  waitingForMe: z.number().int(),
+  get waitingForMeAds() {
+    return z.array(AdWaitingRef);
+  },
+  get slots() {
+    return z.record(z.string(), StaffAdSlot);
+  },
+}).register(common.apiTypes, { id: "advertising.StaffAdsPage" });
+
 /* ------------------------------------------------------------------ events */
 
 /** advertising.campaign.status_changed: Any lifecycle transition (submitted, approved, scheduled, live, paused, finished, archived, rejected) */
@@ -1763,6 +2171,12 @@ export interface AdvertisingDb {
     rejected_reason: string | null;
     finished_reason: string | null;
     note_to_reviewers: string | null;
+    /** staff ads: 1-based order in the placement carousel */
+    position: number | null;
+    /** staff ads: image description */
+    alt: string | null;
+    /** staff ads: an edit of a running ad waiting for review: StaffAdChange values, media ids, submission */
+    pending_change: Json | null;
     created_by: string;
     created_at: Date;
     updated_at: Date;
@@ -2223,7 +2637,7 @@ export const endpoints = defineEndpoints({
       }),
     response: () => AdCampaign,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","PROMOTION_NOT_STARTED"],
+    errors: ["ILLEGAL_TRANSITION","PROMOTION_NOT_STARTED","SLOT_FULL"],
     audited: true,
     events: ["advertising.campaign.status_changed"],
     screens: ["admin/ad-campaign"],
@@ -2400,6 +2814,276 @@ export const endpoints = defineEndpoints({
     response: () => PerformanceReport,
     status: 200,
     screens: ["admin/ads","admin/reports"],
+    phase: 1,
+  },
+  listStaffAds: {
+    area: "admin",
+    method: "GET",
+    path: "/ads",
+    auth: "staff",
+    scope: "staff",
+    summary: "Staff ads by slot: live and scheduled in carousel order, with counts and what waits for my review",
+    desc: "The simple Advertisements page (full-screen, home carousel, department carousels, deals, other). A staff ad is one own (platform) campaign with one placement. Needs advertising.campaigns.view, .manage or .review (checked by the handler). placement takes one key or a comma-separated list; without it every staff-ad slot is listed.",
+    query: () =>
+      z.object({
+        placement: z.string().optional(),
+        status: z.string().describe("Comma-separated StaffAd statuses").optional(),
+      }),
+    response: () => StaffAdsPage,
+    status: 200,
+    errors: ["FORBIDDEN"],
+    screens: ["admin/ads"],
+    phase: 1,
+  },
+  createStaffAd: {
+    area: "admin",
+    method: "POST",
+    path: "/ads",
+    auth: "staff",
+    permission: "advertising.campaigns.manage",
+    scope: "staff",
+    summary: "Create a staff ad draft",
+    desc: "Drafts may be incomplete (name and placement are required). The phone image must match the placement's phone format (opening_fullscreen 1080 × 1920, home_banner and department carousels 750 × 400, deals_top 750 × 150, category_banner 750 × 300, popup 600 × 600); a website image only for opening_fullscreen. The destination is resolved to a store path.",
+    body: () => StaffAdInput,
+    response: () => StaffAd,
+    status: 201,
+    errors: ["VALIDATION_FAILED","PLACEMENT_DISABLED","CREATIVE_FORMAT_INVALID"],
+    audited: true,
+    screens: ["admin/ads"],
+    phase: 1,
+  },
+  getStaffAd: {
+    area: "admin",
+    method: "GET",
+    path: "/ads/{id}",
+    auth: "staff",
+    scope: "staff",
+    summary: "A staff ad with its review, pending change and stats",
+    desc: "Needs advertising.campaigns.view, .manage or .review (checked by the handler). The id or the AD- ref.",
+    params: () =>
+      z.object({
+        id: z.string().describe("Ad id or ref (AD-…)"),
+      }),
+    response: () => StaffAd,
+    status: 200,
+    errors: ["NOT_FOUND","FORBIDDEN"],
+    screens: ["admin/ads"],
+    phase: 1,
+  },
+  updateStaffAd: {
+    area: "admin",
+    method: "PATCH",
+    path: "/ads/{id}",
+    auth: "staff",
+    permission: "advertising.campaigns.manage",
+    scope: "staff",
+    summary: "Edit a staff ad (a running ad gets a pending change)",
+    desc: "Fields left out keep their value; send null to clear. draft and changes_requested: edits the ad. scheduled, live and paused: endsAt applies at once (no review); every other change creates or replaces the pending change (state draft, submitted with POST /ads/{id}/submit) while the current version keeps running. in_review (first review) and a pending change in review: ILLEGAL_TRANSITION until the review is done. ended and rejected: duplicate instead.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => StaffAdPatch,
+    response: () => StaffAd,
+    status: 200,
+    errors: ["ILLEGAL_TRANSITION","CONFLICT","VALIDATION_FAILED","CREATIVE_FORMAT_INVALID"],
+    audited: true,
+    screens: ["admin/ads"],
+    phase: 1,
+  },
+  submitStaffAd: {
+    area: "admin",
+    method: "POST",
+    path: "/ads/{id}/submit",
+    auth: "staff",
+    permission: "advertising.campaigns.manage",
+    scope: "staff",
+    summary: "Send the ad (or its pending change) for the two reviews",
+    desc: "draft or changes_requested → in_review; on a scheduled, live or paused ad: submits its pending change. Submit checks: a phone image of the placement's size, a description (alt), an available destination, endsAt in the future and at most 90 days after the start (or after now when startsAt is empty). Failed checks are CHECKS_FAILED with details.checks.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    response: () => StaffAd,
+    status: 200,
+    errors: ["ILLEGAL_TRANSITION","CHECKS_FAILED"],
+    audited: true,
+    events: ["advertising.campaign.status_changed"],
+    screens: ["admin/ads"],
+    phase: 1,
+  },
+  reviewStaffAd: {
+    area: "admin",
+    method: "POST",
+    path: "/ads/{id}/review",
+    auth: "staff",
+    permission: "advertising.campaigns.review",
+    scope: "staff",
+    summary: "Approve, request changes or reject the open review step (first review or pending change)",
+    desc: "The step comes from the caller's access roles (Advertising Manager → advertising, Content or Marketing Manager → content, Business Owner either). The person who created the ad (or the change) reviews neither step, and one person cannot take both (SAME_REVIEWER). A note is required to request changes or reject. Last approval of the first review: scheduled for startsAt, or live at once when startsAt is empty or past. Last approval of a change: the change replaces the live version (images, destination, name, alt, start, deal) and the pending change is cleared. Request changes on a change: the change goes back to its author (state changes_requested). Reject of a change: the change is dropped and the live version keeps running; reject of a first review: the ad is rejected.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => z.object({
+      decision: z.enum(["approve", "request_changes", "reject"]),
+      note: z.string().nullish(),
+      step: z.enum(["advertising", "content"]).describe("Only when the caller holds both reviewing roles").nullish(),
+    }),
+    response: () => StaffAd,
+    status: 200,
+    errors: ["ILLEGAL_TRANSITION","SAME_REVIEWER","FORBIDDEN","VALIDATION_FAILED"],
+    audited: true,
+    events: ["advertising.campaign.status_changed"],
+    screens: ["admin/ads"],
+    phase: 1,
+  },
+  pauseStaffAd: {
+    area: "admin",
+    method: "POST",
+    path: "/ads/{id}/pause",
+    auth: "staff",
+    permission: "advertising.campaigns.publish",
+    scope: "staff",
+    summary: "Pause a scheduled or live ad (off the app within 1 minute)",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => z.object({
+      reason: z.string().nullish(),
+    }),
+    response: () => StaffAd,
+    status: 200,
+    errors: ["ILLEGAL_TRANSITION"],
+    audited: true,
+    events: ["advertising.campaign.status_changed"],
+    screens: ["admin/ads"],
+    phase: 1,
+  },
+  resumeStaffAd: {
+    area: "admin",
+    method: "POST",
+    path: "/ads/{id}/resume",
+    auth: "staff",
+    permission: "advertising.campaigns.publish",
+    scope: "staff",
+    summary: "Resume a paused ad",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => z.object({
+      reason: z.string().nullish(),
+    }),
+    response: () => StaffAd,
+    status: 200,
+    errors: ["ILLEGAL_TRANSITION","AD_UNAVAILABLE"],
+    audited: true,
+    events: ["advertising.campaign.status_changed"],
+    screens: ["admin/ads"],
+    phase: 1,
+  },
+  endStaffAd: {
+    area: "admin",
+    method: "POST",
+    path: "/ads/{id}/end",
+    auth: "staff",
+    permission: "advertising.campaigns.publish",
+    scope: "staff",
+    summary: "End a scheduled, live or paused ad now",
+    desc: "A pending change is dropped with it.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => z.object({
+      reason: z.string().nullish(),
+    }),
+    response: () => StaffAd,
+    status: 200,
+    errors: ["ILLEGAL_TRANSITION"],
+    audited: true,
+    events: ["advertising.campaign.status_changed"],
+    screens: ["admin/ads"],
+    phase: 1,
+  },
+  duplicateStaffAd: {
+    area: "admin",
+    method: "POST",
+    path: "/ads/{id}/duplicate",
+    auth: "staff",
+    permission: "advertising.campaigns.manage",
+    scope: "staff",
+    summary: "Copy an ad into a new draft",
+    desc: "Same placement, images, description, destination and deal; no dates, no review.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    response: () => StaffAd,
+    status: 201,
+    audited: true,
+    screens: ["admin/ads"],
+    phase: 1,
+  },
+  deleteStaffAd: {
+    area: "admin",
+    method: "DELETE",
+    path: "/ads/{id}",
+    auth: "staff",
+    permission: "advertising.campaigns.manage",
+    scope: "staff",
+    summary: "Delete a draft that never ran",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    response: null,
+    status: 204,
+    errors: ["ILLEGAL_TRANSITION","CONFLICT"],
+    audited: true,
+    screens: ["admin/ads"],
+    phase: 1,
+  },
+  reorderStaffAds: {
+    area: "admin",
+    method: "PUT",
+    path: "/ads/order",
+    auth: "staff",
+    permission: "advertising.campaigns.manage",
+    scope: "staff",
+    summary: "Set the carousel order of a placement's live and scheduled ads (applies at once)",
+    body: () => StaffAdsOrderInput,
+    response: () => StaffAdsPage,
+    status: 200,
+    errors: ["VALIDATION_FAILED"],
+    audited: true,
+    screens: ["admin/ads"],
+    phase: 1,
+  },
+  searchAdDestinations: {
+    area: "admin",
+    method: "GET",
+    path: "/ads/destinations",
+    auth: "staff",
+    scope: "staff",
+    summary: "Search what an ad can open, for the destination pickers",
+    desc: "One search for every picker kind: product (active catalog products), category, department (the ten department pages), restaurant (food), deal (promotions live or scheduled), collection (content collections and campaign pages), seller_store (approved sellers), brand (active brands), phone (department phones). url has no options. A module that is off answers no options. Needs advertising.campaigns.view, .manage or .review (checked by the handler).",
+    query: () =>
+      z.object({
+        kind: z.enum(["product", "category", "department", "restaurant", "deal", "collection", "seller_store", "brand", "phone", "url"]),
+        q: z.string().optional(),
+        limit: z.coerce.number().int().describe("1–50, default 20").optional(),
+      }),
+    response: () => z.object({
+      get items() {
+        return z.array(AdDestinationOption);
+      },
+    }),
+    status: 200,
+    errors: ["FORBIDDEN"],
+    screens: ["admin/ads"],
     phase: 1,
   },
   listPlacements: {
@@ -2915,7 +3599,7 @@ export const spec = defineModuleSpec({
   chapters: [16,3,4,15],
   summary: "Ad placements and their rules, ad campaigns through the full lifecycle, creatives and their review, audiences, schedules, frequency caps and dismissal suppression, rotation and priority, the serving decision for each page view, display/click/dismissal tracking with attribution, and seller sponsored campaigns with spending limits and ad charges kept separate from commission.",
   dependsOn: ["media","access"],
-  optionalDeps: ["promotions","offers","catalog","inventory","sellers","orders","content","finance","search","reports","notifications","audit","customers","settings"],
+  optionalDeps: ["promotions","offers","catalog","inventory","sellers","orders","content","finance","search","reports","notifications","audit","customers","settings","food","departments"],
   publicApi: ["sponsoredForResults","adPositionsFor","campaignsForPromotion","isAdBlockedPage","dailyPerformance","dashboardSummary","exportRows"],
   permissions: [
     {
@@ -3323,6 +4007,10 @@ export const spec = defineModuleSpec({
       "status": 409,
       "meaning": "Paid seller advertising is not enabled yet."
     },
+    "SLOT_FULL": {
+      "status": 409,
+      "meaning": "The carousel already has its most live ads (Placement.maxPerPage); schedule the ad instead: it starts when one ends."
+    },
     "OFFER_NOT_PROMOTABLE": {
       "status": 422,
       "meaning": "The offer is not the seller's, not active or out of stock."
@@ -3580,6 +4268,9 @@ export const spec = defineModuleSpec({
         "rejected_reason",
         "finished_reason",
         "note_to_reviewers",
+        "position",
+        "alt",
+        "pending_change",
         "created_by",
         "created_at",
         "updated_at",
@@ -3602,7 +4293,10 @@ export const spec = defineModuleSpec({
         "pause_cause",
         "rejected_reason",
         "finished_reason",
-        "note_to_reviewers"
+        "note_to_reviewers",
+        "position",
+        "alt",
+        "pending_change"
       ],
       "decimal": [],
       "binary": [],
@@ -3839,6 +4533,21 @@ export const spec = defineModuleSpec({
                 "null"
               ]
             },
+            "position": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "alt": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "pending_change": {},
             "created_by": {
               "bsonType": "string"
             },
@@ -3899,6 +4608,13 @@ export const spec = defineModuleSpec({
           "name": "campaigns_linked_promotion_id_e1f353",
           "key": {
             "linked_promotion_id": 1
+          }
+        },
+        {
+          "name": "campaigns_placement_id_position_fe7a7f",
+          "key": {
+            "placement_id": 1,
+            "position": 1
           }
         }
       ],

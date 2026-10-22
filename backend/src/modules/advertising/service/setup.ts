@@ -7,7 +7,7 @@ import { AppError } from '../../../kernel/errors/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
 import type { GlobalRules, GlobalRulesInput, Placement, PlacementPatch } from '../../../spec/advertising.js';
-import { blockedPagesOf, DEFAULT_RULES, dismissalLabel, frequencyLabel, isPageType, OVERLAY_KEYS, rotationLabel, type RuleValues } from '../domain/rules.js';
+import { blockedPagesOf, CAROUSEL_LIVE_RANGE, CAROUSEL_SECONDS, DEFAULT_RULES, dismissalLabel, frequencyLabel, isPageType, isStaffSlot, OVERLAY_KEYS, pageOptionsOf, slotRotationLabel, type RuleValues } from '../domain/rules.js';
 import { encodeActor, invalid, notFound, Part, SYSTEM, type By } from './core.js';
 
 export const RULES_ACTION = 'advertising.rules.change';
@@ -35,6 +35,9 @@ export class SetupPart extends Part {
     }
     const rules = await this.core.rules();
     if (patch.eligiblePages) {
+      const options = pageOptionsOf(row.key);
+      const outside = patch.eligiblePages.filter((p) => isPageType(p) && !rules.blockedPages.includes(p) && !options.includes(p));
+      if (outside.length) throw this.ctx.error('PAGE_NOT_ELIGIBLE', `${row.name} can't be set to show on ${outside.join(', ')}.`, { issues: outside.map((p) => ({ path: 'eligiblePages', message: `${p} is not a page ${row.name} shows on` })), pageOptions: options });
       const bad = patch.eligiblePages.filter((p) => !isPageType(p) || rules.blockedPages.includes(p));
       if (bad.length) throw this.ctx.error('PAGE_NOT_ELIGIBLE', `Ads can't show on ${bad.join(', ')}.`, { issues: bad.map((p) => ({ path: 'eligiblePages', message: isPageType(p) ? `${p} is blocked for all ads` : `${p} is not a page type` })) });
       if (!patch.eligiblePages.length) issues.push({ path: 'eligiblePages', message: 'Choose at least one page' });
@@ -46,10 +49,20 @@ export class SetupPart extends Part {
     }
     if (patch.formats && !patch.formats.length) issues.push({ path: 'formats', message: 'Keep at least one format' });
     const cap = patch.frequencyCap;
+    // the Slot settings page's limits
+    if (cap?.perSession !== undefined && cap.perSession !== null && !(Number.isInteger(cap.perSession) && cap.perSession! >= 1 && cap.perSession! <= 20)) issues.push({ path: 'frequencyCap.perSession', message: '1 to 20 per session' });
+    if (cap?.perDay !== undefined && cap.perDay !== null && !(Number.isInteger(cap.perDay) && cap.perDay! >= 1 && cap.perDay! <= 50)) issues.push({ path: 'frequencyCap.perDay', message: '1 to 50 a day' });
     if (cap?.perWindow && (cap.perWindow.count < 1 || cap.perWindow.days < 1 || cap.perWindow.days > 30)) issues.push({ path: 'frequencyCap.perWindow', message: 'A count of 1 or more within 1 to 30 days' });
     if (patch.dismissal?.mode === 'not_dismissible' && OVERLAY_KEYS.includes(row.key)) issues.push({ path: 'dismissal.mode', message: 'Overlays always have a visible close control' });
     if (patch.dismissal?.mode === 'days' && !(Number(patch.dismissal.days) >= 1)) issues.push({ path: 'dismissal.days', message: 'How many days a dismissal hides the campaign' });
-    if (patch.maxPerPage !== undefined && patch.maxPerPage !== null && patch.maxPerPage < 1) issues.push({ path: 'maxPerPage', message: '1 or more' });
+    const carousel = ((patch.rotation?.mode ?? (row.rotation as { mode?: string }).mode) === 'carousel') && isStaffSlot(row.key);
+    if (carousel) {
+      if (patch.rotation && patch.rotation.mode !== 'carousel') issues.push({ path: 'rotation.mode', message: 'This slot is a carousel' });
+      const secs = patch.rotation?.carouselSeconds;
+      if (patch.rotation && !(Number.isInteger(secs) && secs! >= CAROUSEL_SECONDS.min && secs! <= CAROUSEL_SECONDS.max)) issues.push({ path: 'rotation.carouselSeconds', message: `${CAROUSEL_SECONDS.min} to ${CAROUSEL_SECONDS.max} seconds` });
+      if (patch.maxPerPage !== undefined && !(Number.isInteger(patch.maxPerPage) && patch.maxPerPage! >= CAROUSEL_LIVE_RANGE.min && patch.maxPerPage! <= CAROUSEL_LIVE_RANGE.max)) issues.push({ path: 'maxPerPage', message: `Live ads at most: ${CAROUSEL_LIVE_RANGE.min} to ${CAROUSEL_LIVE_RANGE.max}` });
+    } else if (row.key === 'category_banner' && patch.maxPerPage !== undefined && !(Number.isInteger(patch.maxPerPage) && patch.maxPerPage! >= 1 && patch.maxPerPage! <= 5)) issues.push({ path: 'maxPerPage', message: 'Banners per page: 1 to 5' });
+    else if (patch.maxPerPage !== undefined && patch.maxPerPage !== null && patch.maxPerPage < 1) issues.push({ path: 'maxPerPage', message: '1 or more' });
     if (patch.positions?.some((p) => !Number.isInteger(p) || p < 1)) issues.push({ path: 'positions', message: 'Positions are 1 or more' });
     if (issues.length) throw invalid(issues);
 
@@ -59,7 +72,7 @@ export class SetupPart extends Part {
       ...(patch.formats ? { formats: patch.formats as never } : {}),
       ...(patch.frequencyCap !== undefined ? { frequency_cap: (patch.frequencyCap ? { ...patch.frequencyCap, label: frequencyLabel(patch.frequencyCap) } : null) as never } : {}),
       ...(patch.trigger !== undefined ? { trigger: (patch.trigger ?? null) as never } : {}),
-      ...(patch.rotation ? { rotation: { ...patch.rotation, label: rotationLabel(patch.rotation) } as never } : {}),
+      ...(patch.rotation ? { rotation: { ...patch.rotation, label: slotRotationLabel(row.key, patch.rotation) } as never } : {}),
       ...(patch.dismissal ? { dismissal: { ...patch.dismissal, label: dismissalLabel(patch.dismissal) } as never } : {}),
       ...(patch.maxPerPage !== undefined ? { max_per_page: patch.maxPerPage ?? null } : {}),
       ...(patch.positions !== undefined ? { positions: (patch.positions ?? null) as never } : {}),
@@ -111,7 +124,7 @@ export class SetupPart extends Part {
     const issues: { path: string; message: string }[] = [];
     if (!reason) issues.push({ path: 'reason', message: 'Say why the rules change' });
     if (input.overlaysPerPageView !== undefined && input.overlaysPerPageView !== null && (input.overlaysPerPageView < 0 || input.overlaysPerPageView > 2)) issues.push({ path: 'overlaysPerPageView', message: 'At most 2 overlays per page view' });
-    if (input.closeControlMinPx !== undefined && input.closeControlMinPx !== null && input.closeControlMinPx < 24) issues.push({ path: 'closeControlMinPx', message: 'The close control is at least 24 px' });
+    if (input.closeControlMinPx !== undefined && input.closeControlMinPx !== null && input.closeControlMinPx < 44) issues.push({ path: 'closeControlMinPx', message: 'The close control is at least 44 px (touch target)' });
     if (input.attributionDays !== undefined && input.attributionDays !== null && (input.attributionDays < 1 || input.attributionDays > 30)) issues.push({ path: 'attributionDays', message: 'Between 1 and 30 days' });
     const badPages = (input.extraBlockedPages ?? []).filter((p) => !isPageType(p));
     if (badPages.length) issues.push({ path: 'extraBlockedPages', message: `Unknown page types: ${badPages.join(', ')}` });

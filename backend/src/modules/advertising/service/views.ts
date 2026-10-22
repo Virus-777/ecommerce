@@ -44,6 +44,13 @@ const TIMELINE_LABEL: Record<string, string> = {
   ending_soon_notice: 'Owner reminded: ending soon',
   repoint: 'Promoted product merged',
   after_approval_fallback: 'Scheduled instead of activated',
+  change_saved: 'Change saved (not live yet)',
+  change_dropped: 'Pending change dropped',
+  change_submitted: 'Change sent for review',
+  change_step_approved: 'Change: review step approved',
+  change_changes_requested: 'Change: changes requested',
+  change_rejected: 'Change rejected; the live version keeps running',
+  change_applied: 'Change approved and live',
 };
 
 

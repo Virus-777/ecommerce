@@ -809,6 +809,7 @@ Indexes: `(restaurant_id, hidden, created_at)`
 
 | Function | Signature | Used by |
 |---|---|---|
+| linkTargets | `(input: { kind: 'restaurant', q?: string, ids?: string[], slugs?: string[], limit?: int }) => LinkTarget[]`<br>Link targets for ad destination pickers (search by q, or resolve ids or URL slugs): restaurants (/food/restaurants/{slug}; available when published), each with its store path the app opens, a label, a short meta line, an image and whether it is shown in the store. Unknown ids are left out. | advertising |
 | exportCustomerData | `(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]`<br>The customer's food orders (reference, restaurant, items, amounts, address, status, dates), reviews and saved restaurants for the personal data export | customers |
 
 ## Permissions

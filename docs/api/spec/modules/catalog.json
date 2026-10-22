@@ -45,6 +45,7 @@
     "workqueues"
   ],
   "publicApi": [
+    {"name":"linkTargets","signature":"(input: { kind: 'product' | 'category' | 'brand', q?: string, ids?: string[], slugs?: string[], limit?: int }) => LinkTarget[]","desc":"Link targets for ad destination pickers (search by q, or resolve ids or URL slugs): active products (/p/{slug}/{id}), categories (/c/{slug}) and active brands (/brand/{slug}), each with its store path the app opens, a label, a short meta line, an image and whether it is shown in the store. Unknown ids are left out.","usedBy":["advertising"]},
     {
       "name": "getProduct",
       "signature": "(productId: uuid) => Product | null",

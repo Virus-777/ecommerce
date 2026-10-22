@@ -92,6 +92,9 @@ const campaigns = new Schema(
     rejected_reason: { type: String, default: null },
     finished_reason: { type: String, default: null },
     note_to_reviewers: { type: String, default: null },
+    position: { type: Number, default: null, validate: integer }, // staff ads: 1-based order in the placement carousel
+    alt: { type: String, default: null }, // staff ads: image description
+    pending_change: { type: Schema.Types.Mixed, default: null }, // staff ads: an edit of a running ad waiting for review: StaffAdChange values, media ids, submission
     created_by: { type: String, required: true },
     created_at: { type: Date, required: true },
     updated_at: { type: Date, required: true },
@@ -107,6 +110,7 @@ campaigns.index({"status":1,"ends_at":1}, {"name":"campaigns_status_ends_at_0fb3
 campaigns.index({"placement_id":1,"status":1}, {"name":"campaigns_placement_id_status_e12e95"});
 campaigns.index({"seller_id":1,"status":1}, {"name":"campaigns_seller_id_status_b608db"});
 campaigns.index({"linked_promotion_id":1}, {"name":"campaigns_linked_promotion_id_e1f353"});
+campaigns.index({"placement_id":1,"position":1}, {"name":"campaigns_placement_id_position_fe7a7f"});
 
 /** Promoted offers, products, stores or brands */
 const campaign_items = new Schema(

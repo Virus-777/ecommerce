@@ -14,7 +14,7 @@ import type * as audit from '../../../spec/audit.js';
 import type * as common from '../../../spec/common.js';
 import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import type * as offers from '../../../spec/offers.js';
-import { DEFAULT_RULES, pagesLabel, requiredDevices, type ReviewRole, type RuleValues } from '../domain/rules.js';
+import { DEFAULT_RULES, isStaffSlot, pageOptionsOf, pagesLabel, requiredDevices, slotRotationLabel, type ReviewRole, type RuleValues } from '../domain/rules.js';
 import type { PlacementRec, RulesRec, Span } from '../ports.js';
 import type { AdvertisingRepository } from '../repository.js';
 import type { BillingPart } from './billing.js';
@@ -25,6 +25,7 @@ import type { ReportsPart } from './reports.js';
 import type { SellerPart } from './sellers.js';
 import type { ServingPart } from './serving.js';
 import type { SetupPart } from './setup.js';
+import type { StaffAdsPart } from './staff-ads.js';
 import type { ViewsPart } from './views.js';
 
 export interface AdvertisingServiceDeps {
@@ -49,6 +50,7 @@ export interface Parts {
   billing: BillingPart;
   reports: ReportsPart;
   ops: OpsPart;
+  staffAds: StaffAdsPart;
 }
 
 type OwnEvent = keyof EventMap & `advertising.${string}`;
@@ -88,6 +90,8 @@ export function decodeActor(s: string | null | undefined): common.Actor | null {
 export interface ProductInfo {
   id: string;
   title: string;
+  /** The product's URL slug (store path /p/{slug}/{id}) */
+  slug: string;
   image: common.MediaRef | null;
   categoryId: string | null;
   brandId: string | null;
@@ -97,6 +101,8 @@ export interface ProductInfo {
 export interface OfferInfo {
   offer: offers.Offer;
   productId: string;
+  /** The product's URL slug (store path /p/{slug}/{id}) */
+  productSlug: string;
   title: string;
   image: common.MediaRef | null;
   categoryId: string | null;
@@ -217,13 +223,8 @@ export class Core {
     this.parts?.serving?.invalidate();
   }
 
-  /**
-   * The review step a staff member acts on, from their access roles (access.rolesOf), never from the request alone:
-   * Advertising Manager → advertising, Content Manager → content, Marketing Manager → marketing, Business Owner any.
-   * `requested` only picks among the caller's own steps (a step their roles do not cover is FORBIDDEN); without it the
-   * caller's single applicable step is used, preferring `waiting` steps, else VALIDATION_FAILED asks for one.
-   */
-  async reviewRoleFor(by: By, requested: ReviewRole | null | undefined, o: { applicable?: (r: ReviewRole) => boolean; waiting?: (r: ReviewRole) => boolean } = {}): Promise<ReviewRole> {
+  /** The review roles a staff member holds, from their access roles (Business Owner: all three) */
+  async reviewRolesOf(by: By): Promise<Set<ReviewRole>> {
     const accountId = by.principal?.accountId ?? (by.actor.kind === 'staff' ? by.actor.id : null);
     const roles = accountId ? await this.ctx.use('access').rolesOf(accountId) : [];
     const mine = new Set<ReviewRole>();
@@ -232,6 +233,17 @@ export class Core {
       const mapped = ROLE_STEP[r.key];
       if (mapped) mine.add(mapped);
     }
+    return mine;
+  }
+
+  /**
+   * The review step a staff member acts on, from their access roles (access.rolesOf), never from the request alone:
+   * Advertising Manager → advertising, Content Manager → content, Marketing Manager → marketing, Business Owner any.
+   * `requested` only picks among the caller's own steps (a step their roles do not cover is FORBIDDEN); without it the
+   * caller's single applicable step is used, preferring `waiting` steps, else VALIDATION_FAILED asks for one.
+   */
+  async reviewRoleFor(by: By, requested: ReviewRole | null | undefined, o: { applicable?: (r: ReviewRole) => boolean; waiting?: (r: ReviewRole) => boolean } = {}): Promise<ReviewRole> {
+    const mine = await this.reviewRolesOf(by);
     if (requested) {
       if (!mine.has(requested)) throw new AppError('FORBIDDEN', `Your roles do not cover the ${requested} review step`);
       return requested;
@@ -262,6 +274,18 @@ export class Core {
     return (await this.placementRows()).find((p) => p.id === id);
   }
 
+  /**
+   * A carousel at its live-ad limit (maxPerPage on a carousel slot of the Advertisements page): its name, live count
+   * and limit, or null when another ad may go live there.
+   */
+  async slotFull(placementId: string, exceptId?: string): Promise<{ name: string; live: number; max: number } | null> {
+    const p = await this.placementById(placementId);
+    const rot = p?.rotation as { mode?: string } | undefined;
+    if (!p || !isStaffSlot(p.key) || rot?.mode !== 'carousel' || !p.max_per_page) return null;
+    const live = await this.repo.count('campaigns', { placement_id: placementId, status: 'live', ...(exceptId ? { id: { op: '<>', value: exceptId } } : {}) });
+    return live >= p.max_per_page ? { name: p.name, live, max: p.max_per_page } : null;
+  }
+
   /** Settings › Website and Android app › Serve the website (apps.serveWebsite): on unless set off */
   async websiteServed(): Promise<boolean> {
     const settings = this.ctx.tryUse('settings');
@@ -290,12 +314,14 @@ export class Core {
       requiredDevices: requiredDevices((p.formats ?? []) as never, websiteServed),
       frequencyCap: (p.frequency_cap ?? null) as never,
       trigger: (p.trigger ?? null) as never,
-      rotation: p.rotation as never,
+      rotation: { ...(p.rotation as object), label: slotRotationLabel(p.key, p.rotation as never) } as never,
       dismissal: p.dismissal as never,
       maxPerPage: p.max_per_page,
       positions: (p.positions ?? null) as never,
       label: p.label as Placement['label'],
       liveCampaigns,
+      inUse: isStaffSlot(p.key),
+      pageOptions: pageOptionsOf(p.key),
       version: p.version,
       updatedAt: p.updated_at.toISOString(),
       updatedBy: decodeActor(p.updated_by),
@@ -356,7 +382,7 @@ export class Core {
     const hit = this.#products.get(productId);
     if (hit && t - hit.at < 60_000) return hit.p;
     const p = await this.optional('catalog', (c) => c.getProduct(productId));
-    const info = p ? { id: p.id, title: p.title, image: p.images?.[0] ?? null, categoryId: p.categoryId ?? null, brandId: p.brand?.id ?? null, brandName: p.brand?.name ?? null } : null;
+    const info = p ? { id: p.id, title: p.title, slug: p.slug || 'item', image: p.images?.[0] ?? null, categoryId: p.categoryId ?? null, brandId: p.brand?.id ?? null, brandName: p.brand?.name ?? null } : null;
     // every viewed product page can land here: keep the cache bounded
     if (this.#products.size >= CACHE_ENTRIES) this.#products.clear();
     this.#products.set(productId, { at: t, p: info });
@@ -407,6 +433,7 @@ export class Core {
       const info: OfferInfo = {
         offer: o,
         productId: o.productId,
+        productSlug: p?.slug || 'item',
         title: p?.title ?? o.sellerSku ?? 'Product',
         image: p?.image ?? null,
         categoryId: p?.categoryId ?? null,

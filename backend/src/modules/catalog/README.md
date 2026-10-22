@@ -972,6 +972,7 @@ Indexes: `pk (brand_id, category_id)`, `(category_id, product_count desc)`
 
 | Function | Signature | Used by |
 |---|---|---|
+| linkTargets | `(input: { kind: 'product' | 'category' | 'brand', q?: string, ids?: string[], slugs?: string[], limit?: int }) => LinkTarget[]`<br>Link targets for ad destination pickers (search by q, or resolve ids or URL slugs): active products (/p/{slug}/{id}), categories (/c/{slug}) and active brands (/brand/{slug}), each with its store path the app opens, a label, a short meta line, an image and whether it is shown in the store. Unknown ids are left out. | advertising |
 | getProduct | `(productId: uuid) => Product | null`<br>Read shared product content | offers, search, reviews, promotions, graphql |
 | isPurchasable | `(productId: uuid) => bool`<br>Approved and Active. Offers only go live on purchasable products. | offers, cart |
 | snapshotForOrder | `(variantId: uuid) => ProductSnapshot`<br>Frozen copy of title, brand, options, version and main image (imageId and image) stored on an order item (plan ch. 8: purchases keep what was accepted) | orders |

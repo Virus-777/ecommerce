@@ -14,6 +14,7 @@ import { AppError } from '../../../kernel/errors/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type { AdImpression, AdPreview, PopupTrigger, PromotedOfferCard, RotationRule, ServeDecision, ServeRequest, SponsoredProductSlot, TrackEvent } from '../../../spec/advertising.js';
 import type * as common from '../../../spec/common.js';
+import { byPosition, isStaffSlot } from '../domain/staff-ads.js';
 import { advertiserIsOwn, footnoteFor, frequencyBlock, isLayoutPosition, isPageType, OVERLAY_KEYS, ownAdvertiserName, rank, suppressionUntil, windowDaysOf, type PageTypeName } from '../domain/rules.js';
 import { eventId, signImpression, verifyImpression, visitorKey, type ImpressionClaims } from '../domain/token.js';
 import type { CampaignRec, CreativeRec, PlacementRec } from '../ports.js';
@@ -46,6 +47,8 @@ const TOKEN_TTL_S = 86_400;
 const OVERLAY_ORDER = ['opening_fullscreen', 'popup', 'interstitial'];
 
 const deviceClass = (d: string) => (d === 'phone' || d === 'app' || d === 'android' || d === 'ios' || d === 'mobile' ? 'phone' : 'desktop');
+/** The app's product page for a promoted offer (core/nav/Links.kt product: /p/{slug}/{id}) */
+export const offerPath = (o: Pick<OfferInfo, 'productId' | 'productSlug' | 'offer'>) => `/p/${o.productSlug || 'item'}/${o.productId}?offer=${o.offer.id}`;
 const words = (s: string | null | undefined) => (s ?? '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2);
 
 export class ServingPart extends Part {
@@ -139,7 +142,7 @@ export class ServingPart extends Part {
     const now = this.now();
     const rules = await this.core.rules();
     const ttlSeconds = await this.core.num('decisionTtlSeconds', 60);
-    const decision: ServeDecision = { decisionId: newId(), overlay: null, popupTrigger: null, slots: {}, sponsoredProducts: [], rotationSeconds: null, ttlSeconds };
+    const decision: ServeDecision = { decisionId: newId(), overlay: null, popupTrigger: null, slots: {}, sponsoredProducts: [], rotationSeconds: null, rotationBySlot: {}, ttlSeconds };
     if (!isPageType(req.page) || rules.blockedPages.includes(req.page)) return decision;
 
     const customerId = who.scope.kind === 'customer' ? (who.scope.customerId ?? null) : null;
@@ -162,7 +165,8 @@ export class ServingPart extends Part {
     const all = (await this.live()).filter((e) => usableIds.has(e.m.placement.id));
     const candidates: Entry[] = [];
     for (const e of all) {
-      if (!this.runsNow(e, now) || !e.m.pages.includes(req.page)) continue;
+      // slots of the Advertisements page show on the slot's pages; other campaigns keep their own page choice
+      if (!this.runsNow(e, now) || !(isStaffSlot(e.m.placement.key) || e.m.pages.includes(req.page))) continue;
       if (req.page === 'category' && e.m.categoryIds.length && !(req.context?.categoryId && e.m.categoryIds.includes(req.context.categoryId))) continue;
       if (e.m.placement.key === 'opening_fullscreen' && !req.isEntryPage) continue;
       if (e.m.placement.key === 'popup' && req.overlayShownThisSession && ((e.m.placement.trigger as PopupTrigger | null)?.skipIfOverlayShownThisSession ?? true)) continue;
@@ -200,7 +204,10 @@ export class ServingPart extends Part {
         .filter((x): x is AdImpression => Boolean(x));
       if (!imps.length) continue;
       decision.slots[p.key] = imps;
-      if (rot.mode === 'carousel' && imps.length > 1) decision.rotationSeconds ??= rot.carouselSeconds ?? 6;
+      if (rot.mode === 'carousel') {
+        decision.rotationBySlot[p.key] = rot.carouselSeconds ?? 6;
+        if (imps.length > 1) decision.rotationSeconds ??= rot.carouselSeconds ?? 6;
+      }
     }
 
     // sponsored product cards
@@ -337,6 +344,18 @@ export class ServingPart extends Part {
   /** Rank by the placement's rotation rule; equal ranks rotate per page view */
   private pick(list: Entry[], p: PlacementRec, categoryId: string | null, max: number): Entry[] {
     const rot = p.rotation as unknown as RotationRule;
+    // carousels show their ads in the order staff set (campaigns.position, Advertisements page)
+    if (rot.mode === 'carousel') return [...list].sort((a, b) => byPosition(a.m.row, b.m.row)).slice(0, max);
+    // the single-ad slots of the Advertisements page: ads take turns in position order, one step per page view
+    // (category banner: ads for the page's category first); seller and sponsored slots keep their rules
+    if (isStaffSlot(p.key)) {
+      const ordered = [...list].sort((a, b) => byPosition(a.m.row, b.m.row));
+      const matches = (e: Entry) => Boolean(categoryId && (e.m.categoryIds.includes(categoryId) || e.m.audience?.categoryIds?.includes(categoryId)));
+      const turn = this.turn(p.key);
+      const turns = (xs: Entry[]) => (xs.length ? [...xs.slice(turn % xs.length), ...xs.slice(0, turn % xs.length)] : xs);
+      const first = p.key === 'category_banner' ? ordered.filter(matches) : [];
+      return [...turns(first), ...turns(ordered.filter((e) => !first.includes(e)))].slice(0, max);
+    }
     const ranked = rank(
       list.map((e) => ({ id: e.m.row.id, priority: e.m.row.priority, relevance: categoryId && (e.m.categoryIds.includes(categoryId) || e.m.audience?.categoryIds?.includes(categoryId)) ? 1 : 0, e })),
       rot.mode,
@@ -437,9 +456,9 @@ export class ServingPart extends Part {
       body: text?.body ?? visual?.body ?? null,
       buttonText: text?.button_text ?? visual?.button_text ?? (offer ? 'View product' : 'Shop now'),
       secondaryText: key === 'opening_fullscreen' ? `Continue to ${req?.page === 'home' || !req ? 'home page' : 'the page'}` : key === 'popup' ? 'No thanks' : null,
-      image: visual?.kind === 'image' ? mediaRef : (offer?.image ?? null),
+      image: visual?.kind === 'image' ? (mediaRef && r.alt ? { ...mediaRef, alt: r.alt } : mediaRef) : (offer?.image ?? null),
       video: visual?.kind === 'video' ? mediaRef : null,
-      destination: text?.link ?? visual?.link ?? (offer ? `/product/${offer.productId}?offer=${offer.offer.id}` : (e.m.destination?.url ?? '/')),
+      destination: text?.link ?? visual?.link ?? (offer ? offerPath(offer) : (e.m.destination?.url ?? '/')),
       dismissible,
       closeLabel: dismissible ? 'Close' : null,
       footnote: footnoteFor(key, r.ends_at, e.m.cap ?? { label: '' }, tz),

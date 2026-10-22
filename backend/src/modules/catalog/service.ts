@@ -132,6 +132,47 @@ export class CatalogService extends CatalogAdmin implements CatalogPublicApi {
     return { ...p, items: p.items.map((r) => s.get(r.id)!) };
   }
 
+  /**
+   * Link targets for advertising destination pickers: purchasable products (/p/{slug}/{id}), visible categories
+   * (/c/{slug}) and active brands (/brand/{slug}) by q, or any of them by id (available only when the store shows it).
+   */
+  async linkTargets(input: { kind: 'product' | 'category' | 'brand'; q?: string; ids?: string[]; slugs?: string[]; limit?: number }): Promise<common.LinkTarget[]> {
+    const limit = Math.min(Math.max(input.limit ?? 20, 1), 100);
+    const q = input.q?.trim() || undefined;
+    const ids = input.ids ? [...new Set(input.ids.filter(isUuid))].slice(0, MAX_BATCH) : null;
+    const slugs = input.slugs ? [...new Set(input.slugs)].slice(0, MAX_BATCH) : null;
+    if (input.kind === 'product') {
+      const rows = ids ? await this.repo.getProducts(ids) : (await this.repo.listProducts({ q, matchGtin: true, purchasableOnly: true }, toPageRequest({ limit }))).items;
+      const s = await this.summaries(rows);
+      return rows.map((r) => {
+        const v = s.get(r.id);
+        return {
+          id: r.id,
+          label: r.title,
+          meta: `Product${v?.brand?.name ? ` · ${v.brand.name}` : ''} · ${r.ref}`,
+          path: `/p/${r.slug || 'item'}/${r.id}`,
+          image: v?.image ?? null,
+          available: !r.merged_into_id && r.review_state === 'approved' && r.publication === 'active',
+        };
+      });
+    }
+    if (input.kind === 'category') {
+      const tax = await this.taxonomy();
+      const needle = q?.toLowerCase();
+      const rows = ids ? tax.rows.filter((c) => ids.includes(c.id)) : slugs ? tax.rows.filter((c) => slugs.includes(c.slug)) : tax.rows.filter((c) => tax.visible(c.id) && (!needle || c.name.toLowerCase().includes(needle) || c.slug.includes(needle))).slice(0, limit);
+      return rows.map((c) => {
+        const path = tax.path(c.id).map((x) => x.name);
+        return { id: c.id, label: c.name, meta: `Category${path.length > 1 ? ` · ${path.slice(0, -1).join(' › ')}` : ''}`, path: `/c/${c.slug}`, image: null, available: tax.visible(c.id) };
+      });
+    }
+    if (input.kind === 'brand') {
+      const rows = ids ? await this.repo.getBrands(ids) : slugs ? (await Promise.all(slugs.map((s) => this.repo.getBrandBySlug(s)))).filter((b): b is NonNullable<typeof b> => Boolean(b)) : (await this.repo.listBrands({ q, statuses: ['active'] }, toPageRequest({ limit }))).items;
+      const views = await this.brandViews(rows);
+      return rows.map((b) => ({ id: b.id, label: b.name, meta: 'Brand', path: `/brand/${b.slug}`, image: views.get(b.id)?.logo ?? null, available: b.status === 'active' }));
+    }
+    return [];
+  }
+
   /** Keyset walk over product ids (by id, 1–1000 per call) for index rebuilds */
   async listProductIds(opts: { after?: string; limit: number; purchasableOnly?: boolean; updatedSince?: string }): Promise<{ ids: string[]; nextAfter: string | null }> {
     const limit = Math.min(1000, Math.max(1, Math.floor(Number(opts?.limit) || 0)));

@@ -3,7 +3,7 @@
 Ad placements and their rules, ad campaigns through the full lifecycle, creatives and their review, audiences, schedules, frequency caps and dismissal suppression, rotation and priority, the serving decision for each page view, display/click/dismissal tracking with attribution, and seller sponsored campaigns with spending limits and ad charges kept separate from commission.
 
 - **Group:** Growth · **Launch phase:** 1 · **Plan chapters:** 16, 3, 4, 15
-- **Depends on:** [media](media.md), [access](access.md) · **Optional:** [promotions](promotions.md), [offers](offers.md), [catalog](catalog.md), [inventory](inventory.md), [sellers](sellers.md), [orders](orders.md), [content](content.md), [finance](finance.md), [search](search.md), [reports](reports.md), [notifications](notifications.md), [audit](audit.md), [customers](customers.md), [settings](settings.md)
+- **Depends on:** [media](media.md), [access](access.md) · **Optional:** [promotions](promotions.md), [offers](offers.md), [catalog](catalog.md), [inventory](inventory.md), [sellers](sellers.md), [orders](orders.md), [content](content.md), [finance](finance.md), [search](search.md), [reports](reports.md), [notifications](notifications.md), [audit](audit.md), [customers](customers.md), [settings](settings.md), [food](food.md), [departments](departments.md)
 
 ## Owns
 - Placements: opening full-screen, home and category banners, promotional pop-up, sponsored product, sponsored store or brand, floating/sticky panel, interstitial; video later
@@ -74,6 +74,19 @@ Ad placements and their rules, ad campaigns through the full lifecycle, creative
 | POST | `/api/admin/advertising/campaigns/{id}/renew` | Create a new draft from a finished or ending campaign (renew deliberately) _(audited)_ | staff<br>`advertising.campaigns.manage` | `{ startsAt: datetime, endsAt: datetime }` → `AdCampaign` |
 | GET | `/api/admin/advertising/campaigns/{id}/report` | Displays, clicks, dismissals, spend and attributed purchases by day | staff<br>`advertising.reports.view` | `PerformanceReport` |
 | GET | `/api/admin/advertising/reports/performance` | Performance across campaigns by placement, with the attribution period stated | staff<br>`advertising.reports.view` | `PerformanceReport` |
+| GET | `/api/admin/advertising/ads` | Staff ads by slot: live and scheduled in carousel order, with counts and what waits for my review | staff | `StaffAdsPage` |
+| POST | `/api/admin/advertising/ads` | Create a staff ad draft _(audited)_ | staff<br>`advertising.campaigns.manage` | `StaffAdInput` → `StaffAd` |
+| GET | `/api/admin/advertising/ads/{id}` | A staff ad with its review, pending change and stats | staff | `StaffAd` |
+| PATCH | `/api/admin/advertising/ads/{id}` | Edit a staff ad (a running ad gets a pending change) _(audited)_ | staff<br>`advertising.campaigns.manage` | `StaffAdPatch` → `StaffAd` |
+| POST | `/api/admin/advertising/ads/{id}/submit` | Send the ad (or its pending change) for the two reviews _(audited)_ | staff<br>`advertising.campaigns.manage` | `StaffAd` |
+| POST | `/api/admin/advertising/ads/{id}/review` | Approve, request changes or reject the open review step (first review or pending change) _(audited)_ | staff<br>`advertising.campaigns.review` | `{ decision: enum(approve|request_changes|reject), note: text?, step: enum(advertising|content)? }` → `StaffAd` |
+| POST | `/api/admin/advertising/ads/{id}/pause` | Pause a scheduled or live ad (off the app within 1 minute) _(audited)_ | staff<br>`advertising.campaigns.publish` | `{ reason: text? }` → `StaffAd` |
+| POST | `/api/admin/advertising/ads/{id}/resume` | Resume a paused ad _(audited)_ | staff<br>`advertising.campaigns.publish` | `{ reason: text? }` → `StaffAd` |
+| POST | `/api/admin/advertising/ads/{id}/end` | End a scheduled, live or paused ad now _(audited)_ | staff<br>`advertising.campaigns.publish` | `{ reason: text? }` → `StaffAd` |
+| POST | `/api/admin/advertising/ads/{id}/duplicate` | Copy an ad into a new draft _(audited)_ | staff<br>`advertising.campaigns.manage` | `StaffAd` |
+| DELETE | `/api/admin/advertising/ads/{id}` | Delete a draft that never ran _(audited)_ | staff<br>`advertising.campaigns.manage` | 204 No content |
+| PUT | `/api/admin/advertising/ads/order` | Set the carousel order of a placement's live and scheduled ads (applies at once) _(audited)_ | staff<br>`advertising.campaigns.manage` | `StaffAdsOrderInput` → `StaffAdsPage` |
+| GET | `/api/admin/advertising/ads/destinations` | Search what an ad can open, for the destination pickers | staff | `{ items: AdDestinationOption[] }` |
 | GET | `/api/admin/advertising/placements` | Placements with pages, formats, caps, rotation and dismissal rules | staff<br>`advertising.campaigns.view` | `Placement[]` |
 | PATCH | `/api/admin/advertising/placements/{id}` | Edit a placement's rules or turn it on/off _(audited)_ | staff<br>`advertising.placements.manage` | `PlacementPatch` → `Placement` |
 | GET | `/api/admin/advertising/rules` | Global advertising rules | staff<br>`advertising.campaigns.view` | `GlobalRules` |
@@ -174,7 +187,7 @@ Ad placements and their rules, ad campaigns through the full lifecycle, creative
 | Field | Type |
 |---|---|
 | id | `uuid` |
-| key | `enum(opening_fullscreen|home_banner|category_banner|campaign_banner|popup|sponsored_product|sponsored_store|floating|interstitial|video|companies_top|play_top|software_top|food_top)` |
+| key | `enum(opening_fullscreen|home_banner|category_banner|campaign_banner|popup|sponsored_product|sponsored_store|floating|interstitial|video|companies_top|play_top|software_top|food_top|deals_top)` |
 | name | `string` |
 | description | `string` Shown on the ad type card when choosing a placement, e.g. Appears when a visitor opens the site. Close or skip always visible. |
 | kind | `enum(overlay|inline|card|strip)` |
@@ -191,7 +204,9 @@ Ad placements and their rules, ad campaigns through the full lifecycle, creative
 | maxPerPage | `int?` |
 | positions | `int[]?` Fixed positions in results lists, e.g. [3, 8] |
 | label | `enum(Ad|Sponsored)` |
-| liveCampaigns | `int` |
+| liveCampaigns | `int` Live ads in the slot now (the Live count of its tab on Advertisements) |
+| inUse | `bool` Managed on the Advertisements page (full-screen, home and department carousels, deals carousel, category banner, pop-up); false for seller-ad and later-phase slots |
+| pageOptions | `string[]` Page types this slot can be set to show on (the pages the app and website ask for it); PlacementPatch.eligiblePages must stay within them |
 | version | `int` Increments on every change; PATCH must send the version it read (PlacementPatch.version), otherwise CONFLICT |
 | updatedAt | `datetime` |
 | updatedBy | `Actor?` |
@@ -205,9 +220,9 @@ Ad placements and their rules, ad campaigns through the full lifecycle, creative
 | formats | `CreativeFormat[]?` |
 | frequencyCap | `FrequencyCapInput?` The label is written by the server |
 | trigger | `PopupTrigger?` |
-| rotation | `RotationRuleInput?` The label is written by the server |
+| rotation | `RotationRuleInput?` The label is written by the server. Carousel slots: carouselSeconds 2–15 (how long each ad shows) |
 | dismissal | `DismissalRuleInput?` The label is written by the server |
-| maxPerPage | `int?` |
+| maxPerPage | `int?` Carousel slots: live ads at most (1–20); ads approved beyond it wait as scheduled and start when one ends |
 | positions | `int[]?` |
 | reason | `text` |
 | version | `int` |
@@ -259,9 +274,9 @@ Ad placements and their rules, ad campaigns through the full lifecycle, creative
 
 | Field | Type |
 |---|---|
-| kind | `enum(url|product|offer|seller_store|brand|collection|campaign_page)` |
-| targetId | `uuid?` |
-| url | `string` |
+| kind | `enum(url|product|offer|seller_store|brand|collection|campaign_page|category|department|restaurant|deal|phone)` |
+| targetId | `string?` uuid, or a department key for kind department |
+| url | `string` The store path (or https url) visitors open; for picked kinds the server writes the resolved path |
 
 ### PromotedItem
 
@@ -644,7 +659,8 @@ Ad placements and their rules, ad campaigns through the full lifecycle, creative
 | popupTrigger | `PopupTrigger?` |
 | slots | `map<AdImpression[]>` placementKey → ads in rotation order |
 | sponsoredProducts | `SponsoredProductSlot[]` |
-| rotationSeconds | `int?` |
+| rotationSeconds | `int?` Seconds per ad of the first carousel in the decision (kept for older clients; use rotationBySlot) |
+| rotationBySlot | `map<int>` placementKey → seconds each ad shows, for every carousel slot in the decision |
 | ttlSeconds | `int` Clients may reuse the decision this long (pausing takes effect within 1 minute) |
 
 ### TrackEvent
@@ -816,6 +832,191 @@ Ad placements and their rules, ad campaigns through the full lifecycle, creative
 | attributionDays | `int` |
 | statementNote | `string` |
 
+### AdDestinationInput
+
+| Field | Type |
+|---|---|
+| kind | `enum(product|category|department|restaurant|deal|collection|seller_store|brand|phone|url)` What the ad opens; every kind but url is picked from GET /ads/destinations |
+| targetId | `string?` The picked target's id (uuid). For department: the department key phones|farm|software|welfare|food|booking|blogs|companies|play|rewards. For deal: tab (or left out) is the Deals tab itself. seller_store 00000000-0000-7000-8000-000000000001 is the Official Store. Not used for url |
+| url | `string?` kind url only: an https address (outside pages). A store path that names a target (e.g. /c/cookware) is saved as that target |
+
+### AdDestination
+
+| Field | Type |
+|---|---|
+| kind | `enum(product|category|department|restaurant|deal|collection|seller_store|brand|phone|url)` |
+| targetId | `string?` |
+| label | `string` e.g. Halden Aurora ANC Wireless Headphones |
+| meta | `string?` e.g. Product · Halden; Collection or Page for kind collection; Web address or Store page for kind url (label Store page /x for a store path nothing names) |
+| path | `string` The store path the app opens (e.g. /p/halden-aurora/…, /c/headphones, /food/restaurants/…), or the https url for kind url; what AdImpression.destination carries |
+| available | `bool` The target still exists and is shown in the store (submit needs true) |
+
+### AdDestinationOption
+
+| Field | Type |
+|---|---|
+| kind | `enum(product|category|department|restaurant|deal|collection|seller_store|brand|phone|url)` |
+| targetId | `string` |
+| label | `string` |
+| meta | `string?` |
+| image | `MediaRef?` |
+| path | `string` The store path the target opens |
+
+### AdImage
+
+| Field | Type |
+|---|---|
+| id | `uuid` Media asset id |
+| url | `url` |
+| width | `int?` |
+| height | `int?` |
+
+### AdReviewStep
+
+| Field | Type |
+|---|---|
+| step | `enum(advertising|content)` |
+| state | `enum(waiting|approved|changes_requested|rejected)` |
+| by | `Actor?` |
+| at | `datetime?` |
+| note | `text?` |
+
+### AdReview
+
+| Field | Type |
+|---|---|
+| steps | `AdReviewStep[]` Empty until submitted |
+| canReview | `bool` The caller may take an open step now (has the reviewing role, did not create the ad or the change, did not take the other step) |
+| submittedBy | `Actor?` |
+| submittedAt | `datetime?` |
+
+### StaffAdChange
+
+| Field | Type |
+|---|---|
+| state | `enum(draft|in_review|changes_requested)` draft: saved, not submitted yet |
+| name | `string?` |
+| image | `AdImage?` |
+| webImage | `AdImage?` |
+| alt | `string?` |
+| destination | `AdDestination?` |
+| startsAt | `datetime?` |
+| dealId | `uuid?` |
+| dealName | `string?` |
+| stopWithDeal | `bool?` |
+| changedFields | `string[]` Fields that differ from the live version: name, image, webImage, alt, destination, startsAt, deal |
+| review | `AdReview` |
+| createdBy | `Actor` |
+| createdAt | `datetime` |
+
+### StaffAdStats
+
+| Field | Type |
+|---|---|
+| views | `int` Displays |
+| taps | `int` Clicks |
+
+### StaffAd
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| ref | `string` AD-YYMMDD-NNNN |
+| name | `string` |
+| placementKey | `string` |
+| placementName | `string` |
+| categoryId | `uuid?` category_banner only: the category it shows on (null = every category) |
+| status | `enum(draft|in_review|changes_requested|scheduled|live|paused|ended|rejected)` |
+| image | `AdImage?` Phone image (the placement's phone format, e.g. 750 × 400) |
+| webImage | `AdImage?` opening_fullscreen only, optional: website image 1600 × 900 |
+| alt | `string?` |
+| destination | `AdDestination?` |
+| startsAt | `datetime?` null = as soon as approved |
+| endsAt | `datetime?` Required to submit |
+| dealId | `uuid?` Linked deal (promotions campaign) |
+| dealName | `string?` |
+| stopWithDeal | `bool` |
+| position | `int` 1-based order inside its placement's carousel (live and scheduled ads); serving order of carousel placements |
+| review | `AdReview` The initial review (the latest submission of the ad itself) |
+| pendingChange | `StaffAdChange?` An edit of a scheduled, live or paused ad waiting for review; the current version keeps running until the change is approved |
+| stats | `StaffAdStats` |
+| allowedActions | `string[]` edit, submit, review, pause, resume, end, duplicate, delete |
+| statusNote | `string?` e.g. Needs Content review; Changes requested: brighter image |
+| createdBy | `Actor` |
+| createdAt | `datetime` |
+| updatedAt | `datetime` |
+| version | `int` PATCH sends it back; a stale version is CONFLICT |
+
+### StaffAdInput
+
+| Field | Type |
+|---|---|
+| name | `string` |
+| placementKey | `string` |
+| categoryId | `uuid?` category_banner only |
+| imageId | `uuid?` Media asset of the phone image (uploaded through media first; checked against the placement's phone format) |
+| webImageId | `uuid?` opening_fullscreen only: website image 1600 × 900 |
+| alt | `string?` |
+| destination | `AdDestinationInput?` |
+| startsAt | `datetime?` null = as soon as approved |
+| endsAt | `datetime?` |
+| dealId | `uuid?` |
+| stopWithDeal | `bool?` |
+
+### StaffAdPatch
+
+| Field | Type |
+|---|---|
+| name | `string?` |
+| categoryId | `uuid?` |
+| imageId | `uuid?` |
+| webImageId | `uuid?` |
+| alt | `string?` |
+| destination | `AdDestinationInput?` |
+| startsAt | `datetime?` |
+| endsAt | `datetime?` |
+| dealId | `uuid?` |
+| stopWithDeal | `bool?` |
+| version | `int` |
+
+### StaffAdsOrderInput
+
+| Field | Type |
+|---|---|
+| placementKey | `string` |
+| ids | `uuid[]` Live and scheduled ads of the placement in the new order (every one of them) |
+
+### StaffAdSlot
+
+| Field | Type |
+|---|---|
+| name | `string` |
+| enabled | `bool` |
+| live | `int` Live ads now (equals Placement.liveCampaigns) |
+| maxLive | `int?` Carousels: live ads at most |
+| carouselSeconds | `int?` Carousels: seconds each ad shows |
+| rotationLabel | `string` e.g. Each ad shows 6 s, in the order on Advertisements; Ads take turns in the order on Advertisements |
+
+### AdWaitingRef
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| name | `string` |
+| placementKey | `string` |
+| isChange | `bool` A pending change of a running ad (else the ad's first review) |
+
+### StaffAdsPage
+
+| Field | Type |
+|---|---|
+| items | `StaffAd[]` Ads of the asked placement(s): live and scheduled in position order, then paused, in review and drafts, ended and rejected last |
+| counts | `map<int>` placementKey → ads not ended (for the slot tabs) |
+| statusCounts | `map<int>` status → ads in the asked placement(s) |
+| waitingForMe | `int` |
+| waitingForMeAds | `AdWaitingRef[]` |
+| slots | `map<StaffAdSlot>` placementKey → slot settings and live count, for every staff-ad slot |
+
 ## Status flows
 
 ### Ad campaign (`AdCampaign.status`)
@@ -954,12 +1155,15 @@ Charges accrue per day from billable clicks/displays or the fixed daily fee and 
 | rejected_reason | text? |
 | finished_reason | text? |
 | note_to_reviewers | text? |
+| position | int? (staff ads: 1-based order in the placement carousel) |
+| alt | text? (staff ads: image description) |
+| pending_change | jsonb? (staff ads: an edit of a running ad waiting for review: StaffAdChange values, media ids, submission) |
 | created_by | text |
 | created_at | timestamptz |
 | updated_at | timestamptz |
 | version | int |
 
-Indexes: `(status, starts_at)`, `(status, ends_at)`, `(placement_id, status)`, `(seller_id, status)`, `(linked_promotion_id)`
+Indexes: `(status, starts_at)`, `(status, ends_at)`, `(placement_id, status)`, `(seller_id, status)`, `(linked_promotion_id)`, `(placement_id, position)`
 
 **campaign_items**: Promoted offers, products, stores or brands
 
@@ -1227,6 +1431,7 @@ Checked through the access module (limits per role, second reviewer).
 | `CREATIVE_FORMAT_INVALID` | 422 | Size, dimensions, file type or text length does not match the placement format. |
 | `INVALID_IMPRESSION_TOKEN` | 400 | The tracking token is missing, expired or tampered with. |
 | `PAID_ADS_DISABLED` | 409 | Paid seller advertising is not enabled yet. |
+| `SLOT_FULL` | 409 | The carousel already has its most live ads (Placement.maxPerPage); schedule the ad instead: it starts when one ends. |
 | `OFFER_NOT_PROMOTABLE` | 422 | The offer is not the seller's, not active or out of stock. |
 
 ## Background jobs
@@ -1269,6 +1474,13 @@ Checked through the access module (limits per role, second reviewer).
 - Global rules changes are versioned with an effective date and always need Business Owner approval (admin/ad-placements); the four blocked page types can never be unblocked.
 - Reviewer roles: approve, request-changes and creative review take the reviewing step from the caller's access roles (access.rolesOf), so a Content Manager can never act on the Advertising step by sending role advertising.
 - Attribution privacy (decision: guest attribution only with personalizationAllowed): orders carry visitorId only when the shopper allowed personalization; clicks recorded without personalization keep no visitor key usable for attribution.
+- Staff ads (GET/POST /ads…, owner decision 2026-10-23): the simple Advertisements page. A staff ad is an own (platform) campaign with one placement, a phone image creative (plus an optional website image for opening_fullscreen), a picked destination resolved to a store path, a schedule, a carousel position and an optional linked deal (linkedPromotionId, stopWithPromotion). It uses the same lifecycle, review steps (advertising + content, never the creator, never one person for both), jobs, serving and stats as every campaign; the campaign endpoints keep working on the same records. Slots: Full-screen (opening_fullscreen), Home carousel (home_banner), Departments (software_top, food_top, companies_top, play_top), Deals (deals_top), Other (category_banner, popup).
+- Pending change: editing a scheduled, live or paused staff ad saves the edit as campaigns.pending_change and the current version keeps serving. Submitting it opens a new review submission (approval_steps.submission); the last approval applies it (new creatives replace the old ones, destination, name, alt, start and deal are copied) and clears it; reject drops it. End date and carousel position never need review.
+- Carousel order: carousel placements (rotation mode carousel) serve their ads by campaigns.position (1 first), then by creation. Every staff ad gets the next position of its placement when created; PUT /ads/order rewrites the order of the live and scheduled ones.
+- Destinations are picked (AdDestinationInput) and resolved server-side to app store paths through the owning modules' linkTargets public API: product /p/{slug}/{id}, category /c/{slug}, department /phones, /farm-machines, /software, /welfare, /food, /booking, /blogs, /companies, /play, /rewards, restaurant /food/restaurants/{slug}, deal /deals?campaign={id}, collection /collection/{slug}, seller_store /shop/{slug} (Official Store /official), brand /brand/{slug}, phone /phones/{slug}; url is kept as typed (https, or a store path). Promoted-offer impressions open /p/{slug}/{productId}?offer={offerId}.
+- Links saved before the pickers (kind url and the wizard's kinds) are read as the target their store path names (and converted by the 2026-10-23 destinations migration): /p/{slug}/{id} and /product/{id} product; /c/{slug} category; /pages, /collections and /collection/{slug} collection; /deals the Deals tab (kind deal, targetId tab) and /deals?campaign={id} a deal; the ten department paths (and the old /softwares) department; /phones/{slug} phone; /food/restaurants/{slug} restaurant; /shop/{slug} and /official seller_store; /brand/{slug} brand. A slug that is not found keeps its path with available false. Other store paths stay kind url labelled Store page; https addresses are Web address.
+- Slot settings (2026-10-23): carousel slots show every live ad in position order, each for rotation.carouselSeconds (2–15), with at most maxPerPage live ads (1–20, default 10). An ad that would go live in a full carousel (last approval, its start time, resume) waits as scheduled and starts when one ends (oldest start first); activating one by hand is SLOT_FULL. The single-ad slots (opening_fullscreen, popup, category_banner) let their ads take turns in position order per page view (category banner: ads for the page's category first). Slots on the Advertisements page show on the slot's pages (eligiblePages within pageOptions), not per-ad pages.
+- deals_top (2026-10-23): a short carousel at the top of the app's Deals tab, phone 750 × 150 (5:1), every live ad in position order, like the department carousels.
 
 ## GraphQL (read layer)
 

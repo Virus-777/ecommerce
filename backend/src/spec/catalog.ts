@@ -1297,6 +1297,8 @@ export const CatalogBrandChangedEvent: z.ZodType<CatalogBrandChangedEvent> = z.o
 
 /** What other modules may call in-process: `ctx.use('catalog')` (or `ctx.tryUse` for an optional dependency). */
 export interface CatalogPublicApi {
+  /** Link targets for ad destination pickers (search by q, or resolve ids or URL slugs): active products (/p/{slug}/{id}), categories (/c/{slug}) and active brands (/brand/{slug}), each with its store path the app opens, a label, a short meta line, an image and whether it is shown in the store. Unknown ids are left out. Used by: advertising. */
+  linkTargets(input: { kind: 'product' | 'category' | 'brand', q?: string, ids?: string[], slugs?: string[], limit?: number }): Promise<common.LinkTarget[]>;
   /** Read shared product content Used by: offers, search, reviews, promotions, graphql. */
   getProduct(productId: string): Promise<Product | null>;
   /** Approved and Active. Offers only go live on purchasable products. Used by: offers, cart. */
@@ -2573,7 +2575,7 @@ export const spec = defineModuleSpec({
   summary: "What a product is: categories, attributes, brands, products, variants, and the review workflow that decides whether a product may be sold. How a seller sells it (price, stock, condition) belongs to offers.",
   dependsOn: ["media"],
   optionalDeps: ["search","sellers","access","audit","offers","cart","reviews","inventory","reports","orders","returns","support","settings","workqueues"],
-  publicApi: ["getProduct","isPurchasable","snapshotForOrder","getProducts","searchProducts","listProductIds","brandSellerCheck","productIdsOfBrand","getBrands","getVariants","getParcels","getCategoryPaths","listCategories","getCategoryBySlug","getBrandBySlug","getProductForSeller","getProductAdmin","listReviewQueue","countProductsForSellers","exportRows"],
+  publicApi: ["linkTargets","getProduct","isPurchasable","snapshotForOrder","getProducts","searchProducts","listProductIds","brandSellerCheck","productIdsOfBrand","getBrands","getVariants","getParcels","getCategoryPaths","listCategories","getCategoryBySlug","getBrandBySlug","getProductForSeller","getProductAdmin","listReviewQueue","countProductsForSellers","exportRows"],
   permissions: [
     {
       "key": "catalog.products.review",

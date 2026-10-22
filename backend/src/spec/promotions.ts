@@ -2088,6 +2088,8 @@ export const PromotionsBudgetThresholdReachedEvent: z.ZodType<PromotionsBudgetTh
 
 /** What other modules may call in-process: `ctx.use('promotions')` (or `ctx.tryUse` for an optional dependency). */
 export interface PromotionsPublicApi {
+  /** Link targets for ad destination pickers (search by q, or resolve ids): platform promotion campaigns that are live or scheduled (/deals?campaign={id}); resolving ids also returns ended ones as unavailable, each with its store path the app opens, a label, a short meta line, an image and whether it is shown in the store. Unknown ids are left out. Used by: advertising. */
+  linkTargets(input: { kind: 'deal', q?: string, ids?: string[], limit?: number }): Promise<common.LinkTarget[]>;
   /** Current markdown or flash price, was price, badges, purchase limit and countdown per offer. Used for product cards, the purchase box and cart lines so prices match everywhere (plan ch. 15: consistent across product page, cart, checkout and confirmation). Used by: offers, search, cart, content, wishlist, graphql, reports. */
   priceOffers(offerIds: string[], ctx: { customerId?: string, at?: string }): Promise<OfferPromotion[]>;
   /** Runs eligibility, stacking, limits and budgets for a cart or checkout quote. Returns per-line discounts with the funding split, free-shipping packages, applied codes with the items they cover and rejected codes with a reason the customer can read. Pure read: nothing is reserved. Used by: cart, checkout. */
@@ -3479,7 +3481,7 @@ export const spec = defineModuleSpec({
   summary: "Discounts and sales campaigns: markdowns, percentage and fixed coupons, minimum-spend and free-shipping offers, flash sales, seller discounts and platform campaigns with seller consent. Owns eligibility, stacking, budgets and caps, the funding owner of every discount, coupon clipping and redemption, the Deals page data and campaign results.",
   dependsOn: ["catalog","offers"],
   optionalDeps: ["sellers","inventory","orders","customers","access","notifications","reports","advertising","audit","content","finance","reviews","search","settings"],
-  publicApi: ["priceOffers","evaluateCart","reserveRedemption","commitRedemption","releaseRedemption","fundingSplitFor","refundShare","getPublicCampaign","isCampaignActive","liveDeals","referencePrice","getDealsPage","listClearance","getFlashSale","couponsForProduct","issueCode","couponsForCustomer","activeSellerPromotions","exportRows"],
+  publicApi: ["linkTargets","priceOffers","evaluateCart","reserveRedemption","commitRedemption","releaseRedemption","fundingSplitFor","refundShare","getPublicCampaign","isCampaignActive","liveDeals","referencePrice","getDealsPage","listClearance","getFlashSale","couponsForProduct","issueCode","couponsForCustomer","activeSellerPromotions","exportRows"],
   permissions: [
     {
       "key": "promotions.campaigns.view",

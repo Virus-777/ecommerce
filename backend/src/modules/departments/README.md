@@ -1424,6 +1424,7 @@ Indexes: `unique (game_id, week, customer_id)`, `(game_id, week, rank)`, `(state
 
 | Function | Signature | Used by |
 |---|---|---|
+| linkTargets | `(input: { kind: 'phone', q?: string, ids?: string[], slugs?: string[], limit?: int }) => LinkTarget[]`<br>Link targets for ad destination pickers (search by q, or resolve ids or URL slugs): phones of the Phones department (/phones/{slug}; available when published), each with its store path the app opens, a label, a short meta line, an image and whether it is shown in the store. Unknown ids are left out. | advertising |
 | getFarmMachine | `(productId: uuid) => FarmMachine`<br>A picked farm machine with its attachments as product cards (prices and availability now), like GET /farm/machines/{productId}; NOT_FOUND when it isn't picked or the store no longer shows it. Farm orders price machines and attachments with it. | farm |
 | exportCustomerData | `(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]`<br>The customer's blog reactions, replies, reports, saved posts, followed authors and reply likes; company inquiries; company and game reviews; Play center player ID, scores and prize coupons, for the personal data export. Reactions, replies, reports and inquiries are kept by account id, the rest by customers-module id (both ids are looked up everywhere) | customers |
 

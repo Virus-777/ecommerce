@@ -67,6 +67,10 @@ export class PromotionsService implements PromotionsPublicApi {
     return this.checkout.refundShare(orderItemId, quantity);
   }
 
+  linkTargets(input: { kind: 'deal'; q?: string; ids?: string[]; limit?: number }): Promise<common.LinkTarget[]> {
+    return this.storefront.linkTargets(input);
+  }
+
   getPublicCampaign(campaignId: string): Promise<PublicCampaign | null> {
     return this.storefront.getPublicCampaign(campaignId);
   }

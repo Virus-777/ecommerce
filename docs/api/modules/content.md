@@ -1367,6 +1367,7 @@ Indexes: `(entity, entity_id, at desc)`
 
 | Function | Signature | Used by |
 |---|---|---|
+| linkTargets | `(input: { kind: 'collection', q?: string, ids?: string[], slugs?: string[], limit?: int }) => LinkTarget[]`<br>Link targets for ad destination pickers (search by q, or resolve ids or URL slugs): collections and campaign pages (/collection/{slug}; available while published), each with its store path the app opens, a label, a short meta line, an image and whether it is shown in the store. Unknown ids are left out. | advertising |
 | currentPolicyVersions | `(keys: string[], at?: datetime) => PolicyVersionRef[]`<br>Policy versions in effect at a moment. Checkout and orders store these ids on the order so the order keeps the purchase terms and return policy accepted at purchase (plan ch. 3, 8). | checkout, orders, returns, sellers |
 | getPolicyVersion | `(versionId: uuid) => PolicyVersion`<br>Exact text of a version, e.g. for order details and disputes. | orders, support, returns |
 | helpArticlesFor | `(topic: string, limit: int) => HelpArticleSummary[]`<br>Suggested articles for an order problem or case category. | support, graphql |

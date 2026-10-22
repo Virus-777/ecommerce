@@ -144,6 +144,14 @@
       "module": "string",
       "records": { "type": "json[]", "desc": "Plain records about the customer (their own words, choices and amounts). Other people's personal details are left out or masked; internal staff notes are never included." },
       "attachmentIds": { "type": "uuid[]?", "desc": "Media assets the customer uploaded that belong in the ZIP (message attachments, review photos)" }
+    },
+    "LinkTarget": {
+      "id": { "type": "string", "desc": "The record's id (uuid)" },
+      "label": { "type": "string", "desc": "e.g. Halden Aurora ANC Wireless Headphones" },
+      "meta": { "type": "string?", "desc": "Short second line, e.g. Product · $149.00, Restaurant · Pizza" },
+      "path": { "type": "string", "desc": "Store path the website and the app open, e.g. /p/halden-aurora/{id}" },
+      "image": "MediaRef?",
+      "available": { "type": "bool", "desc": "Shown in the store now (published, active, approved)" }
     }
   },
   "pagination": {

@@ -293,6 +293,7 @@ export class OpsPart extends Part {
     const rows = await this.repo.find('campaigns', { status: 'scheduled', starts_at: { op: '<=', value: now }, ...(ids ? { id: ids } : {}) }, { orderBy: [['starts_at', 'asc']], limit: BATCH });
     for (const r of rows) {
       if (r.ends_at && r.ends_at.getTime() <= now.getTime()) await this.parts.campaigns.finish(r.id, 'ended', null, SYSTEM_BY).catch(ignoreIllegal);
+      else if (await this.core.slotFull(r.placement_id, r.id)) continue;
       else await this.parts.campaigns.transition(r.id, 'start', SYSTEM_BY).catch(ignoreIllegal);
     }
   }

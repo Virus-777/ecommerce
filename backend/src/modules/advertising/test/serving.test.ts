@@ -86,11 +86,13 @@ describe('scenario 8: opening advertisement', () => {
     expect(await k.svc.isAdBlockedPage('home')).toBe(false);
   });
 
-  it('one overlay per page view: the higher priority shows; a pop-up is skipped when an overlay already showed', async () => {
+  // 2026-10-23: the full-screen ad's ads take turns in the order on Advertisements (position), not by priority
+  it('one overlay per page view: the ads take turns in position order; a pop-up is skipped when an overlay already showed', async () => {
     const low = await liveCampaign(k, { name: 'Low', priority: 1 });
     const high = await liveCampaign(k, { name: 'High', priority: 3 });
-    for (let i = 0; i < 3; i++) expect((await serve(k, { visitorId: visitor() })).overlay.campaignId).toBe(high.id);
-    expect(low.id).not.toBe(high.id);
+    const shown = new Set<string>();
+    for (let i = 0; i < 4; i++) shown.add((await serve(k, { visitorId: visitor() })).overlay.campaignId);
+    expect(shown).toEqual(new Set([low.id, high.id]));
     const popupCreative = await creative(k, 'popup', 'any', [600, 600], { headline: 'Take 20% off with HOME20' });
     const promo = k.promotion();
     const popup = await liveCampaign(k, { name: 'Popup', placementKey: 'popup', pages: ['home', 'category'], creativeIds: [popupCreative.id], linkedPromotionId: promo.id, frequencyCap: null });
@@ -132,25 +134,24 @@ describe('scenario 8: opening advertisement', () => {
     expect(d.overlay).toMatchObject({ creativeId: text.body.id, headline: '$20 off your order over $100', image: null });
   });
 
-  it('banners rotate evenly at equal priority, in the carousel order', async () => {
+  // owner decision 2026-10-23: carousels show every live ad in the order staff set (position), not rotated
+  it('banners show in the carousel order (position)', async () => {
     const mk = async (name: string) => {
       const c1 = await creative(k, 'home_banner', 'any', [1200, 300]);
       return liveCampaign(k, { name, placementKey: 'home_banner', creativeIds: [c1.id], dismissal: null, frequencyCap: null });
     };
     const a = await mk('Banner A');
     const b = await mk('Banner B');
-    const firsts = new Set<string>();
     for (let i = 0; i < 4; i++) {
       const d = await serve(k, { visitorId: visitor(), slots: ['home_banner'] });
       expect(d.overlay).toBeNull();
       expect(d.slots.home_banner).toHaveLength(2);
       expect(d.rotationSeconds).toBe(6);
-      firsts.add(d.slots.home_banner[0].campaignId);
+      expect(d.slots.home_banner.map((x: any) => x.campaignId).filter((id: string) => id === a.id || id === b.id)).toEqual([a.id, b.id]);
     }
-    expect(firsts).toEqual(new Set([a.id, b.id]));
   });
 
-  it('the home banner carousel shows every live ad unless staff set a limit', async () => {
+  it('the home banner carousel shows every live ad up to its live-ad limit', async () => {
     for (const name of ['Banner 1', 'Banner 2', 'Banner 3', 'Banner 4', 'Banner 5']) {
       const c1 = await creative(k, 'home_banner', 'any', [1200, 300]);
       await liveCampaign(k, { name, placementKey: 'home_banner', creativeIds: [c1.id], dismissal: null, frequencyCap: null });
@@ -158,11 +159,11 @@ describe('scenario 8: opening advertisement', () => {
     // five live banners: all five, no limit of 3
     expect((await serve(k, { visitorId: visitor(), slots: ['home_banner'] })).slots.home_banner).toHaveLength(5);
     const placement = (await k.call('GET', `${ADMIN}/placements`, k.staff)).body.find((p: any) => p.key === 'home_banner');
-    expect(placement).toMatchObject({ maxPerPage: null, rotation: { mode: 'carousel', maxInRotation: null, label: 'Carousel, 6 s each' } });
+    expect(placement).toMatchObject({ name: 'Home carousel', maxPerPage: 10, inUse: true, pageOptions: ['home'], rotation: { mode: 'carousel', maxInRotation: null, label: 'Each ad shows 6 s, in the order on Advertisements' } });
     const limited = await k.call('PATCH', `${ADMIN}/placements/${placement.id}`, k.staff, { maxPerPage: 2, reason: 'Two at a time', version: placement.version });
     expect(limited.status, JSON.stringify(limited.body)).toBe(200);
     expect((await serve(k, { visitorId: visitor(), slots: ['home_banner'] })).slots.home_banner).toHaveLength(2);
-    await k.call('PATCH', `${ADMIN}/placements/${placement.id}`, k.staff, { maxPerPage: null, reason: 'All again', version: limited.body.version });
+    await k.call('PATCH', `${ADMIN}/placements/${placement.id}`, k.staff, { maxPerPage: 10, reason: 'All again', version: limited.body.version });
     expect((await serve(k, { visitorId: visitor(), slots: ['home_banner'] })).slots.home_banner).toHaveLength(5);
   });
 
@@ -203,8 +204,8 @@ describe('tracking', () => {
 describe('positions for content and sponsored products for search', () => {
   it('adPositionsFor lists the layout positions of a page, the opening ad first', async () => {
     expect(await k.svc.adPositionsFor('home')).toEqual([
-      { placementKey: 'opening_fullscreen', name: 'Opening full-screen ad', enabled: true },
-      { placementKey: 'home_banner', name: 'Sponsored brand banner', enabled: true },
+      { placementKey: 'opening_fullscreen', name: 'Full-screen ad', enabled: true },
+      { placementKey: 'home_banner', name: 'Home carousel', enabled: true },
       { placementKey: 'sponsored_store', name: 'Sponsored store or brand', enabled: false },
     ]);
     expect(await k.svc.adPositionsFor('checkout')).toEqual([]);

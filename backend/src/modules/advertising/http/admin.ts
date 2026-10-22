@@ -9,6 +9,7 @@ import type { AdvertisingService } from '../service.js';
 export const adminRoutes = (service: AdvertisingService) => {
   const c = service.campaigns;
   const cr = service.creatives;
+  const s = service.staffAds;
   return routes(endpoints, 'admin', {
     /** GET /dashboard: Live now, upcoming starts, ending soon, waiting approvals, spending and performance */
     adsDashboard: async ({ query }) => {
@@ -75,6 +76,70 @@ export const adminRoutes = (service: AdvertisingService) => {
     getAdCampaignReport: async ({ params, query }) => service.reports.campaignReport(params.id, query),
     /** GET /reports/performance: Performance across campaigns by placement, with the attribution period stated */
     getAdPerformance: async ({ query }) => service.reports.performance(query),
+    /** GET /ads: Staff ads by slot: live and scheduled in carousel order, with counts and what waits for my review */
+    listStaffAds: async ({ query, can, actor, requestId, principal }) => {
+      await s.assertCanView(can);
+      return s.list(query, await s.viewer({ actor, requestId, principal }, can));
+    },
+    /** POST /ads: Create a staff ad draft */
+    createStaffAd: async ({ body, can, actor, requestId, principal }) => {
+      const by = { actor, requestId, principal };
+      return s.create(body, by, await s.viewer(by, can));
+    },
+    /** GET /ads/{id}: A staff ad with its review, pending change and stats */
+    getStaffAd: async ({ params, can, actor, requestId, principal }) => {
+      await s.assertCanView(can);
+      return s.get(params.id, await s.viewer({ actor, requestId, principal }, can));
+    },
+    /** PATCH /ads/{id}: Edit a staff ad (a running ad gets a pending change) */
+    updateStaffAd: async ({ params, body, can, actor, requestId, principal }) => {
+      const by = { actor, requestId, principal };
+      return s.update(params.id, body, by, await s.viewer(by, can));
+    },
+    /** POST /ads/{id}/submit: Send the ad (or its pending change) for the two reviews */
+    submitStaffAd: async ({ params, can, actor, requestId, principal }) => {
+      const by = { actor, requestId, principal };
+      return s.submit(params.id, by, await s.viewer(by, can));
+    },
+    /** POST /ads/{id}/review: Approve, request changes or reject the open review step (first review or pending change) */
+    reviewStaffAd: async ({ params, body, can, actor, requestId, principal }) => {
+      const by = { actor, requestId, principal };
+      return s.review(params.id, body, by, await s.viewer(by, can));
+    },
+    /** POST /ads/{id}/pause: Pause a scheduled or live ad (off the app within 1 minute) */
+    pauseStaffAd: async ({ params, body, can, actor, requestId, principal }) => {
+      const by = { actor, requestId, principal };
+      return s.pause(params.id, body.reason, by, await s.viewer(by, can));
+    },
+    /** POST /ads/{id}/resume: Resume a paused ad */
+    resumeStaffAd: async ({ params, body, can, actor, requestId, principal }) => {
+      const by = { actor, requestId, principal };
+      return s.resume(params.id, body.reason, by, await s.viewer(by, can));
+    },
+    /** POST /ads/{id}/end: End a scheduled, live or paused ad now */
+    endStaffAd: async ({ params, body, can, actor, requestId, principal }) => {
+      const by = { actor, requestId, principal };
+      return s.end(params.id, body.reason, by, await s.viewer(by, can));
+    },
+    /** POST /ads/{id}/duplicate: Copy an ad into a new draft */
+    duplicateStaffAd: async ({ params, can, actor, requestId, principal }) => {
+      const by = { actor, requestId, principal };
+      return s.duplicate(params.id, by, await s.viewer(by, can));
+    },
+    /** DELETE /ads/{id}: Delete a draft that never ran */
+    deleteStaffAd: async ({ params, actor, requestId, principal }) => {
+      await s.remove(params.id, { actor, requestId, principal });
+    },
+    /** PUT /ads/order: Set the carousel order of a placement's live and scheduled ads (applies at once) */
+    reorderStaffAds: async ({ body, can, actor, requestId, principal }) => {
+      const by = { actor, requestId, principal };
+      return s.reorder(body, by, await s.viewer(by, can));
+    },
+    /** GET /ads/destinations: Search what an ad can open, for the destination pickers */
+    searchAdDestinations: async ({ query, can }) => {
+      await s.assertCanView(can);
+      return s.searchDestinations(query);
+    },
     /** GET /placements: Placements with pages, formats, caps, rotation and dismissal rules */
     listPlacements: async () => service.setup.listPlacements(),
     /** PATCH /placements/{id}: Edit a placement's rules or turn it on/off */
