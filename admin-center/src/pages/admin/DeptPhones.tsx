@@ -1,216 +1,297 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { announce, Badge, Button, EmptyState, IconButton, Img, PageHeader, SearchInput, Alert } from '@marketly/web-shared/ui';
+import { useLocation } from 'react-router';
 import { call, errorMessage, useApi } from '@marketly/web-shared/api';
-import { formatMoney } from '@marketly/web-shared/lib/format';
+import { formatMoney, percentOff } from '@marketly/web-shared/lib/format';
+import { href } from '@marketly/web-shared/routes';
+import { Alert, announce, Badge, Button, Dialog, EmptyState, Icon, Img, PageHeader, sameOriginFile, SearchInput, TableWrap } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
-import { LoadError, SkeletonLines, shortDate } from '@/app/parts';
-import { DeptPage, plural, type ProductCard } from './data/departments';
+import { dateTime, LoadError, SkeletonLines } from '@/app/parts';
+import { DeptPage, plural, useDragSort, type Money, type PhoneAdmin } from './data/departments';
 
-// Admin › Departments › Phones (designed in React from the Marketly Departments canvas): the phones of the app's Phone
-// tab, picked one by one and kept in order. API: GET/PUT /api/admin/departments/phones; products are found with
-// GET /api/admin/catalog/products?q= (the Products page search).
+// Admin › Departments › Phones (designed from the Marketly Departments canvas: AdminPhones). The phones of the app's
+// Phone tab are standalone records staff add (DeptPhoneEdit.tsx), in the order the tab shows them; hidden phones keep
+// their place. API: GET /api/admin/departments/phones (every phone, at most 100: search and filters work on the
+// page), PUT /phones/order (drag a row by its handle, or focus the handle and use the arrow keys). Photos counts the
+// preview photos (Detail tab gallery), Ads the advertisement images (Advertisements tab).
 
-const MAX = 100;
-type Pick = { id: string; title: string; brand?: string | null; image?: string | null; price?: string | null; shown: boolean; stock?: ProductCard['availability'] };
+export const PHONES_KEY = ['departments', 'phones'];
+export const PHONES_LIST = href('admin/departments-phones');
+export const phoneHref = (id: string) => href('admin/departments-phone', '', { id });
 
-const STOCK: Record<ProductCard['availability'], { label: string; tone: 'success' | 'warning' | 'danger' }> = {
-  in_stock: { label: 'In stock', tone: 'success' },
-  low_stock: { label: 'Low stock', tone: 'warning' },
-  out_of_stock: { label: 'Out of stock', tone: 'danger' },
+type Status = PhoneAdmin['status'];
+export const PHONE_STATUS: Record<Status, { label: string; tone: 'success' | 'outline' }> = {
+  published: { label: 'On the Phone tab', tone: 'success' },
+  hidden: { label: 'Hidden', tone: 'outline' },
 };
+
+/** The storage size the list's price shows: the cheapest one */
+const cheapest = (p: PhoneAdmin) => p.storage.reduce<PhoneAdmin['storage'][number] | undefined>((m, s) => (!m || s.price.amount < m.price.amount ? s : m), undefined);
+
+/** A card of the app's Phone tab: cover with the deal badge, name, first storage and color, price and was price */
+export function PhoneTile({ name, meta, cover, price, was }: { name: string; meta: string; cover?: string | null; price: Money | null; was?: Money | null }) {
+  const pct = price && was ? percentOff(price.amount, was.amount) : 0;
+  return (
+    <div style={{ width: 168, display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ aspectRatio: '1', borderRadius: 14, background: 'var(--img-2)', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--img-ink)', marginBottom: 4, overflow: 'hidden' }}>
+        {cover ? <img src={sameOriginFile(cover)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Icon name="smartphone" style={{ width: 40, height: 40 }} />}
+        {pct > 0 && <span style={{ position: 'absolute', top: 8, left: 8, fontSize: 12, fontWeight: 600, padding: '3px 8px', borderRadius: 999, background: 'var(--deal)', color: 'var(--on-deal)' }}>-{pct}%</span>}
+      </div>
+      <span className="small" style={{ fontWeight: 500, lineHeight: '18px' }}>
+        {name}
+      </span>
+      {meta && <span className="xs muted">{meta}</span>}
+      <span style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+        <span style={{ fontSize: 17, fontWeight: 700 }}>{formatMoney(price) || '$—'}</span>
+        {pct > 0 && <s className="small muted">{formatMoney(was)}</s>}
+      </span>
+    </div>
+  );
+}
 
 export default function DeptPhones() {
   const { api } = useApi();
   const qc = useQueryClient();
   const { can } = useStaffSession();
   const canView = can('departments.view');
-  const canEdit = can('departments.phones.manage');
-  const [draft, setDraft] = useState<string[] | null>(null);
-  // titles of products added in this session, before they are saved and come back as cards
-  const [added, setAdded] = useState<Record<string, Pick>>({});
-  const [q, setQ] = useState('');
+  const canManage = can('departments.phones.manage');
+  // the notice of a phone just deleted on its edit page
+  const [notice, setNotice] = useState((useLocation().state as { notice?: string } | null)?.notice ?? '');
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
+  const [q, setQ] = useState('');
+  const [brand, setBrand] = useState('');
+  const [status, setStatus] = useState<Status | ''>('');
+  const [preview, setPreview] = useState(false);
 
-  const picks = useQuery({ queryKey: ['departments', 'phones'], enabled: canView, queryFn: () => call(api.GET('/api/admin/departments/phones')) });
-  const term = q.trim();
-  const search = useQuery({
-    queryKey: ['catalog', 'products', 'phone-search', term],
-    enabled: canEdit && term.length >= 2,
-    queryFn: () => call(api.GET('/api/admin/catalog/products', { params: { query: { q: term, publication: 'active', limit: 8 } } })),
-  });
+  const list = useQuery({ queryKey: PHONES_KEY, enabled: canView, queryFn: () => call(api.GET('/api/admin/departments/phones')) });
+  const all = list.data?.items ?? [];
+  const byId = new Map(all.map((p) => [p.id, p]));
+  const brands = [...new Set(all.map((p) => p.brand))].sort((a, b) => a.localeCompare(b));
+  const term = q.trim().toLowerCase();
+  const rows = all.filter((p) => (!term || `${p.name} ${p.brand}`.toLowerCase().includes(term)) && (!brand || p.brand === brand) && (!status || p.status === status));
+  const hidden = all.filter((p) => p.status === 'hidden').length;
+  const filtered = !!(term || brand || status);
 
-  const saved = picks.data?.productIds ?? [];
-  const ids = draft ?? saved;
-  const dirty = draft !== null && (draft.length !== saved.length || draft.some((id, i) => id !== saved[i]));
-  const cards = new Map((picks.data?.products ?? []).map((c) => [c.productId, c]));
-  const pickOf = (id: string): Pick => {
-    const c = cards.get(id);
-    if (c) return { id, title: c.title, brand: c.brandName, image: c.image?.url, price: formatMoney(c.price), shown: true, stock: c.availability };
-    return added[id] ?? { id, title: 'Product not shown in the store', shown: false };
-  };
-
-  const set = (next: string[]) => {
-    setDraft(next);
-    setNotice('');
-  };
-  const move = (i: number, dir: -1 | 1) => {
-    const j = i + dir;
-    if (j < 0 || j >= ids.length) return;
-    const next = [...ids];
-    [next[i], next[j]] = [next[j], next[i]];
-    set(next);
-    announce(`${pickOf(ids[i]).title} moved ${dir < 0 ? 'up' : 'down'}`);
-  };
-
-  const save = useMutation({
-    mutationFn: () => call(api.PUT('/api/admin/departments/phones', { body: { productIds: ids } })),
-    onSuccess: (d) => {
-      qc.setQueryData(['departments', 'phones'], d);
-      setDraft(null);
-      setError('');
-      const msg = `Phone tab saved: ${plural(d.productIds.length, 'phone')}. The app shows the new order now.`;
-      setNotice(msg);
-      announce(msg);
+  const order = useMutation({
+    mutationFn: (ids: string[]) => call(api.PUT('/api/admin/departments/phones/order', { body: { ids } })),
+    onSuccess: (d) => qc.setQueryData(PHONES_KEY, d),
+    // a dropped order shows at once; on failure show the server's order again
+    onError: (e) => {
+      setError(errorMessage(e));
+      void qc.invalidateQueries({ queryKey: PHONES_KEY });
     },
-    onError: (e) => setError(errorMessage(e)),
   });
-
-  const results = (search.data?.items ?? []).filter((r) => !ids.includes(r.product.id));
+  const sort = useDragSort({
+    keys: rows.map((p) => p.id),
+    disabled: !canManage || order.isPending,
+    onSort: (keys, moved) => {
+      // the shown phones (all of them, or the filtered ones) take the places they held among all phones
+      const ids = all.map((p) => p.id);
+      const slots = ids.map((id, i) => (keys.includes(id) ? i : -1)).filter((i) => i >= 0);
+      slots.forEach((slot, k) => (ids[slot] = keys[k]));
+      qc.setQueryData(PHONES_KEY, { items: ids.map((id, i) => ({ ...byId.get(id)!, position: i + 1 })) });
+      setError('');
+      setNotice('');
+      order.mutate(ids);
+      announce(`${byId.get(moved)?.name ?? 'Phone'} moved to place ${ids.indexOf(moved) + 1} of ${ids.length}`);
+    },
+  });
+  const shown = sort.order.map((id) => byId.get(id)).filter((p): p is PhoneAdmin => !!p);
+  const onTab = all.filter((p) => p.status === 'published');
 
   return (
     <DeptPage active="dept-phones" title="Phones" canView={canView}>
       <PageHeader
-        crumbs={[{ label: 'Departments' }, { label: 'Phones' }]}
+        crumbs={[{ label: 'Admin' }, { label: 'Departments' }]}
         title="Phones"
-        sub={`The Phone tab of the app’s Phones department · ${canEdit ? 'pick the phones one by one and order them' : 'view only: editing needs the Phones permission'}${picks.data?.updatedAt ? ` · saved ${shortDate(picks.data.updatedAt)}` : ''}`}
+        sub="The Phone tab in the app: phones staff add with their price, options, spec sheet and photos, in the order shown"
         actions={
-          canEdit && (
-            <>
-              <Button variant="ghost" size="sm" onClick={() => setDraft(null)} disabled={!dirty || save.isPending}>
-                Discard changes
+          <>
+            <Button variant="secondary" size="sm" icon="eye" onClick={() => setPreview(true)} disabled={!list.data}>
+              Preview in store
+            </Button>
+            {canManage && (
+              <Button size="sm" icon="plus" to={phoneHref('new')}>
+                Add phone
               </Button>
-              <Button size="sm" icon="check" onClick={() => save.mutate()} disabled={!dirty || !ids.length || save.isPending}>
-                Save
-              </Button>
-            </>
-          )
+            )}
+          </>
         }
       />
       {notice && <Alert tone="success" title={notice} />}
       {error && (
-        <Alert tone="danger" title="The phones weren’t saved">
+        <Alert tone="danger" title="The new order wasn’t saved">
           {error}
         </Alert>
       )}
-      <Alert tone="info" title="OS install and Post-sale services come later">
-        The app shows those two tabs as coming soon until their services are set up.
-      </Alert>
-      <div className="ab-main">
-        <section className="card">
-          <div className="card-head">
-            <div className="stack gap-0">
-              <h2 className="h4">Picked phones</h2>
-              <span className="xs muted">
-                Shown in this order · {plural(ids.length, 'phone')} of {MAX}
-                {dirty ? ' · unsaved changes' : ''}
-              </span>
-            </div>
+      <section className="card">
+        <div className="card-head toolbar" style={{ justifyContent: 'flex-start' }}>
+          <div style={{ width: 280, maxWidth: '100%' }}>
+            <SearchInput id="ph-q" placeholder="Search phones or brands" value={q} onChange={setQ} label="Search phones" />
           </div>
-          {picks.isError ? (
-            <div className="card-body">
-              <LoadError error={picks.error} onRetry={() => void picks.refetch()} />
-            </div>
-          ) : picks.isPending ? (
-            <div className="card-body">
-              <SkeletonLines rows={5} />
-            </div>
-          ) : ids.length === 0 ? (
-            <div className="card-body">
-              <EmptyState icon="smartphone" title="No phones picked yet">
-                Search the catalog on the right and add the phones the Phone tab should show.
-              </EmptyState>
-            </div>
-          ) : (
-            <ul className="list pad">
-              {ids.map((id, i) => {
-                const p = pickOf(id);
-                return (
-                  <li key={id}>
-                    <span className="xs muted num">{i + 1}</span>
-                    <Img icon="smartphone" src={p.image ?? undefined} alt="" className="tiny" />
-                    <span className="grow stack gap-0">
-                      <span className="small strong truncate">{p.title}</span>
-                      <span className="xs muted">
-                        {p.shown ? [p.brand, p.price].filter(Boolean).join(' · ') : 'Hidden, suspended or without a live offer: the app leaves it out until it sells again'}
-                      </span>
-                    </span>
-                    {p.stock ? <Badge tone={STOCK[p.stock].tone}>{STOCK[p.stock].label}</Badge> : !p.shown && <Badge tone="warning" icon="eye-off">Not shown</Badge>}
-                    {canEdit && (
-                      <>
-                        <IconButton icon="arrow-up" label={`Move ${p.title} up`} disabled={i === 0} onClick={() => move(i, -1)} />
-                        <IconButton icon="arrow-down" label={`Move ${p.title} down`} disabled={i === ids.length - 1} onClick={() => move(i, 1)} />
-                        <IconButton icon="x" label={`Remove ${p.title}`} onClick={() => set(ids.filter((x) => x !== id))} />
-                      </>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
+          <select className="select" id="ph-brand" aria-label="Brand" value={brand} onChange={(e) => setBrand(e.target.value)} style={{ width: 170 }}>
+            <option value="">All brands</option>
+            {brands.map((b) => (
+              <option key={b} value={b}>
+                {b}
+              </option>
+            ))}
+          </select>
+          <select className="select" id="ph-status" aria-label="Status" value={status} onChange={(e) => setStatus(e.target.value as Status | '')} style={{ width: 150 }}>
+            <option value="">All statuses</option>
+            {(Object.keys(PHONE_STATUS) as Status[]).map((s) => (
+              <option key={s} value={s}>
+                {PHONE_STATUS[s].label}
+              </option>
+            ))}
+          </select>
+          {list.isSuccess && (
+            <span className="xs muted" style={{ marginLeft: 'auto' }}>
+              {filtered ? `${rows.length} of ${plural(all.length, 'phone')}` : plural(all.length, 'phone')}
+              {hidden ? ` · ${hidden} hidden` : ''}
+            </span>
           )}
-        </section>
-
-        {canEdit && (
-          <section className="card">
-            <div className="card-head">
-              <div className="stack gap-0">
-                <h2 className="h4">Add phones</h2>
-                <span className="xs muted">Active catalog products</span>
-              </div>
-            </div>
-            <div className="card-body stack gap-3">
-              <SearchInput id="dp-q" placeholder="Search products by name" value={q} onChange={setQ} label="Search products" />
-              {term.length < 2 ? (
-                <span className="xs muted">Type at least two letters.</span>
-              ) : search.isError ? (
-                <LoadError error={search.error} onRetry={() => void search.refetch()} />
-              ) : search.isPending ? (
-                <SkeletonLines rows={3} />
-              ) : results.length === 0 ? (
-                <span className="small muted">No products to add for “{term}”.</span>
-              ) : (
-                <ul className="list">
-                  {results.map((r) => (
-                    <li key={r.product.id}>
-                      <Img icon="package" src={r.product.images?.[0]?.url} alt="" className="tiny" />
-                      <span className="grow stack gap-0">
-                        <span className="small truncate">{r.product.title}</span>
-                        <span className="xs muted">
-                          {[r.product.brand?.name, r.bestPrice ? `from ${formatMoney(r.bestPrice)}` : 'No live offer'].filter(Boolean).join(' · ')}
+        </div>
+        {list.isError ? (
+          <div className="card-body">
+            <LoadError error={list.error} onRetry={() => void list.refetch()} />
+          </div>
+        ) : list.isPending ? (
+          <div className="card-body">
+            <SkeletonLines rows={6} />
+          </div>
+        ) : all.length === 0 ? (
+          <div className="card-body">
+            <EmptyState
+              icon="smartphone"
+              title="No phones yet"
+              as="h2"
+              action={
+                canManage && (
+                  <Button size="sm" icon="plus" to={phoneHref('new')}>
+                    Add phone
+                  </Button>
+                )
+              }
+            >
+              Add the phones the app’s Phone tab shows, with their prices, colors, photos and spec sheet.
+            </EmptyState>
+          </div>
+        ) : (
+          <TableWrap label="Phones table">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th scope="col" style={{ width: 24 }}>
+                    <span className="sr-only">Order</span>
+                  </th>
+                  <th scope="col">Phone</th>
+                  <th scope="col">Storage</th>
+                  <th scope="col">Price</th>
+                  <th scope="col">Colors</th>
+                  <th scope="col" className="r">
+                    Photos
+                  </th>
+                  <th scope="col" className="r">
+                    Ads
+                  </th>
+                  <th scope="col" className="r">
+                    Specs
+                  </th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Updated</th>
+                  <th scope="col">
+                    <span className="sr-only">Actions</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {shown.map((p) => {
+                  const s = cheapest(p);
+                  const h = sort.handle(p.id);
+                  return (
+                    <tr key={p.id} ref={sort.item(p.id)} style={sort.dragged === p.id ? { opacity: 0.6 } : undefined}>
+                      <td>
+                        {canManage ? (
+                          <button type="button" className="icon-btn sm" aria-label={`Move ${p.name}`} title="Drag, or use the arrow keys, to move" disabled={order.isPending} {...h} style={{ ...h.style, width: 30, height: 30 }}>
+                            <Icon name="grip-vertical" className="ic-sm" />
+                          </button>
+                        ) : (
+                          <span className="muted" style={{ display: 'inline-flex' }}>
+                            <Icon name="grip-vertical" className="ic-sm" />
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        <span className="row nowrap gap-3" style={{ minWidth: 220 }}>
+                          <Img icon="smartphone" src={p.photos[0]?.thumbUrl ?? p.photos[0]?.url} alt="" className="tiny" />
+                          <span className="stack gap-0" style={{ minWidth: 0 }}>
+                            <span className="strong">{p.name}</span>
+                            <span className="xs muted">{p.brand}</span>
+                          </span>
                         </span>
-                      </span>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        icon="plus"
-                        disabled={ids.length >= MAX}
-                        onClick={() => {
-                          setAdded((a) => ({ ...a, [r.product.id]: { id: r.product.id, title: r.product.title, brand: r.product.brand?.name, image: r.product.images?.[0]?.url, price: r.bestPrice ? formatMoney(r.bestPrice) : null, shown: true } }));
-                          set([...ids, r.product.id]);
-                          announce(`${r.product.title} added`);
-                        }}
-                      >
-                        Add<span className="sr-only"> {r.product.title}</span>
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </section>
+                      </td>
+                      <td className="xs" style={{ color: 'var(--text-2)' }}>
+                        {p.storage.map((x) => x.size).join(', ')}
+                      </td>
+                      <td className="nowrap">
+                        <span className="strong">{s ? `${p.storage.length > 1 ? 'from ' : ''}${formatMoney(s.price)}` : '—'}</span>
+                        {s?.was && s.was.amount > s.price.amount && (
+                          <>
+                            {' '}
+                            <s className="xs muted">{formatMoney(s.was)}</s>
+                          </>
+                        )}
+                      </td>
+                      <td className="xs" style={{ color: 'var(--text-2)' }}>
+                        {p.colors.map((c) => c.short || c.name).join(', ') || '—'}
+                      </td>
+                      <td className="r">{p.photos.length}</td>
+                      <td className="r">{p.adImages.length}</td>
+                      <td className="r">{p.specGroups.reduce((n, g) => n + g.rows.length, 0)}</td>
+                      <td>
+                        <Badge tone={PHONE_STATUS[p.status].tone}>{PHONE_STATUS[p.status].label}</Badge>
+                      </td>
+                      <td className="xs muted nowrap">{dateTime(p.updatedAt)}</td>
+                      <td className="r nowrap">
+                        <Button variant="ghost" size="sm" to={phoneHref(p.id)}>
+                          {canManage ? 'Edit' : 'View'}
+                          <span className="sr-only"> {p.name}</span>
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {rows.length === 0 && (
+                  <tr>
+                    <td colSpan={11} className="small muted">
+                      No phones match these filters.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </TableWrap>
         )}
-      </div>
+        <div className="card-foot" style={{ justifyContent: 'space-between' }}>
+          <span className="xs muted">{canManage ? 'Drag a row to change its place on the Phone tab · hidden phones keep their place' : 'View only: adding, editing and ordering phones needs the Phones permission'}</span>
+        </div>
+      </section>
+
+      <Dialog open={preview} onClose={() => setPreview(false)} title="Phone tab preview" size="lg">
+        <p className="small muted" style={{ margin: 0 }}>
+          The Phone tab is in the Marketly app. It shows {onTab.length ? plural(onTab.length, 'phone') : 'no phones'} like this, in this order; hidden phones are left out.
+        </p>
+        {onTab.length > 0 ? (
+          <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, 168px)' }}>
+            {onTab.map((p) => (
+              <PhoneTile key={p.id} name={p.name} meta={[p.storage[0]?.size, p.colors[0]?.name].filter(Boolean).join(' · ')} cover={p.photos[0]?.thumbUrl ?? p.photos[0]?.url} price={p.storage[0]?.price ?? null} was={p.storage[0]?.was} />
+            ))}
+          </div>
+        ) : (
+          <span className="small muted">Turn on “Show on the Phone tab” on a phone to show it here.</span>
+        )}
+      </Dialog>
     </DeptPage>
   );
 }

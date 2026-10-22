@@ -6704,12 +6704,34 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * The Phone tab: picked phones as product cards, in order
+         * The Phone tab: published phones as cards, in staff order
          * @description **Screens:** store/phones
          *
          *     **Launch phase:** 2
          */
         get: operations["departments.getPhones"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/store/departments/phones/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A phone page: Detail and Advertisements tabs
+         * @description **Screens:** store/phone
+         *
+         *     **Launch phase:** 2
+         */
+        get: operations["departments.getPhone"];
         put?: never;
         post?: never;
         delete?: never;
@@ -7334,16 +7356,42 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * The Phone tab picks
+         * Every phone in staff order
          * @description **Permission:** `departments.view`
          *
          *     **Screens:** admin/departments-phones
          *
          *     **Launch phase:** 2
          */
-        get: operations["departments.getPhonesAdmin"];
+        get: operations["departments.listPhonesAdmin"];
+        put?: never;
         /**
-         * Replace the Phone tab picks
+         * Add a phone
+         * @description **Permission:** `departments.phones.manage`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Screens:** admin/departments-phone
+         *
+         *     **Launch phase:** 2
+         */
+        post: operations["departments.createPhone"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/departments/phones/order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Change the order of the Phone tab
          * @description **Permission:** `departments.phones.manage`
          *
          *     **Audited:** recorded in the action history.
@@ -7352,12 +7400,58 @@ export interface paths {
          *
          *     **Launch phase:** 2
          */
-        put: operations["departments.setPhones"];
+        put: operations["departments.reorderPhones"];
         post?: never;
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/admin/departments/phones/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A phone for editing
+         * @description **Permission:** `departments.view`
+         *
+         *     **Screens:** admin/departments-phone
+         *
+         *     **Launch phase:** 2
+         */
+        get: operations["departments.getPhoneAdmin"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a phone and release its photos
+         * @description **Permission:** `departments.phones.manage`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Screens:** admin/departments-phone
+         *
+         *     **Launch phase:** 2
+         */
+        delete: operations["departments.deletePhone"];
+        options?: never;
+        head?: never;
+        /**
+         * Edit, hide or show a phone
+         * @description The body is the whole phone (like CompanyInput): photos, storage, colors and spec groups are replaced.
+         *
+         *     **Permission:** `departments.phones.manage`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Screens:** admin/departments-phone
+         *
+         *     **Launch phase:** 2
+         */
+        patch: operations["departments.updatePhone"];
         trace?: never;
     };
     "/api/admin/departments/farm": {
@@ -8274,6 +8368,30 @@ export interface paths {
          *     **Launch phase:** 2
          */
         post: operations["farm.quoteOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/store/farm/payment-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Saved cards and a new-card session for a farm order's card amount
+         * @description Prices the machine and attachments like POST /quotes and asks payments.listOptions for the card amount of the option (the total for pay_in_full, the depositPercent deposit for pay_on_delivery). chargeNote explains the farm hold: held when ordering, charged when the dealer confirms, released when the dealer can't take it or the customer cancels before then. Installments take no card (VALIDATION_FAILED).
+         *
+         *     **Screens:** store/farm-order
+         *
+         *     **Launch phase:** 2
+         */
+        get: operations["farm.getPaymentOptions"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -39059,21 +39177,170 @@ export interface components {
             /** @description What changed and what stays available, e.g. 'Existing orders, returns, refunds and cases stay open' */
             effects: string[];
         };
+        "departments.PhoneStorage": {
+            /** @description e.g. 256 GB */
+            size: string;
+            price: components["schemas"]["Money"];
+            /** @description Shown crossed out with Save $200 when above price */
+            was?: components["schemas"]["Money"] | null;
+        };
+        "departments.PhoneColor": {
+            /** @description Full name for the title line, e.g. Titanium Gray */
+            name: string;
+            /** @description Under the swatch, e.g. Gray; null means name */
+            short?: string | null;
+            /** @description Swatch color #RRGGBB */
+            hex: string;
+        };
+        "departments.PhonePhoto": {
+            /**
+             * Format: uuid
+             * @description Media asset id
+             */
+            id: string;
+            /**
+             * Format: uri
+             * @description Large rendition (1280 px wide at most, the photo's own ratio): the Photos tab
+             */
+            url: string;
+            /**
+             * Format: uri
+             * @description Zoom rendition (2048 px wide at most): the full-screen viewer
+             */
+            zoomUrl: string;
+            /**
+             * Format: uri
+             * @description Thumb rendition: gallery strip and admin grid
+             */
+            thumbUrl?: string | null;
+            width?: number | null;
+            height?: number | null;
+            /** @description Staff description, read by screen readers */
+            alt?: string | null;
+        };
+        "departments.PhoneSpecRow": {
+            /** @description e.g. Refresh rate */
+            name: string;
+            /** @description e.g. 1–120 Hz */
+            value: string;
+        };
+        "departments.PhoneSpecGroup": {
+            /** @description e.g. Display */
+            name: string;
+            rows: components["schemas"]["departments.PhoneSpecRow"][];
+        };
+        "departments.PhoneCard": {
+            /** Format: uuid */
+            id: string;
+            slug: string;
+            brand: string;
+            name: string;
+            /** @description First storage and first color, e.g. 256 GB · Titanium Gray */
+            meta: string;
+            /** @description The first storage's price */
+            price: components["schemas"]["Money"];
+            was?: components["schemas"]["Money"] | null;
+            /** @description Whole percent off the was price (the −15% badge); null without a deal */
+            dealPercent?: number | null;
+            /** @description The cover photo (first), medium rendition */
+            image?: components["schemas"]["MediaRef"] | null;
+        };
         "departments.PhonesPage": {
-            /** @description The picked phones in order; ones the store no longer shows are left out. The app builds the brand chips from brandName */
-            products: components["schemas"]["search.ProductCard"][];
+            /** @description Published phones in staff order */
+            phones: components["schemas"]["departments.PhoneCard"][];
+            /** @description Brands of those phones, in first-seen order: the brand chips */
+            brands: string[];
+        };
+        "departments.Phone": {
+            /** Format: uuid */
+            id: string;
+            slug: string;
+            brand: string;
+            name: string;
+            /** @description Plain text; blank lines separate paragraphs */
+            overview?: string | null;
+            /** @description At least one; the first is selected when the page opens */
+            storage: components["schemas"]["departments.PhoneStorage"][];
+            /** @description May be empty; the first is selected when the page opens */
+            colors: components["schemas"]["departments.PhoneColor"][];
+            /** @description Preview photos: the Detail tab gallery, in staff order; the first is the cover */
+            photos: components["schemas"]["departments.PhonePhoto"][];
+            /** @description Advertisement images for the Advertisements tab (not the gallery photos), full size in staff order; empty: the tab is not shown */
+            adImages: components["schemas"]["departments.PhonePhoto"][];
+            specGroups: components["schemas"]["departments.PhoneSpecGroup"][];
+            /** @description Show the free OS install and post-sale card */
+            showServices: boolean;
+            /** @description What Find in store searches for (staff term, else the name) */
+            searchTerm: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        "departments.PhoneAdmin": {
+            /** Format: uuid */
+            id: string;
+            slug: string;
+            brand: string;
+            name: string;
+            overview?: string | null;
+            storage: components["schemas"]["departments.PhoneStorage"][];
+            colors: components["schemas"]["departments.PhoneColor"][];
+            photos: components["schemas"]["departments.PhonePhoto"][];
+            adImages: components["schemas"]["departments.PhonePhoto"][];
+            specGroups: components["schemas"]["departments.PhoneSpecGroup"][];
+            showServices: boolean;
+            /** @description Null: Find in store searches for the name */
+            searchTerm?: string | null;
+            /** @enum {string} */
+            status: "published" | "hidden";
+            /** @description 1-based place on the Phone tab */
+            position: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            updatedBy?: components["schemas"]["Actor"] | null;
         };
         "departments.PhonesAdmin": {
-            /** @description Every picked product in order, unavailable ones included */
-            productIds: string[];
-            /** @description Cards of the picks the store still shows */
-            products: components["schemas"]["search.ProductCard"][];
-            /** Format: date-time */
-            updatedAt?: string | null;
+            /** @description Every phone in staff order, hidden ones included */
+            items: components["schemas"]["departments.PhoneAdmin"][];
         };
-        "departments.PhonesInput": {
-            /** @description 1–100 products in order */
-            productIds: string[];
+        "departments.PhonePhotoInput": {
+            /**
+             * Format: uuid
+             * @description content_image upload, at least 1080 px wide
+             */
+            id: string;
+            alt?: string | null;
+        };
+        "departments.PhoneInput": {
+            /** @description At most 40 characters */
+            brand: string;
+            /** @description At most 80 characters */
+            name: string;
+            slug?: string | null;
+            /** @description At most 1,000 characters */
+            overview?: string | null;
+            /** @description 1–8 sizes in order, each with a price above zero; was, when given, above price; one currency (the market's) */
+            storage: components["schemas"]["departments.PhoneStorage"][];
+            /** @description Up to 12, in order */
+            colors?: components["schemas"]["departments.PhoneColor"][] | null;
+            /** @description 1–20 preview photos in order (the Detail tab gallery); the first is the cover */
+            photos: components["schemas"]["departments.PhonePhotoInput"][];
+            /** @description Up to 20 advertisement images in order (the Advertisements tab), content_image uploads at least 1080 px wide, none of them also a preview photo */
+            adImages?: components["schemas"]["departments.PhonePhotoInput"][] | null;
+            /** @description Up to 20 groups of up to 30 rows; rows with an empty name or value are left out, then empty groups */
+            specGroups?: components["schemas"]["departments.PhoneSpecGroup"][] | null;
+            showServices?: boolean | null;
+            /** @description At most 80 characters */
+            searchTerm?: string | null;
+            /** @enum {string|null} */
+            status?: "published" | "hidden" | null;
+            /** @description 1-based; new phones go last when not given */
+            position?: number | null;
+        };
+        "departments.PhonesOrderInput": {
+            /** @description Every phone id, in the new order */
+            ids: string[];
         };
         "departments.BlogTopic": {
             /** Format: uuid */
@@ -77647,9 +77914,7 @@ export interface operations {
     };
     "departments.getPhones": {
         parameters: {
-            query?: {
-                postalCode?: string | null;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -77685,6 +77950,64 @@ export interface operations {
             };
             /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "departments.getPhone": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["departments.Phone"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -79478,7 +79801,7 @@ export interface operations {
             };
         };
     };
-    "departments.getPhonesAdmin": {
+    "departments.listPhonesAdmin": {
         parameters: {
             query?: never;
             header?: never;
@@ -79528,7 +79851,7 @@ export interface operations {
             };
         };
     };
-    "departments.setPhones": {
+    "departments.createPhone": {
         parameters: {
             query?: never;
             header?: never;
@@ -79537,7 +79860,70 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["departments.PhonesInput"];
+                "application/json": components["schemas"]["departments.PhoneInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["departments.PhoneAdmin"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description SLUG_TAKEN: Another record already uses this slug. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "departments.reorderPhones": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["departments.PhonesOrderInput"];
             };
         };
         responses: {
@@ -79573,6 +79959,200 @@ export interface operations {
              *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
              */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "departments.getPhoneAdmin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["departments.PhoneAdmin"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "departments.deletePhone": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success, no content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "departments.updatePhone": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["departments.PhoneInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["departments.PhoneAdmin"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description SLUG_TAKEN: Another record already uses this slug. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -82559,6 +83139,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["farm.FarmQuote"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "farm.getPaymentOptions": {
+        parameters: {
+            query: {
+                option: "pay_in_full" | "pay_on_delivery";
+                productId: string;
+                attachmentIds?: string[] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["payments.PaymentOptions"];
                 };
             };
             /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */

@@ -1,19 +1,19 @@
 import { slugify as slugText } from '@marketly/web-shared/lib/format';
 import { useQuery } from '@tanstack/react-query';
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { call, errorMessage, resolveProductImageSpec, uploadMedia, useApi, type components } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { Alert, Breadcrumbs, Button, Dialog, Field, IconButton, ImageCropper, Img, Textarea, type CropWording, type IconName, type ProcessedImage } from '@marketly/web-shared/ui';
 
 // Helpers of the Admin › Departments pages (DeptPhones, DeptBlogs, DeptCompanies, DeptPlay; designed in React from the
-// Marketly Departments canvas): API types, status labels, the access notice, and picture uploads (content_image) with
-// a crop: one picture (logo, avatar, icon, cover) or an ordered list (company photos).
+// Marketly Departments canvas): API types, status labels, the access notice, drag to reorder, and picture uploads
+// (content_image) with a crop: one picture (logo, avatar, icon, cover) or an ordered list (company photos).
 
 type S = components['schemas'];
 export type MediaRef = S['MediaRef'];
-export type PhonesAdmin = S['departments.PhonesAdmin'];
-export type ProductCard = S['search.ProductCard'];
+export type PhoneAdmin = S['departments.PhoneAdmin'];
+export type PhoneInput = S['departments.PhoneInput'];
 export type BlogTopic = S['departments.BlogTopic'];
 export type BlogAuthor = S['departments.BlogAuthorAdmin'];
 export type BlogPost = S['departments.BlogPostAdmin'];
@@ -271,6 +271,110 @@ export function LinesField({ id, label, hint, lines, onChange, placeholder, max 
       )}
     </div>
   );
+}
+
+/* ---------------- Drag to reorder ---------------- */
+
+/**
+ * Drag to reorder by a handle, as Content › Homepage sections does it: the item moves as the pointer passes another
+ * row's middle (or, in a grid, enters another cell), and dropping calls onSort with the new order. Window listeners
+ * (not pointer capture) because React moves the item's node; Escape cancels. The handle is a button, so keyboard and
+ * screen reader users move the item one place with the arrow keys.
+ */
+export function useDragSort({ keys, onSort, grid, disabled }: { keys: string[]; onSort: (keys: string[], moved: string) => void; grid?: boolean; disabled?: boolean }) {
+  const [drag, setDrag] = useState<{ key: string; keys: string[] } | null>(null);
+  // live.current is the drag as of the last pointer event (a drop can follow a move before React re-renders)
+  const live = useRef(drag);
+  const setLive = (d: typeof drag) => {
+    live.current = d;
+    setDrag(d);
+  };
+  const items = useRef(new Map<string, HTMLElement>());
+  const handles = useRef(new Map<string, HTMLElement>());
+  const move = useRef<(x: number, y: number) => void>(() => {});
+  move.current = (x, y) => {
+    const d = live.current;
+    if (!d) return;
+    const rect = (k: string) => items.current.get(k)?.getBoundingClientRect();
+    const others = d.keys.filter((k) => k !== d.key);
+    let at: number;
+    if (grid) {
+      const over = d.keys.find((k) => {
+        const r = rect(k);
+        return !!r && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+      });
+      if (!over || over === d.key) return;
+      at = d.keys.indexOf(over);
+    } else {
+      at = others.filter((k) => {
+        const r = rect(k);
+        return !!r && r.top + r.height / 2 < y;
+      }).length;
+    }
+    const next = [...others.slice(0, at), d.key, ...others.slice(at)];
+    if (next.some((k, i) => k !== d.keys[i])) setLive({ ...d, keys: next });
+  };
+  const finish = useRef<(save: boolean) => void>(() => {});
+  finish.current = (save) => {
+    const d = live.current;
+    if (!d) return;
+    setLive(null);
+    if (save && d.keys.some((k, i) => k !== keys[i])) onSort(d.keys, d.key);
+  };
+  const dragging = drag !== null;
+  useEffect(() => {
+    if (!dragging) return;
+    const onMove = (e: PointerEvent) => move.current(e.clientX, e.clientY);
+    const up = () => finish.current(true);
+    const cancel = () => finish.current(false);
+    const key = (e: KeyboardEvent) => e.key === 'Escape' && cancel();
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cancel);
+    window.addEventListener('keydown', key);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cancel);
+      window.removeEventListener('keydown', key);
+    };
+  }, [dragging]);
+  const start = (e: ReactPointerEvent, key: string) => {
+    if (disabled || e.button !== 0) return;
+    e.preventDefault();
+    setLive({ key, keys });
+  };
+  const shift = (key: string, by: number) => {
+    const i = keys.indexOf(key);
+    const j = i + by;
+    if (i < 0 || j < 0 || j >= keys.length) return;
+    const next = [...keys];
+    [next[i], next[j]] = [next[j], next[i]];
+    onSort(next, key);
+    // React moves the focused handle's node: keep the focus on it
+    requestAnimationFrame(() => handles.current.get(key)?.focus());
+  };
+  return {
+    /** The keys in the order to show (the dragged order while dragging) */
+    order: drag?.keys ?? keys,
+    dragged: drag?.key ?? null,
+    /** ref of an item (row or cell) the pointer is measured against */
+    item: (key: string) => (el: HTMLElement | null) => void (el ? items.current.set(key, el) : items.current.delete(key)),
+    /** starts a drag from anywhere on an item (e.g. a photo) */
+    start,
+    /** props of the handle button: pointer drag and arrow keys */
+    handle: (key: string) => ({
+      ref: (el: HTMLElement | null) => void (el ? handles.current.set(key, el) : handles.current.delete(key)),
+      onPointerDown: (e: ReactPointerEvent) => start(e, key),
+      onKeyDown: (e: ReactKeyboardEvent) => {
+        const by = e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 : 0;
+        if (!by || disabled) return;
+        e.preventDefault();
+        shift(key, by);
+      },
+      style: { cursor: disabled ? undefined : drag?.key === key ? 'grabbing' : 'grab', touchAction: 'none' } as const,
+    }),
+  };
 }
 
 /* ---------------- Picture uploads ---------------- */

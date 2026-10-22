@@ -32,6 +32,7 @@ export const PAGES: Partial<Record<ScreenId, LazyExoticComponent<ComponentType>>
   'admin/help-content': lazy(() => import('../pages/admin/HelpContent')),
   'admin/news': lazy(() => import('../pages/admin/News')),
   'admin/departments-phones': lazy(() => import('../pages/admin/DeptPhones')),
+  'admin/departments-phone': lazy(() => import('../pages/admin/DeptPhoneEdit')),
   'admin/departments-blogs': lazy(() => import('../pages/admin/DeptBlogs')),
   'admin/departments-companies': lazy(() => import('../pages/admin/DeptCompanies')),
   'admin/departments-play': lazy(() => import('../pages/admin/DeptPlay')),
