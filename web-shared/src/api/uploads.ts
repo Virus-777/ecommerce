@@ -48,12 +48,27 @@ async function api<T>(session: Session, method: string, path: string, body?: unk
   return (res.status === 204 ? undefined : await res.json()) as T;
 }
 
+/** Sends the bytes with XMLHttpRequest so the caller sees upload progress (fetch can't report it); answers like fetch. */
+function sendWithProgress(url: string, method: string, headers: Headers | undefined, body: BodyInit, onProgress: (sent: number, total: number) => void): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const x = new XMLHttpRequest();
+    x.open(method, url);
+    headers?.forEach((v, k) => x.setRequestHeader(k, v));
+    x.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded, e.total);
+    x.onload = () => resolve(new Response([101, 204, 205, 304].includes(x.status) ? null : x.responseText, { status: x.status, statusText: x.statusText, headers: { 'Content-Type': x.getResponseHeader('Content-Type') ?? 'application/json' } }));
+    x.onerror = () => reject(new TypeError('Failed to fetch'));
+    x.onabort = () => reject(new TypeError('Upload cancelled'));
+    x.send(body as XMLHttpRequestBodyInit);
+  });
+}
+
 /**
  * Uploads one file and resolves with the ready asset (its `id` goes into `mediaIds`/`imageIds`).
  * Development storage receives the bytes through the API itself (/api/<area>/media/uploads/{id}/content,
  * same origin through the dev proxy, with the session token); provider storage gets a pre-signed URL.
+ * onProgress reports the bytes sent (large files such as software packages); the asset is then checked and processed.
  */
-export async function uploadMedia(session: Session, file: File, purpose: UploadPurpose, o: { alt?: string; timeoutMs?: number } = {}): Promise<MediaAsset> {
+export async function uploadMedia(session: Session, file: File, purpose: UploadPurpose, o: { alt?: string; timeoutMs?: number; onProgress?: (sent: number, total: number) => void } = {}): Promise<MediaAsset> {
   const base = `/api/${session.audience}/media`;
   // Browsers on Windows report .csv as application/vnd.ms-excel: spreadsheets are typed by their extension.
   const contentType = /\.csv$/i.test(file.name) ? 'text/csv' : /\.xlsx$/i.test(file.name) ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : file.type || 'application/octet-stream';
@@ -77,7 +92,9 @@ export async function uploadMedia(session: Session, file: File, purpose: UploadP
     form.append('file', file);
     body = form;
   }
-  const sent = await fetch(own ? target.pathname + target.search : ticket.url, { method: ticket.method, headers: ticket.method === 'POST' && !own ? undefined : headers, body });
+  const sendTo = own ? target.pathname + target.search : ticket.url;
+  const sendHeaders = ticket.method === 'POST' && !own ? undefined : headers;
+  const sent = o.onProgress ? await sendWithProgress(sendTo, ticket.method, sendHeaders, body, o.onProgress) : await fetch(sendTo, { method: ticket.method, headers: sendHeaders, body });
   if (!sent.ok) throw await toApiError(sent);
 
   // The seller and admin areas answer {asset, usages, …}; the store area answers the asset itself.
