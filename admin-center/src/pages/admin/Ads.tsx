@@ -1,5 +1,5 @@
 import { Fragment, useState } from 'react';
-import { Link } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
@@ -84,7 +84,9 @@ export default function Ads() {
   const { can } = useStaffSession();
   const [q, setQ] = useState('');
   const [source, setSource] = useState('');
-  const [type, setType] = useState('');
+  // ?placement= opens the list filtered to one placement (links from the department pages, e.g. Softwares › Carousel ads)
+  const [params] = useSearchParams();
+  const [type, setType] = useState(() => params.get('placement') ?? '');
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [notice, setNotice] = useState('');
   /** The draft whose Delete was pressed (confirmation dialog) */

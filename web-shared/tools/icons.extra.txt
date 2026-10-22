@@ -41,3 +41,7 @@ pizza
 # Admin › Departments (Play center rankings)
 trophy
 wrench
+# Admin › Departments (Softwares files and rails, Daily rewards points)
+database
+layout-list
+coins

@@ -3,7 +3,7 @@ import { useRef, useState, type ReactNode } from 'react';
 import { errorMessage, resolveProductImageSpec, uploadMedia, useApi, type components } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
-import { Alert, Breadcrumbs, Button, IconButton, ImageCropper, Img, type CropWording, type IconName, type ProcessedImage } from '@marketly/web-shared/ui';
+import { Alert, Breadcrumbs, Button, Dialog, Field, IconButton, ImageCropper, Img, Textarea, type CropWording, type IconName, type ProcessedImage } from '@marketly/web-shared/ui';
 
 // Helpers of the Admin › Departments pages (DeptPhones, DeptBlogs, DeptCompanies, DeptPlay; designed in React from the
 // Marketly Departments canvas): API types, status labels, the access notice, and picture uploads (content_image) with
@@ -46,6 +46,41 @@ export type RequestStatus = ServiceRequest['status'];
 export type RequestUpdate = S['services.RequestUpdate'];
 export type ServiceReview = S['services.ReviewAdmin'];
 export type Money = S['Money'];
+export type SoftwareCategory = S['software.SoftwareCategory'];
+export type AppRow = S['software.AppAdminRow'];
+export type AppAdmin = S['software.AppAdmin'];
+export type AppInput = S['software.AppInput'];
+export type AppFile = S['software.AppFile'];
+export type AppStatus = AppAdmin['status'];
+export type Platform = AppAdmin['platforms'][number];
+export type VersionEntry = S['software.VersionEntry'];
+export type AppPermission = S['software.AppPermission'];
+export type Pack = S['software.PackAdmin'];
+export type PackInput = S['software.PackInput'];
+export type Rail = S['software.RailAdmin'];
+export type SoftwarePurchase = S['software.PurchaseAdmin'];
+export type PurchaseStatus = SoftwarePurchase['status'];
+export type AppReview = S['software.ReviewAdmin'];
+export type FoodCategory = S['food.FoodCategory'];
+export type Restaurant = S['food.RestaurantAdmin'];
+export type RestaurantInput = S['food.RestaurantInput'];
+export type RestaurantStatus = Restaurant['status'];
+export type FoodDay = S['food.OpeningDay'];
+export type MenuSection = S['food.MenuSectionAdmin'];
+export type MenuItem = S['food.MenuItemAdmin'];
+export type MenuItemInput = S['food.MenuItemInput'];
+export type OptionGroup = S['food.OptionGroup'];
+export type FoodOrder = S['food.FoodOrderAdmin'];
+export type FoodOrderStatus = FoodOrder['status'];
+export type FoodAction = FoodOrder['actions'][number];
+export type FoodReview = S['food.ReviewAdmin'];
+export type RewardsProgram = S['rewards.ProgramAdmin'];
+export type RewardTask = S['rewards.TaskAdmin'];
+export type TaskKind = RewardTask['kind'];
+export type Reward = S['rewards.RewardAdmin'];
+export type RewardTint = Reward['tint'];
+export type Redemption = S['rewards.RedemptionAdmin'];
+export type CustomerPoints = S['rewards.CustomerPoints'];
 
 export const PAGE_SIZE = 20;
 
@@ -95,9 +130,70 @@ export const WEEKDAYS: Array<{ value: OpeningDay['weekday']; label: string }> = 
 export const toMoney = (dollars: string): Money | null => (dollars.trim() && !Number.isNaN(Number(dollars)) ? { amount: Math.round(Number(dollars) * 100), currency: 'USD' } : null);
 export const moneyText = (m: Money | null | undefined) => (m ? String(m.amount / 100) : '');
 export const newKey = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `k${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`);
+type BadgeTone = 'brand' | 'info' | 'warning' | 'success' | 'danger' | 'outline' | '';
 
-/** Page frame: breadcrumbs, title and the notice shown without departments.view */
-export function DeptPage({ active, title, canView, children }: { active: string; title: string; canView: boolean; children: ReactNode }) {
+/* ---------------- Softwares, Food delivery and Daily rewards (Phase 3) ---------------- */
+
+export const APP_STATUS: Record<AppStatus, { label: string; tone: BadgeTone }> = {
+  draft: { label: 'Draft', tone: 'outline' },
+  in_review: { label: 'In review', tone: 'warning' },
+  published: { label: 'Published', tone: 'success' },
+  hidden: { label: 'Hidden', tone: 'outline' },
+};
+export const PLATFORMS: Array<{ value: Platform; label: string }> = [
+  { value: 'android', label: 'Android' },
+  { value: 'ios', label: 'iOS' },
+  { value: 'windows', label: 'Windows' },
+  { value: 'macos', label: 'macOS' },
+  { value: 'linux', label: 'Linux' },
+  { value: 'web', label: 'Web' },
+];
+export const platformLabel = (p: Platform) => PLATFORMS.find((x) => x.value === p)?.label ?? p;
+export const PURCHASE_STATUS: Record<PurchaseStatus, { label: string; tone: BadgeTone }> = {
+  pending_payment: { label: 'Waiting for payment', tone: 'info' },
+  requires_action: { label: 'Needs the bank’s check', tone: 'warning' },
+  paid: { label: 'Paid', tone: 'success' },
+  failed: { label: 'Payment failed', tone: 'danger' },
+  cancelled: { label: 'Cancelled', tone: '' },
+};
+export const FOOD_ORDER_STATUS: Record<FoodOrderStatus, { label: string; tone: BadgeTone }> = {
+  payment_pending: { label: 'Waiting for payment', tone: 'info' },
+  payment_failed: { label: 'Payment failed', tone: 'danger' },
+  placed: { label: 'New', tone: 'brand' },
+  accepted: { label: 'Accepted', tone: 'info' },
+  preparing: { label: 'Preparing', tone: 'warning' },
+  on_the_way: { label: 'On the way', tone: 'warning' },
+  delivered: { label: 'Delivered', tone: 'success' },
+  cancelled: { label: 'Cancelled', tone: '' },
+  declined: { label: 'Declined', tone: 'danger' },
+};
+export const RESTAURANT_STATUS: Record<RestaurantStatus, { label: string; tone: BadgeTone }> = {
+  draft: { label: 'Draft', tone: 'outline' },
+  published: { label: 'Published', tone: 'success' },
+  paused: { label: 'Paused', tone: 'warning' },
+  hidden: { label: 'Hidden', tone: 'outline' },
+};
+export const TASK_KIND: Record<TaskKind, { label: string; hint: string }> = {
+  visit_store: { label: 'Visit a store page', hint: 'Counts store pages the customer opens (/stores/…)' },
+  share_product: { label: 'Share a product', hint: 'Counts products shared from the product page' },
+  write_review: { label: 'Write a review', hint: 'Counts reviews the customer writes' },
+  place_order: { label: 'Place an order', hint: 'Counts orders the customer places' },
+};
+export const TINTS: Array<{ value: RewardTint; label: string }> = [
+  { value: 'deal', label: 'Deal (orange)' },
+  { value: 'brand', label: 'Brand (green)' },
+  { value: 'info', label: 'Info (blue)' },
+  { value: 'neutral', label: 'Neutral (grey)' },
+];
+/** File sizes the way the API labels them: 1,000-based units, one decimal above 1 GB (software spec notes) */
+export const sizeLabel = (bytes: number) => (bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : bytes >= 1e6 ? `${Math.round(bytes / 1e6)} MB` : bytes >= 1e3 ? `${Math.round(bytes / 1e3)} KB` : `${bytes} B`);
+/** The API's VALIDATION_FAILED issues by field path (details.issues), '' when the error has none */
+export const fieldErrorsOf = (e: unknown): Record<string, string> => (e && typeof e === 'object' && 'fieldErrors' in e ? ((e as { fieldErrors: Record<string, string> }).fieldErrors ?? {}) : {});
+/** An error's code (IN_USE, PAYMENT_CAPTURE_FAILED…) */
+export const codeOf = (e: unknown) => (e && typeof e === 'object' && 'code' in e ? String((e as { code: unknown }).code) : '');
+
+/** Page frame: breadcrumbs, title and the notice shown without the view permission (departments.view unless `need` names another) */
+export function DeptPage({ active, title, canView, need, children }: { active: string; title: string; canView: boolean; need?: string; children: ReactNode }) {
   if (!canView) {
     return (
       <AdminLayout active={active}>
@@ -108,7 +204,7 @@ export function DeptPage({ active, title, canView, children }: { active: string;
           </div>
         </div>
         <Alert tone="info" title={`You don’t have access to ${title}`}>
-          Viewing the department pages needs the “See the department pages’ content” permission. A Platform Administrator can change your roles in Staff and roles.
+          Viewing {need ? 'this page' : 'the department pages'} needs the “{need ?? 'See the department pages’ content'}” permission. A Platform Administrator can change your roles in Staff and roles.
         </Alert>
       </AdminLayout>
     );
@@ -242,7 +338,7 @@ export function PictureField({ label, value, onChange, shape, icon, alt, hint, d
 }
 
 /** An ordered list of 16 : 9 pictures (company photos). */
-export function PhotosField({ photos, onChange, max, alt, disabled }: { photos: MediaRef[]; onChange: (p: MediaRef[]) => void; max: number; alt: string; disabled: boolean }) {
+export function PhotosField({ photos, onChange, max, alt, disabled, label = 'Photos', hint = '16 : 9, saved at 1200 × 675. The first photos show in the carousel, the rest in the gallery.' }: { photos: MediaRef[]; onChange: (p: MediaRef[]) => void; max: number; alt: string; disabled: boolean; label?: string; hint?: string }) {
   const [files, setFiles] = useState<File[]>([]);
   const { busy, error, upload } = useUpload('wide', alt, (m) => onChange([...photos, m]));
   const pick = useFilePicker({ onFiles: setFiles });
@@ -256,7 +352,7 @@ export function PhotosField({ photos, onChange, max, alt, disabled }: { photos: 
   return (
     <div className="stack gap-2">
       <span className="label">
-        Photos ({photos.length} of {max})
+        {label} ({photos.length} of {max})
       </span>
       {photos.length > 0 && (
         <ul className="list">
@@ -275,7 +371,7 @@ export function PhotosField({ photos, onChange, max, alt, disabled }: { photos: 
           ))}
         </ul>
       )}
-      <span className="xs sub">16 : 9, saved at 1200 × 675. The first photos show in the carousel, the rest in the gallery.</span>
+      <span className="xs sub">{hint}</span>
       {!disabled && photos.length < max && (
         <div className="row gap-2">
           <Button variant="secondary" size="sm" icon="upload" onClick={pick.open} disabled={busy}>
@@ -287,5 +383,38 @@ export function PhotosField({ photos, onChange, max, alt, disabled }: { photos: 
       {error && <span className={cx('xs', 't-danger-text')}>{error}</span>}
       {files.length > 0 && <ImageCropper files={files} spec={SPEC.wide} wording={WORDING.wide} onProcessed={(img) => void upload(img)} onClose={() => setFiles([])} />}
     </div>
+  );
+}
+
+/* ---------------- Review moderation ---------------- */
+
+/** Hide a review with an optional reason (Softwares and Food delivery reviews; POST …/reviews/{id}/moderate). */
+export function HideReviewDialog({ open, who, busy, error, onClose, onHide }: { open: boolean; who: string; busy: boolean; error?: string; onClose: () => void; onHide: (reason: string | null) => void }) {
+  const [reason, setReason] = useState('');
+  const close = () => (setReason(''), onClose());
+  return (
+    <Dialog
+      open={open}
+      onClose={close}
+      title={`Hide ${who}’s review`}
+      foot={
+        <>
+          <Button variant="ghost" onClick={close}>
+            Cancel
+          </Button>
+          <Button variant="danger" onClick={() => onHide(reason.trim() || null)} disabled={busy}>
+            Hide review
+          </Button>
+        </>
+      }
+    >
+      {error && <Alert tone="danger" title={error} />}
+      <p className="small sub" style={{ margin: 0 }}>
+        Hidden reviews leave the app and stop counting in the rating. You can show it again later.
+      </p>
+      <Field label="Reason" optional hint="Only staff see it, e.g. Spam or Personal details">
+        <Textarea id="rv-hide-reason" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
+      </Field>
+    </Dialog>
   );
 }
