@@ -1,4 +1,4 @@
-// Shared advertising helpers for the Admin Center ad screens (Ads, AdCampaign, AdAssets, AdPlacements):
+// Shared advertising helpers for the Admin Center placement screens (AdPlacements) and the Softwares carousel-ads tab:
 // API types from the OpenAPI schema, status labels, placement icons and small formatters.
 import { fromZonedInput, zonedInput } from '@marketly/web-shared/lib/dates';
 import type { components } from '@marketly/web-shared/api';

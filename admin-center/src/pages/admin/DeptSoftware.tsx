@@ -884,7 +884,7 @@ function AdsTab({ canAds }: { canAds: boolean }) {
                   </span>
                 </td>
                 <td>
-                  <Button variant="ghost" size="sm" to={href('admin/ad-campaign', c.status === 'in_review' ? 'approval' : 'creative-preview', undefined, { ref: c.ref })}>
+                  <Button variant="ghost" size="sm" to={href('admin/ad', '', { id: c.id })}>
                     Open<span className="sr-only"> {c.name}</span>
                   </Button>
                 </td>

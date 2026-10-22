@@ -21,6 +21,9 @@ export function actorLabel(a?: { kind?: string | null; name?: string | null } | 
 const SCREEN_ALIAS: Record<string, ScreenId> = {
   'admin/applications': 'admin/sellers',
   'admin/appeals': 'admin/sellers',
+  // the campaign wizard and the creative library were replaced by the Advertisements list and its Add / edit ad page
+  'admin/ad-campaign': 'admin/ads',
+  'admin/ad-assets': 'admin/ads',
 };
 
 /**

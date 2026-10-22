@@ -1,492 +1,407 @@
 import { Fragment, useState } from 'react';
-import { Link, useSearchParams } from 'react-router';
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
-import { cx } from '@marketly/web-shared/lib/cx';
-import { formatMoney } from '@marketly/web-shared/lib/format';
+import { num } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, announce, BarsChart, Badge, Breadcrumbs, Button, Card, Dialog, fmtCount, fmtCountCompact, Icon, SearchInput, Select, Stat, StatusBadge, TableWrap, type IconName } from '@marketly/web-shared/ui';
+import { Alert, announce, Badge, Button, Chip, Dialog, EmptyState, Icon, IconButton, PageHeader, sameOriginFile, TableWrap, Tabs, type IconName } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
-import { dateTime, LoadError, shortDate, SkeletonLines } from '@/app/parts';
-import { ACTION_LABEL, ACTION_PERMISSION, CampaignActionDialog, NEEDS_INPUT, runCampaignAction, type CampaignAction, type PendingAction } from './data/ad-actions';
-import { CAMPAIGN_STATUS, isOwn, num, statusLabel, type AdCampaignSummary, type AdsDashboard, type CampaignStatus, type Page, type Placement } from './data/ads';
+import { actorLabel, LoadError, SkeletonLines } from '@/app/parts';
+import { useDragSort } from './data/departments';
+import { ADS_KEY, adHref, adReviewHref, AdStatusBadges, kindChip, scheduleText, sizeText, slotOf, slotsOfTab, TABS, type AdStatus, type SlotTab, type StaffAd, type StaffAdsPage } from './data/staff-ads';
 
-// Design: pages/admin/admin-ads.html. Data: GET /api/admin/advertising/dashboard (KPIs, side lists, billing,
-// performance), GET …/campaigns (table, filtered on the server), GET …/placements (type filter), and the
-// lifecycle actions POST …/campaigns/{id}/<action> from each row's allowedActions.
+// Admin › Marketing and content › Advertisements (designed from the Marketly canvas: AdminAds). Staff ads by where they
+// show: Full-screen | Home carousel | Departments (Softwares, Food delivery, Companies, Play center) | Deals | Other
+// (category banner, pop-up). Each tab has its slot card (size, rotation, Add … ad preset to the slot), status chips
+// and the ads in carousel order. Data: GET /api/admin/advertising/ads?placement=<keys>; reorder PUT /ads/order (live
+// and scheduled ads of one slot, drag the handle or use the arrow keys on it); row menu POST /ads/{id}/pause|resume|
+// end|duplicate and DELETE /ads/{id} from the ad's allowedActions. ?placement=<key> opens that slot (department pages
+// link here). The placements page (rules per slot) stays reachable as Slot settings.
 
-const LIFECYCLE: CampaignStatus[] = ['draft', 'in_review', 'approved', 'scheduled', 'live', 'paused', 'finished', 'archived'];
-const SOURCES = [
-  { value: '', label: 'Own and paid ads' },
-  { value: 'own', label: 'Own promotions' },
-  { value: 'seller', label: 'Seller paid ads' },
-  { value: 'brand', label: 'Brand campaigns' },
+type StatusFilter = 'all' | 'live' | 'scheduled' | 'paused' | 'review' | 'drafts' | 'ended';
+const STATUS_FILTERS: Array<{ value: StatusFilter; label: string; statuses: AdStatus[] }> = [
+  { value: 'all', label: 'All', statuses: [] },
+  { value: 'live', label: 'Live', statuses: ['live'] },
+  { value: 'scheduled', label: 'Scheduled', statuses: ['scheduled'] },
+  { value: 'paused', label: 'Paused', statuses: ['paused'] },
+  { value: 'review', label: 'Waiting for review', statuses: ['in_review'] },
+  { value: 'drafts', label: 'Drafts', statuses: ['draft', 'changes_requested'] },
+  { value: 'ended', label: 'Ended', statuses: ['ended', 'rejected'] },
 ];
-const AT_RISK: CampaignStatus[] = ['in_review', 'paused'];
+type MenuAction = 'pause' | 'resume' | 'end' | 'duplicate' | 'delete';
+const MENU: Array<{ action: MenuAction; label: string; icon: IconName }> = [
+  { action: 'pause', label: 'Pause', icon: 'pause' },
+  { action: 'resume', label: 'Resume', icon: 'play' },
+  { action: 'end', label: 'End now', icon: 'circle-x' },
+  { action: 'duplicate', label: 'Duplicate', icon: 'copy' },
+  { action: 'delete', label: 'Delete draft', icon: 'trash' },
+];
+const DONE: Record<MenuAction, string> = { pause: 'paused: it leaves the app within a minute', resume: 'resumed', end: 'ended', duplicate: 'copied into a new draft', delete: 'deleted' };
+const LIVE_ORDER: AdStatus[] = ['live', 'scheduled'];
 
-const campaignHref = (c: { ref: string }, view = '') => href('admin/ad-campaign', view, undefined, { ref: c.ref });
-
-type RowAction = { label: string; icon?: IconName; variant?: 'ghost' | 'secondary'; to?: string; action?: CampaignAction; del?: boolean };
-/** Row buttons from the API's allowedActions (at most two, in the design's order). */
-function actionsFor(c: AdCampaignSummary, can: (p: string) => boolean): RowAction[] {
-  const allowed = new Set(c.allowedActions);
-  const out: RowAction[] = [];
-  const add = (a: CampaignAction, icon?: IconName, variant?: 'secondary') => {
-    if (allowed.has(a) && can(ACTION_PERMISSION[a])) out.push({ label: ACTION_LABEL[a], icon, variant, action: a });
-  };
-  if (allowed.has('review') && can('advertising.campaigns.review')) out.push({ label: 'Review', variant: 'secondary', to: campaignHref(c, 'approval') });
-  add('pause', 'pause');
-  add('resume', 'play');
-  add('schedule', undefined, 'secondary');
-  if (allowed.has('edit') && can('advertising.campaigns.manage')) out.push({ label: 'Edit', to: campaignHref(c) });
-  // a staff draft that never ran (DELETE /campaigns/{id}); campaigns that ran are finished and archived instead
-  if (allowed.has('delete') && can('advertising.campaigns.manage')) out.push({ label: 'Delete', icon: 'trash', del: true });
-  add('finish');
-  add('archive');
-  add('renew');
-  if (!out.length) out.push({ label: 'View', to: campaignHref(c, c.status === 'in_review' ? 'approval' : 'creative-preview') });
-  return out.slice(0, 2);
+/** How a slot's ads take turns, from Slot settings: "each ad shows 6 s, in this order · up to 10 live" */
+function slotNote(s?: StaffAdsPage['slots'][string]): string {
+  if (!s) return '';
+  if (s.carouselSeconds) return `each ad shows ${s.carouselSeconds} s, in this order${s.maxLive ? ` · up to ${s.maxLive} live` : ''}`;
+  const label = s.rotationLabel.replace(/ on Advertisements$/, '');
+  return label ? label[0]!.toLowerCase() + label.slice(1) : '';
 }
 
-function SideList({ title, items, empty }: { title: string; items: Array<{ key: string; name: string; to?: string; meta: string; status: string }>; empty: string }) {
-  return (
-    <Card title={title} titleAs="h3" flush>
-      <ul className="list pad">
-        {items.map((it) => (
-          <li key={it.key}>
-            <span className="grow stack gap-0">
-              {it.to ? (
-                <Link className="small strong" to={it.to}>
-                  {it.name}
-                </Link>
-              ) : (
-                <span className="small strong">{it.name}</span>
-              )}
-              <span className="xs muted">{it.meta}</span>
-            </span>
-            <StatusBadge status={it.status} />
-          </li>
-        ))}
-        {items.length === 0 && (
-          <li>
-            <span className="xs muted">{empty}</span>
-          </li>
-        )}
-      </ul>
-    </Card>
-  );
-}
 
 export default function Ads() {
   const { api } = useApi();
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const { can } = useStaffSession();
-  const [q, setQ] = useState('');
-  const [source, setSource] = useState('');
-  // ?placement= opens the list filtered to one placement (links from the department pages, e.g. Softwares › Carousel ads)
-  const [params] = useSearchParams();
-  const [type, setType] = useState(() => params.get('placement') ?? '');
-  const [pending, setPending] = useState<PendingAction | null>(null);
-  const [notice, setNotice] = useState('');
-  /** The draft whose Delete was pressed (confirmation dialog) */
-  const [toDelete, setToDelete] = useState<AdCampaignSummary | null>(null);
-  const remove = useMutation({
-    mutationFn: (c: AdCampaignSummary) => call(api.DELETE('/api/admin/advertising/campaigns/{id}', { params: { path: { id: c.id } } })),
-    onSuccess: (_, c) => {
-      setToDelete(null);
-      const msg = `${c.name} deleted`;
-      setNotice(msg);
-      announce(msg);
-      void qc.invalidateQueries({ queryKey: ['advertising'] });
+  const canView = can('advertising.campaigns.view') || can('advertising.campaigns.manage') || can('advertising.campaigns.review');
+  const canManage = can('advertising.campaigns.manage');
+  const [params, setParams] = useSearchParams();
+  const asked = slotOf(params.get('placement'));
+  const tab = (TABS.some((t) => t.value === params.get('tab')) ? params.get('tab') : (asked?.tab ?? 'home')) as SlotTab;
+  const slots = slotsOfTab(tab);
+  const one = asked && asked.tab === tab ? asked : slots.length === 1 ? slots[0] : undefined;
+  const keys = one ? [one.key] : slots.map((s) => s.key);
+  const [status, setStatus] = useState<StatusFilter>('all');
+  const [notice, setNotice] = useState((useLocation().state as { notice?: string } | null)?.notice ?? '');
+  const [error, setError] = useState('');
+  const [menuFor, setMenuFor] = useState<StaffAd | null>(null);
+  const [confirm, setConfirm] = useState<{ ad: StaffAd; action: 'end' | 'delete' } | null>(null);
+
+  const goTab = (t: SlotTab) => {
+    setStatus('all');
+    setParams({ tab: t }, { replace: true });
+  };
+  const goSlot = (key: string) => {
+    setStatus('all');
+    setParams(key ? { tab, placement: key } : { tab }, { replace: true });
+  };
+
+  const queryKey = [...ADS_KEY, keys.join(',')];
+  const list = useQuery({ queryKey, enabled: canView, queryFn: () => call(api.GET('/api/admin/advertising/ads', { params: { query: { placement: keys.join(',') } } })) });
+  const page = list.data;
+  const items = page?.items ?? [];
+  const byId = new Map(items.map((a) => [a.id, a]));
+  const counts = page?.counts ?? {};
+  const statusCount = (f: (typeof STATUS_FILTERS)[number]) => (f.value === 'all' ? items.length : f.statuses.reduce((n, s) => n + (page?.statusCounts[s] ?? 0), 0));
+  const filter = STATUS_FILTERS.find((f) => f.value === status)!;
+  const shownItems = status === 'all' ? items : items.filter((a) => filter.statuses.includes(a.status));
+  // live and scheduled ads of one slot keep a carousel order (they come first, in position order)
+  const canOrder = canManage && !!one && status === 'all';
+  const ordered = shownItems.filter((a) => LIVE_ORDER.includes(a.status));
+  const rest = shownItems.filter((a) => !LIVE_ORDER.includes(a.status));
+
+  const order = useMutation({
+    mutationFn: (ids: string[]) => call(api.PUT('/api/admin/advertising/ads/order', { body: { placementKey: one!.key, ids } })),
+    onSuccess: (d) => qc.setQueryData(queryKey, d),
+    onError: (e) => {
+      setError(`The new order wasn’t saved: ${errorMessage(e)}`);
+      void qc.invalidateQueries({ queryKey: ADS_KEY });
     },
   });
-  const [ending, setEnding] = useState<Record<string, 'finish'>>({});
-
-  const dash = useQuery({ queryKey: ['advertising', 'dashboard'], queryFn: () => call(api.GET('/api/admin/advertising/dashboard')) as Promise<AdsDashboard> });
-  const placements = useQuery({ queryKey: ['advertising', 'placements'], queryFn: () => call(api.GET('/api/admin/advertising/placements')) as Promise<Placement[]> });
-  const needle = q.trim();
-  const list = useQuery({
-    queryKey: ['advertising', 'campaigns', { q: needle, source, type }],
-    queryFn: () =>
-      call(api.GET('/api/admin/advertising/campaigns', { params: { query: { q: needle || undefined, source: (source || undefined) as 'own' | undefined, placementKey: type || undefined, limit: 100 } } })) as Promise<Page<AdCampaignSummary>>,
-    placeholderData: keepPreviousData,
+  const sort = useDragSort({
+    keys: ordered.map((a) => a.id),
+    disabled: !canOrder || order.isPending,
+    onSort: (ids, moved) => {
+      qc.setQueryData(queryKey, (d: StaffAdsPage | undefined) => d && { ...d, items: [...ids.map((id, i) => ({ ...byId.get(id)!, position: i + 1 })), ...d.items.filter((a) => !ids.includes(a.id))] });
+      setError('');
+      setNotice('');
+      order.mutate(ids);
+      announce(`${byId.get(moved)?.name ?? 'Ad'} moved to place ${ids.indexOf(moved) + 1} of ${ids.length}`);
+    },
   });
 
   const act = useMutation({
-    mutationFn: ({ p, body }: { p: PendingAction; body?: Record<string, unknown> }) => runCampaignAction(api, p.id, p.action, body),
-    onSuccess: (c, { p }) => {
-      setPending(null);
-      const msg = p.action === 'renew' ? `Renewal draft ${c.ref} created. Set the details in the campaign.` : `${p.name}: ${statusLabel(c.status)}`;
-      setNotice(msg);
+    mutationFn: async ({ ad, action }: { ad: StaffAd; action: MenuAction }) => {
+      const path = { params: { path: { id: ad.id } } };
+      if (action === 'delete') return void (await call(api.DELETE('/api/admin/advertising/ads/{id}', path)));
+      if (action === 'pause') return call(api.POST('/api/admin/advertising/ads/{id}/pause', { ...path, body: {} }));
+      if (action === 'resume') return call(api.POST('/api/admin/advertising/ads/{id}/resume', { ...path, body: {} }));
+      if (action === 'end') return call(api.POST('/api/admin/advertising/ads/{id}/end', { ...path, body: {} }));
+      return call(api.POST('/api/admin/advertising/ads/{id}/duplicate', path));
+    },
+    onSuccess: (r, { ad, action }) => {
+      setMenuFor(null);
+      setConfirm(null);
+      setError('');
+      void qc.invalidateQueries({ queryKey: ADS_KEY });
+      const msg = `${ad.name} ${DONE[action]}`;
       announce(msg);
-      void qc.invalidateQueries({ queryKey: ['advertising'] });
-      void qc.invalidateQueries({ queryKey: ['workqueues', 'queues'] });
+      if (action === 'duplicate' && r) navigate(adHref(r.id), { state: { notice: `${msg}. Change what you need, then submit it for review.` } });
+      else setNotice(msg);
+    },
+    onError: (e) => {
+      setMenuFor(null);
+      setConfirm(null);
+      setNotice('');
+      setError(errorMessage(e));
     },
   });
-  const start = (c: AdCampaignSummary, action: CampaignAction) => {
-    const p: PendingAction = { id: c.id, name: c.name, action, startsAt: c.startsAt, endsAt: c.endsAt };
-    act.reset();
-    if (NEEDS_INPUT[action]) setPending(p);
-    else act.mutate({ p });
+  const run = (ad: StaffAd, action: MenuAction) => {
+    if (action === 'end' || action === 'delete') {
+      setMenuFor(null);
+      setConfirm({ ad, action });
+    } else act.mutate({ ad, action });
   };
+  const menuOf = (ad: StaffAd) => MENU.filter((m) => ad.allowedActions.includes(m.action));
 
-  const d = dash.data;
-  const rows = list.data?.items ?? [];
-  const typeOptions = [{ value: '', label: 'All ad types' }, ...(placements.data ?? []).map((p) => ({ value: p.key, label: p.name }))];
-  const perf = d?.performance;
-  const perfRange = perf ? `${shortDate(perf.range.from)}–${shortDate(perf.range.to)}` : '';
-  const endingFirst = d?.endingSoonList[0];
+  const waiting = page?.waitingForMeAds ?? [];
+  const firstWaiting = waiting[0];
+  const addSlot = one ?? (tab === 'departments' ? undefined : slots[0]);
+  const tabCount = (t: SlotTab) => slotsOfTab(t).reduce((n, s) => n + (counts[s.key] ?? 0), 0);
+
+  if (!canView) {
+    return (
+      <AdminLayout active="ads">
+        <PageHeader crumbs={[{ label: 'Admin' }, { label: 'Marketing and content' }]} title="Advertisements" />
+        <Alert tone="info" title="You don’t have access to Advertisements">
+          Seeing ads needs an advertising permission (view, manage or review ads). A Platform Administrator can change your roles in Staff and roles.
+        </Alert>
+      </AdminLayout>
+    );
+  }
+
+  const row = (a: StaffAd, draggable: boolean) => {
+    const h = sort.handle(a.id);
+    const review = a.allowedActions.includes('review');
+    const menu = menuOf(a);
+    return (
+      <tr key={a.id} ref={draggable ? sort.item(a.id) : undefined} style={sort.dragged === a.id ? { opacity: 0.6 } : undefined}>
+        <td>
+          {draggable && canOrder ? (
+            <button type="button" className="icon-btn sm" aria-label={`Move ${a.name}`} title="Drag, or use the arrow keys, to change the carousel order" disabled={order.isPending} {...h} style={{ ...h.style, width: 30, height: 30 }}>
+              <Icon name="grip-vertical" className="ic-sm" />
+            </button>
+          ) : draggable ? (
+            <span className="muted" style={{ display: 'inline-flex' }} title={one ? undefined : 'Pick one slot to change its order'}>
+              <Icon name="grip-vertical" className="ic-sm" />
+            </span>
+          ) : null}
+        </td>
+        <td>
+          <span className="row nowrap gap-3" style={{ minWidth: 260 }}>
+            <span style={{ width: 120, height: 64, borderRadius: 8, background: 'var(--surface-2)', flex: 'none', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-3)' }}>
+              {a.image?.url ? <img src={sameOriginFile(a.image.url)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Icon name="image" />}
+            </span>
+            <span className="stack gap-0" style={{ minWidth: 0 }}>
+              <span className="strong">{a.name || 'Untitled ad'}</span>
+              <span className="xs muted">
+                {[!one && slotOf(a.placementKey)?.dept ? slotOf(a.placementKey)!.dept : !one ? a.placementName : '', actorLabel(a.createdBy), a.stats.views ? `${num(a.stats.views)} views` : ''].filter(Boolean).join(' · ')}
+              </span>
+            </span>
+          </span>
+        </td>
+        <td>
+          {a.destination ? (
+            <span className="chip" style={{ paddingRight: 12, maxWidth: 260, boxSizing: 'border-box', overflow: 'hidden', cursor: 'default' }} title={a.destination.available ? a.destination.path : `${a.destination.label}: no longer available`}>
+              <span className="xs muted" style={{ fontWeight: 600 }}>
+                {kindChip(a.destination)}
+              </span>
+              <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.destination.label}</span>
+              {!a.destination.available && <Icon name="triangle-alert" className="ic-sm t-danger-text" />}
+            </span>
+          ) : (
+            <span className="xs muted">Not picked yet</span>
+          )}
+        </td>
+        <td className="nowrap" style={{ color: 'var(--text-2)', fontSize: 12 }}>
+          {scheduleText(a)}
+        </td>
+        <td>
+          <AdStatusBadges ad={a} />
+          {a.statusNote && <span className="xs muted" style={{ display: 'block', marginTop: 4, maxWidth: 220 }}>{a.statusNote}</span>}
+        </td>
+        <td className="r nowrap">
+          <Button variant="ghost" size="sm" to={review && a.pendingChange?.state === 'in_review' ? adReviewHref(a.id) : adHref(a.id)}>
+            {review ? 'Review' : a.allowedActions.includes('edit') ? 'Edit' : 'View'}
+            <span className="sr-only"> {a.name}</span>
+          </Button>
+          {menu.length > 0 ? <IconButton icon="ellipsis" size="sm" label={`More actions for ${a.name}`} aria-haspopup="dialog" onClick={() => setMenuFor(a)} /> : <span style={{ display: 'inline-block', width: 36 }} />}
+        </td>
+      </tr>
+    );
+  };
 
   return (
     <AdminLayout active="ads">
-      <div className="page-head">
-        <div className="t">
-          <Breadcrumbs items={[{ label: 'Admin', to: href('admin/dashboard') }, { label: 'Advertisements' }]} />
-          <h1 className="h1">Advertisements</h1>
-          <p className="sub small">Own promotions and seller paid ads · Pacific Time</p>
-        </div>
-        <div className="actions">
-          <Button variant="secondary" size="sm" icon="settings-2" to={href('admin/ad-placements')}>
-            Placements and rules
+      <PageHeader
+        crumbs={[{ label: 'Admin' }, { label: 'Marketing and content' }]}
+        title="Advertisements"
+        sub="Ads in the app and on the website, by where they show. Each ad goes live after an advertising and a content review by two other staff members."
+        actions={
+          <>
+            {can('advertising.placements.manage') && (
+              <Button variant="ghost" size="sm" icon="settings-2" to={href('admin/ad-placements')}>
+                Slot settings
+              </Button>
+            )}
+            {canManage && (
+              <Button size="sm" icon="plus" to={adHref('new')}>
+                Add ad
+              </Button>
+            )}
+          </>
+        }
+      />
+      {notice && <Alert tone="success" title={notice} />}
+      {error && <Alert tone="danger" title={error} />}
+
+      {page && page.waitingForMe > 0 && firstWaiting && (
+        <div className="alert t-warning" role="status" style={{ alignItems: 'center' }}>
+          <Icon name="clock" />
+          <span className="grow">
+            <strong>
+              {page.waitingForMe === 1 ? '1 ad is' : `${page.waitingForMe} ads are`} waiting for your review.
+            </strong>{' '}
+            {waiting.map((w, i) => (
+              <Fragment key={w.id}>
+                {i > 0 && (i === waiting.length - 1 ? ' and ' : ', ')}
+                <Link to={w.isChange ? adReviewHref(w.id) : adHref(w.id)}>{w.name}</Link>
+                {w.isChange ? ' (a change to a live ad)' : ''}
+              </Fragment>
+            ))}
+            .
+          </span>
+          <Button variant="secondary" size="sm" to={firstWaiting.isChange ? adReviewHref(firstWaiting.id) : adHref(firstWaiting.id)}>
+            Review
           </Button>
-          {can('advertising.campaigns.manage') && (
-            <Button size="sm" icon="plus" to={href('admin/ad-campaign')}>
-              Create campaign
+        </div>
+      )}
+
+      <Tabs label="Where ads show" items={TABS.map((t) => ({ value: t.value, label: t.label, count: page ? tabCount(t.value) : undefined }))} active={tab} onChange={goTab} />
+
+      <section className="card">
+        <div className="card-head">
+          <div className="row nowrap gap-3" style={{ gap: 14, minWidth: 0 }}>
+            <span className="imgph" style={{ width: 44, height: 44, borderRadius: 10, background: 'var(--brand-soft)', color: 'var(--brand-text)', aspectRatio: 'auto' }}>
+              <Icon name={one?.icon ?? slots[0]!.icon} />
+            </span>
+            <span className="stack gap-0" style={{ minWidth: 0, gap: 2 }}>
+              <h2 className="h4">
+                {one ? one.name : tab === 'departments' ? 'Department carousels' : 'Category banner and pop-up'}
+                {one && page?.slots[one.key] && !page.slots[one.key]!.enabled && (
+                  <>
+                    {' '}
+                    <Badge tone="warning">Off in Slot settings</Badge>
+                  </>
+                )}
+              </h2>
+              <span className="xs muted">
+                {one
+                  ? `${one.where} · phone image ${sizeText(one.phone)}${one.web ? ` (+ website ${sizeText(one.web)}, optional)` : ''} · ${slotNote(page?.slots[one.key]) || one.rotation}`
+                  : tab === 'departments'
+                    ? `Top of the Softwares, Food delivery, Companies and Play center pages · phone image 750 × 400 · each department has its own carousel${slotNote(page?.slots.food_top) ? ` · ${slotNote(page?.slots.food_top)}` : ''}`
+                    : 'Category banner: top of category pages, 750 × 300 · Pop-up: over Home, search and product pages, 600 × 600'}
+              </span>
+            </span>
+          </div>
+          {canManage && (
+            <Button variant="soft" size="sm" icon="plus" to={adHref('new', { slot: addSlot ? addSlot.key : 'department' })}>
+              {addSlot ? addSlot.add : 'Add department ad'}
             </Button>
           )}
         </div>
-      </div>
-
-      {notice && <Alert tone="success" title={notice} />}
-      {act.error && !pending && <Alert tone="danger" title="That didn’t work">{errorMessage(act.error)}</Alert>}
-      {dash.error && <LoadError error={dash.error} onRetry={() => void dash.refetch()} />}
-
-      <div className="ab-kpis k6">
-        {d ? (
-          <>
-            <div className="card pad">
-              <Stat icon="radio" label="Live now" value={d.liveNow.total} note={`${d.liveNow.own} own · ${d.liveNow.paid} paid`} />
-            </div>
-            <div className="card pad">
-              <Stat icon="calendar" label="Starting in 7 days" value={d.startingIn7Days} note={d.nextStartAt ? `Next: ${dateTime(d.nextStartAt)}` : 'Nothing scheduled'} />
-            </div>
-            <div className="card pad">
-              <Stat icon="timer" label="Ending soon" value={d.endingSoon} note={endingFirst ? `${endingFirst.name}${endingFirst.endsAt ? `, ${shortDate(endingFirst.endsAt)}` : ''}` : 'None'} />
-            </div>
-            <div className="card pad">
-              <Stat icon="list-checks" label="Waiting approval" value={d.waitingApproval} note={d.oldestWaitingDays != null ? `Oldest ${d.oldestWaitingDays} day${d.oldestWaitingDays === 1 ? '' : 's'}` : 'None waiting'} />
-            </div>
-            <div className="card pad">
-              <Stat icon="circle-dollar-sign" label="Spend this month" value={formatMoney(d.spendThisMonth)} note="Seller paid ads · billed separately from commission" />
-            </div>
-            <div className="card pad">
-              <Stat icon="shopping-bag" label="Attributed purchases" value={num(d.attributedOrders)} note={`${formatMoney(d.attributedSales)} · ${d.attributionDays}-day click window`} />
-            </div>
-          </>
-        ) : (
-          Array.from({ length: 6 }, (_, i) => (
-            <div className="card pad" key={i}>
-              <SkeletonLines rows={1} />
-            </div>
-          ))
+        {slots.length > 1 && (
+          <div className="row gap-2" style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)' }} role="group" aria-label={tab === 'departments' ? 'Department' : 'Slot'}>
+            <Chip active={!one} onClick={() => goSlot('')}>
+              {tab === 'departments' ? 'All departments' : 'Both'}
+            </Chip>
+            {slots.map((s) => (
+              <Chip key={s.key} active={one?.key === s.key} onClick={() => goSlot(s.key)}>
+                {s.dept ?? s.name} {page && counts[s.key] ? <span className="muted">{counts[s.key]}</span> : null}
+              </Chip>
+            ))}
+          </div>
         )}
-      </div>
-
-      <div className="ab-main">
-        <div className="stack gap-5">
-          <section className="card">
-            <div className="card-head">
-              <div className="stack gap-0">
-                <h2 className="h4">Campaigns</h2>
-                <span className="xs muted">Every status in the campaign lifecycle</span>
-              </div>
-            </div>
-            <div className="card-body" style={{ paddingBottom: 'var(--sp-2)' }}>
-              <div className="ab-lifecycle" aria-label="Campaign lifecycle">
-                {LIFECYCLE.map((s, i) => (
-                  <Fragment key={s}>
-                    {i > 0 && <Icon name="chevron-right" />}
-                    <StatusBadge status={CAMPAIGN_STATUS[s]} />
-                  </Fragment>
-                ))}
-              </div>
-              <div className="toolbar">
-                <SearchInput id="ad-q" placeholder="Search campaign or advertiser" value={q} onChange={setQ} />
-                <Select id="ad-src" aria-label="Source" options={SOURCES} value={source} onChange={(e) => setSource(e.target.value)} />
-                <Select id="ad-type" aria-label="Placement type" options={typeOptions} value={type} onChange={(e) => setType(e.target.value)} />
-              </div>
-            </div>
-            {list.error ? (
-              <div className="card-body">
-                <LoadError error={list.error} onRetry={() => void list.refetch()} />
-              </div>
-            ) : !list.data ? (
-              <div className="card-body">
-                <SkeletonLines rows={5} />
-              </div>
-            ) : (
-              <TableWrap label="Campaigns table">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th scope="col">Campaign</th>
-                      <th scope="col">Advertiser</th>
-                      <th scope="col">Type and placement</th>
-                      <th scope="col">Period</th>
-                      <th scope="col">Budget / spend</th>
-                      <th className="r" scope="col">Displays</th>
-                      <th className="r" scope="col">Clicks</th>
-                      <th scope="col">Status</th>
-                      <th className="col-pin" scope="col">
-                        <span className="sr-only">Actions</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((c) => {
-                      const warn = AT_RISK.includes(c.status);
-                      const shown = c.status === 'draft' || c.status === 'in_review' || c.status === 'approved' || (c.status === 'scheduled' && !c.displays);
-                      return (
-                        <tr key={c.id} className={cx(warn && 'is-warn')}>
-                          <td>
-                            {warn && <span className="sr-only">At risk: </span>}
-                            <Link className="strong" to={campaignHref(c, c.status === 'in_review' ? 'approval' : 'creative-preview')}>
-                              {c.name}
-                            </Link>
-                          </td>
-                          <td>
-                            <span className="row nowrap gap-2">
-                              {c.advertiser.name}
-                              {isOwn(c.advertiser) ? <Badge tone="brand">Own</Badge> : <Badge tone="info">Paid</Badge>}
-                            </span>
-                          </td>
-                          <td>
-                            <span className="ab-cell">
-                              <span className="strong">{c.placementName}</span>
-                              <span className="xs muted">{c.pagesLabel}</span>
-                            </span>
-                          </td>
-                          <td>
-                            <span className="nowrap">{c.periodLabel}</span>
-                          </td>
-                          <td>{c.budgetLabel}</td>
-                          <td className="r">{shown ? '—' : num(c.displays)}</td>
-                          <td className="r">{shown ? '—' : num(c.clicks)}</td>
-                          <td>
-                            <span title={c.statusNote ?? undefined}>
-                              <StatusBadge status={statusLabel(c.status)} />
-                            </span>
-                          </td>
-                          <td className="col-pin">
-                            <span className="row nowrap gap-1">
-                              {actionsFor(c, can).map((a) => {
-                                const inner = (
-                                  <>
-                                    {a.icon && <Icon name={a.icon} />}
-                                    <span>{a.label}</span>
-                                    <span className="sr-only"> {c.name}</span>
-                                  </>
-                                );
-                                const cls = cx('btn', a.variant === 'secondary' ? 'btn-secondary' : 'btn-ghost', 'btn-sm');
-                                return a.to ? (
-                                  <Link key={a.label} className={cls} to={a.to}>
-                                    {inner}
-                                  </Link>
-                                ) : (
-                                  <button key={a.label} type="button" className={cls} disabled={act.isPending || remove.isPending} onClick={() => (a.del ? (remove.reset(), setToDelete(c)) : a.action && start(c, a.action))}>
-                                    {inner}
-                                  </button>
-                                );
-                              })}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                    {rows.length === 0 && (
-                      <tr>
-                        <td colSpan={9} className="muted">
-                          {needle || source || type ? 'No campaigns match these filters.' : 'No campaigns yet. Create one to get started.'}
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </TableWrap>
-            )}
-            <p className="status-legend status-legend--edge">
-              <span className="sr-only">Legend: </span>
-              <span className="sl sl-warning">
-                <i aria-hidden="true" />
-                Amber edge = at risk: due soon or near target
-              </span>
-            </p>
-            <div className="card-foot">
-              <span className="ab-note grow">Pausing takes an ad off the site within 1 minute. Expired ads and ads for unavailable offers are removed automatically.</span>
-            </div>
-          </section>
-
-          {can('advertising.reports.view') || can('advertising.campaigns.view') ? (
-            <Card title="Performance" titleAs="h3" sub={perf ? `${perfRange} · all live campaigns` : undefined}>
-              {perf ? (
-                <>
-                  <div className="grid m2 md4 gap-3">
-                    {[
-                      { k: 'Displays', v: num(perf.metrics.displays) },
-                      { k: 'Clicks', v: num(perf.metrics.clicks), d: `${perf.metrics.ctrPct.toFixed(1)}% of displays` },
-                      { k: 'Dismissals', v: num(perf.metrics.dismissals), d: perf.openingAdClosedPct != null ? `Opening ad closed: ${Math.round(perf.openingAdClosedPct)}%` : undefined },
-                      { k: 'Attributed purchases', v: num(perf.metrics.attributedOrders), d: formatMoney(perf.metrics.attributedSales) },
-                    ].map((p) => (
-                      <div className="panel" key={p.k}>
-                        <Stat label={p.k} value={p.v} note={p.d} />
-                      </div>
-                    ))}
-                  </div>
-                  {perf.daily.length > 0 && (
-                    <BarsChart
-                      rows={perf.daily.map((x) => ({ x: x.date, label: shortDate(x.date), displays: x.displays }))}
-                      series={[{ key: 'displays', label: 'Ad displays' }]}
-                      fmt={fmtCount}
-                      axisFmt={fmtCountCompact}
-                      height={200}
-                      label="Daily ad displays"
-                    />
-                  )}
-                  <p className="ab-note">
-                    <Icon name="info" className="ic-sm" /> {perf.attributionNote}
-                    {perf.daily.some((x) => x.partial) ? ` ${shortDate(perf.daily.filter((x) => x.partial).slice(-1)[0].date)} is partial.` : ''}
-                  </p>
-                </>
-              ) : dash.isLoading ? (
-                <SkeletonLines rows={3} />
-              ) : null}
-            </Card>
-          ) : null}
+        <div className="row gap-2" style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)' }} role="group" aria-label="Status">
+          {STATUS_FILTERS.map((f) => {
+            const n = statusCount(f);
+            if (f.value === 'paused' && !n) return null;
+            return (
+              <Chip key={f.value} active={status === f.value} onClick={() => setStatus(f.value)}>
+                {f.label}
+                {page && n ? ` ${n}` : ''}
+              </Chip>
+            );
+          })}
         </div>
-
-        <div className="stack gap-5">
-          <SideList
-            title="Waiting approval"
-            empty={d ? 'Nothing waiting for approval.' : 'Loading…'}
-            items={(d?.waitingList ?? []).map((c) => ({
-              key: c.id,
-              name: c.name,
-              to: campaignHref(c, 'approval'),
-              meta: `${c.advertiser.name}${isOwn(c.advertiser) ? '' : ' · paid'}${c.statusNote ? ` · ${c.statusNote}` : ''}`,
-              status: statusLabel(c.status),
-            }))}
-          />
-          <SideList
-            title="Upcoming starts"
-            empty={d ? 'No campaigns start in the next 7 days.' : 'Loading…'}
-            items={(d?.upcomingStarts ?? []).map((c) => ({ key: c.id, name: c.name, to: campaignHref(c, 'creative-preview'), meta: `${c.placementName}${c.startsAt ? ` · ${dateTime(c.startsAt)}` : ''}`, status: statusLabel(c.status) }))}
-          />
-          <Card
-            title="Ending soon"
-            titleAs="h3"
-            flush
-            foot={
-              endingFirst ? (
-                ending[endingFirst.id] ? (
-                  <span className="xs muted">{`It finishes ${endingFirst.endsAt ? dateTime(endingFirst.endsAt) : ''} as planned.`}</span>
-                ) : (
-                  <>
-                    {endingFirst.allowedActions.includes('renew') && can('advertising.campaigns.manage') && (
-                      <Button variant="secondary" size="sm" onClick={() => start(endingFirst, 'renew')}>
-                        Renew
-                      </Button>
-                    )}
-                    <Button variant="ghost" size="sm" onClick={() => (setEnding((e) => ({ ...e, [endingFirst.id]: 'finish' })), announce(`${endingFirst.name} will finish as planned`))}>
-                      Let it finish
-                    </Button>
-                  </>
-                )
-              ) : undefined
-            }
-          >
-            <ul className="list pad">
-              {(d?.endingSoonList ?? []).map((c) => (
-                <li key={c.id}>
-                  <span className="grow stack gap-0">
-                    <Link className="small strong" to={campaignHref(c, 'creative-preview')}>
-                      {c.name}
-                    </Link>
-                    <span className="xs muted">{c.endsAt ? `Ends ${dateTime(c.endsAt)} · finish or renew deliberately` : c.periodLabel}</span>
-                  </span>
-                  <Badge tone="warning">Ending soon</Badge>
-                </li>
-              ))}
-              {d && d.endingSoonList.length === 0 && (
-                <li>
-                  <span className="xs muted">No campaigns end in the next few days.</span>
-                </li>
-              )}
-              {!d && (
-                <li>
-                  <SkeletonLines rows={1} />
-                </li>
-              )}
-            </ul>
-          </Card>
-          <Card title="Seller ad billing" titleAs="h3" sub={d ? `Example model: ${d.billing.modelLabel}` : undefined}>
-            {d ? (
-              <div className="ab-sumlist">
-                <div>
-                  <span>Billed this month</span>
-                  <span>{formatMoney(d.billing.billedThisMonth)}</span>
-                </div>
-                <div>
-                  <span>Unused budget returned</span>
-                  <span>{formatMoney(d.billing.unusedBudgetReturned)}</span>
-                </div>
-                <div>
-                  <span>Cancelled campaigns</span>
-                  <span>{d.billing.cancelledCampaigns}</span>
-                </div>
-              </div>
-            ) : (
-              <SkeletonLines rows={3} />
-            )}
-            <p className="ab-note">
-              <Icon name="info" className="ic-sm" /> Ad charges appear on seller statements as a separate line from sales commission.
-            </p>
-          </Card>
+        {list.isError ? (
+          <div className="card-body">
+            <LoadError error={list.error} onRetry={() => void list.refetch()} />
+          </div>
+        ) : list.isPending ? (
+          <div className="card-body">
+            <SkeletonLines rows={6} />
+          </div>
+        ) : shownItems.length === 0 ? (
+          <div className="card-body">
+            <EmptyState icon="megaphone" title={status === 'all' ? 'No ads here yet' : 'No ads with this status'} as="h2" action={canManage && status === 'all' && <Button size="sm" icon="plus" to={adHref('new', { slot: addSlot ? addSlot.key : 'department' })}>{addSlot ? addSlot.add : 'Add department ad'}</Button>}>
+              {status === 'all' ? 'Add an ad: pick the image and what it opens, then submit it for review.' : 'Pick another status above.'}
+            </EmptyState>
+          </div>
+        ) : (
+          <TableWrap label="Ads table">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th scope="col" style={{ width: 24 }}>
+                    <span className="sr-only">Order</span>
+                  </th>
+                  <th scope="col">Ad</th>
+                  <th scope="col">Opens</th>
+                  <th scope="col">Schedule</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">
+                    <span className="sr-only">Actions</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {sort.order.map((id) => byId.get(id)).filter((a): a is StaffAd => !!a).map((a) => row(a, true))}
+                {rest.map((a) => row(a, false))}
+              </tbody>
+            </table>
+          </TableWrap>
+        )}
+        <div className="card-foot" style={{ justifyContent: 'space-between' }}>
+          <span className="xs muted">{canOrder ? 'Drag live and scheduled ads to change their order in the carousel · ⋮ has Pause, End now, Duplicate and Delete draft' : one ? '⋮ has Pause, End now, Duplicate and Delete draft' : 'Pick one department or slot above to change the order of its live and scheduled ads'}</span>
         </div>
-      </div>
+      </section>
 
+      <Dialog open={!!menuFor} onClose={() => setMenuFor(null)} title={menuFor ? `Actions for ${menuFor.name}` : 'Actions'} size="sm">
+        {menuFor && (
+          <div className="menu-list">
+            {menuOf(menuFor).map((m) => (
+              <button key={m.action} type="button" onClick={() => run(menuFor, m.action)} disabled={act.isPending}>
+                <Icon name={m.icon} />
+                {m.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </Dialog>
       <Dialog
-        open={!!toDelete}
-        onClose={() => setToDelete(null)}
-        title={toDelete ? `Delete ${toDelete.name}?` : 'Delete campaign'}
+        open={!!confirm}
+        onClose={() => setConfirm(null)}
+        title={confirm ? (confirm.action === 'end' ? `End ${confirm.ad.name} now?` : `Delete ${confirm.ad.name}?`) : ''}
         size="sm"
         foot={
           <>
-            <Button variant="ghost" onClick={() => setToDelete(null)} disabled={remove.isPending}>
-              Cancel
+            <Button variant="ghost" onClick={() => setConfirm(null)}>
+              {confirm?.action === 'end' ? 'Keep it running' : 'Keep it'}
             </Button>
-            <Button variant="danger" icon="trash" onClick={() => toDelete && remove.mutate(toDelete)} disabled={remove.isPending}>
-              {remove.isPending ? 'Deleting…' : 'Delete draft'}
+            <Button variant="danger" onClick={() => confirm && act.mutate(confirm)} disabled={act.isPending}>
+              {act.isPending ? 'Working…' : confirm?.action === 'end' ? 'End now' : 'Delete draft'}
             </Button>
           </>
         }
       >
-        {remove.isError && (
-          <Alert tone="danger" title="The draft wasn’t deleted">
-            {errorMessage(remove.error)}
-          </Alert>
-        )}
-        <span className="small">
-          The draft {toDelete?.ref} and the creatives only it uses are deleted. This can’t be undone; Action history keeps a record. Campaigns that have run can’t be deleted: finish and archive them instead.
-        </span>
+        <p className="small" style={{ margin: 0 }}>
+          {confirm?.action === 'end'
+            ? `The ad leaves the app within a minute and can’t be started again (duplicate it to run it later).${confirm.ad.pendingChange ? ' Its edit waiting for review is dropped too.' : ''}`
+            : 'The draft is deleted for good.'}
+        </p>
       </Dialog>
-      <CampaignActionDialog
-        pending={pending}
-        busy={act.isPending}
-        error={act.error}
-        onClose={() => setPending(null)}
-        onConfirm={(body) => pending && act.mutate({ p: pending, body })}
-      />
     </AdminLayout>
   );
 }

@@ -1274,6 +1274,286 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/advertising/ads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Staff ads by slot: live and scheduled in carousel order, with counts and what waits for my review
+         * @description The simple Advertisements page (full-screen, home carousel, department carousels, deals, other). A staff ad is one own (platform) campaign with one placement. Needs advertising.campaigns.view, .manage or .review (checked by the handler). placement takes one key or a comma-separated list; without it every staff-ad slot is listed.
+         *
+         *     **Screens:** admin/ads
+         */
+        get: operations["advertising.listStaffAds"];
+        put?: never;
+        /**
+         * Create a staff ad draft
+         * @description Drafts may be incomplete (name and placement are required). The phone image must match the placement's phone format (opening_fullscreen 1080 × 1920, home_banner and department carousels 750 × 400, deals_top 750 × 150, category_banner 750 × 300, popup 600 × 600); a website image only for opening_fullscreen. The destination is resolved to a store path.
+         *
+         *     **Permission:** `advertising.campaigns.manage`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Screens:** admin/ads
+         */
+        post: operations["advertising.createStaffAd"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/advertising/ads/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A staff ad with its review, pending change and stats
+         * @description Needs advertising.campaigns.view, .manage or .review (checked by the handler). The id or the AD- ref.
+         *
+         *     **Screens:** admin/ads
+         */
+        get: operations["advertising.getStaffAd"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a draft that never ran
+         * @description **Permission:** `advertising.campaigns.manage`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Screens:** admin/ads
+         */
+        delete: operations["advertising.deleteStaffAd"];
+        options?: never;
+        head?: never;
+        /**
+         * Edit a staff ad (a running ad gets a pending change)
+         * @description Fields left out keep their value; send null to clear. draft and changes_requested: edits the ad. scheduled, live and paused: endsAt applies at once (no review); every other change creates or replaces the pending change (state draft, submitted with POST /ads/{id}/submit) while the current version keeps running. in_review (first review) and a pending change in review: ILLEGAL_TRANSITION until the review is done. ended and rejected: duplicate instead.
+         *
+         *     **Permission:** `advertising.campaigns.manage`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Screens:** admin/ads
+         */
+        patch: operations["advertising.updateStaffAd"];
+        trace?: never;
+    };
+    "/api/admin/advertising/ads/{id}/submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send the ad (or its pending change) for the two reviews
+         * @description draft or changes_requested → in_review; on a scheduled, live or paused ad: submits its pending change. Submit checks: a phone image of the placement's size, a description (alt), an available destination, endsAt in the future and at most 90 days after the start (or after now when startsAt is empty). Failed checks are CHECKS_FAILED with details.checks.
+         *
+         *     **Permission:** `advertising.campaigns.manage`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Publishes:** `advertising.campaign.status_changed`
+         *
+         *     **Screens:** admin/ads
+         */
+        post: operations["advertising.submitStaffAd"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/advertising/ads/{id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve, request changes or reject the open review step (first review or pending change)
+         * @description The step comes from the caller's access roles (Advertising Manager → advertising, Content or Marketing Manager → content, Business Owner either). The person who created the ad (or the change) reviews neither step, and one person cannot take both (SAME_REVIEWER). A note is required to request changes or reject. Last approval of the first review: scheduled for startsAt, or live at once when startsAt is empty or past. Last approval of a change: the change replaces the live version (images, destination, name, alt, start, deal) and the pending change is cleared. Request changes on a change: the change goes back to its author (state changes_requested). Reject of a change: the change is dropped and the live version keeps running; reject of a first review: the ad is rejected.
+         *
+         *     **Permission:** `advertising.campaigns.review`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Publishes:** `advertising.campaign.status_changed`
+         *
+         *     **Screens:** admin/ads
+         */
+        post: operations["advertising.reviewStaffAd"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/advertising/ads/{id}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pause a scheduled or live ad (off the app within 1 minute)
+         * @description **Permission:** `advertising.campaigns.publish`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Publishes:** `advertising.campaign.status_changed`
+         *
+         *     **Screens:** admin/ads
+         */
+        post: operations["advertising.pauseStaffAd"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/advertising/ads/{id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume a paused ad
+         * @description **Permission:** `advertising.campaigns.publish`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Publishes:** `advertising.campaign.status_changed`
+         *
+         *     **Screens:** admin/ads
+         */
+        post: operations["advertising.resumeStaffAd"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/advertising/ads/{id}/end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End a scheduled, live or paused ad now
+         * @description A pending change is dropped with it.
+         *
+         *     **Permission:** `advertising.campaigns.publish`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Publishes:** `advertising.campaign.status_changed`
+         *
+         *     **Screens:** admin/ads
+         */
+        post: operations["advertising.endStaffAd"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/advertising/ads/{id}/duplicate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Copy an ad into a new draft
+         * @description Same placement, images, description, destination and deal; no dates, no review.
+         *
+         *     **Permission:** `advertising.campaigns.manage`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Screens:** admin/ads
+         */
+        post: operations["advertising.duplicateStaffAd"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/advertising/ads/order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set the carousel order of a placement's live and scheduled ads (applies at once)
+         * @description **Permission:** `advertising.campaigns.manage`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Screens:** admin/ads
+         */
+        put: operations["advertising.reorderStaffAds"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/advertising/ads/destinations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search what an ad can open, for the destination pickers
+         * @description One search for every picker kind: product (active catalog products), category, department (the ten department pages), restaurant (food), deal (promotions live or scheduled), collection (content collections and campaign pages), seller_store (approved sellers), brand (active brands), phone (department phones). url has no options. A module that is off answers no options. Needs advertising.campaigns.view, .manage or .review (checked by the handler).
+         *
+         *     **Screens:** admin/ads
+         */
+        get: operations["advertising.searchAdDestinations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/advertising/placements": {
         parameters: {
             query?: never;
@@ -34712,6 +34992,19 @@ export interface components {
             /** @description Media assets the customer uploaded that belong in the ZIP (message attachments, review photos) */
             attachmentIds?: string[] | null;
         };
+        LinkTarget: {
+            /** @description The record's id (uuid) */
+            id: string;
+            /** @description e.g. Halden Aurora ANC Wireless Headphones */
+            label: string;
+            /** @description Short second line, e.g. Product · $149.00, Restaurant · Pizza */
+            meta?: string | null;
+            /** @description Store path the website and the app open, e.g. /p/halden-aurora/{id} */
+            path: string;
+            image?: components["schemas"]["MediaRef"] | null;
+            /** @description Shown in the store now (published, active, approved) */
+            available: boolean;
+        };
         "access.RoleRef": {
             /** Format: uuid */
             id: string;
@@ -35216,7 +35509,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            key: "opening_fullscreen" | "home_banner" | "category_banner" | "campaign_banner" | "popup" | "sponsored_product" | "sponsored_store" | "floating" | "interstitial" | "video" | "companies_top" | "play_top" | "software_top" | "food_top";
+            key: "opening_fullscreen" | "home_banner" | "category_banner" | "campaign_banner" | "popup" | "sponsored_product" | "sponsored_store" | "floating" | "interstitial" | "video" | "companies_top" | "play_top" | "software_top" | "food_top" | "deals_top";
             name: string;
             /** @description Shown on the ad type card when choosing a placement, e.g. Appears when a visitor opens the site. Close or skip always visible. */
             description: string;
@@ -35243,7 +35536,12 @@ export interface components {
             positions?: number[] | null;
             /** @enum {string} */
             label: "Ad" | "Sponsored";
+            /** @description Live ads in the slot now (the Live count of its tab on Advertisements) */
             liveCampaigns: number;
+            /** @description Managed on the Advertisements page (full-screen, home and department carousels, deals carousel, category banner, pop-up); false for seller-ad and later-phase slots */
+            inUse: boolean;
+            /** @description Page types this slot can be set to show on (the pages the app and website ask for it); PlacementPatch.eligiblePages must stay within them */
+            pageOptions: string[];
             /** @description Increments on every change; PATCH must send the version it read (PlacementPatch.version), otherwise CONFLICT */
             version: number;
             /** Format: date-time */
@@ -35257,10 +35555,11 @@ export interface components {
             /** @description The label is written by the server */
             frequencyCap?: components["schemas"]["advertising.FrequencyCapInput"] | null;
             trigger?: components["schemas"]["advertising.PopupTrigger"] | null;
-            /** @description The label is written by the server */
+            /** @description The label is written by the server. Carousel slots: carouselSeconds 2–15 (how long each ad shows) */
             rotation?: components["schemas"]["advertising.RotationRuleInput"] | null;
             /** @description The label is written by the server */
             dismissal?: components["schemas"]["advertising.DismissalRuleInput"] | null;
+            /** @description Carousel slots: live ads at most (1–20); ads approved beyond it wait as scheduled and start when one ends */
             maxPerPage?: number | null;
             positions?: number[] | null;
             reason: string;
@@ -35312,9 +35611,10 @@ export interface components {
         };
         "advertising.Destination": {
             /** @enum {string} */
-            kind: "url" | "product" | "offer" | "seller_store" | "brand" | "collection" | "campaign_page";
-            /** Format: uuid */
+            kind: "url" | "product" | "offer" | "seller_store" | "brand" | "collection" | "campaign_page" | "category" | "department" | "restaurant" | "deal" | "phone";
+            /** @description uuid, or a department key for kind department */
             targetId?: string | null;
+            /** @description The store path (or https url) visitors open; for picked kinds the server writes the resolved path */
             url: string;
         };
         "advertising.PromotedItem": {
@@ -35748,7 +36048,12 @@ export interface components {
                 [key: string]: components["schemas"]["advertising.AdImpression"][];
             };
             sponsoredProducts: components["schemas"]["advertising.SponsoredProductSlot"][];
+            /** @description Seconds per ad of the first carousel in the decision (kept for older clients; use rotationBySlot) */
             rotationSeconds?: number | null;
+            /** @description placementKey → seconds each ad shows, for every carousel slot in the decision */
+            rotationBySlot: {
+                [key: string]: number;
+            };
             /** @description Clients may reuse the decision this long (pausing takes effect within 1 minute) */
             ttlSeconds: number;
         };
@@ -35908,6 +36213,250 @@ export interface components {
             attributedOrders: number;
             attributionDays: number;
             statementNote: string;
+        };
+        "advertising.AdDestinationInput": {
+            /**
+             * @description What the ad opens; every kind but url is picked from GET /ads/destinations
+             * @enum {string}
+             */
+            kind: "product" | "category" | "department" | "restaurant" | "deal" | "collection" | "seller_store" | "brand" | "phone" | "url";
+            /** @description The picked target's id (uuid). For department: the department key phones|farm|software|welfare|food|booking|blogs|companies|play|rewards. For deal: tab (or left out) is the Deals tab itself. seller_store 00000000-0000-7000-8000-000000000001 is the Official Store. Not used for url */
+            targetId?: string | null;
+            /** @description kind url only: an https address (outside pages). A store path that names a target (e.g. /c/cookware) is saved as that target */
+            url?: string | null;
+        };
+        "advertising.AdDestination": {
+            /** @enum {string} */
+            kind: "product" | "category" | "department" | "restaurant" | "deal" | "collection" | "seller_store" | "brand" | "phone" | "url";
+            targetId?: string | null;
+            /** @description e.g. Halden Aurora ANC Wireless Headphones */
+            label: string;
+            /** @description e.g. Product · Halden; Collection or Page for kind collection; Web address or Store page for kind url (label Store page /x for a store path nothing names) */
+            meta?: string | null;
+            /** @description The store path the app opens (e.g. /p/halden-aurora/…, /c/headphones, /food/restaurants/…), or the https url for kind url; what AdImpression.destination carries */
+            path: string;
+            /** @description The target still exists and is shown in the store (submit needs true) */
+            available: boolean;
+        };
+        "advertising.AdDestinationOption": {
+            /** @enum {string} */
+            kind: "product" | "category" | "department" | "restaurant" | "deal" | "collection" | "seller_store" | "brand" | "phone" | "url";
+            targetId: string;
+            label: string;
+            meta?: string | null;
+            image?: components["schemas"]["MediaRef"] | null;
+            /** @description The store path the target opens */
+            path: string;
+        };
+        "advertising.AdImage": {
+            /**
+             * Format: uuid
+             * @description Media asset id
+             */
+            id: string;
+            /** Format: uri */
+            url: string;
+            width?: number | null;
+            height?: number | null;
+        };
+        "advertising.AdReviewStep": {
+            /** @enum {string} */
+            step: "advertising" | "content";
+            /** @enum {string} */
+            state: "waiting" | "approved" | "changes_requested" | "rejected";
+            by?: components["schemas"]["Actor"] | null;
+            /** Format: date-time */
+            at?: string | null;
+            note?: string | null;
+        };
+        "advertising.AdReview": {
+            /** @description Empty until submitted */
+            steps: components["schemas"]["advertising.AdReviewStep"][];
+            /** @description The caller may take an open step now (has the reviewing role, did not create the ad or the change, did not take the other step) */
+            canReview: boolean;
+            submittedBy?: components["schemas"]["Actor"] | null;
+            /** Format: date-time */
+            submittedAt?: string | null;
+        };
+        "advertising.StaffAdChange": {
+            /**
+             * @description draft: saved, not submitted yet
+             * @enum {string}
+             */
+            state: "draft" | "in_review" | "changes_requested";
+            name?: string | null;
+            image?: components["schemas"]["advertising.AdImage"] | null;
+            webImage?: components["schemas"]["advertising.AdImage"] | null;
+            alt?: string | null;
+            destination?: components["schemas"]["advertising.AdDestination"] | null;
+            /** Format: date-time */
+            startsAt?: string | null;
+            /** Format: uuid */
+            dealId?: string | null;
+            dealName?: string | null;
+            stopWithDeal?: boolean | null;
+            /** @description Fields that differ from the live version: name, image, webImage, alt, destination, startsAt, deal */
+            changedFields: string[];
+            review: components["schemas"]["advertising.AdReview"];
+            createdBy: components["schemas"]["Actor"];
+            /** Format: date-time */
+            createdAt: string;
+        };
+        "advertising.StaffAdStats": {
+            /** @description Displays */
+            views: number;
+            /** @description Clicks */
+            taps: number;
+        };
+        "advertising.StaffAd": {
+            /** Format: uuid */
+            id: string;
+            /** @description AD-YYMMDD-NNNN */
+            ref: string;
+            name: string;
+            placementKey: string;
+            placementName: string;
+            /**
+             * Format: uuid
+             * @description category_banner only: the category it shows on (null = every category)
+             */
+            categoryId?: string | null;
+            /** @enum {string} */
+            status: "draft" | "in_review" | "changes_requested" | "scheduled" | "live" | "paused" | "ended" | "rejected";
+            /** @description Phone image (the placement's phone format, e.g. 750 × 400) */
+            image?: components["schemas"]["advertising.AdImage"] | null;
+            /** @description opening_fullscreen only, optional: website image 1600 × 900 */
+            webImage?: components["schemas"]["advertising.AdImage"] | null;
+            alt?: string | null;
+            destination?: components["schemas"]["advertising.AdDestination"] | null;
+            /**
+             * Format: date-time
+             * @description null = as soon as approved
+             */
+            startsAt?: string | null;
+            /**
+             * Format: date-time
+             * @description Required to submit
+             */
+            endsAt?: string | null;
+            /**
+             * Format: uuid
+             * @description Linked deal (promotions campaign)
+             */
+            dealId?: string | null;
+            dealName?: string | null;
+            stopWithDeal: boolean;
+            /** @description 1-based order inside its placement's carousel (live and scheduled ads); serving order of carousel placements */
+            position: number;
+            /** @description The initial review (the latest submission of the ad itself) */
+            review: components["schemas"]["advertising.AdReview"];
+            /** @description An edit of a scheduled, live or paused ad waiting for review; the current version keeps running until the change is approved */
+            pendingChange?: components["schemas"]["advertising.StaffAdChange"] | null;
+            stats: components["schemas"]["advertising.StaffAdStats"];
+            /** @description edit, submit, review, pause, resume, end, duplicate, delete */
+            allowedActions: string[];
+            /** @description e.g. Needs Content review; Changes requested: brighter image */
+            statusNote?: string | null;
+            createdBy: components["schemas"]["Actor"];
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            /** @description PATCH sends it back; a stale version is CONFLICT */
+            version: number;
+        };
+        "advertising.StaffAdInput": {
+            name: string;
+            placementKey: string;
+            /**
+             * Format: uuid
+             * @description category_banner only
+             */
+            categoryId?: string | null;
+            /**
+             * Format: uuid
+             * @description Media asset of the phone image (uploaded through media first; checked against the placement's phone format)
+             */
+            imageId?: string | null;
+            /**
+             * Format: uuid
+             * @description opening_fullscreen only: website image 1600 × 900
+             */
+            webImageId?: string | null;
+            alt?: string | null;
+            destination?: components["schemas"]["advertising.AdDestinationInput"] | null;
+            /**
+             * Format: date-time
+             * @description null = as soon as approved
+             */
+            startsAt?: string | null;
+            /** Format: date-time */
+            endsAt?: string | null;
+            /** Format: uuid */
+            dealId?: string | null;
+            stopWithDeal?: boolean | null;
+        };
+        "advertising.StaffAdPatch": {
+            name?: string | null;
+            /** Format: uuid */
+            categoryId?: string | null;
+            /** Format: uuid */
+            imageId?: string | null;
+            /** Format: uuid */
+            webImageId?: string | null;
+            alt?: string | null;
+            destination?: components["schemas"]["advertising.AdDestinationInput"] | null;
+            /** Format: date-time */
+            startsAt?: string | null;
+            /** Format: date-time */
+            endsAt?: string | null;
+            /** Format: uuid */
+            dealId?: string | null;
+            stopWithDeal?: boolean | null;
+            version: number;
+        };
+        "advertising.StaffAdsOrderInput": {
+            placementKey: string;
+            /** @description Live and scheduled ads of the placement in the new order (every one of them) */
+            ids: string[];
+        };
+        "advertising.StaffAdSlot": {
+            name: string;
+            enabled: boolean;
+            /** @description Live ads now (equals Placement.liveCampaigns) */
+            live: number;
+            /** @description Carousels: live ads at most */
+            maxLive?: number | null;
+            /** @description Carousels: seconds each ad shows */
+            carouselSeconds?: number | null;
+            /** @description e.g. Each ad shows 6 s, in the order on Advertisements; Ads take turns in the order on Advertisements */
+            rotationLabel: string;
+        };
+        "advertising.AdWaitingRef": {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            placementKey: string;
+            /** @description A pending change of a running ad (else the ad's first review) */
+            isChange: boolean;
+        };
+        "advertising.StaffAdsPage": {
+            /** @description Ads of the asked placement(s): live and scheduled in position order, then paused, in review and drafts, ended and rejected last */
+            items: components["schemas"]["advertising.StaffAd"][];
+            /** @description placementKey → ads not ended (for the slot tabs) */
+            counts: {
+                [key: string]: number;
+            };
+            /** @description status → ads in the asked placement(s) */
+            statusCounts: {
+                [key: string]: number;
+            };
+            waitingForMe: number;
+            waitingForMeAds: components["schemas"]["advertising.AdWaitingRef"][];
+            /** @description placementKey → slot settings and live count, for every staff-ad slot */
+            slots: {
+                [key: string]: components["schemas"]["advertising.StaffAdSlot"];
+            };
         };
         "audit.RoleName": {
             key: string;
@@ -60526,6 +61075,7 @@ export interface operations {
             /**
              * @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.
              *     PROMOTION_NOT_STARTED: The linked promotion has not started; schedule instead of activating.
+             *     SLOT_FULL: The carousel already has its most live ads (Placement.maxPerPage); schedule the ad instead: it starts when one ends.
              */
             409: {
                 headers: {
@@ -60992,6 +61542,916 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["advertising.PerformanceReport"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "advertising.listStaffAds": {
+        parameters: {
+            query?: {
+                placement?: string | null;
+                status?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["advertising.StaffAdsPage"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "advertising.createStaffAd": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["advertising.StaffAdInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["advertising.StaffAd"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description PLACEMENT_DISABLED: The placement is off or belongs to a later phase. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description CREATIVE_FORMAT_INVALID: Size, dimensions, file type or text length does not match the placement format. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "advertising.getStaffAd": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["advertising.StaffAd"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "advertising.deleteStaffAd": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success, no content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.
+             *     CONFLICT: Concurrent change; reload and retry.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "advertising.updateStaffAd": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["advertising.StaffAdPatch"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["advertising.StaffAd"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.
+             *     CONFLICT: Concurrent change; reload and retry.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description CREATIVE_FORMAT_INVALID: Size, dimensions, file type or text length does not match the placement format. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "advertising.submitStaffAd": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["advertising.StaffAd"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description CHECKS_FAILED: Required checks failed (missing label, broken link, promoted offer unavailable, missing phone or desktop creative). details.checks. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "advertising.reviewStaffAd": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    decision: "approve" | "request_changes" | "reject";
+                    note?: string | null;
+                    /**
+                     * @description Only when the caller holds both reviewing roles
+                     * @enum {string|null}
+                     */
+                    step?: "advertising" | "content" | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["advertising.StaffAd"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.
+             *     SAME_REVIEWER: The same person cannot approve two required review steps, and the campaign creator approves none.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "advertising.pauseStaffAd": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    reason?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["advertising.StaffAd"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "advertising.resumeStaffAd": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    reason?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["advertising.StaffAd"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.
+             *     AD_UNAVAILABLE: The promoted offer is unavailable or the linked promotion is inactive.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "advertising.endStaffAd": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    reason?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["advertising.StaffAd"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "advertising.duplicateStaffAd": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["advertising.StaffAd"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "advertising.reorderStaffAds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["advertising.StaffAdsOrderInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["advertising.StaffAdsPage"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "advertising.searchAdDestinations": {
+        parameters: {
+            query: {
+                kind: "product" | "category" | "department" | "restaurant" | "deal" | "collection" | "seller_store" | "brand" | "phone" | "url";
+                q?: string | null;
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["advertising.AdDestinationOption"][];
+                    };
                 };
             };
             /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
