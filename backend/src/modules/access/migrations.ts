@@ -4,7 +4,7 @@
  */
 import { allSpecs } from '../../kernel/module-system/loader.js';
 import type { MongoMigration } from '../../kernel/mongo/schema.js';
-import { ANNOUNCEMENT_ROLES, ANNOUNCEMENTS_SEND, BUSINESS_OWNER, DEPARTMENTS_MANAGE, MARKETING_OFFERS_VIEW, PHASE3_MANAGE, PHASE3_SUPPORT, SERVICES_MANAGE, SERVICES_REQUESTS, NEWS_MANAGE, NEWS_PUBLISH, PLATFORM_ADMINISTRATOR, STAFF_UPLOADS, SYSTEM_ROLES, viewCompanions } from './domain/seed.js';
+import { ANNOUNCEMENT_ROLES, ANNOUNCEMENTS_SEND, BUSINESS_OWNER, DEPARTMENTS_MANAGE, MARKETING_OFFERS_VIEW, PHASE3_MANAGE, PHASE3_SUPPORT, PHASE4_MANAGE, PHASE4_SUPPORT, SERVICES_MANAGE, SERVICES_REQUESTS, NEWS_MANAGE, NEWS_PUBLISH, PLATFORM_ADMINISTRATOR, STAFF_UPLOADS, SYSTEM_ROLES, viewCompanions } from './domain/seed.js';
 
 /** Every staff permission key ending in `.view`, from every module's spec (enabled or not, like the registry) */
 export function staffViewKeys(): string[] {
@@ -205,4 +205,34 @@ export const phase3Keys: MongoMigration = {
   },
 };
 
-export const mongoMigrations: readonly MongoMigration[] = [businessOwnerViewKeys, staffWorkUploads, platformAdminAccountActions, newsKeys, announcementKeys, departmentsKeys, servicesKeys, phase3Keys];
+/**
+ * Phase 4 of the department pages (farm module, Post-sale devices, game server keys and review moderation,
+ * 2026-10-24): the new keys reach roles seeded before them, as in the seed (Content Manager all of them, Marketing
+ * Manager the manage keys with farm.view, Customer Support Manager and Support Agent farm.view, farm orders and
+ * registered devices). The Business Owner gets farm.view from the registry sync (*.view); one that staff already gave
+ * the department manage keys (departments.blogs.manage) gets every other new key too, as in 2026-10-23-phase3-keys.
+ * It runs once.
+ */
+export const phase4Keys: MongoMigration = {
+  id: '2026-10-24-phase4-keys',
+  async up(db) {
+    const roles = await db.collection('access.roles').find({ system: true, key: { $in: ['content_manager', 'marketing_manager', 'customer_support_manager', 'support_agent', BUSINESS_OWNER] }, archived_at: null }).toArray();
+    if (!roles.length) return; // a new install: the registry sync seeds the roles with the keys
+    const now = new Date();
+    const perms = db.collection('access.role_permissions');
+    const grant = (roleId: unknown, key: string) => perms.updateOne({ role_id: roleId, permission_key: key }, { $setOnInsert: { granted_by: 'system', granted_at: now } }, { upsert: true });
+    const keys: Record<string, string[]> = {
+      content_manager: [...PHASE4_SUPPORT, ...PHASE4_MANAGE],
+      marketing_manager: ['farm.view', ...PHASE4_MANAGE],
+      customer_support_manager: [...PHASE4_SUPPORT],
+      support_agent: [...PHASE4_SUPPORT],
+    };
+    for (const role of roles) {
+      let list = keys[String(role.key)] ?? [];
+      if (role.key === BUSINESS_OWNER) list = (await perms.countDocuments({ role_id: role._id, permission_key: 'departments.blogs.manage' }, { limit: 1 })) ? [...PHASE4_MANAGE, 'farm.orders.manage', 'services.devices.manage'] : [];
+      for (const key of list) await grant(role._id, key);
+    }
+  },
+};
+
+export const mongoMigrations: readonly MongoMigration[] = [businessOwnerViewKeys, staffWorkUploads, platformAdminAccountActions, newsKeys, announcementKeys, departmentsKeys, servicesKeys, phase3Keys, phase4Keys];

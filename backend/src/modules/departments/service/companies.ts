@@ -5,11 +5,11 @@
 import { newId } from '../../../kernel/lib/ids.js';
 import { pageOf, type Page, type PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
-import type { Company, CompanyAdmin, CompanyCard, CompanyContacts, CompanyInput, GeoPoint, Industry, IndustryInput, InquiryAdmin, InquiryInput, InquiryReceipt, InquiryUpdate } from '../../../spec/departments.js';
+import type { Company, CompanyAdmin, CompanyCard, CompanyContacts, CompanyInput, DeptReview, GeoPoint, Industry, IndustryInput, InquiryAdmin, InquiryInput, InquiryReceipt, InquiryUpdate, ReviewInput } from '../../../spec/departments.js';
 import { isSafeUrl, LIMITS } from '../domain/rules.js';
 import type { CompanyRow, IndustryRow, InquiryRow } from '../ports.js';
 import { invalid, mediaList, mediaOf, notFound, optionalText, requireText, unique, type By, type StoredMedia } from './base.js';
-import { DepartmentsBlogs } from './blogs.js';
+import { DepartmentsReviews } from './reviews.js';
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -23,7 +23,7 @@ const locationOf = (v: unknown): GeoPoint | null => {
   return g && typeof g.lat === 'number' && typeof g.lng === 'number' ? { lat: g.lat, lng: g.lng } : null;
 };
 
-export class DepartmentsCompanies extends DepartmentsBlogs {
+export class DepartmentsCompanies extends DepartmentsReviews {
   /* ---------------------------------------------------------------- industries */
 
   private async industriesOut(rows: IndustryRow[]): Promise<Industry[]> {
@@ -68,22 +68,26 @@ export class DepartmentsCompanies extends DepartmentsBlogs {
   /* ---------------------------------------------------------------- companies */
 
   private async companyContext(rows: CompanyRow[]) {
-    const [industries, refs] = await Promise.all([
+    const [industries, refs, ratings] = await Promise.all([
       this.repo.industriesByIds(unique(rows.map((c) => c.industry_id).filter((x): x is string => Boolean(x)))),
       this.refsMap(rows.flatMap((c) => [mediaOf(c.logo)?.id, ...mediaList(c.photos).map((p) => p.id)])),
+      this.ratingsOf('company', rows.map((c) => c.id)),
     ]);
-    return { industries: new Map(industries.map((i) => [i.id, i])), refs };
+    return { industries: new Map(industries.map((i) => [i.id, i])), refs, ratings };
   }
 
   private cardOfCompany(c: CompanyRow, x: Awaited<ReturnType<DepartmentsCompanies['companyContext']>>): CompanyCard {
     const logo = mediaOf(c.logo);
     const ind = c.industry_id ? x.industries.get(c.industry_id) : undefined;
-    return { id: c.id, slug: c.slug, name: c.name, logo: logo ? (x.refs.get(logo.id) ?? null) : null, industry: ind ? { id: ind.id, slug: ind.slug, name: ind.name } : null, city: c.city, tagline: c.tagline, verified: c.verified };
+    const rating = x.ratings.get(c.id);
+    return { id: c.id, slug: c.slug, name: c.name, logo: logo ? (x.refs.get(logo.id) ?? null) : null, industry: ind ? { id: ind.id, slug: ind.slug, name: ind.name } : null, city: c.city, tagline: c.tagline, verified: c.verified, rating: rating?.average ?? null, ratingCount: rating?.count ?? 0 };
   }
 
-  private companyOf(c: CompanyRow, x: Awaited<ReturnType<DepartmentsCompanies['companyContext']>>): Company {
+  private companyOf(c: CompanyRow, x: Awaited<ReturnType<DepartmentsCompanies['companyContext']>>, myReview: Company['myReview'] = null): Company {
     return {
       ...this.cardOfCompany(c, x),
+      ratingSummary: x.ratings.get(c.id) ?? { average: null, count: 0, stars: [0, 0, 0, 0, 0] },
+      myReview,
       description: c.description,
       photos: mediaList(c.photos).map((p) => x.refs.get(p.id)).filter((r): r is common.MediaRef => Boolean(r)),
       founded: c.founded,
@@ -94,8 +98,11 @@ export class DepartmentsCompanies extends DepartmentsBlogs {
   }
 
   private async companiesAdmin(rows: CompanyRow[]): Promise<CompanyAdmin[]> {
-    const [x, open] = await Promise.all([this.companyContext(rows), this.repo.openInquiryCounts(rows.map((c) => c.id))]);
-    return rows.map((c) => ({ ...this.companyOf(c, x), status: c.status as CompanyAdmin['status'], position: c.position, openInquiryCount: open.get(c.id) ?? 0, createdAt: c.created_at.toISOString(), updatedAt: c.updated_at.toISOString() }));
+    const [x, open, hiddenReviews] = await Promise.all([this.companyContext(rows), this.repo.openInquiryCounts(rows.map((c) => c.id)), this.repo.hiddenReviewCounts('company', rows.map((c) => c.id))]);
+    return rows.map((c) => {
+      const { ratingSummary: _summary, myReview: _mine, ...company } = this.companyOf(c, x);
+      return { ...company, hiddenReviewCount: hiddenReviews.get(c.id) ?? 0, status: c.status as CompanyAdmin['status'], position: c.position, openInquiryCount: open.get(c.id) ?? 0, createdAt: c.created_at.toISOString(), updatedAt: c.updated_at.toISOString() };
+    });
   }
 
   private async hiddenIndustryIds(): Promise<string[]> {
@@ -114,10 +121,30 @@ export class DepartmentsCompanies extends DepartmentsBlogs {
     return { ...res, items: res.items.map((c) => this.cardOfCompany(c, x)) };
   }
 
-  async getCompany(slug: string): Promise<Company> {
+  /** A published company page; `customerId` (customers-module id) answers myReview */
+  async getCompany(slug: string, customerId: string | null = null): Promise<Company> {
     const c = await this.repo.companyBySlug(slug);
     if (!c || c.status !== 'published') throw notFound('Company');
-    return this.companyOf(c, await this.companyContext([c]));
+    const [x, mine] = await Promise.all([this.companyContext([c]), this.myReviewOf('company', c.id, customerId)]);
+    return this.companyOf(c, x, mine);
+  }
+
+  /* ---------------------------------------------------------------- reviews */
+
+  private async publishedCompany(slug: string): Promise<CompanyRow> {
+    const c = await this.repo.companyBySlug(slug);
+    if (!c || c.status !== 'published') throw notFound('Company');
+    return c;
+  }
+
+  async listCompanyReviews(slug: string, customerId: string | null, q: { stars?: number }, page: PageRequest): Promise<Page<DeptReview>> {
+    const c = await this.publishedCompany(slug);
+    return this.pageReviewsOf('company', c.id, customerId, q.stars, page);
+  }
+
+  async reviewCompany(slug: string, customerId: string, accountId: string | null, input: ReviewInput): Promise<DeptReview> {
+    const c = await this.publishedCompany(slug);
+    return this.writeReview('company', c.id, customerId, accountId, input);
   }
 
   async listCompaniesAdmin(q: { status?: 'published' | 'hidden'; industryId?: string; q?: string }, page: PageRequest): Promise<Page<CompanyAdmin>> {

@@ -19,8 +19,8 @@ const customerOf = (scope: Scope, principal: Principal | null): string => {
 
 /**
  * Store API: /api/store/software/…  (docs/api/modules/software.md)
- * Browsing is open to visitors (a signed-in customer also sees what they own); owning, buying, downloading and
- * rating need a customer.
+ * Browsing is open to visitors (a signed-in customer also sees what they own and their licence keys); owning, buying,
+ * downloading (no purchase needed) and rating need a customer.
  */
 export const storeRoutes = (service: SoftwareService) =>
   routes(endpoints, 'store', {
@@ -40,7 +40,7 @@ export const storeRoutes = (service: SoftwareService) =>
     reviewApp: async ({ params, body, scope, principal }) => service.reviewApp(customerOf(scope, principal), params.slug, body),
     /** POST /apps/{slug}/get: Own a free app */
     getFreeApp: async ({ params, scope, principal }) => service.getFreeApp(customerOf(scope, principal), params.slug),
-    /** POST /apps/{slug}/downloads: A signed link to download an owned app's package or a database */
+    /** POST /apps/{slug}/downloads: A signed link to download an app's package or a database (any signed-in customer) */
     createDownload: async ({ params, body, scope, principal }) => service.createDownload(customerOf(scope, principal), params.slug, body ?? {}, principal!),
     /** GET /payment-options: Saved cards and a new-card session for buying an app or a pack */
     getPaymentOptions: async ({ query, scope, principal }) => service.getPaymentOptions(customerOf(scope, principal), query),

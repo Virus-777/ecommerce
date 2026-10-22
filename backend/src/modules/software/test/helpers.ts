@@ -60,7 +60,7 @@ export async function boot(): Promise<Kit> {
       },
     },
   });
-  for (const name of ['software.purchase.paid', 'software.purchase.failed', 'payments.purchase.authorized', 'payments.purchase.failed', 'payments.purchase.captured', 'payments.purchase.voided']) {
+  for (const name of ['software.purchase.paid', 'software.purchase.failed', 'software.licence.reissued', 'payments.purchase.authorized', 'payments.purchase.failed', 'payments.purchase.captured', 'payments.purchase.voided']) {
     app.kernel.events.subscribe('test', name, (e) => void k.events.push({ name: e.name, payload: e.payload }));
   }
   const staffId = newId();

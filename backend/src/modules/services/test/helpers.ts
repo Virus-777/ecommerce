@@ -1,6 +1,8 @@
 /**
  * Test harness for services: the module with real media, and the answers a test controls stubbed:
- * customers.getCustomerByUserId → `k.names`; audit.record → recorded; settings → `k.settingsValues`. The clock is set
+ * customers.getCustomerByUserId and getCustomer → `k.names`; customers.customerLocation → `k.locations`;
+ * customers.geocodeAddress → `k.geocoded` (calls in `k.geocodeCalls`); audit.record → recorded; settings →
+ * `k.settingsValues`. The clock is set
  * to a Monday morning in the market zone (America/Los_Angeles), so slots are in the future.
  */
 import type { FastifyInstance } from 'fastify';
@@ -18,6 +20,11 @@ export interface Kit {
   audits: audit.RecordInput[];
   events: { name: string; payload: any }[];
   settingsValues: Record<string, unknown>;
+  locations: Map<string, { point: { lat: number; lng: number }; city: string; region: string; addressId: string; label: string }>;
+  geocoded: Map<string, { lat: number; lng: number }>;
+  geocodeCalls: unknown[];
+  /** account id → customers-module id, for accounts whose customer record has another id */
+  customerIds: Map<string, string>;
   staff(permissions?: string[]): Record<string, string>;
   customer(accountId: string): Record<string, string>;
   call(method: Method, url: string, payload?: unknown, headers?: Record<string, string>): Promise<{ status: number; body: any }>;
@@ -34,13 +41,23 @@ export async function boot(): Promise<Kit> {
   clock.set(START);
   tokenClock.now = () => clock.now();
   tokenClock.ttlSeconds = 3600;
-  const k = { clock, names: new Map<string, string>(), audits: [] as audit.RecordInput[], events: [] as { name: string; payload: any }[], settingsValues: {} as Record<string, unknown> };
+  const k = { clock, names: new Map<string, string>(), audits: [] as audit.RecordInput[], events: [] as { name: string; payload: any }[], settingsValues: {} as Record<string, unknown>, locations: new Map() as Kit['locations'], geocoded: new Map<string, { lat: number; lng: number }>(), geocodeCalls: [] as unknown[], customerIds: new Map<string, string>() };
+  const snapshot = (id: string) => ({ id, userId: id, ref: 'CU-1', displayName: k.names.get(id)!, email: 'a@example.com', accountStatus: 'active', canOrder: true, canMessage: true }) as never;
   const app = await buildTestApp({
     only: ['services', 'media'],
     clock,
     config: { rateLimits: false },
     apiStubs: {
-      customers: { getCustomerByUserId: async (id: string) => (k.names.has(id) ? ({ id, userId: id, ref: 'CU-1', displayName: k.names.get(id)!, email: 'a@example.com', accountStatus: 'active', canOrder: true, canMessage: true } as never) : null) },
+      customers: {
+        // an account in k.customerIds has a customers-module id of its own
+        getCustomerByUserId: async (id: string) => (k.customerIds.has(id) ? ({ ...(snapshot(id) as object), id: k.customerIds.get(id)! } as never) : k.names.has(id) ? snapshot(id) : null),
+        getCustomer: async (id: string) => (k.names.has(id) ? snapshot(id) : null),
+        customerLocation: async (id: string) => k.locations.get(id) ?? null,
+        geocodeAddress: async (input: { city: string; postalCode?: string }) => {
+          k.geocodeCalls.push(input);
+          return k.geocoded.get(input.postalCode ?? input.city) ?? null;
+        },
+      },
       audit: {
         record: async (entry) => {
           k.audits.push(entry);

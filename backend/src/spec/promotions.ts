@@ -2118,7 +2118,7 @@ export interface PromotionsPublicApi {
   getFlashSale(campaignId: string): Promise<FlashSaleBlock | null>;
   /** Clippable coupons that cover each product, with the customer's clipped state (the coupons part of GET /products/{productId}). Batched per request. Used by: graphql. */
   couponsForProduct(productIds: string[], ctx: { customerId?: string }): Promise<Record<string, CouponCard[]>>;
-  /** Give one customer their own single-use code of a coupon campaign (a Daily rewards redemption, 2026-10-22). The campaign must be a coupon campaign that is scheduled or running (CAMPAIGN_NOT_ACTIVE otherwise); the code is unique, max_redemptions 1, assigned to the customer, and shows in their coupons. The same key returns the same code. Used by: rewards. */
+  /** Give one customer their own single-use code of a coupon campaign (a Daily rewards redemption, 2026-10-22). The campaign must be a coupon campaign that is scheduled or running (CAMPAIGN_NOT_ACTIVE otherwise); the code is unique, max_redemptions 1, assigned to the customer, and shows in their coupons. The same key returns the same code. Used by: rewards, departments. */
   issueCode(campaignId: string, customerId: string, idempotencyKey: string): Promise<IssuedCoupon>;
   /** My coupons: available and clipped, used and expired, with the rules line (GET /coupons). Used by: graphql. */
   couponsForCustomer(customerId: string): Promise<AccountCoupons>;

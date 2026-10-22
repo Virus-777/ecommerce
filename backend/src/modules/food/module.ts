@@ -3,6 +3,7 @@ import { spec } from '../../spec/food.js';
 import { storeRoutes } from './http/store.js';
 import { adminRoutes } from './http/admin.js';
 import { FoodRepository } from './repository.js';
+import { mongoMigrations } from './migrations.js';
 import { schemas } from './schema.js';
 import { FoodService } from './service.js';
 
@@ -14,8 +15,9 @@ import { FoodService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.0.0',
+  version: '1.1.0',
   schemas,
+  mongoMigrations,
   register(ctx) {
     const service = new FoodService({ repo: new FoodRepository(ctx.mongo), ctx });
     ctx.provide(service);
@@ -26,6 +28,7 @@ export default defineModule({
     ctx.events.on("payments.purchase.failed", (e) => service.onPurchaseFailedFromPayments(e.payload, e.id));
 
     // Background jobs (spec jobs)
+    ctx.jobs.handle("food.geocode-restaurants", () => service.geocodeRestaurants());
     ctx.jobs.handle("food.expire-unaccepted", () => service.expireUnaccepted());
   },
 });

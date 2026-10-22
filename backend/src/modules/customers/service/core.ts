@@ -11,7 +11,7 @@ import type * as common from '../../../spec/common.js';
 import { spec as customersSpec } from '../../../spec/customers.js';
 import { specs } from '../../../spec/index.js';
 import { displayName } from '../domain/rules.js';
-import type { ActionRow, AddressValidationProvider, CustomerRow } from '../ports.js';
+import type { ActionRow, AddressValidationProvider, CustomerRow, Geocoder } from '../ports.js';
 import type { CustomersRepository } from '../repository.js';
 
 export interface CustomersServiceDeps {
@@ -19,6 +19,8 @@ export interface CustomersServiceDeps {
   ctx: ModuleContext<'customers'>;
   /** Address validation provider (optional integration); format rules only without it */
   addressProvider?: AddressValidationProvider;
+  /** Geocoder provider; without it (or with the unconfigured stub) addresses keep no point */
+  geocoder?: Geocoder;
 }
 
 /** Who acts, for events, audit and the consent log */

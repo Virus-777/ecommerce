@@ -19,8 +19,17 @@ describe('sample restaurants (tools/simulate/food-data.ts)', () => {
     };
     const sections = RESTAURANTS.reduce((n, r) => n + Object.keys(r.menu).length, 0);
     const items = RESTAURANTS.reduce((n, r) => n + Object.values(r.menu).flat().length, 0);
-    expect(await seedFood(admin)).toEqual({ categories: FOOD_CATEGORIES.length, restaurants: RESTAURANTS.length, sections, items });
-    expect(await seedFood(admin)).toEqual({ categories: 0, restaurants: 0, sections: 0, items: 0 });
+    expect(await seedFood(admin)).toEqual({ categories: FOOD_CATEGORIES.length, restaurants: RESTAURANTS.length, placed: 0, sections, items });
+    expect(await seedFood(admin)).toEqual({ categories: 0, restaurants: 0, placed: 0, sections: 0, items: 0 });
+
+    // real Portland addresses with their pins; a restaurant without a staff pin (seeded before points) gets it once
+    const admins = (await k.admin('GET', '/restaurants?limit=100')).body.items;
+    const napoliAdmin = admins.find((r: any) => r.slug === 'napoli-corner');
+    expect(napoliAdmin).toMatchObject({ address: '1022 NW Glisan St', city: 'Portland', region: 'OR', postalCode: '97209', point: { lat: 45.5265, lng: -122.6817 }, pointSource: 'staff' });
+    expect(admins.every((r: any) => r.pointSource === 'staff')).toBe(true);
+    await k.admin('PATCH', `/restaurants/${napoliAdmin.id}`, { name: napoliAdmin.name, cuisine: napoliAdmin.cuisine, deliveryMinMinutes: 20, deliveryMaxMinutes: 30, deliveryFee: napoliAdmin.deliveryFee, address: '118 Bay Rd', point: null });
+    expect(await seedFood(admin)).toMatchObject({ restaurants: 0, placed: 1 });
+    expect((await k.admin('GET', `/restaurants/${napoliAdmin.id}`)).body).toMatchObject({ address: '1022 NW Glisan St', pointSource: 'staff', promoBadge: 'Free delivery', status: 'published' });
 
     // Wednesday noon: Tokyo Ramen House opens at 5 PM
     const list = (await k.store('GET', '/restaurants')).body.items;
@@ -29,7 +38,7 @@ describe('sample restaurants (tools/simulate/food-data.ts)', () => {
     expect(list[3]).toMatchObject({ open: false, openLabel: 'Closed · opens 5 PM', feeLabel: '$2.99 delivery' });
     const napoli = (await k.store('GET', '/restaurants/napoli-corner')).body;
     expect(napoli.sections.map((s: any) => s.name)).toEqual(['Popular', 'Pizza', 'Sides', 'Drinks', 'Desserts']);
-    expect(napoli).toMatchObject({ address: '118 Bay Rd', minOrderLabel: 'Min. order $12.00', promoText: 'Free delivery on orders over $25 this week' });
+    expect(napoli).toMatchObject({ address: '1022 NW Glisan St', minOrderLabel: 'Min. order $12.00', promoText: 'Free delivery on orders over $25 this week' });
     const recommended = (await k.store('GET', '/items?recommended=true')).body.items;
     expect(recommended.map((i: any) => i.name)).toEqual(['Margherita pizza 12"', 'Chicken avocado bowl', 'Tonkotsu ramen', 'Double smash burger']);
     expect(recommended[1]).toMatchObject({ priceLabel: '$11.90', wasLabel: '$14.00' });

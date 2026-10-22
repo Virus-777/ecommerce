@@ -48,6 +48,7 @@ export const enabledModules: string[] = [
   'services',
   'software',
   'food',
+  'farm',
   'rewards',
 
   // Later phases (off at launch)

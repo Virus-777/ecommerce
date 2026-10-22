@@ -8,8 +8,8 @@ import { isIsoDate } from '../../../kernel/lib/dates.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { money } from '../../../kernel/lib/money.js';
 import { pageOf, type Page, type PageRequest } from '../../../kernel/lib/pagination.js';
-import type { ProviderStaff, RequestAdmin, RequestDetails, RequestInput, RequestUpdate, ReviewAdmin, ReviewInput, ServiceRequest, StatusChange } from '../../../spec/services.js';
-import { dayLabel, HANDOVER_MODES, LIMITS, makeRef, OPEN_STATUSES, requestPriceLabel, shortName, STATUS_EVENT, statusLabel, timeLabel, withRating } from '../domain/rules.js';
+import type { ProviderStaff, RequestAdmin, RequestDetails, RequestDevice, RequestInput, RequestUpdate, ReviewAdmin, ReviewInput, ServiceRequest, StatusChange } from '../../../spec/services.js';
+import { dayLabel, deviceLabel, HANDOVER_MODES, LIMITS, makeRef, OPEN_STATUSES, requestPriceLabel, shortName, STATUS_EVENT, statusLabel, timeLabel, withRating } from '../domain/rules.js';
 import { serviceRequestMachine } from '../domain/state-machines.js';
 import type { ProviderRow, RequestRow, ReviewRow, ServiceRow } from '../ports.js';
 import { actorKey, invalid, notFound, optionalText, requireText, unique, type By } from './base.js';
@@ -18,6 +18,10 @@ import { ServicesCatalog } from './catalog.js';
 type Status = RequestRow['status'];
 const historyOf = (v: unknown): StatusChange[] => (Array.isArray(v) ? (v as StatusChange[]).filter((h) => h && typeof h.status === 'string' && typeof h.at === 'string') : []);
 const detailsOf = (v: unknown): RequestDetails => (v && typeof v === 'object' ? (v as RequestDetails) : {});
+const deviceOf = (v: unknown): RequestDevice | null => {
+  const d = v as RequestDevice | null;
+  return d && typeof d === 'object' && typeof d.id === 'string' ? { id: d.id, label: d.label, imeiLast4: d.imeiLast4, covered: d.covered === true } : null;
+};
 const staffOfRow = (p: ProviderRow | undefined, id: string | null): ProviderStaff | null => {
   if (!p || !id) return null;
   const s = (Array.isArray(p.staff) ? (p.staff as unknown as ProviderStaff[]) : []).find((x) => x && x.id === id);
@@ -54,7 +58,8 @@ export class ServicesRequests extends ServicesCatalog {
         staff: staffOfRow(p, r.staff_id),
         contact: r.contact as unknown as ServiceRequest['contact'],
         details: detailsOf(r.details),
-        priceLabel: requestPriceLabel(s.from_price == null ? null : money(s.from_price, s.currency), s.price_unit),
+        priceLabel: deviceOf(r.device)?.covered ? '$0 · covered by your warranty' : requestPriceLabel(s.from_price == null ? null : money(s.from_price, s.currency), s.price_unit),
+        device: deviceOf(r.device),
         providerNote: r.provider_note,
         canCancel: (r.status === 'requested' || r.status === 'confirmed') && beforeCutoff,
         canReview: r.status === 'completed' && !r.reviewed,
@@ -93,6 +98,7 @@ export class ServicesRequests extends ServicesCatalog {
       slotStart: r.slot_start?.toISOString() ?? null,
       slotEnd: r.slot_end?.toISOString() ?? null,
       staff: staffOfRow(pById.get(r.provider_id), r.staff_id),
+      device: deviceOf(r.device),
       contact: r.contact as unknown as RequestAdmin['contact'],
       details: detailsOf(r.details),
       providerNote: r.provider_note,
@@ -134,7 +140,11 @@ export class ServicesRequests extends ServicesCatalog {
     throw new AppError('CONFLICT', 'Could not make a request reference; try again');
   }
 
-  async createRequest(customerId: string, input: RequestInput, by: By): Promise<ServiceRequest> {
+  /**
+   * `customerId` keys the request (the account id); `deviceOwner` is the customers-module id the registered devices
+   * are kept under (the same when the account has no customer record).
+   */
+  async createRequest(customerId: string, input: RequestInput, by: By, deviceOwner: string = customerId): Promise<ServiceRequest> {
     const contact = { name: requireText(input.contact?.name, 'contact.name', LIMITS.short), phone: requireText(input.contact?.phone, 'contact.phone', 40), email: optionalText(input.contact?.email, 'contact.email', 120) };
     const id = newId();
     await this.repo.transaction(async (tx) => {
@@ -143,6 +153,16 @@ export class ServicesRequests extends ServicesCatalog {
       const p = s && s.status === 'published' ? await tx.getProvider(s.provider_id, { forUpdate: true }) : undefined;
       if (!s || !p || p.status !== 'published') throw notFound('Service');
       const details = this.checkDetails(input.details, s);
+      let device: RequestDevice | null = null;
+      if (input.deviceId) {
+        if (s.area !== 'post_sale' && s.area !== 'os_install') throw invalid('deviceId', 'Only phone services take a registered device');
+        const d = await tx.getDevice(input.deviceId);
+        if (!d || d.customer_id !== deviceOwner) throw invalid('deviceId', 'Pick one of your registered devices');
+        // $0 only for a covered-by-warranty post-sale service and a verified device whose cover runs today
+        const covered = s.covered_by_warranty === true && s.area === 'post_sale' && d.status === 'verified' && d.covered_until != null && d.covered_until >= this.today();
+        device = { id: d.id, label: deviceLabel(d.model, d.storage), imeiLast4: d.imei_last4, covered };
+        if (!details.deviceModel) details.deviceModel = d.model;
+      }
       let slot: { start: Date; end: Date } | null = null;
       let staffId: string | null = null;
       if (s.slot_minutes) {
@@ -162,6 +182,8 @@ export class ServicesRequests extends ServicesCatalog {
         slot_start: slot?.start ?? null,
         slot_end: slot?.end ?? null,
         staff_id: staffId,
+        device_id: device?.id ?? null,
+        device: device as never,
         contact: contact as never,
         details: details as never,
         status: 'requested',

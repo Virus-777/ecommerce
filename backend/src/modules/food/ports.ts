@@ -8,6 +8,7 @@ export type ItemRow = FoodDb['items'];
 export type BasketRow = FoodDb['baskets'];
 export type OrderRow = FoodDb['orders'];
 export type ReviewRow = FoodDb['reviews'];
+export type SavedRestaurantRow = FoodDb['saved_restaurants'];
 
 /** A basket line as stored (baskets.lines): the item, its choices, quantity and note, with the name and unit price when added (shown if the item goes away) */
 export interface StoredLine {

@@ -2,7 +2,7 @@
 
 # Softwares (`software`)
 
-The app's Softwares department: apps for phones and PCs that customers download. Staff keep the categories, apps, files, packs and the home rails in Admin › Departments › Softwares. Free apps are owned on Get; paid apps and packs are bought with a card in their own payment flow (payments purchase intents, not cart and checkout), and owners download the files through signed links.
+The app's Softwares department: apps for phones and PCs that customers download. Staff keep the categories, apps, files, packs and the home rails in Admin › Departments › Softwares. Free apps are owned on Get; paid apps and packs are bought with a card in their own payment flow (payments purchase intents, not cart and checkout) and come with a licence key. Any signed-in customer downloads the files through signed links.
 
 - **Group:** Growth · **Launch phase:** 2 · **Plan chapters:** -
 - **Depends on:** [media](../media/README.md), [payments](../payments/README.md) · **Optional:** [customers](../customers/README.md), [audit](../audit/README.md), [notifications](../notifications/README.md)
@@ -12,7 +12,7 @@ The app's Softwares department: apps for phones and PCs that customers download.
 - Apps: title, company, brief, icon, screenshots, descriptions, what you get, price and sale price, files (package and optional databases), version, what's new, version history, runtime platforms, minimum requirements, notice, permissions, status
 - Packs: several apps sold together for one price
 - Home rails of the Recommended tab (staff pick, newest, a category, a platform or top rated)
-- Purchases (SW- references) and their payment status; entitlements (who owns which app); downloads and views counted per app
+- Purchases (SW- references) and their payment status; entitlements (who owns which app) with a licence key for paid apps; downloads and views counted per app
 - Ratings and reviews from owners
 
 **Not here:**
@@ -33,7 +33,7 @@ The app's Softwares department: apps for phones and PCs that customers download.
 | GET | `/api/store/software/apps/{slug}/reviews` | An app's reviews, newest first | visitor | Page<AppReview> |
 | POST | `/api/store/software/apps/{slug}/reviews` | Rate an app you own, or change your rating | customer | `ReviewInput` → `AppReview` |
 | POST | `/api/store/software/apps/{slug}/get` | Own a free app | customer | `Entitlement` |
-| POST | `/api/store/software/apps/{slug}/downloads` | A signed link to download an owned app's package or a database | customer | `DownloadInput` → `media.DownloadLink` |
+| POST | `/api/store/software/apps/{slug}/downloads` | A signed link to download an app's package or a database | customer | `DownloadInput` → `media.DownloadLink` |
 | GET | `/api/store/software/payment-options` | Saved cards and a new-card session for buying an app or a pack | customer | `payments.PaymentOptions` |
 | POST | `/api/store/software/purchases` | Buy an app or a pack _(idempotent)_ | customer | `PurchaseInput` → `SoftwarePurchase` |
 | GET | `/api/store/software/purchases/{id}` | A purchase and its payment status | customer | `SoftwarePurchase` |
@@ -63,6 +63,8 @@ The app's Softwares department: apps for phones and PCs that customers download.
 | PUT | `/api/admin/software/rails` | Replace the Recommended tab's rails _(audited)_ | staff<br>`software.manage` | `RailsInput` → `RailAdmin[]` |
 | GET | `/api/admin/software/purchases` | Purchases, newest first | staff<br>`software.view` | Page<PurchaseAdmin> |
 | POST | `/api/admin/software/entitlements` | Give a customer an app (support goodwill or a payment settled elsewhere) _(audited)_ | staff<br>`software.manage` | `GrantInput` → `Entitlement` |
+| GET | `/api/admin/software/entitlements` | Who owns which app, with licence keys, newest first | staff<br>`software.view` | Page<EntitlementAdmin> |
+| POST | `/api/admin/software/entitlements/{id}/reissue-licence` | Replace an owner's licence key _(audited)_ | staff<br>`software.manage` | `ReissueLicenceInput` → `EntitlementAdmin` |
 | GET | `/api/admin/software/reviews` | Reviews, newest first | staff<br>`software.view` | Page<ReviewAdmin> |
 | POST | `/api/admin/software/reviews/{id}/moderate` | Hide or show a review _(audited)_ | staff<br>`software.manage` | `ReviewModeration` → `ReviewAdmin` |
 
@@ -155,6 +157,17 @@ The app's Softwares department: apps for phones and PCs that customers download.
 | package | `AppFile?` |
 | databases | `AppFile[]` |
 | databasesNote | `string?` e.g. Preset library and LUT packs, needed for offline use |
+| databasesSizeBytes | `int` All databases together; 0 without databases |
+| databasesSizeLabel | `string?` e.g. 340 MB (Download databases · 340 MB); null without databases |
+
+### OwnedLicence
+
+| Field | Type |
+|---|---|
+| key | `string` XXXXX-XXXXX-XXXXX-XXXXX, the key that unlocks the app |
+| devices | `int?` Devices one key unlocks; null when the app sets no limit |
+| devicesLabel | `string` e.g. Use on up to 2 devices, Use on any number of devices |
+| issuedAt | `datetime` When this key was issued (a reissue replaces the key) |
 
 ### AppPermission
 
@@ -215,13 +228,15 @@ The app's Softwares department: apps for phones and PCs that customers download.
 | whatYouGet | `string[]` |
 | price | `AppPrice` |
 | licenceLabel | `string?` e.g. One-time purchase · 2 devices |
+| licenceDevices | `int?` Devices one licence key unlocks; null when not limited (and for free apps) |
 | version | `string?` |
 | releasedAt | `date?` When the current version came out (Updated) |
 | whatsNew | `string?` |
 | versionHistory | `VersionEntry[]` Earlier versions, newest first |
-| files | `AppFiles` Names and sizes only; downloads go through POST /apps/{slug}/downloads |
+| files | `AppFiles` Names and sizes only (shown to everyone: Download app · 1.2 GB, Download databases · 340 MB); downloads go through POST /apps/{slug}/downloads |
 | sizeBytes | `int` |
 | sizeLabel | `string` |
+| canDownload | `bool` The caller may download the files: any signed-in customer (no purchase needed); false for visitors, who sign in first |
 | platforms | `enum(android|ios|windows|macos|linux|web)[]` |
 | platformLabels | `string[]` Runtime platforms with minimum versions, e.g. Windows 10+ |
 | minRequirements | `string?` |
@@ -235,6 +250,7 @@ The app's Softwares department: apps for phones and PCs that customers download.
 | owned | `bool` |
 | canReview | `bool` Owner who has not reviewed yet |
 | myReview | `AppReview?` |
+| licence | `OwnedLicence?` The owner's licence key for a paid app; null for visitors, customers who don't own it and free apps |
 
 ### PackApp
 
@@ -351,6 +367,7 @@ The app's Softwares department: apps for phones and PCs that customers download.
 | title | `string` |
 | source | `enum(free|purchase|pack|staff)` |
 | ownedAt | `datetime` |
+| licenceKey | `string?` Paid apps only |
 
 ### LibraryApp
 
@@ -359,6 +376,7 @@ The app's Softwares department: apps for phones and PCs that customers download.
 | app | `AppCard` |
 | source | `enum(free|purchase|pack|staff)` |
 | ownedAt | `datetime` |
+| licence | `OwnedLicence?` Paid apps only (My apps shows the key) |
 
 ### AppAdminRow
 
@@ -399,6 +417,7 @@ The app's Softwares department: apps for phones and PCs that customers download.
 | whatYouGet | `string[]` |
 | price | `AppPrice` |
 | licenceLabel | `string?` |
+| licenceDevices | `int?` |
 | files | `AppFiles` |
 | sizeBytes | `int` |
 | sizeLabel | `string` |
@@ -442,6 +461,7 @@ The app's Softwares department: apps for phones and PCs that customers download.
 | salePrice | `Money?` Below price |
 | saleEndsAt | `datetime?` Required with salePrice |
 | licenceLabel | `string?` |
+| licenceDevices | `int?` Devices one licence key unlocks, 1 to 100; empty when not limited. Paid apps only (ignored for free apps) |
 | packageId | `uuid?` software_package upload; needed to publish |
 | databaseIds | `uuid[]?` software_package uploads |
 | databasesNote | `string?` |
@@ -556,6 +576,29 @@ The app's Softwares department: apps for phones and PCs that customers download.
 | appId | `uuid` |
 | reason | `string` |
 
+### EntitlementAdmin
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| app | `PackApp` |
+| free | `bool` The app is free now (no licence key) |
+| customer | `{"id":"uuid","name":"string?","email":"email?"}` |
+| source | `enum(free|purchase|pack|staff)` |
+| ownedAt | `datetime` |
+| purchaseId | `uuid?` |
+| purchaseRef | `string?` SW- reference of the purchase that granted it |
+| grantedBy | `string?` Staff who gave it (source staff) |
+| licenceKey | `string?` Paid apps only |
+| licenceIssuedAt | `datetime?` |
+| licenceReissues | `int` Times staff replaced the key |
+
+### ReissueLicenceInput
+
+| Field | Type |
+|---|---|
+| reason | `string` Why the key is replaced, e.g. the customer's key leaked; kept in the action history |
+
 ## Status flows
 
 ### Software purchase (`SoftwarePurchase.status`)
@@ -614,6 +657,7 @@ Indexes: `(position)`
 | sale_ends_at | timestamptz? |
 | currency | text |
 | licence_label | text? |
+| licence_devices | int? (devices one licence key unlocks; null = not limited) |
 | package | jsonb? (AppFile) |
 | databases | jsonb (AppFile[]) |
 | databases_note | text? |
@@ -717,9 +761,12 @@ Indexes: `(customer_id, created_at)`, `(status, created_at)`, `(intent_id)`
 | source | text (free|purchase|pack|staff) |
 | purchase_id | uuid? |
 | granted_by | text? |
+| licence_key | text? unique (XXXXX-XXXXX-XXXXX-XXXXX; paid apps only) |
+| licence_issued_at | timestamptz? |
+| licence_reissues | int? (times staff replaced the key; null = never) |
 | created_at | timestamptz |
 
-Indexes: `unique (customer_id, app_id)`, `(app_id)`
+Indexes: `unique (customer_id, app_id)`, `(app_id)`, `(created_at)`
 
 **reviews**
 
@@ -744,6 +791,7 @@ Indexes: `unique (app_id, customer_id)`, `(app_id, hidden, created_at)`
 |---|---|---|---|
 | `software.purchase.paid` | A purchase is paid and its apps are owned | `{ purchaseId: uuid, ref: string, customerId: uuid, title: string, amount: Money, appIds: uuid[] }` | notifications |
 | `software.purchase.failed` | A purchase's payment fails | `{ purchaseId: uuid, ref: string, customerId: uuid, title: string }` | - |
+| `software.licence.reissued` | Staff replace an owner's licence key (the old key stops working) | `{ entitlementId: uuid, customerId: uuid, appId: uuid, slug: string, title: string }` | notifications |
 
 | Consumes | From | Does |
 |---|---|---|
@@ -761,7 +809,7 @@ Indexes: `unique (app_id, customer_id)`, `(app_id, hidden, created_at)`
 | Key | Who | Allows |
 |---|---|---|
 | `software.view` | staff | See apps, packs, purchases and reviews in Admin › Departments › Softwares |
-| `software.manage` | staff | Categories, apps and their files, packs, rails, hide reviews, give an app to a customer |
+| `software.manage` | staff | Categories, apps and their files, packs, rails, hide reviews, give an app to a customer, reissue a licence key |
 
 ## Error codes
 
@@ -777,6 +825,7 @@ Indexes: `unique (app_id, customer_id)`, `(app_id, hidden, created_at)`
 | `REVIEWS_OFF` | 409 | Reviews are turned off for this app. |
 | `FILE_MISSING` | 404 | That file isn't available yet. |
 | `FILE_NOT_READY` | 409 | An uploaded file isn't ready or has the wrong purpose. |
+| `NO_LICENCE` | 409 | The app is free, so this entitlement has no licence key. |
 
 ## Background jobs
 
@@ -792,3 +841,5 @@ Indexes: `unique (app_id, customer_id)`, `(app_id, hidden, created_at)`
 - Rails: manual (the staff's apps in order), newest (releasedAt), category, platform (e.g. windows and macos for PC apps) and top_rated (ratings with at least 3 reviews). Default rails: Recommended for you (manual, carousel), New apps (newest, list), Games (category games, carousel), Browsers (category browsers, list), PC apps (platform windows, carousel).
 - The reviewer's name is their first name and last initial (customers.getCustomer), else Customer. Ratings count only visible reviews.
 - Customers are customers-module ids (the store principal's customerId), as payments and promotions use.
+- 2026-10-22 (user): anyone signed in can download an app's files (package and databases) without owning it; the Download buttons always show. Buying a paid app issues a licence key that unlocks it on as many devices as the app's licence says (licenceDevices). Free apps need no key.
+- Licence keys: XXXXX-XXXXX-XXXXX-XXXXX from 23456789ABCDEFGHJKLMNPQRSTUVWXYZ (no 0/O, 1/I/L), unique. Issued with every entitlement of a paid app (purchase, pack, staff grant) when it is created; entitlements of paid apps made before keys existed get theirs from the 2026-10-22 migration, and an entitlement still without one (an app that became paid later) gets it the next time the owner opens the app or My apps. The key is shown to its owner (GET /apps/{slug} licence, GET /library) and to staff (GET /admin/software/entitlements); staff replace it with reissue-licence (audited). Activation and device counting happen in the app's own licence check, not here.

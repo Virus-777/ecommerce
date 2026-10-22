@@ -14,6 +14,7 @@ export const moduleLoaders: Record<string, () => Promise<{ default: ModuleDefini
   "content": () => import('./content/module.js'),
   "customers": () => import('./customers/module.js'),
   "departments": () => import('./departments/module.js'),
+  "farm": () => import('./farm/module.js'),
   "finance": () => import('./finance/module.js'),
   "food": () => import('./food/module.js'),
   "fulfillment-service": () => import('./fulfillment-service/module.js'),

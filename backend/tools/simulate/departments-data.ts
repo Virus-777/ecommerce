@@ -139,6 +139,8 @@ export const GAMES: { title: string; genre: string; featured?: boolean; playersL
   { title: 'Coin Hopper', genre: 'Arcade', playersLabel: '9.8k players this week', description: 'Jump from platform to platform collecting coins. Miss a jump and the run is over.', howToPlay: ['Tap to jump', 'Hold for a longer jump', 'Collect coins for points'], prizes: [{ ranks: '#1', reward: '$5 coupon' }], top: 21480 },
 ];
 
+const PRIZE_NOTE = 'Coupons land in Account › Coupons on Monday. Minimum order $30.';
+
 /** Ten rows from a top score down, with movement since the last update */
 function table(top: number, seed: number) {
   return PLAYERS.map((_, i) => ({ name: PLAYERS[(i + seed) % PLAYERS.length]!, score: Math.round(top * (1 - i * 0.07)), change: [2, 0, -1, 1, 3, -2, 0, 1, -1, 0][(i + seed) % 10]! }));
@@ -211,7 +213,7 @@ export async function seedDepartments(admin: AdminCall, store: StoreCall): Promi
   for (const [n, g] of GAMES.entries()) {
     let row = games.find((x) => x.slug === slug(g.title));
     if (!row) {
-      row = await admin('POST', '/admin/departments/play/games', { title: g.title, genre: g.genre, featured: g.featured ?? false, playersLabel: g.playersLabel, description: g.description, howToPlay: g.howToPlay, prizes: g.prizes });
+      row = await admin('POST', '/admin/departments/play/games', { title: g.title, genre: g.genre, featured: g.featured ?? false, playersLabel: g.playersLabel, description: g.description, howToPlay: g.howToPlay, prizes: g.prizes, prizeNote: g.prizes.length ? PRIZE_NOTE : null });
       added.games++;
     }
     if (row!.rankingsUpdatedAt) continue;
@@ -255,6 +257,149 @@ export async function seedDepartments(admin: AdminCall, store: StoreCall): Promi
       const machines = machineIds.map((productId, i) => ({ productId, typeId: types[i % types.length]!.id, highlights: FARM_HIGHLIGHTS[i % FARM_HIGHLIGHTS.length]!, attachmentIds: i === 0 ? attachments : [] }));
       await admin('PUT', '/admin/departments/farm', { types, machines });
       added.farmMachines = machines.length;
+    }
+  }
+  return added;
+}
+
+
+/* ------------------------------------------------------------------ reviews and play center scores */
+
+/** Any API call: method, full path, body, bearer token, extra headers; answers the parsed body */
+export type ApiCall = (method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE', path: string, body?: unknown, token?: string, headers?: Record<string, string>) => Promise<any>;
+
+/** Sample customers who review companies and games and post scores (signed in, or registered with the dev outbox code) */
+export const PLAY_CUSTOMERS = [
+  { firstName: 'Kofi', lastName: 'Boateng', email: 'kofi.boateng.play@example.com' },
+  { firstName: 'Lina', lastName: 'Wolff', email: 'lina.wolff.play@example.com' },
+  { firstName: 'Omar', lastName: 'Haddad', email: 'omar.haddad.play@example.com' },
+];
+const PLAY_PASSWORD = 'Block-Drop-8842Z';
+
+/** Who reviews which company or game, and what they wrote */
+export const DEPARTMENT_REVIEWS: { target: 'company' | 'game'; name: string; by: string; stars: number; text?: string }[] = [
+  { target: 'company', name: 'Northwind Tools', by: 'Kofi', stars: 5, text: 'My pruners came back sharpened and like new. Lifetime repair is real.' },
+  { target: 'company', name: 'Northwind Tools', by: 'Lina', stars: 4, text: 'Solid hammers; a bit pricey but they last.' },
+  { target: 'company', name: 'Cascade Freight', by: 'Omar', stars: 5, text: 'Pickups on time every week.' },
+  { target: 'company', name: 'Bitwise Labs', by: 'Lina', stars: 4 },
+  { target: 'company', name: 'Rose City Bakery Co.', by: 'Kofi', stars: 5, text: 'Our cafe runs on their sourdough.' },
+  { target: 'game', name: 'Block Drop', by: 'Kofi', stars: 5, text: 'Simple and hard to put down.' },
+  { target: 'game', name: 'Block Drop', by: 'Omar', stars: 4 },
+  { target: 'game', name: 'Word Rush', by: 'Lina', stars: 5, text: 'Great for a coffee break.' },
+  { target: 'game', name: 'Fruit Match', by: 'Omar', stars: 3, text: 'Fun, but the levels repeat.' },
+];
+
+/** The games whose partners post scores in dev, with the week's best score */
+export const SCORE_GAMES: { title: string; top: number }[] = [
+  { title: 'Block Drop', top: 21305 },
+  { title: 'Word Rush', top: 3920 },
+];
+/** The development customer whose player ID gets scores when Admin › Play center finds it */
+export const DEV_CUSTOMER_EMAIL = 'android.dev.0ae9fb@example.com';
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** A sample customer's store token: signs in, or registers with the code from the development outbox (DEV_TOKENS on) */
+async function sampleCustomer(api: ApiCall, storeApp: () => Promise<string>, p: (typeof PLAY_CUSTOMERS)[number]): Promise<string> {
+  const app = await storeApp();
+  const device = { kind: 'web' };
+  try {
+    const session = await api('POST', '/api/public/identity/sessions', { email: p.email, password: PLAY_PASSWORD, audience: 'store', keepSignedIn: false, device }, app);
+    if (session.status === 'signed_in') return session.tokens.accessToken as string;
+  } catch {
+    // not registered yet
+  }
+  const since = new Date(Date.now() - 1000).toISOString();
+  const reg = await api('POST', '/api/public/identity/registrations', { email: p.email, password: PLAY_PASSWORD, firstName: p.firstName, lastName: p.lastName, marketingOptIn: false, acceptedTermsVersion: '2026-01', device }, app);
+  let code: string | undefined;
+  for (let i = 0; i < 45 && !code; i++) {
+    const box = (await api('GET', `/api/dev/notifications/outbox?to=${encodeURIComponent(p.email)}&channel=email&since=${encodeURIComponent(since)}`, undefined, app)) as { items: { subject: string | null; text: string }[] };
+    code = box.items.map((m) => `${m.subject ?? ''}\n${m.text}`.match(/\b(\d{6})\b/)?.[1]).find(Boolean);
+    if (!code) await wait(2000);
+  }
+  if (!code) throw new Error(`no verification code reached ${p.email}`);
+  const done = await api('POST', `/api/public/identity/verifications/${reg.id}/confirm`, { code, keepSignedIn: false, device }, app);
+  return done.tokens.accessToken as string;
+}
+
+/**
+ * Reviews and Play center scores through the flows the app, the Admin Center and a game partner use:
+ * - the sample customers (PLAY_CUSTOMERS) sign in or register and write the DEPARTMENT_REVIEWS they have not written;
+ * - each SCORE_GAMES game without scores gets a server key made for this run (nothing secret is printed or kept;
+ *   one is rotated when the game already has two) and its partner posts two or three scores for each player: the
+ *   sample customers (their player IDs from GET /play/player) and customers Admin › Play center finds, the development
+ *   customer first (findPlayers issues their player IDs). Scores are from the last hour (older ones are refused);
+ * - Block Drop's #4–10 tier is linked to the Daily rewards $5 off coupon campaign when it runs, so the weekly prize job
+ *   has a campaign to give codes from (seed-departments seeds Daily rewards before this).
+ */
+export async function seedDepartmentActivity(admin: AdminCall, api: ApiCall, storeApp: () => Promise<string>, o: { now?: Date } = {}) {
+  const added = { reviews: 0, gameKeys: 0, players: 0, scores: 0, prizeLinks: 0, devCustomer: false, skipped: [] as string[] };
+  const tokens = new Map<string, string>();
+  for (const p of PLAY_CUSTOMERS) {
+    try {
+      tokens.set(p.firstName, await sampleCustomer(api, storeApp, p));
+    } catch (err) {
+      added.skipped.push(`${p.email} (${err instanceof Error ? err.message.slice(0, 80) : 'sign-in failed'})`);
+    }
+  }
+
+  // reviews the sample customers have not written yet
+  for (const v of DEPARTMENT_REVIEWS) {
+    const token = tokens.get(v.by);
+    if (!token) continue;
+    const base = v.target === 'company' ? `/api/store/departments/companies/${slug(v.name)}` : `/api/store/departments/play/games/${slug(v.name)}`;
+    const page = await api('GET', base, undefined, token).catch(() => null);
+    if (!page || page.myReview) continue;
+    await api('POST', `${base}/reviews`, { stars: v.stars, ...(v.text ? { text: v.text } : {}) }, token);
+    added.reviews++;
+  }
+
+  // players: the sample customers, then customers staff can find (the development customer first)
+  const players: string[] = [];
+  for (const token of tokens.values()) players.push((await api('GET', '/api/store/departments/play/player', undefined, token)).playerId);
+  for (const q of [DEV_CUSTOMER_EMAIL, 'example.com']) {
+    if (players.length >= 12) break;
+    const found = (await admin('GET', `/admin/departments/play/players?q=${encodeURIComponent(q)}`).catch(() => [])) as { customerId: string; playerId: string }[];
+    if (q === DEV_CUSTOMER_EMAIL && found.length) added.devCustomer = true;
+    for (const p of found) if (players.length < 12 && !players.includes(p.playerId)) players.push(p.playerId);
+  }
+  added.players = players.length;
+
+  const games = (await admin('GET', '/admin/departments/play/games')) as { id: string; slug: string; scoreCount: number; activeKeyCount: number }[];
+  const now = o.now ?? new Date();
+  for (const [n, sg] of SCORE_GAMES.entries()) {
+    const g = games.find((x) => x.slug === slug(sg.title));
+    if (!g || g.scoreCount > 0 || !players.length) continue;
+    let secret: string;
+    if (g.activeKeyCount >= 2) {
+      const keys = (await admin('GET', `/admin/departments/play/games/${g.id}/keys`)) as { id: string; status: string }[];
+      secret = (await admin('POST', `/admin/departments/play/games/${g.id}/keys/${keys.find((k) => k.status === 'active')!.id}/rotate`)).secret;
+    } else {
+      secret = (await admin('POST', `/admin/departments/play/games/${g.id}/keys`)).secret;
+    }
+    added.gameKeys++;
+    for (const [i, playerId] of players.entries()) {
+      const best = Math.round(sg.top * (1 - i * 0.07));
+      const tries = [Math.round(best * 0.62), best, ...(i % 2 ? [] : [Math.round(best * 0.41)])];
+      for (const [t, score] of tries.entries()) {
+        // within the last 50 minutes: scores may be at most an hour old
+        const playedAt = new Date(now.getTime() - (50 - i * 3 - t) * 60_000).toISOString();
+        await api('POST', '/webhooks/departments/play/scores', { scoreId: `seed-${n}-${playerId}-${t}`, playerId, score, playedAt }, undefined, { 'x-game-key': secret });
+        added.scores++;
+      }
+    }
+  }
+
+  // Block Drop #4–10 → the Daily rewards $5 off coupon campaign, when it runs
+  const full = ((await admin('GET', '/admin/departments/play/games')) as any[]).find((x) => x.slug === 'block-drop');
+  const tier = full ? (full.prizes as any[]).findIndex((p) => p.fromRank === 4 && p.toRank === 10 && !p.campaignId) : -1;
+  if (full && tier >= 0) {
+    const found = ((await admin('GET', `/admin/promotions/campaigns?q=${encodeURIComponent('Daily rewards: $5 off')}&limit=20`).catch(() => ({ items: [] }))).items ?? []) as { id: string; name: string; status: string }[];
+    const campaign = found.find((c) => c.name === 'Daily rewards: $5 off' && (c.status === 'live' || c.status === 'scheduled'));
+    if (campaign) {
+      const prizes = (full.prizes as any[]).map((p, i) => ({ ranks: p.ranks, reward: p.reward, fromRank: p.fromRank, toRank: p.toRank, campaignId: i === tier ? campaign.id : p.campaignId }));
+      await admin('PATCH', `/admin/departments/play/games/${full.id}`, { title: full.title, slug: full.slug, genre: full.genre, icon: full.icon, cover: full.cover, playersLabel: full.playersLabel, featured: full.featured, description: full.description, howToPlay: full.howToPlay, prizes, prizeNote: full.prizeNote ?? PRIZE_NOTE, status: full.status, position: full.position });
+      added.prizeLinks++;
     }
   }
   return added;

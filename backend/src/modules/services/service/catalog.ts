@@ -8,10 +8,14 @@ import { dateInZone, zonedTimeToUtc } from '../../../kernel/lib/clock.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { money, type Money } from '../../../kernel/lib/money.js';
 import { pageOf, type Page, type PageRequest } from '../../../kernel/lib/pagination.js';
+import { distanceLabel, distanceMiles, isGeoPoint } from '../../../kernel/lib/geo.js';
 import type * as common from '../../../spec/common.js';
+import type { CustomerLocation } from '../../../spec/customers.js';
 import type {
   AvailabilityDay,
   Contacts,
+  CoveredDevicePrice,
+  CustomerArea,
   GeoPoint,
   HandoverOption,
   OpeningDay,
@@ -20,6 +24,7 @@ import type {
   ProviderAdmin,
   ProviderCard,
   ProviderInput,
+  ProviderSaved,
   ProviderStaff,
   Service,
   ServiceAdmin,
@@ -31,8 +36,8 @@ import type {
   ServiceReview,
   ServiceStep,
 } from '../../../spec/services.js';
-import { AREAS, dayLabel, daysOf, HANDOVER_MODES, hoursOut, isHhmm, LIMITS, minutesOf, overlaps, PRICE_UNITS, ratingOf, slotsOfDay, slugOf, timeLabel, WEEKDAYS, weekdayIndex, weekdayLabel, type Area } from '../domain/rules.js';
-import type { CategoryRow, ProviderRow, RequestRow, ReviewRow, ServiceRow } from '../ports.js';
+import { addressParts, AREAS, dayLabel, daysOf, HANDOVER_MODES, hoursOut, isHhmm, LIMITS, matchPriceRow, minutesOf, monthYearLabel, openLabel, overlaps, PRICE_UNITS, priceText, ratingOf, SAVED_LIMIT, slotsOfDay, slugOf, timeLabel, WEEKDAYS, weekdayIndex, weekdayLabel, type Area } from '../domain/rules.js';
+import type { CategoryRow, DeviceRow, ProviderRow, RequestRow, ReviewRow, ServiceRow } from '../ports.js';
 import { actorKey, invalid, iso, mediaList, mediaOf, notFound, optionalText, requireText, ServicesBase, stringsOf, textList, unique, type By, type StoredMedia } from './base.js';
 
 type Refs = Map<string, common.MediaRef>;
@@ -53,8 +58,39 @@ const zoneOf = (p: ProviderRow, fallback: string) => {
   return typeof tz === 'string' && isTimeZone(tz) ? tz : fallback;
 };
 const reviewOut = (r: ReviewRow): ServiceReview => ({ id: r.id, rating: r.rating, text: r.text, authorName: r.author_name, createdAt: r.created_at.toISOString() });
+/** Where the map and distances place a provider: the staff pin, else its geocoded address */
+export const pointOf = (p: ProviderRow): GeoPoint | null => geoOf(p.location) ?? geoOf(p.point);
+
+/** Who is looking: the customer (customers-module id), their location and the providers they saved */
+export interface Viewer {
+  customerId: string | null;
+  location: CustomerLocation | null;
+  saved: Set<string>;
+}
+export const NO_VIEWER: Viewer = { customerId: null, location: null, saved: new Set() };
 
 export class ServicesCatalog extends ServicesBase {
+  /* ---------------------------------------------------------------- viewer */
+
+  /** The viewer of a store call: a signed-in customer's location (customers.customerLocation) and saves; nobody for visitors */
+  async viewerOf(customerId: string | null): Promise<Viewer> {
+    if (!customerId) return NO_VIEWER;
+    const customers = this.ctx.tryUse('customers');
+    const [location, saved] = await Promise.all([this.soft('customers.customerLocation', customers && (() => customers.customerLocation(customerId)), null), this.repo.savedProviderIds(customerId)]);
+    return { customerId, location: location && isGeoPoint(location.point) ? location : null, saved };
+  }
+
+  /** Miles from the viewer to a provider; Infinity when either point is unknown (sorts last) */
+  protected milesTo(p: ProviderRow, viewer: Viewer): number {
+    const to = pointOf(p);
+    return viewer.location && to ? distanceMiles(viewer.location.point, to) : Number.POSITIVE_INFINITY;
+  }
+
+  async getMyArea(viewer: Viewer): Promise<CustomerArea> {
+    const l = viewer.location;
+    return l ? { located: true, city: l.city, region: l.region, addressLabel: l.label } : { located: false, city: null, region: null, addressLabel: null };
+  }
+
   /* ---------------------------------------------------------------- cards */
 
   protected categoryRef(c: CategoryRow | undefined): ServiceCategoryRef | null {
@@ -72,7 +108,7 @@ export class ServicesCatalog extends ServicesBase {
     ]);
   }
 
-  protected serviceCard(s: ServiceRow, p: ProviderRow, cats: Map<string, CategoryRow>, refs: Refs): ServiceCard {
+  protected serviceCard(s: ServiceRow, p: ProviderRow, cats: Map<string, CategoryRow>, refs: Refs, viewer: Viewer = NO_VIEWER): ServiceCard {
     const image = mediaOf(s.image);
     return {
       id: s.id,
@@ -91,10 +127,12 @@ export class ServicesCatalog extends ServicesBase {
       coverage: s.coverage,
       tags: stringsOf(s.tags),
       rating: ratingOf(s.rating_sum, s.rating_count, s.rating_stars),
+      distance: distanceLabel(viewer.location?.point, pointOf(p)),
+      coveredByWarranty: s.covered_by_warranty === true,
     };
   }
 
-  protected providerCard(p: ProviderRow, cats: Map<string, CategoryRow>, refs: Refs, extra: { fromPrice?: Money | null; nextFree?: string | null } = {}): ProviderCard {
+  protected providerCard(p: ProviderRow, cats: Map<string, CategoryRow>, refs: Refs, extra: { fromPrice?: Money | null; nextFree?: string | null } = {}, viewer: Viewer = NO_VIEWER): ProviderCard {
     const logo = mediaOf(p.logo);
     const cover = mediaOf(p.cover);
     return {
@@ -110,6 +148,11 @@ export class ServicesCatalog extends ServicesBase {
       rating: ratingOf(p.rating_sum, p.rating_count, p.rating_stars),
       fromPrice: extra.fromPrice ?? null,
       nextFree: extra.nextFree ?? null,
+      address: contactsOf(p.contacts).address ?? null,
+      location: pointOf(p),
+      distance: distanceLabel(viewer.location?.point, pointOf(p)),
+      openLabel: openLabel(daysOf((p.hours as { days?: unknown } | null)?.days), this.now(), zoneOf(p, this.tz)),
+      saved: viewer.saved.has(p.id),
     };
   }
 
@@ -122,7 +165,7 @@ export class ServicesCatalog extends ServicesBase {
   }
 
   /** Provider cards with their lowest price and, for booking, the next free slot today or tomorrow */
-  protected async providerCards(providers: ProviderRow[], area?: string): Promise<ProviderCard[]> {
+  protected async providerCards(providers: ProviderRow[], area?: string, viewer: Viewer = NO_VIEWER): Promise<ProviderCard[]> {
     if (!providers.length) return [];
     const [cats, services] = await Promise.all([this.categoryMap(), this.repo.listServices({ providerIds: providers.map((p) => p.id), publishedOnly: true, ...(area ? { area } : {}) })]);
     const refs = await this.refsOf(providers, []);
@@ -133,7 +176,7 @@ export class ServicesCatalog extends ServicesBase {
         const own = byProvider.get(p.id) ?? [];
         const bookable = own.filter((s) => s.slot_minutes);
         const nextFree = bookable.length ? await this.nextFreeLabel(p, bookable) : null;
-        return this.providerCard(p, cats, refs, { fromPrice: this.lowestPrice(own), nextFree });
+        return this.providerCard(p, cats, refs, { fromPrice: this.lowestPrice(own), nextFree }, viewer);
       }),
     );
   }
@@ -261,7 +304,7 @@ export class ServicesCatalog extends ServicesBase {
     return { services: services.filter((s) => providers.has(s.provider_id)), providers };
   }
 
-  async listServices(q: { area: string; category?: string; q?: string; sort?: 'recommended' | 'price' | 'rating' }, page: PageRequest): Promise<Page<ServiceCard>> {
+  async listServices(q: { area: string; category?: string; q?: string; sort?: 'recommended' | 'nearest' | 'price' | 'rating' }, page: PageRequest, viewer: Viewer = NO_VIEWER): Promise<Page<ServiceCard>> {
     const area = this.areaOf(q.area);
     let { services, providers } = await this.liveServices(area);
     if (q.category) {
@@ -272,21 +315,34 @@ export class ServicesCatalog extends ServicesBase {
     if (text) services = services.filter((s) => [s.title, s.summary ?? '', providers.get(s.provider_id)!.name, s.supported_label ?? ''].some((t) => t.toLowerCase().includes(text)));
     if (q.sort === 'price') services = [...services].sort((a, b) => (a.price_unit === 'free' ? 0 : (a.from_price ?? Number.MAX_SAFE_INTEGER)) - (b.price_unit === 'free' ? 0 : (b.from_price ?? Number.MAX_SAFE_INTEGER)));
     if (q.sort === 'rating') services = [...services].sort((a, b) => (b.rating_count ? b.rating_sum / b.rating_count : 0) - (a.rating_count ? a.rating_sum / a.rating_count : 0));
+    if (q.sort === 'nearest' && viewer.location) {
+      const miles = new Map([...providers.values()].map((p) => [p.id, this.milesTo(p, viewer)]));
+      // a stable sort: services of the same provider keep the recommended order
+      services = [...services].sort((a, b) => miles.get(a.provider_id)! - miles.get(b.provider_id)! || 0);
+    }
     const cats = await this.categoryMap();
     const paged = pageOf(services, page);
     const refs = await this.refsOf([], paged.items);
-    return { ...paged, items: paged.items.map((s) => this.serviceCard(s, providers.get(s.provider_id)!, cats, refs)) };
+    return { ...paged, items: paged.items.map((s) => this.serviceCard(s, providers.get(s.provider_id)!, cats, refs, viewer)) };
   }
 
-  async getService(slug: string): Promise<Service> {
+  async getService(slug: string, viewer: Viewer = NO_VIEWER): Promise<Service> {
     const s = await this.repo.serviceBySlug(slug);
     const p = s && s.status === 'published' ? await this.repo.getProvider(s.provider_id) : undefined;
     if (!s || !p || p.status !== 'published') throw notFound('Service');
-    const [cats, refs, reviews, [card]] = await Promise.all([this.categoryMap(), this.refsOf([p], [s], true), this.repo.newestReviews(s.id, 3), this.providerCards([p], s.area)]);
+    const [cats, refs, reviews, [card], devices] = await Promise.all([
+      this.categoryMap(),
+      this.refsOf([p], [s], true),
+      this.repo.newestReviews(s.id, 3),
+      this.providerCards([p], s.area, viewer),
+      viewer.customerId && s.covered_by_warranty && s.area === 'post_sale' ? this.coveredDevices(viewer.customerId) : Promise.resolve([] as DeviceRow[]),
+    ]);
     const tz = zoneOf(p, this.tz);
     const first = s.slot_minutes ? await this.firstFree(s, p, LIMITS.days) : null;
     return {
-      ...this.serviceCard(s, p, cats, refs),
+      ...this.serviceCard(s, p, cats, refs, viewer),
+      fullTerms: s.full_terms ?? null,
+      yourDevice: this.coveredPrice(s, devices),
       photos: mediaList(s.photos).map((m) => refs.get(m.id)).filter((m): m is common.MediaRef => Boolean(m)),
       provider: card!,
       description: s.description,
@@ -313,7 +369,74 @@ export class ServicesCatalog extends ServicesBase {
     return { ...res, items: res.items.map(reviewOut) };
   }
 
-  async listProviders(q: { area: string; category?: string; q?: string }, page: PageRequest): Promise<Page<ProviderCard>> {
+  /* ---------------------------------------------------------------- registered devices: what the catalog needs */
+
+  /** The customer's verified devices whose cover runs today (market time), newest first */
+  protected async coveredDevices(customerId: string): Promise<DeviceRow[]> {
+    const today = this.today();
+    return (await this.repo.customerDevices(customerId)).filter((d) => d.status === 'verified' && d.covered_until != null && d.covered_until >= today);
+  }
+
+  /**
+   * The $0 price of a covered-by-warranty service for one of the customer's covered devices: the device whose model
+   * matches a price row first, else the newest one. The normal price is that row's price, else the from price.
+   */
+  protected coveredPrice(s: ServiceRow, devices: DeviceRow[]): CoveredDevicePrice | null {
+    if (!s.covered_by_warranty || s.area !== 'post_sale' || !devices.length) return null;
+    const rows = rowsOf(s.price_table);
+    const matched = devices.map((d) => ({ d, row: matchPriceRow(rows, d.brand, d.model) }));
+    const pick = matched.find((m) => m.row >= 0) ?? matched[0]!;
+    const row = pick.row >= 0 ? rows[pick.row]! : null;
+    const d = pick.d;
+    return {
+      deviceId: d.id,
+      label: d.model,
+      priceRowLabel: row?.label ?? null,
+      normalPrice: row?.price ?? priceText(priceOf(s), s.price_unit, false),
+      price: money(0, s.currency),
+      priceText: priceText(money(0, s.currency), 'fixed', false)!,
+      barLabel: `${d.model} · warranty`,
+      coveredUntil: d.covered_until!,
+      coverageLabel: `Covered to ${monthYearLabel(d.covered_until!)}`,
+    };
+  }
+
+  /* ---------------------------------------------------------------- saved providers */
+
+  async listSavedProviders(customerId: string, q: { area?: string }, page: PageRequest): Promise<Page<ProviderCard>> {
+    const area = q.area ? this.areaOf(q.area) : undefined;
+    const saves = await this.repo.savedProviders(customerId);
+    const byId = new Map((await this.repo.providersByIds(saves.map((r) => r.provider_id))).filter((p) => p.status === 'published').map((p) => [p.id, p]));
+    let list = saves.map((r) => byId.get(r.provider_id)).filter((p): p is ProviderRow => Boolean(p));
+    if (area) {
+      const withArea = new Set((await this.repo.listServices({ area, publishedOnly: true, providerIds: list.map((p) => p.id) })).map((s) => s.provider_id));
+      list = list.filter((p) => withArea.has(p.id));
+    }
+    const paged = pageOf(list, page);
+    const viewer = await this.viewerOf(customerId);
+    return { ...paged, items: await this.providerCards(paged.items, area, viewer) };
+  }
+
+  async saveProvider(customerId: string, providerId: string): Promise<ProviderSaved> {
+    const p = await this.repo.getProvider(providerId);
+    if (!p || p.status !== 'published') throw notFound('Provider');
+    if (await this.repo.isProviderSaved(customerId, providerId)) return { providerId, saved: true };
+    if ((await this.repo.countSavedProviders(customerId)) >= SAVED_LIMIT) throw this.ctx.error('SAVED_LIMIT', `You can save up to ${SAVED_LIMIT} providers; remove one first.`);
+    try {
+      await this.repo.insertSavedProvider({ id: newId(), customer_id: customerId, provider_id: providerId, created_at: this.now() });
+    } catch (err) {
+      // a second save at the same moment hits the unique (customer, provider) key: it is saved either way
+      if (!(await this.repo.isProviderSaved(customerId, providerId))) throw err;
+    }
+    return { providerId, saved: true };
+  }
+
+  async unsaveProvider(customerId: string, providerId: string): Promise<ProviderSaved> {
+    await this.repo.deleteSavedProvider(customerId, providerId);
+    return { providerId, saved: false };
+  }
+
+  async listProviders(q: { area: string; category?: string; q?: string; sort?: 'name' | 'nearest' | 'rating' }, page: PageRequest, viewer: Viewer = NO_VIEWER): Promise<Page<ProviderCard>> {
     const area = this.areaOf(q.area);
     const { services, providers } = await this.liveServices(area);
     let list = [...providers.values()].sort((a, b) => a.name.localeCompare(b.name));
@@ -323,27 +446,29 @@ export class ServicesCatalog extends ServicesBase {
     }
     const text = q.q?.trim().toLowerCase();
     if (text) list = list.filter((p) => [p.name, p.kind ?? '', p.city ?? ''].some((t) => t.toLowerCase().includes(text)));
+    if (q.sort === 'rating') list = [...list].sort((a, b) => (b.rating_count ? b.rating_sum / b.rating_count : 0) - (a.rating_count ? a.rating_sum / a.rating_count : 0));
+    if (q.sort === 'nearest' && viewer.location) list = [...list].sort((a, b) => this.milesTo(a, viewer) - this.milesTo(b, viewer) || 0);
     const paged = pageOf(list, page);
-    return { ...paged, items: await this.providerCards(paged.items, area) };
+    return { ...paged, items: await this.providerCards(paged.items, area, viewer) };
   }
 
-  async getProvider(slug: string, q: { area?: string }): Promise<Provider> {
+  async getProvider(slug: string, q: { area?: string }, viewer: Viewer = NO_VIEWER): Promise<Provider> {
     const p = await this.repo.providerBySlug(slug);
     if (!p || p.status !== 'published') throw notFound('Provider');
     const area = q.area ? this.areaOf(q.area) : undefined;
     const services = await this.repo.listServices({ providerId: p.id, publishedOnly: true, ...(area ? { area } : {}) });
-    const [cats, refs, [card]] = await Promise.all([this.categoryMap(), this.refsOf([p], services, true), this.providerCards([p], area)]);
+    const [cats, refs, [card]] = await Promise.all([this.categoryMap(), this.refsOf([p], services, true), this.providerCards([p], area, viewer)]);
     return {
       ...card!,
       photos: mediaList(p.photos).map((m) => refs.get(m.id)).filter((m): m is common.MediaRef => Boolean(m)),
       description: p.description,
       since: p.since,
       contacts: contactsOf(p.contacts),
-      location: geoOf(p.location),
+      location: pointOf(p),
       hours: hoursOut(p.hours, this.tz, this.today(zoneOf(p, this.tz))),
       staff: staffOf(p.staff),
       replyTime: p.reply_time,
-      services: services.map((s) => this.serviceCard(s, p, cats, refs)),
+      services: services.map((s) => this.serviceCard(s, p, cats, refs, viewer)),
     };
   }
 
@@ -434,6 +559,8 @@ export class ServicesCatalog extends ServicesBase {
         since: p.since,
         contacts: contactsOf(p.contacts),
         location: geoOf(p.location),
+        point: pointOf(p),
+        pointSource: geoOf(p.location) ? 'pin' : geoOf(p.point) ? 'address' : null,
         hours: hoursOut(p.hours, this.tz, this.today(zoneOf(p, this.tz))),
         staff: staffOf(p.staff),
         replyTime: p.reply_time,
@@ -549,13 +676,29 @@ export class ServicesCatalog extends ServicesBase {
     };
   }
 
+  /**
+   * Where a provider without a pin sits: its address (contacts.address and city) geocoded with customers.geocodeAddress,
+   * kept while the address stays the same; null with a pin, without a city, or when the address can't be placed.
+   */
+  private async geocodedPoint(f: { location: GeoPoint | null; contacts: Contacts; city: string | null }, before?: ProviderRow): Promise<GeoPoint | null> {
+    if (f.location) return null;
+    const kept = before ? geoOf(before.point) : null;
+    if (kept && before && contactsOf(before.contacts).address === f.contacts.address && before.city === f.city) return kept;
+    const parts = addressParts(f.contacts.address, f.city);
+    if (!parts) return null;
+    const customers = this.ctx.tryUse('customers');
+    const p = await this.soft('customers.geocodeAddress', customers && (() => customers.geocodeAddress(parts)), null);
+    return isGeoPoint(p) ? { lat: p.lat, lng: p.lng } : null;
+  }
+
   async createProvider(input: ProviderInput, by: By): Promise<ProviderAdmin> {
     const f = await this.providerFields(input);
     const media = this.pictures(input);
     const id = newId();
     const now = this.now();
+    const point = await this.geocodedPoint(f);
     await this.withMedia(id, f.name, [], this.mediaPaths(media), () =>
-      this.repo.insertProvider({ id, ...f, logo: media.logo, cover: media.cover, photos: media.photos, contacts: f.contacts as never, location: f.location as never, hours: f.hours as never, staff: f.staff as never, rating_sum: 0, rating_count: 0, rating_stars: [0, 0, 0, 0, 0], created_at: now, updated_at: now }),
+      this.repo.insertProvider({ id, ...f, logo: media.logo, cover: media.cover, photos: media.photos, contacts: f.contacts as never, location: f.location as never, point: point as never, hours: f.hours as never, staff: f.staff as never, rating_sum: 0, rating_count: 0, rating_stars: [0, 0, 0, 0, 0], created_at: now, updated_at: now }),
     );
     const out = await this.getProviderAdmin(id);
     await this.audit({ action: 'services.provider.create', actionLabel: 'Added a provider', target: { type: 'service_provider', id, label: f.name }, after: out }, by);
@@ -568,7 +711,8 @@ export class ServicesCatalog extends ServicesBase {
     const f = await this.providerFields({ ...input, hours: input.hours === undefined ? ({ days: daysOf((before.hours as { days?: unknown })?.days), timeZone: (before.hours as { timeZone?: string })?.timeZone ?? null } as never) : input.hours, staff: input.staff === undefined ? staffOf(before.staff) : input.staff, status: input.status ?? (before.status as ProviderInput['status']) }, id);
     const media = this.pictures({ logo: input.logo === undefined ? (mediaOf(before.logo) as never) : input.logo, cover: input.cover === undefined ? (mediaOf(before.cover) as never) : input.cover, photos: input.photos === undefined ? (mediaList(before.photos) as never) : input.photos });
     const prev = [mediaOf(before.logo), mediaOf(before.cover), ...mediaList(before.photos)].filter((m): m is StoredMedia => Boolean(m));
-    await this.withMedia(id, f.name, prev, this.mediaPaths(media), () => this.repo.updateProvider(id, { ...f, logo: media.logo, cover: media.cover, photos: media.photos, contacts: f.contacts as never, location: f.location as never, hours: f.hours as never, staff: f.staff as never, updated_at: this.now() }));
+    const point = await this.geocodedPoint(f, before);
+    await this.withMedia(id, f.name, prev, this.mediaPaths(media), () => this.repo.updateProvider(id, { ...f, logo: media.logo, cover: media.cover, photos: media.photos, contacts: f.contacts as never, location: f.location as never, point: point as never, hours: f.hours as never, staff: f.staff as never, updated_at: this.now() }));
     const out = await this.getProviderAdmin(id);
     await this.audit({ action: 'services.provider.update', actionLabel: 'Changed a provider', target: { type: 'service_provider', id, label: f.name }, before: { name: before.name, status: before.status }, after: out }, by);
     return out;
@@ -619,6 +763,8 @@ export class ServicesCatalog extends ServicesBase {
         priceTableTitle: s.price_table_title,
         terms: stringsOf(s.terms),
         steps: stepsOf(s.steps),
+        fullTerms: s.full_terms ?? null,
+        coveredByWarranty: s.covered_by_warranty === true,
         slotMinutes: s.slot_minutes,
         durationMinutes: s.duration_minutes,
         status: s.status as ServiceAdmin['status'],
@@ -679,6 +825,7 @@ export class ServicesCatalog extends ServicesBase {
     if (priceTable.length > LIMITS.priceRows) throw invalid('priceTable', `Use at most ${LIMITS.priceRows} rows`);
     const steps = (input.steps ?? []).map((s, i) => ({ title: requireText(s.title, `steps[${i}].title`, LIMITS.short), detail: optionalText(s.detail, `steps[${i}].detail`, LIMITS.listItem) }));
     if (steps.length > LIMITS.steps) throw invalid('steps', `Use at most ${LIMITS.steps} steps`);
+    if (input.coveredByWarranty && area !== 'post_sale') throw invalid('coveredByWarranty', 'Only post-sale services can be covered by the warranty');
     return {
       area,
       title,
@@ -703,6 +850,8 @@ export class ServicesCatalog extends ServicesBase {
       price_table: priceTable,
       price_table_title: optionalText(input.priceTableTitle, 'priceTableTitle', 60),
       terms: textList(input.terms, 'terms', LIMITS.listItems, LIMITS.listItem),
+      full_terms: optionalText(input.fullTerms, 'fullTerms', LIMITS.fullTerms),
+      covered_by_warranty: input.coveredByWarranty === true,
       steps,
       slot_minutes: input.slotMinutes ?? null,
       duration_minutes: input.durationMinutes ?? null,
@@ -727,7 +876,8 @@ export class ServicesCatalog extends ServicesBase {
   async updateService(id: string, input: ServiceInput, by: By): Promise<ServiceAdmin> {
     const before = await this.repo.getService(id);
     if (!before) throw notFound('Service');
-    const f = await this.serviceFields({ ...input, status: input.status ?? (before.status as ServiceInput['status']) }, id);
+    // fields an older Admin Center doesn't send keep their value
+    const f = await this.serviceFields({ ...input, status: input.status ?? (before.status as ServiceInput['status']), fullTerms: input.fullTerms === undefined ? before.full_terms : input.fullTerms, coveredByWarranty: input.coveredByWarranty ?? (before.covered_by_warranty === true && input.area === 'post_sale') }, id);
     const media = this.pictures({ image: input.image === undefined ? (mediaOf(before.image) as never) : input.image, photos: input.photos === undefined ? (mediaList(before.photos) as never) : input.photos });
     const prev = [mediaOf(before.image), ...mediaList(before.photos)].filter((m): m is StoredMedia => Boolean(m));
     await this.withMedia(id, f.title, prev, this.mediaPaths(media), () =>

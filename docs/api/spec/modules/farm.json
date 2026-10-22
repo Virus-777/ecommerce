@@ -1,0 +1,240 @@
+{
+  "name": "farm",
+  "title": "Farm orders",
+  "group": "Growth",
+  "phase": 2,
+  "chapters": [],
+  "summary": "Farm machine orders from the app's Farm machines department: the dealers staff keep in Admin (address, map point, hours, phone), the customer's nearest dealer, and farm orders of a picked machine with its attachments delivered to the customer's farm, paid in full by card (payments purchase intents, captured when the dealer confirms), by installments the dealer arranges, or on delivery. Staff confirm, schedule, send out and deliver each order on the dealer's behalf.",
+  "owns": [
+    "Dealers: name, address and map point (geocoded, or a pin staff set), opening hours text, phone, message phone or email, lead time, active, order",
+    "The customer's nearest dealer (from their saved default address)",
+    "Farm orders (FM- references): the machine and attachments with their prices at order time, delivery date, farm location with an optional pin, contact, payment option, notes for the dealer, status and payment"
+  ],
+  "notOwns": [
+    "Machine types, picked machines and their attachments: departments (getFarmMachine; Admin › Departments › Farm machines)",
+    "Prices and availability of machines and attachments: search product cards (through departments)",
+    "Card payments: payments purchase intents (authorizePurchase, completeAction, capturePurchase, voidIntent)",
+    "Saved addresses, the customer's location and geocoding: customers (getAddressForOrder, customerLocation, geocodeAddress)",
+    "Cart, checkout and orders of the main store: farm orders never go there (2026-10-22 decision 3)",
+    "Renting machines: out of v1"
+  ],
+  "dependsOn": ["payments", "customers"],
+  "optionalDeps": ["departments", "audit"],
+  "publicApi": [
+    { "name": "exportCustomerData", "signature": "(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]", "desc": "The customer's farm orders (reference, dealer, machine, attachments, amounts, payment option, delivery date, farm location, contact, notes, status, dates) for the personal data export", "usedBy": ["customers"] }
+  ],
+  "types": {
+    "DealerAddress": { "line1": "string", "line2": "string?", "city": "string", "region": { "type": "string", "desc": "State code, e.g. OR" }, "postalCode": "string?", "country": { "type": "string?", "desc": "ISO 3166-1 alpha-2; the market's when left out" } },
+    "DealerMessage": { "kind": { "type": "enum(sms|email)", "desc": "The Message button opens a text message, or an email when the dealer has no message phone" }, "to": "string" },
+    "DealerCard": {
+      "id": "uuid", "name": { "type": "string", "desc": "e.g. Greenfield Agri Equipment" },
+      "addressLabel": { "type": "string", "desc": "First address line and city, e.g. Route 9, Millbrook" }, "city": "string",
+      "distanceLabel": { "type": "string?", "desc": "e.g. 12 mi; null when the customer's location or the dealer's point is unknown" },
+      "metaLabel": { "type": "string", "desc": "The line under the name: Route 9, Millbrook · 12 mi away, or the address alone without a distance" },
+      "hours": { "type": "string", "desc": "e.g. Mon–Sat 7:00–18:00" }, "phone": { "type": "string", "desc": "The Call button" }, "message": "DealerMessage?",
+      "point": "customers.GeoPoint?"
+    },
+    "NearestDealer": {
+      "dealer": { "type": "DealerCard?", "desc": "Null only when there is no active dealer (the app hides the section)" },
+      "basis": { "type": "enum(your_address|market_default)", "desc": "your_address: the nearest active dealer to the signed-in customer's geocoded default address; market_default: the first active dealer in Admin order (visitors, and customers without a geocoded default address), shown without a distance" }
+    },
+    "FarmLocationInput": {
+      "addressId": { "type": "uuid?", "desc": "One of the customer's saved addresses; give this or address" },
+      "address": { "type": "FarmAddressInput?", "desc": "A farm address typed in the form" },
+      "point": { "type": "customers.GeoPoint?", "desc": "The pin the customer put on the map; without it the address is geocoded" }
+    },
+    "FarmAddressInput": { "name": { "type": "string?", "desc": "Farm name, e.g. Hollow Creek Farm" }, "line1": "string", "line2": "string?", "city": "string", "region": "string", "postalCode": "string?", "country": "string?" },
+    "FarmLocation": {
+      "name": "string?", "line1": "string", "line2": "string?", "city": "string", "region": "string", "postalCode": "string?", "country": "string",
+      "label": { "type": "string", "desc": "e.g. Hollow Creek Farm, 4410 County Rd 12, Millbrook" },
+      "point": { "type": "customers.GeoPoint?", "desc": "The customer's pin, or the geocoded address; null when neither is known" },
+      "pinned": { "type": "bool", "desc": "The customer put the pin on the map" }
+    },
+    "QuoteInput": {
+      "productId": { "type": "uuid", "desc": "A machine picked in Farm machines (departments)" },
+      "attachmentIds": { "type": "uuid[]?", "desc": "Chosen attachments of that machine" },
+      "location": { "type": "FarmLocationInput?", "desc": "The farm location so far; picks the dealer. Without it the signed-in customer's default address, else the market default dealer" }
+    },
+    "QuoteAttachment": {
+      "product": "search.ProductCard", "selected": "bool",
+      "priceLabel": { "type": "string", "desc": "e.g. +$3,200" }, "available": { "type": "bool", "desc": "False when out of stock; it can't be selected" }
+    },
+    "PaymentOptionInfo": {
+      "option": "enum(pay_in_full|installments|pay_on_delivery)",
+      "title": { "type": "string", "desc": "Pay in full, Installments, Pay on delivery" },
+      "subtitle": { "type": "string", "desc": "e.g. 12 months · $1,842/mo, subject to approval, or 10% deposit now, the rest when it arrives" },
+      "needsCard": { "type": "bool", "desc": "Pay in full and pay on delivery (its deposit) take a card" },
+      "cardAmount": { "type": "Money", "desc": "What the card is charged when the dealer confirms: the total, the deposit, or 0 for installments" }
+    },
+    "FarmQuote": {
+      "machine": "search.ProductCard", "highlights": "string[]",
+      "machineLabel": { "type": "string", "desc": "Highlights and the dealer, e.g. 25 hp · 4WD · Greenfield Agri Equipment" },
+      "attachments": { "type": "QuoteAttachment[]", "desc": "Every attachment of the machine the store still shows, the chosen ones selected" },
+      "dealer": "DealerCard?",
+      "machinePrice": "Money", "attachmentsTotal": "Money", "deliveryFee": { "type": "Money", "desc": "Always 0: delivery is included" }, "total": "Money",
+      "summaryLabel": { "type": "string", "desc": "e.g. Machine + 1 attachment · delivery included" },
+      "earliestDeliveryDate": { "type": "date", "desc": "Today in the market time zone plus the dealer's lead time" },
+      "latestDeliveryDate": "date",
+      "paymentOptions": "PaymentOptionInfo[]",
+      "depositPercent": { "type": "int", "desc": "Pay on delivery's deposit share (depositPercent setting)" },
+      "deposit": { "type": "Money", "desc": "Pay on delivery: depositPercent of the total, in whole cents" },
+      "balance": { "type": "Money", "desc": "Pay on delivery: the rest, paid to the dealer when it arrives" },
+      "depositLabel": { "type": "string", "desc": "e.g. $2,210.00 now" },
+      "balanceLabel": { "type": "string", "desc": "e.g. $19,890.00 when it arrives" },
+      "canOrder": "bool", "problems": { "type": "string[]", "desc": "e.g. This machine is out of stock; No dealer delivers yet" }
+    },
+    "PlaceOrderInput": {
+      "productId": "uuid", "attachmentIds": "uuid[]?",
+      "deliveryDate": { "type": "date", "desc": "The date the customer wants it; from earliestDeliveryDate to latestDeliveryDate" },
+      "location": "FarmLocationInput",
+      "contactName": "string", "contactPhone": "string",
+      "paymentOption": "enum(pay_in_full|installments|pay_on_delivery)",
+      "notes": { "type": "string?", "desc": "Notes for the dealer: gate code, access road, best time to call (up to 500 characters)" },
+      "expectedTotal": { "type": "Money", "desc": "The total the customer saw; PRICE_CHANGED when it differs" },
+      "method": { "type": "payments.MethodSelection?", "desc": "Required for pay_in_full and pay_on_delivery (the deposit)" },
+      "returnUrl": { "type": "url?", "desc": "Required for pay_in_full and pay_on_delivery: where the bank sends the customer back after a challenge" }
+    },
+    "RetryPaymentInput": { "method": "payments.MethodSelection", "returnUrl": "url" },
+    "CompleteActionInput": { "resultToken": "string" },
+    "CancelInput": { "reason": "string?" },
+    "OrderMachine": { "productId": "uuid", "slug": "string?", "title": "string", "image": "MediaRef?", "highlights": "string[]", "price": "Money" },
+    "OrderAttachment": { "productId": "uuid", "title": "string", "image": "MediaRef?", "price": "Money", "priceLabel": { "type": "string", "desc": "e.g. +$3,200" } },
+    "StatusChange": { "status": "string", "at": "datetime", "by": { "type": "string?", "desc": "Admin only: who changed it" }, "note": "string?" },
+    "FarmOrder": {
+      "id": "uuid", "ref": { "type": "string", "desc": "e.g. FM-7KQ2D" },
+      "status": "enum(payment_pending|payment_failed|placed|confirmed|out_for_delivery|delivered|rejected|cancelled)",
+      "statusLabel": { "type": "string", "desc": "e.g. Waiting for Greenfield Agri Equipment to confirm" },
+      "machine": "OrderMachine", "attachments": "OrderAttachment[]",
+      "machinePrice": "Money", "attachmentsTotal": "Money", "deliveryFee": "Money", "total": "Money",
+      "summaryLabel": { "type": "string", "desc": "e.g. Machine + 1 attachment · delivery included" },
+      "paymentOption": "enum(pay_in_full|installments|pay_on_delivery)",
+      "paymentLabel": { "type": "string", "desc": "e.g. Pay in full · Visa •••• 4242, Installments · 12 months, subject to approval, Pay on delivery · 10% deposit · Visa •••• 4242" },
+      "cardAmount": { "type": "Money", "desc": "What the card pays: the total (pay in full), the deposit (pay on delivery) or 0 (installments)" },
+      "deposit": { "type": "Money?", "desc": "Pay on delivery only: the deposit charged by card when the dealer confirms" },
+      "balance": { "type": "Money?", "desc": "Pay on delivery only: the rest, paid to the dealer when it arrives" },
+      "depositLabel": { "type": "string?", "desc": "Pay on delivery only, e.g. $2,210.00 now (once charged: $2,210.00 paid)" },
+      "balanceLabel": { "type": "string?", "desc": "Pay on delivery only, e.g. $19,890.00 when it arrives" },
+      "dealer": "DealerCard",
+      "requestedDeliveryDate": "date", "deliveryDate": { "type": "date", "desc": "The date the dealer set when confirming, else the requested one" },
+      "deliveryDateConfirmed": "bool", "deliveryLabel": { "type": "string", "desc": "e.g. Delivery Tue, Nov 3, or Requested for Tue, Nov 3" },
+      "location": "FarmLocation", "contactName": "string", "contactPhone": "string", "notes": "string?",
+      "dealerNote": { "type": "string?", "desc": "A reject or cancel reason, or a note from the dealer" },
+      "history": { "type": "StatusChange[]", "desc": "Oldest first" },
+      "payment": "payments.PurchasePaymentStatus?",
+      "canCancel": "bool", "placedAt": "datetime?", "confirmedAt": "datetime?", "deliveredAt": "datetime?", "createdAt": "datetime"
+    },
+    "DealerAdmin": {
+      "id": "uuid", "name": "string", "address": "DealerAddress", "point": "customers.GeoPoint?",
+      "pinned": { "type": "bool", "desc": "Staff set the point; otherwise it was geocoded from the address" },
+      "hours": "string", "phone": "string", "messagePhone": "string?", "messageEmail": "email?",
+      "leadDays": { "type": "int?", "desc": "Days from today to the earliest delivery; null uses the leadDays setting" },
+      "active": "bool", "position": "int", "openOrders": "int", "orderCount": "int", "createdAt": "datetime", "updatedAt": "datetime"
+    },
+    "DealerInput": {
+      "name": "string", "address": "DealerAddress",
+      "point": { "type": "customers.GeoPoint?", "desc": "A pin; null or left out geocodes the address (customers.geocodeAddress)" },
+      "hours": { "type": "string", "desc": "Free text, e.g. Mon–Sat 7:00–18:00" }, "phone": "string",
+      "messagePhone": { "type": "string?", "desc": "For text messages" }, "messageEmail": { "type": "email?", "desc": "Used for Message when there is no message phone" },
+      "leadDays": { "type": "int?", "desc": "0 to 60" }, "active": "bool?", "position": "int?"
+    },
+    "FarmOrderAdmin": {
+      "id": "uuid", "ref": "string", "status": "enum(payment_pending|payment_failed|placed|confirmed|out_for_delivery|delivered|rejected|cancelled)", "statusLabel": "string",
+      "machine": "OrderMachine", "attachments": "OrderAttachment[]", "machinePrice": "Money", "attachmentsTotal": "Money", "total": "Money",
+      "paymentOption": "enum(pay_in_full|installments|pay_on_delivery)", "paymentLabel": "string",
+      "cardAmount": "Money", "deposit": "Money?", "balance": { "type": "Money?", "desc": "Pay on delivery: what the dealer collects when it arrives" },
+      "dealer": { "id": "uuid", "name": "string", "phone": "string?" },
+      "customer": { "id": "uuid", "name": "string?", "email": "email?" },
+      "requestedDeliveryDate": "date", "deliveryDate": "date", "deliveryDateConfirmed": "bool",
+      "location": "FarmLocation", "contactName": "string", "contactPhone": "string", "notes": "string?",
+      "dealerNote": "string?", "staffNote": "string?", "history": "StatusChange[]",
+      "methodLabel": "string?", "paymentState": "string?", "intentId": "uuid?",
+      "placedAt": "datetime?", "confirmedAt": "datetime?", "deliveredAt": "datetime?", "createdAt": "datetime",
+      "actions": { "type": "enum(confirm|reject|dispatch|deliver|cancel|reschedule)[]", "desc": "Moves allowed now" }
+    },
+    "OrderAction": {
+      "action": "enum(confirm|reject|dispatch|deliver|cancel|reschedule)",
+      "deliveryDate": { "type": "date?", "desc": "confirm: the delivery date (the requested one when left out); reschedule: the new date (required). Today or later" },
+      "note": { "type": "string?", "desc": "Shown to the customer (reject and cancel reasons, a note with the date)" },
+      "staffNote": "string?"
+    }
+  },
+  "tables": [
+    { "name": "dealers", "columns": { "id": "uuid pk", "name": "text", "line1": "text", "line2": "text?", "city": "text", "region": "text", "postal_code": "text?", "country": "text", "point": "jsonb? (GeoPoint)", "pinned": "bool", "hours": "text", "phone": "text", "message_phone": "text?", "message_email": "text?", "lead_days": "int?", "active": "bool", "position": "int", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(active, position)"] },
+    { "name": "orders", "columns": { "id": "uuid pk", "ref": "text unique", "customer_id": "uuid", "dealer_id": "uuid → dealers", "dealer": "jsonb (the dealer card at order time: name, address, point, hours, phone, message)", "machine": "jsonb (OrderMachine at order time)", "attachments": "jsonb (OrderAttachment[] at order time)", "machine_price": "bigint", "attachments_total": "bigint", "total": "bigint", "card_amount": "bigint (what the card is authorized and charged for: the total, the pay-on-delivery deposit, or 0)", "currency": "text", "payment_option": "text (pay_in_full|installments|pay_on_delivery)", "requested_date": "date", "delivery_date": "date", "date_confirmed": "bool", "location": "jsonb (FarmLocation)", "contact_name": "text", "contact_phone": "text", "notes": "text?", "status": "text (payment_pending|payment_failed|placed|confirmed|out_for_delivery|delivered|rejected|cancelled)", "history": "jsonb", "dealer_note": "text?", "staff_note": "text?", "intent_id": "uuid?", "attempts": "int", "method_label": "text?", "captured": "bool", "placed_at": "timestamptz?", "confirmed_at": "timestamptz?", "dispatched_at": "timestamptz?", "delivered_at": "timestamptz?", "idempotency_key": "text unique", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(customer_id, created_at)", "(status, created_at)", "(dealer_id, status, created_at)", "(intent_id)", "(status, placed_at, id)", "(status, updated_at, id)"] }
+  ],
+  "stateMachines": [
+    {
+      "name": "Farm order",
+      "field": "FarmOrder.status",
+      "initial": "payment_pending",
+      "transitions": [["payment_pending", "pay", "placed"], ["payment_pending", "fail", "payment_failed"], ["payment_pending", "abandon", "cancelled"], ["payment_failed", "retry", "payment_pending"], ["payment_failed", "cancel", "cancelled"], ["placed", "confirm", "confirmed"], ["placed", "reject", "rejected"], ["placed", "cancel", "cancelled"], ["placed", "expire", "cancelled"], ["confirmed", "dispatch", "out_for_delivery"], ["confirmed", "cancel", "cancelled"], ["out_for_delivery", "deliver", "delivered"], ["out_for_delivery", "cancel", "cancelled"]],
+      "notes": "Pay in full and pay on delivery start in payment_pending; pay: the card is authorized (payments.authorizePurchase) for the total, or for the depositPercent deposit of pay on delivery. Installments need no card and start placed. confirm sets the delivery date and captures the card (payments.capturePurchase); reject, cancel and expire void it (payments.voidIntent). Customers cancel while placed or payment_failed; staff move and cancel on the dealer's behalf, but a captured card order is not cancelled in the app (refunds of purchases are not built). Placed orders not confirmed within confirmHours expire."
+    }
+  ],
+  "endpoints": [
+    { "id": "getNearestDealer", "area": "store", "method": "GET", "path": "/dealers/nearest", "summary": "Your nearest dealer, for Farm machines", "desc": "The nearest active dealer to the signed-in customer's geocoded default address (customers.customerLocation) with the distance; visitors and customers without one get the market default dealer (the first active one) without a distance.", "auth": "visitor", "response": "NearestDealer", "screens": ["store/farm"] },
+    { "id": "quoteOrder", "area": "store", "method": "POST", "path": "/quotes", "summary": "Price a machine with attachments, the dealer and the payment options", "desc": "Nothing is saved. Delivery is included. Problems (an out-of-stock machine, no dealer) set canOrder false.", "auth": "visitor", "body": "QuoteInput", "response": "FarmQuote", "errors": ["NOT_FOUND", "VALIDATION_FAILED"], "screens": ["store/farm-order"] },
+    { "id": "getPaymentOptions", "area": "store", "method": "GET", "path": "/payment-options", "summary": "Saved cards and a new-card session for a farm order's card amount", "desc": "Prices the machine and attachments like POST /quotes and asks payments.listOptions for the card amount of the option (the total for pay_in_full, the depositPercent deposit for pay_on_delivery). chargeNote explains the farm hold: held when ordering, charged when the dealer confirms, released when the dealer can't take it or the customer cancels before then. Installments take no card (VALIDATION_FAILED).", "auth": "customer", "query": { "option": "enum(pay_in_full|pay_on_delivery)", "productId": "uuid", "attachmentIds": { "type": "uuid[]?", "desc": "Comma-separated, as sent to POST /quotes" } }, "response": "payments.PaymentOptions", "errors": ["NOT_FOUND", "VALIDATION_FAILED"], "screens": ["store/farm-order"] },
+    { "id": "placeOrder", "area": "store", "method": "POST", "path": "/orders", "summary": "Order a machine for delivery to your farm", "desc": "Prices the machine and attachments now (PRICE_CHANGED when the total differs from expectedTotal), takes the farm location (a saved address through customers.getAddressForOrder, or the typed one; the pin, else the geocoded address), sends it to the nearest active dealer and checks the delivery date against the dealer's lead time. pay_in_full authorizes the card for the total and pay_on_delivery for the deposit (depositPercent of the total, whole cents): accepted → placed; requires_action → payment.nextAction (finish with complete-action); failed → payment_failed with payment.decline; pending_check → payment_pending until payments says. Installments are placed at once (no card).", "auth": "customer", "body": "PlaceOrderInput", "response": "FarmOrder", "status": 201, "idempotent": true, "errors": ["NOT_FOUND", "VALIDATION_FAILED", "MACHINE_UNAVAILABLE", "ATTACHMENT_UNAVAILABLE", "NO_DEALER", "DELIVERY_DATE_UNAVAILABLE", "PRICE_CHANGED"], "events": ["farm.order.placed", "farm.order.status_changed"], "screens": ["store/farm-order"] },
+    { "id": "listMyOrders", "area": "store", "method": "GET", "path": "/orders", "summary": "My farm orders, newest first", "auth": "customer", "paging": true, "query": { "state": { "type": "enum(open|past)?", "desc": "open: payment pending, placed, confirmed, out for delivery" } }, "response": "FarmOrder", "screens": ["store/farm-orders"] },
+    { "id": "getOrder", "area": "store", "method": "GET", "path": "/orders/{id}", "summary": "A farm order with its status and payment", "auth": "customer", "params": { "id": "uuid" }, "query": { "refresh": { "type": "bool?", "desc": "Ask the provider about a pending payment first" } }, "response": "FarmOrder", "errors": ["NOT_FOUND"], "screens": ["store/farm-order-detail"] },
+    { "id": "completeOrderAction", "area": "store", "method": "POST", "path": "/orders/{id}/complete-action", "summary": "Finish the bank challenge of a farm order", "auth": "customer", "params": { "id": "uuid" }, "body": "CompleteActionInput", "response": "FarmOrder", "idempotent": true, "errors": ["NOT_FOUND", "ILLEGAL_TRANSITION"], "events": ["farm.order.placed", "farm.order.status_changed"], "screens": ["store/farm-order", "store/farm-order-detail"] },
+    { "id": "retryOrderPayment", "area": "store", "method": "POST", "path": "/orders/{id}/retry", "summary": "Pay a failed farm order again", "auth": "customer", "params": { "id": "uuid" }, "body": "RetryPaymentInput", "response": "FarmOrder", "idempotent": true, "errors": ["NOT_FOUND", "ILLEGAL_TRANSITION"], "events": ["farm.order.placed", "farm.order.status_changed"], "screens": ["store/farm-order-detail"] },
+    { "id": "cancelOrder", "area": "store", "method": "POST", "path": "/orders/{id}/cancel", "summary": "Cancel an order the dealer hasn't confirmed", "desc": "While placed or payment_failed; the card hold is released.", "auth": "customer", "params": { "id": "uuid" }, "body": "CancelInput", "response": "FarmOrder", "errors": ["NOT_FOUND", "ILLEGAL_TRANSITION"], "events": ["farm.order.status_changed"], "screens": ["store/farm-order-detail"] },
+
+    { "id": "listDealers", "area": "admin", "method": "GET", "path": "/dealers", "summary": "Dealers in order", "auth": "staff", "permission": "farm.view", "query": { "q": "string?", "active": "bool?" }, "response": "DealerAdmin[]", "screens": ["admin/departments-farm-orders"] },
+    { "id": "createDealer", "area": "admin", "method": "POST", "path": "/dealers", "summary": "Add a dealer", "desc": "Without a pin the address is geocoded (customers.geocodeAddress); a dealer without a point is never the nearest, only the market default.", "auth": "staff", "permission": "farm.manage", "body": "DealerInput", "response": "DealerAdmin", "status": 201, "errors": ["VALIDATION_FAILED"], "audited": true, "screens": ["admin/departments-farm-orders"] },
+    { "id": "getDealer", "area": "admin", "method": "GET", "path": "/dealers/{id}", "summary": "A dealer for editing", "auth": "staff", "permission": "farm.view", "params": { "id": "uuid" }, "response": "DealerAdmin", "errors": ["NOT_FOUND"], "screens": ["admin/departments-farm-orders"] },
+    { "id": "updateDealer", "area": "admin", "method": "PATCH", "path": "/dealers/{id}", "summary": "Change a dealer, move its pin or switch it off", "auth": "staff", "permission": "farm.manage", "params": { "id": "uuid" }, "body": "DealerInput", "response": "DealerAdmin", "errors": ["NOT_FOUND", "VALIDATION_FAILED"], "audited": true, "screens": ["admin/departments-farm-orders"] },
+    { "id": "deleteDealer", "area": "admin", "method": "DELETE", "path": "/dealers/{id}", "summary": "Delete a dealer with no orders", "desc": "Dealers with orders are switched off instead (active false).", "auth": "staff", "permission": "farm.manage", "params": { "id": "uuid" }, "response": null, "errors": ["NOT_FOUND", "IN_USE"], "audited": true, "screens": ["admin/departments-farm-orders"] },
+    { "id": "listOrdersAdmin", "area": "admin", "method": "GET", "path": "/orders", "summary": "Farm orders, newest first", "auth": "staff", "permission": "farm.view", "paging": true, "query": { "status": "enum(payment_pending|payment_failed|placed|confirmed|out_for_delivery|delivered|rejected|cancelled)?", "state": "enum(open|past)?", "dealerId": "uuid?", "paymentOption": "enum(pay_in_full|installments|pay_on_delivery)?", "q": { "type": "string?", "desc": "FM- reference, customer name or email" } }, "response": "FarmOrderAdmin", "screens": ["admin/departments-farm-orders"] },
+    { "id": "getOrderAdmin", "area": "admin", "method": "GET", "path": "/orders/{id}", "summary": "A farm order with its history", "auth": "staff", "permission": "farm.view", "params": { "id": "uuid" }, "response": "FarmOrderAdmin", "errors": ["NOT_FOUND"], "screens": ["admin/departments-farm-orders"] },
+    { "id": "moveOrder", "area": "admin", "method": "POST", "path": "/orders/{id}/status", "summary": "Confirm with a delivery date, reject, send out, deliver, cancel or reschedule an order", "desc": "confirm captures the card: the total of pay in full, the deposit of pay on delivery (PAYMENT_CAPTURE_FAILED leaves it placed); reject and cancel void it. A captured card order can't be cancelled here (REFUND_NOT_AVAILABLE). reschedule changes the delivery date of a confirmed order.", "auth": "staff", "permission": "farm.orders.manage", "params": { "id": "uuid" }, "body": "OrderAction", "response": "FarmOrderAdmin", "errors": ["NOT_FOUND", "ILLEGAL_TRANSITION", "VALIDATION_FAILED", "PAYMENT_CAPTURE_FAILED", "REFUND_NOT_AVAILABLE"], "audited": true, "events": ["farm.order.status_changed"], "screens": ["admin/departments-farm-orders"] }
+  ],
+  "events": {
+    "publishes": [
+      { "name": "farm.order.placed", "when": "A farm order reaches placed (at once for installments; when the card is authorized for pay in full and for the pay-on-delivery deposit)", "payload": { "orderId": "uuid", "ref": "string", "customerId": "uuid", "dealerId": "uuid", "dealerName": "string", "machineName": "string", "paymentOption": "string", "total": "Money", "cardAmount": { "type": "Money", "desc": "The total, the deposit, or 0" }, "deliveryDate": "date" } },
+      { "name": "farm.order.status_changed", "when": "A farm order moves after it is created (confirmed, out for delivery, delivered, rejected, cancelled, payment failed, rescheduled); placed is farm.order.placed", "payload": { "orderId": "uuid", "ref": "string", "customerId": "uuid", "dealerName": "string", "machineName": "string", "status": "string", "paymentOption": "string", "total": "Money", "cardAmount": { "type": "Money", "desc": "Charged on confirmed: the total (pay in full) or the deposit (pay on delivery); 0 for installments. The rest due on delivery is total minus cardAmount" }, "deliveryDate": "date", "rescheduled": "bool", "note": "string?" } }
+    ],
+    "consumes": [
+      { "name": "payments.purchase.authorized", "does": "module farm: a pending or challenged payment went through — place the order" },
+      { "name": "payments.purchase.failed", "does": "module farm: mark the order payment_failed" }
+    ]
+  },
+  "jobs": [
+    { "name": "farm.expire-unconfirmed", "schedule": "every 15 min", "does": "Cancel placed orders the dealer hasn't confirmed within confirmHours (void the card hold, tell the customer); cancel payment_pending orders left in a bank challenge for 30 minutes" }
+  ],
+  "permissions": [
+    { "key": "farm.view", "audience": "staff", "desc": "See dealers and farm orders in Admin › Departments › Farm orders" },
+    { "key": "farm.manage", "audience": "staff", "desc": "Add, change and switch off dealers" },
+    { "key": "farm.orders.manage", "audience": "staff", "desc": "Confirm, schedule, reject, send out, deliver and cancel farm orders on the dealer's behalf" }
+  ],
+  "settings": [
+    { "key": "confirmHours", "type": "duration", "default": 48, "unit": "hours", "min": 1, "max": 120, "desc": "A placed farm order the dealer hasn't confirmed in this time is cancelled and the card hold released (card holds last about 7 days)" },
+    { "key": "leadDays", "type": "duration", "default": 3, "unit": "days", "min": 0, "max": 60, "desc": "Earliest delivery: today in the market time zone plus this many days, unless the dealer has its own lead time" },
+    { "key": "maxAheadDays", "type": "duration", "default": 90, "unit": "days", "min": 7, "max": 365, "desc": "Latest delivery date a customer can ask for, counted from today" },
+    { "key": "depositPercent", "type": "int", "default": 10, "min": 1, "max": 100, "unit": "%", "desc": "Pay on delivery: the share of the total charged by card as a deposit when the dealer confirms (10% deposit now, the rest when it arrives); the rest is paid to the dealer on delivery" },
+    { "key": "installmentMonths", "type": "int", "default": 12, "min": 2, "max": 60, "desc": "Months shown on the Installments option (12 months · $1,842/mo, subject to approval); the dealer arranges the plan" }
+  ],
+  "integrations": [],
+  "errorCodes": {
+    "IN_USE": { "status": 409, "meaning": "Orders still use this dealer; switch it off instead." },
+    "MACHINE_UNAVAILABLE": { "status": 409, "meaning": "This machine can't be ordered now (no longer picked or out of stock)." },
+    "ATTACHMENT_UNAVAILABLE": { "status": 409, "meaning": "An attachment can't be ordered now. details.productIds." },
+    "NO_DEALER": { "status": 409, "meaning": "No dealer takes farm orders yet." },
+    "DELIVERY_DATE_UNAVAILABLE": { "status": 422, "meaning": "Pick a delivery date from details.earliest to details.latest." },
+    "PRICE_CHANGED": { "status": 409, "meaning": "Prices changed; details.total is the new total." },
+    "PAYMENT_CAPTURE_FAILED": { "status": 502, "meaning": "The card couldn't be charged; the order stays placed. Try again or reject it." },
+    "REFUND_NOT_AVAILABLE": { "status": 409, "meaning": "The card was already charged and refunds of farm orders aren't in the app yet." }
+  },
+  "notes": [
+    "2026-10-22 (user, decision 3): farm machines are ordered in their own farm orders, like Food, not through cart and checkout. Buy only; renting is out of v1. Staff act for the dealers in Admin.",
+    "Prices: the machine's and the chosen attachments' product-card prices now (search, through departments.getFarmMachine; departments is an optional dependency, and while it is off no machine can be quoted or ordered); delivery is included (deliveryFee 0). Farm orders don't reserve catalog stock: an out-of-stock machine or attachment can't be ordered, and the dealer confirms availability. Refs are FM- plus five characters from 23456789ABCDEFGHJKLMNPQRSTUVWXYZ.",
+    "Payment: pay in full authorizes the card when the order is placed and captures it when the dealer confirms; reject, cancel and expiry void it, so nothing needs a refund before confirmation. Pay on delivery (2026-10-22, matching the FarmOrder artboard) takes a deposit by card the same way: depositPercent of the total rounded to whole cents, authorized when placed, captured on confirm, voided on reject, cancel or expiry; the balance is paid to the dealer when it arrives (outside the app). Installments (a request the dealer arranges with the customer) take no card.",
+    "Dealer: an order goes to the nearest active dealer with a point to the farm location's point (the pin, else the geocoded address); when that is unknown, to the nearest to the customer's default address; else to the market default (the first active dealer in Admin order). The order keeps a copy of the dealer's name, phone and address.",
+    "Delivery date: from today in the market time zone plus the dealer's lead time (leadDays setting when it has none) to maxAheadDays ahead. When confirming, staff set the date (today or later); reschedule changes it while confirmed.",
+    "Nearest dealer (FarmIntro): the signed-in customer's geocoded default address (decision 4, no device location); visitors and customers without one see the market default dealer without a distance. Distances are miles (kernel geo milesLabel).",
+    "Payment option texts: Pay on delivery is the artboard's '10% deposit now, the rest when it arrives' (built from depositPercent). The artboard's Pay in full says 'Card or bank transfer now', but v1 has no bank transfer, so its subtitle is 'Card now · charged when the dealer confirms'. The app asks GET /payment-options (option, productId, attachmentIds) for the card fields: it prices the order server-side and sets a farm chargeNote instead of checkout's.",
+    "Customers are customers-module ids (the store principal's customerId, else the account id), as payments uses."
+  ]
+}

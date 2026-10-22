@@ -12,6 +12,9 @@ const customerOf = (scope: Scope, principal: Principal | null): string => {
   return id;
 };
 
+/** The signed-in customer on a page visitors can also open (saved flags and distances), else null */
+const viewerOf = (scope: Scope, principal: Principal | null): string | null => (scope.kind === 'customer' ? (scope.customerId ?? principal?.accountId ?? null) : null);
+
 /**
  * Store API: /api/store/food/…  (docs/api/modules/food.md)
  * Browsing is open to visitors; the basket, orders, payments and ratings need a customer.
@@ -21,13 +24,23 @@ export const storeRoutes = (service: FoodService) =>
     /** GET /categories: Visible food categories in order */
     listCategories: async () => service.listCategories(),
     /** GET /restaurants: Published restaurants, open ones first */
-    listRestaurants: async ({ query, page }) => service.listRestaurants(query, page),
+    listRestaurants: async ({ query, page, scope, principal }) => service.listRestaurants(query, page, viewerOf(scope, principal)),
     /** GET /restaurants/{slug}: A restaurant with its menu */
-    getRestaurant: async ({ params }) => service.getRestaurant(params.slug),
+    getRestaurant: async ({ params, scope, principal }) => service.getRestaurant(params.slug, viewerOf(scope, principal)),
+    /** GET /restaurants/{slug}/reviews: A restaurant's reviews, newest first */
+    listRestaurantReviews: async ({ params, query, page }) => service.listRestaurantReviews(params.slug, query, page),
+    /** GET /restaurants/{slug}/ratings: A restaurant's rating summary: average, count and count per star */
+    getRestaurantRatings: async ({ params }) => service.getRestaurantRatings(params.slug),
+    /** GET /saved-restaurants: My saved restaurants, last saved first */
+    listSavedRestaurants: async ({ page, scope, principal }) => service.listSavedRestaurants(customerOf(scope, principal), page),
+    /** PUT /saved-restaurants/{slug}: Save a restaurant (the heart) */
+    saveRestaurant: async ({ params, scope, principal }) => service.saveRestaurant(customerOf(scope, principal), params.slug),
+    /** DELETE /saved-restaurants/{slug}: Remove a restaurant from my saved ones */
+    unsaveRestaurant: async ({ params, scope, principal }) => service.unsaveRestaurant(customerOf(scope, principal), params.slug),
     /** GET /items: Menu items across restaurants */
     listItems: async ({ query, page }) => service.listItems(query, page),
     /** GET /items/{id}: A menu item with its photos, sizes and extras */
-    getItem: async ({ params }) => service.getItem(params.id),
+    getItem: async ({ params, scope, principal }) => service.getItem(params.id, viewerOf(scope, principal)),
     /** GET /basket: My food basket with prices worked out now */
     getBasket: async ({ scope, principal }) => service.getBasket(customerOf(scope, principal)),
     /** POST /basket/lines: Add an item with its options */

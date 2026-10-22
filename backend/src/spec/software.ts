@@ -7,7 +7,7 @@ import * as common from './common.js';
 import * as media from './media.js';
 import * as payments from './payments.js';
 
-/** Softwares: The app's Softwares department: apps for phones and PCs that customers download. Staff keep the categories, apps, files, packs and the home rails in Admin › Departments › Softwares. Free apps are owned on Get; paid apps and packs are bought with a card in their own payment flow (payments purchase intents, not cart and checkout), and owners download the files through signed links. */
+/** Softwares: The app's Softwares department: apps for phones and PCs that customers download. Staff keep the categories, apps, files, packs and the home rails in Admin › Departments › Softwares. Free apps are owned on Get; paid apps and packs are bought with a card in their own payment flow (payments purchase intents, not cart and checkout) and come with a licence key. Any signed-in customer downloads the files through signed links. */
 
 /* ------------------------------------------------------------------ types */
 
@@ -179,6 +179,10 @@ export interface AppFiles {
   databases: AppFile[];
   /** e.g. Preset library and LUT packs, needed for offline use */
   databasesNote?: string | null;
+  /** All databases together; 0 without databases */
+  databasesSizeBytes: number;
+  /** e.g. 340 MB (Download databases · 340 MB); null without databases */
+  databasesSizeLabel?: string | null;
 }
 
 export const AppFiles: z.ZodType<AppFiles> = z.object({
@@ -189,7 +193,27 @@ export const AppFiles: z.ZodType<AppFiles> = z.object({
     return z.array(AppFile);
   },
   databasesNote: z.string().describe("e.g. Preset library and LUT packs, needed for offline use").nullish(),
+  databasesSizeBytes: z.number().int().describe("All databases together; 0 without databases"),
+  databasesSizeLabel: z.string().describe("e.g. 340 MB (Download databases · 340 MB); null without databases").nullish(),
 }).register(common.apiTypes, { id: "software.AppFiles" });
+
+export interface OwnedLicence {
+  /** XXXXX-XXXXX-XXXXX-XXXXX, the key that unlocks the app */
+  key: string;
+  /** Devices one key unlocks; null when the app sets no limit */
+  devices?: number | null;
+  /** e.g. Use on up to 2 devices, Use on any number of devices */
+  devicesLabel: string;
+  /** When this key was issued (a reissue replaces the key) */
+  issuedAt: string;
+}
+
+export const OwnedLicence: z.ZodType<OwnedLicence> = z.object({
+  key: z.string().describe("XXXXX-XXXXX-XXXXX-XXXXX, the key that unlocks the app"),
+  devices: z.number().int().describe("Devices one key unlocks; null when the app sets no limit").nullish(),
+  devicesLabel: z.string().describe("e.g. Use on up to 2 devices, Use on any number of devices"),
+  issuedAt: z.iso.datetime({ offset: true }).describe("When this key was issued (a reissue replaces the key)"),
+}).register(common.apiTypes, { id: "software.OwnedLicence" });
 
 export interface AppPermission {
   /** e.g. Storage */
@@ -277,16 +301,20 @@ export interface SoftwareApp {
   price: AppPrice;
   /** e.g. One-time purchase · 2 devices */
   licenceLabel?: string | null;
+  /** Devices one licence key unlocks; null when not limited (and for free apps) */
+  licenceDevices?: number | null;
   version?: string | null;
   /** When the current version came out (Updated) */
   releasedAt?: string | null;
   whatsNew?: string | null;
   /** Earlier versions, newest first */
   versionHistory: VersionEntry[];
-  /** Names and sizes only; downloads go through POST /apps/{slug}/downloads */
+  /** Names and sizes only (shown to everyone: Download app · 1.2 GB, Download databases · 340 MB); downloads go through POST /apps/{slug}/downloads */
   files: AppFiles;
   sizeBytes: number;
   sizeLabel: string;
+  /** The caller may download the files: any signed-in customer (no purchase needed); false for visitors, who sign in first */
+  canDownload: boolean;
   platforms: ("android" | "ios" | "windows" | "macos" | "linux" | "web")[];
   /** Runtime platforms with minimum versions, e.g. Windows 10+ */
   platformLabels: string[];
@@ -304,6 +332,8 @@ export interface SoftwareApp {
   /** Owner who has not reviewed yet */
   canReview: boolean;
   myReview?: AppReview | null;
+  /** The owner's licence key for a paid app; null for visitors, customers who don't own it and free apps */
+  licence?: OwnedLicence | null;
 }
 
 export const SoftwareApp: z.ZodType<SoftwareApp> = z.object({
@@ -331,6 +361,7 @@ export const SoftwareApp: z.ZodType<SoftwareApp> = z.object({
     return AppPrice;
   },
   licenceLabel: z.string().describe("e.g. One-time purchase · 2 devices").nullish(),
+  licenceDevices: z.number().int().describe("Devices one licence key unlocks; null when not limited (and for free apps)").nullish(),
   version: z.string().nullish(),
   releasedAt: z.iso.date().describe("When the current version came out (Updated)").nullish(),
   whatsNew: z.string().nullish(),
@@ -342,6 +373,7 @@ export const SoftwareApp: z.ZodType<SoftwareApp> = z.object({
   },
   sizeBytes: z.number().int(),
   sizeLabel: z.string(),
+  canDownload: z.boolean().describe("The caller may download the files: any signed-in customer (no purchase needed); false for visitors, who sign in first"),
   platforms: z.array(z.enum(["android", "ios", "windows", "macos", "linux", "web"])),
   platformLabels: z.array(z.string()).describe("Runtime platforms with minimum versions, e.g. Windows 10+"),
   minRequirements: z.string().nullish(),
@@ -362,6 +394,9 @@ export const SoftwareApp: z.ZodType<SoftwareApp> = z.object({
   canReview: z.boolean().describe("Owner who has not reviewed yet"),
   get myReview() {
     return AppReview.nullish();
+  },
+  get licence() {
+    return OwnedLicence.nullish();
   },
 }).register(common.apiTypes, { id: "software.SoftwareApp" });
 
@@ -584,6 +619,8 @@ export interface Entitlement {
   title: string;
   source: "free" | "purchase" | "pack" | "staff";
   ownedAt: string;
+  /** Paid apps only */
+  licenceKey?: string | null;
 }
 
 export const Entitlement: z.ZodType<Entitlement> = z.object({
@@ -592,12 +629,15 @@ export const Entitlement: z.ZodType<Entitlement> = z.object({
   title: z.string(),
   source: z.enum(["free", "purchase", "pack", "staff"]),
   ownedAt: z.iso.datetime({ offset: true }),
+  licenceKey: z.string().describe("Paid apps only").nullish(),
 }).register(common.apiTypes, { id: "software.Entitlement" });
 
 export interface LibraryApp {
   app: AppCard;
   source: "free" | "purchase" | "pack" | "staff";
   ownedAt: string;
+  /** Paid apps only (My apps shows the key) */
+  licence?: OwnedLicence | null;
 }
 
 export const LibraryApp: z.ZodType<LibraryApp> = z.object({
@@ -606,6 +646,9 @@ export const LibraryApp: z.ZodType<LibraryApp> = z.object({
   },
   source: z.enum(["free", "purchase", "pack", "staff"]),
   ownedAt: z.iso.datetime({ offset: true }),
+  get licence() {
+    return OwnedLicence.nullish();
+  },
 }).register(common.apiTypes, { id: "software.LibraryApp" });
 
 export interface AppAdminRow {
@@ -669,6 +712,7 @@ export interface AppAdmin {
   whatYouGet: string[];
   price: AppPrice;
   licenceLabel?: string | null;
+  licenceDevices?: number | null;
   files: AppFiles;
   sizeBytes: number;
   sizeLabel: string;
@@ -718,6 +762,7 @@ export const AppAdmin: z.ZodType<AppAdmin> = z.object({
     return AppPrice;
   },
   licenceLabel: z.string().nullish(),
+  licenceDevices: z.number().int().nullish(),
   get files() {
     return AppFiles;
   },
@@ -773,6 +818,8 @@ export interface AppInput {
   /** Required with salePrice */
   saleEndsAt?: string | null;
   licenceLabel?: string | null;
+  /** Devices one licence key unlocks, 1 to 100; empty when not limited. Paid apps only (ignored for free apps) */
+  licenceDevices?: number | null;
   /** software_package upload; needed to publish */
   packageId?: string | null;
   /** software_package uploads */
@@ -816,6 +863,7 @@ export const AppInput: z.ZodType<AppInput> = z.object({
   },
   saleEndsAt: z.iso.datetime({ offset: true }).describe("Required with salePrice").nullish(),
   licenceLabel: z.string().nullish(),
+  licenceDevices: z.number().int().describe("Devices one licence key unlocks, 1 to 100; empty when not limited. Paid apps only (ignored for free apps)").nullish(),
   packageId: z.uuid().describe("software_package upload; needed to publish").nullish(),
   databaseIds: z.array(z.uuid()).describe("software_package uploads").nullish(),
   databasesNote: z.string().nullish(),
@@ -1025,6 +1073,60 @@ export const GrantInput: z.ZodType<GrantInput> = z.object({
   reason: z.string(),
 }).register(common.apiTypes, { id: "software.GrantInput" });
 
+export interface EntitlementAdmin {
+  id: string;
+  app: PackApp;
+  /** The app is free now (no licence key) */
+  free: boolean;
+  customer: {
+    id: string;
+    name?: string | null;
+    email?: string | null;
+  };
+  source: "free" | "purchase" | "pack" | "staff";
+  ownedAt: string;
+  purchaseId?: string | null;
+  /** SW- reference of the purchase that granted it */
+  purchaseRef?: string | null;
+  /** Staff who gave it (source staff) */
+  grantedBy?: string | null;
+  /** Paid apps only */
+  licenceKey?: string | null;
+  licenceIssuedAt?: string | null;
+  /** Times staff replaced the key */
+  licenceReissues: number;
+}
+
+export const EntitlementAdmin: z.ZodType<EntitlementAdmin> = z.object({
+  id: z.uuid(),
+  get app() {
+    return PackApp;
+  },
+  free: z.boolean().describe("The app is free now (no licence key)"),
+  customer: z.object({
+    id: z.uuid(),
+    name: z.string().nullish(),
+    email: z.email().nullish(),
+  }),
+  source: z.enum(["free", "purchase", "pack", "staff"]),
+  ownedAt: z.iso.datetime({ offset: true }),
+  purchaseId: z.uuid().nullish(),
+  purchaseRef: z.string().describe("SW- reference of the purchase that granted it").nullish(),
+  grantedBy: z.string().describe("Staff who gave it (source staff)").nullish(),
+  licenceKey: z.string().describe("Paid apps only").nullish(),
+  licenceIssuedAt: z.iso.datetime({ offset: true }).nullish(),
+  licenceReissues: z.number().int().describe("Times staff replaced the key"),
+}).register(common.apiTypes, { id: "software.EntitlementAdmin" });
+
+export interface ReissueLicenceInput {
+  /** Why the key is replaced, e.g. the customer's key leaked; kept in the action history */
+  reason: string;
+}
+
+export const ReissueLicenceInput: z.ZodType<ReissueLicenceInput> = z.object({
+  reason: z.string().describe("Why the key is replaced, e.g. the customer's key leaked; kept in the action history"),
+}).register(common.apiTypes, { id: "software.ReissueLicenceInput" });
+
 /* ------------------------------------------------------------------ events */
 
 /** software.purchase.paid: A purchase is paid and its apps are owned */
@@ -1060,6 +1162,23 @@ export const SoftwarePurchaseFailedEvent: z.ZodType<SoftwarePurchaseFailedEvent>
   purchaseId: z.uuid(),
   ref: z.string(),
   customerId: z.uuid(),
+  title: z.string(),
+});
+
+/** software.licence.reissued: Staff replace an owner's licence key (the old key stops working) */
+export interface SoftwareLicenceReissuedEvent {
+  entitlementId: string;
+  customerId: string;
+  appId: string;
+  slug: string;
+  title: string;
+}
+
+export const SoftwareLicenceReissuedEvent: z.ZodType<SoftwareLicenceReissuedEvent> = z.object({
+  entitlementId: z.uuid(),
+  customerId: z.uuid(),
+  appId: z.uuid(),
+  slug: z.string(),
   title: z.string(),
 });
 
@@ -1105,6 +1224,8 @@ export interface SoftwareDb {
     sale_ends_at: Date | null;
     currency: string;
     licence_label: string | null;
+    /** devices one licence key unlocks; null = not limited */
+    licence_devices: number | null;
     /** AppFile */
     package: Json | null;
     /** AppFile[] */
@@ -1192,6 +1313,11 @@ export interface SoftwareDb {
     source: 'free' | 'purchase' | 'pack' | 'staff';
     purchase_id: string | null;
     granted_by: string | null;
+    /** XXXXX-XXXXX-XXXXX-XXXXX; paid apps only */
+    licence_key: string | null;
+    licence_issued_at: Date | null;
+    /** times staff replaced the key; null = never */
+    licence_reissues: number | null;
     created_at: Date;
   };
   reviews: {
@@ -1350,8 +1476,8 @@ export const endpoints = defineEndpoints({
     path: "/apps/{slug}/downloads",
     auth: "customer",
     scope: "own-customer",
-    summary: "A signed link to download an owned app's package or a database",
-    desc: "Counts a download for the package. Links last media's downloadUrlTtlMinutes.",
+    summary: "A signed link to download an app's package or a database",
+    desc: "Any signed-in customer, whether or not they own the app (owner decision 2026-10-22: paid apps are unlocked by the licence key, not by the download). Published apps; a hidden app only for its owners (NOT_FOUND otherwise). Counts a download for the package. Links last media's downloadUrlTtlMinutes.",
     params: () =>
       z.object({
         slug: z.string(),
@@ -1359,8 +1485,8 @@ export const endpoints = defineEndpoints({
     body: () => DownloadInput,
     response: () => media.DownloadLink,
     status: 200,
-    errors: ["NOT_FOUND","NOT_OWNED","FILE_MISSING"],
-    screens: ["store/software-app"],
+    errors: ["NOT_FOUND","FILE_MISSING"],
+    screens: ["store/software-app","store/software-library"],
     phase: 2,
   },
   getPaymentOptions: {
@@ -1779,6 +1905,49 @@ export const endpoints = defineEndpoints({
     screens: ["admin/departments-software"],
     phase: 2,
   },
+  listEntitlementsAdmin: {
+    area: "admin",
+    method: "GET",
+    path: "/entitlements",
+    auth: "staff",
+    permission: "software.view",
+    scope: "staff",
+    summary: "Who owns which app, with licence keys, newest first",
+    desc: "The owners of an app (appId), a customer's apps (customerId), or a search by licence key, SW- reference or customer email (q).",
+    query: () =>
+      z.object({
+        appId: z.uuid().optional(),
+        customerId: z.uuid().optional(),
+        q: z.string().describe("Licence key, SW- reference or customer email").optional(),
+      }),
+    paging: true,
+    response: () => EntitlementAdmin,
+    status: 200,
+    screens: ["admin/departments-software","admin/departments-software-app"],
+    phase: 2,
+  },
+  reissueLicence: {
+    area: "admin",
+    method: "POST",
+    path: "/entitlements/{id}/reissue-licence",
+    auth: "staff",
+    permission: "software.manage",
+    scope: "staff",
+    summary: "Replace an owner's licence key",
+    desc: "Issues a new key for a paid app's entitlement; the old key stops working. The action history keeps the reason and the last five characters of both keys. The customer is notified (software.licence.reissued).",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => ReissueLicenceInput,
+    response: () => EntitlementAdmin,
+    status: 200,
+    errors: ["NOT_FOUND","NO_LICENCE","VALIDATION_FAILED"],
+    audited: true,
+    events: ["software.licence.reissued"],
+    screens: ["admin/departments-software","admin/departments-software-app"],
+    phase: 2,
+  },
   listReviewsAdmin: {
     area: "admin",
     method: "GET",
@@ -1829,7 +1998,7 @@ export const spec = defineModuleSpec({
   group: "Growth",
   phase: 2,
   chapters: [],
-  summary: "The app's Softwares department: apps for phones and PCs that customers download. Staff keep the categories, apps, files, packs and the home rails in Admin › Departments › Softwares. Free apps are owned on Get; paid apps and packs are bought with a card in their own payment flow (payments purchase intents, not cart and checkout), and owners download the files through signed links.",
+  summary: "The app's Softwares department: apps for phones and PCs that customers download. Staff keep the categories, apps, files, packs and the home rails in Admin › Departments › Softwares. Free apps are owned on Get; paid apps and packs are bought with a card in their own payment flow (payments purchase intents, not cart and checkout) and come with a licence key. Any signed-in customer downloads the files through signed links.",
   dependsOn: ["media","payments"],
   optionalDeps: ["customers","audit","notifications"],
   publicApi: ["exportCustomerData"],
@@ -1842,7 +2011,7 @@ export const spec = defineModuleSpec({
     {
       "key": "software.manage",
       "audience": "staff",
-      "desc": "Categories, apps and their files, packs, rails, hide reviews, give an app to a customer"
+      "desc": "Categories, apps and their files, packs, rails, hide reviews, give an app to a customer, reissue a licence key"
     }
   ],
   approvalActions: [],
@@ -1898,6 +2067,7 @@ export const spec = defineModuleSpec({
     publishes: {
       "software.purchase.paid": { when: "A purchase is paid and its apps are owned", payload: () => SoftwarePurchasePaidEvent },
       "software.purchase.failed": { when: "A purchase's payment fails", payload: () => SoftwarePurchaseFailedEvent },
+      "software.licence.reissued": { when: "Staff replace an owner's licence key (the old key stops working)", payload: () => SoftwareLicenceReissuedEvent },
     },
     consumes: {
       "payments.purchase.authorized": "module software: capture and mark the purchase paid (a payment that was pending or finished its bank challenge outside the app)",
@@ -1951,6 +2121,10 @@ export const spec = defineModuleSpec({
     "FILE_NOT_READY": {
       "status": 409,
       "meaning": "An uploaded file isn't ready or has the wrong purpose."
+    },
+    "NO_LICENCE": {
+      "status": 409,
+      "meaning": "The app is free, so this entitlement has no licence key."
     }
   },
   collections: {
@@ -2075,6 +2249,7 @@ export const spec = defineModuleSpec({
         "sale_ends_at",
         "currency",
         "licence_label",
+        "licence_devices",
         "package",
         "databases",
         "databases_note",
@@ -2111,6 +2286,7 @@ export const spec = defineModuleSpec({
         "sale_price",
         "sale_ends_at",
         "licence_label",
+        "licence_devices",
         "package",
         "databases_note",
         "version",
@@ -2241,6 +2417,14 @@ export const spec = defineModuleSpec({
             "licence_label": {
               "bsonType": [
                 "string",
+                "null"
+              ]
+            },
+            "licence_devices": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
                 "null"
               ]
             },
@@ -2863,15 +3047,22 @@ export const spec = defineModuleSpec({
         "source",
         "purchase_id",
         "granted_by",
+        "licence_key",
+        "licence_issued_at",
+        "licence_reissues",
         "created_at"
       ],
       "nullable": [
         "purchase_id",
-        "granted_by"
+        "granted_by",
+        "licence_key",
+        "licence_issued_at",
+        "licence_reissues"
       ],
       "decimal": [],
       "binary": [],
       "dates": [
+        "licence_issued_at",
         "created_at"
       ],
       "identity": null,
@@ -2923,6 +3114,26 @@ export const spec = defineModuleSpec({
                 "null"
               ]
             },
+            "licence_key": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "licence_issued_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "licence_reissues": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
             "created_at": {
               "bsonType": "date"
             }
@@ -2931,6 +3142,18 @@ export const spec = defineModuleSpec({
         }
       },
       "indexes": [
+        {
+          "name": "entitlements_licence_key_8be2ce",
+          "key": {
+            "licence_key": 1
+          },
+          "unique": true,
+          "partial": {
+            "licence_key": {
+              "$gte": ""
+            }
+          }
+        },
         {
           "name": "entitlements_customer_id_app_id_2bee7e",
           "key": {
@@ -2943,6 +3166,12 @@ export const spec = defineModuleSpec({
           "name": "entitlements_app_id_1d3d17",
           "key": {
             "app_id": 1
+          }
+        },
+        {
+          "name": "entitlements_created_at_f6b874",
+          "key": {
+            "created_at": 1
           }
         }
       ],
@@ -3069,6 +3298,7 @@ declare module '../kernel/events/event-map.js' {
   interface EventMap {
     "software.purchase.paid": SoftwarePurchasePaidEvent;
     "software.purchase.failed": SoftwarePurchaseFailedEvent;
+    "software.licence.reissued": SoftwareLicenceReissuedEvent;
   }
 }
 

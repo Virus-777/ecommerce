@@ -3,8 +3,8 @@
 The customer side of an account: profile, saved addresses, marketing consent, recently viewed products, the Account tab overview, guest order access, data export and account closure, and the staff view of customer accounts with notes and recorded account actions. Credentials, sessions and verification belong to identity.
 
 - **Group:** Participants · **Launch phase:** 1 · **Plan chapters:** 3, 4, 6, 7, 17, 18, 19
-- **Depends on:** [identity](identity.md) · **Optional:** [orders](orders.md), [returns](returns.md), [support](support.md), [messaging](messaging.md), [wallet](wallet.md), [reviews](reviews.md), [wishlist](wishlist.md), [payments](payments.md), [catalog](catalog.md), [offers](offers.md), [trust](trust.md), [reports](reports.md), [notifications](notifications.md), [access](access.md), [audit](audit.md), [media](media.md), [workqueues](workqueues.md), [software](software.md), [food](food.md), [rewards](rewards.md)
-- **Required by:** [checkout](checkout.md), [food](food.md), [wallet](wallet.md), [wishlist](wishlist.md)
+- **Depends on:** [identity](identity.md) · **Optional:** [orders](orders.md), [returns](returns.md), [support](support.md), [messaging](messaging.md), [wallet](wallet.md), [reviews](reviews.md), [wishlist](wishlist.md), [payments](payments.md), [catalog](catalog.md), [offers](offers.md), [trust](trust.md), [reports](reports.md), [notifications](notifications.md), [access](access.md), [audit](audit.md), [media](media.md), [workqueues](workqueues.md), [software](software.md), [food](food.md), [rewards](rewards.md), [services](services.md), [departments](departments.md)
+- **Required by:** [checkout](checkout.md), [farm](farm.md), [food](food.md), [wallet](wallet.md), [wishlist](wishlist.md)
 
 ## Owns
 - Customer profile (name, phone, member since) linked one-to-one to an identity user
@@ -129,6 +129,24 @@ The customer side of an account: profile, saved addresses, marketing consent, re
 | lastUsedAt | `datetime?` |
 | createdAt | `datetime` |
 | updatedAt | `datetime` |
+
+### GeoPoint
+
+| Field | Type |
+|---|---|
+| lat | `number` WGS84 degrees |
+| lng | `number` WGS84 degrees |
+
+### CustomerLocation
+
+| Field | Type |
+|---|---|
+| point | `GeoPoint` |
+| city | `string` |
+| region | `string` State code, e.g. OR |
+| addressId | `uuid` The default address the point comes from |
+| label | `string` The address's first line, e.g. 1120 SW 5th Ave |
+| precision | `enum(zip|city)?` How exact the point is: the ZIP centroid or only the city's |
 
 ### AddressInput
 
@@ -529,12 +547,16 @@ Indexes: `(account_status, id)`, `(email)`, `(created_at, id)`, `gin(to_tsvector
 | delivery_instructions | text? |
 | is_default | bool |
 | validated_at | timestamptz? |
+| lat | numeric(9,6)? (WGS84 latitude from the geocoder; internal, never in store responses) |
+| lng | numeric(9,6)? (WGS84 longitude) |
+| geocoded_at | timestamptz? (last geocoding attempt; set with null lat/lng when the address could not be placed) |
+| geocode_precision | text? (zip|city) |
 | last_used_at | timestamptz? |
 | deleted_at | timestamptz? |
 | created_at | timestamptz |
 | updated_at | timestamptz |
 
-Indexes: `(customer_id)`, `unique(customer_id) where is_default and deleted_at is null`
+Indexes: `(customer_id)`, `unique(customer_id) where is_default and deleted_at is null`, `(geocoded_at)`
 
 **marketing_preferences**
 
@@ -736,6 +758,8 @@ Indexes: `(email_hash, at desc)`, `(ip, at desc)`
 | listRecentlyViewedItems | `(owner: { customerId?: uuid, guestSessionId?: string }, limit: int) => RecentlyViewedItem[]`<br>Recently viewed rows, newest first, with the title and image snapshot and availability (same rows as GET /recently-viewed). In GraphQL the current price comes from offers through RecentlyViewedItem.product. | graphql |
 | searchCustomers | `(filter: { search?: string, statuses?: string[], verification?: string, joinedFrom?: date, joinedTo?: date }, page: PageInput) => Page<CustomerSnapshot>`<br>Admin customer list with the same filters and permission rules as GET /api/admin/customers/customers | graphql, search |
 | exportRows | `(dataset: string, filters: json, principal: identity.Principal, cursor?: string) => { rows: json[], nextCursor?: string }`<br>Export rows for reports dataset customers.admin.accounts (the filtered customer list) | reports |
+| customerLocation | `(customerId: uuid) => CustomerLocation | null`<br>The customer's point from their geocoded default delivery address (city and label from that address), or null when they have no default address or it could not be geocoded. The store then shows the city without a distance. No device location is used. | food, services, farm, departments |
+| geocodeAddress | `(input: { line1?: string, city: string, region: string, postalCode?: string, country?: string }) => GeoPoint | null`<br>A point for an address through the geocoder provider (ZIP centroid, falling back to the city centroid), or null when unknown or no provider is configured. Other modules geocode staff-entered addresses (restaurants, providers, dealers) with it. | food, services, farm, departments |
 
 ## Permissions
 
@@ -777,6 +801,7 @@ Checked through the access module (limits per role, second reviewer).
 | `customers.expire-export-links` | hourly | Expire ready exports after exportLinkValidDays and delete the file |
 | `customers.complete-closures` | daily 02:00 market time | For closures past the cooling-off date, re-check obligations; close the account, anonymise profile and addresses, keep order references. When obligations block it, keep the request and publish customers.closure.delayed (once per new set of blockers) |
 | `customers.prune-recently-viewed` | daily | Delete rows older than recentlyViewedRetentionDays and guest rows whose session expired |
+| `customers.geocode-addresses` | every 10 min | Backfill: geocode saved addresses that were never geocoded (addresses saved before geocoding existed, or while the geocoder failed), and retry addresses the geocoder could not place after a week. Batches of 200; defaults first |
 
 ## Settings
 
@@ -794,6 +819,7 @@ Checked through the access module (limits per role, second reviewer).
 
 ## Integrations
 - **Address validation provider (optional)**: Normalise US addresses and detect PO boxes; format rules only when not configured
+- **Geocoder (geocoder port)**: A point (lat/lng) for each saved address and for addresses other modules pass to geocodeAddress. Development: a built-in table of ZIP centroids for the Portland–Vancouver–Salem metro and city centroids for the seed data (CA, OR, WA), city fallback. Production: no provider is configured yet, so addresses keep no point and the store shows the city without distances
 
 ## Notes
 - Customer id is separate from the identity user id (one-to-one). Other modules store customerId; the guest order flow stores email only. Ids are never interchangeable: callers that hold an account id resolve it with getCustomerByUserId, and no API accepts either.
@@ -806,6 +832,7 @@ Checked through the access module (limits per role, second reviewer).
 - Account actions call identity in-process: send_password_reset uses the forced-reset tool, sign_out_everywhere uses revokeSessions, completed closure uses closeAccount.
 - Customer restrictions applied directly by staff are appealed through a support case (route stated in appealRoute). Restrictions that come from a trust enforcement are appealed in trust (POST /api/store/trust/appeals).
 - Address changes never alter accepted orders: checkout copies the address via getAddressForOrder and orders store that copy.
+- Customer location (owner decision 2026-10-22): the customer's point is their saved default delivery address, geocoded on the server when it is saved (create, edit, checkout save) and by the customers.geocode-addresses backfill. No device location permission. Coordinates stay internal: store address responses do not carry them; modules that show distances read customerLocation and use kernel/lib/geo.ts. A failed geocode never fails the save.
 
 ## GraphQL (read layer)
 

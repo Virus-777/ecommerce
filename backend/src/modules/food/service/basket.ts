@@ -48,7 +48,7 @@ export class FoodBasket extends FoodCatalog {
     if (!restaurant) return { basket: this.emptyBasket(), restaurant: undefined, lines: [] };
     const items = new Map((await this.repo.itemsByIds([...new Set(stored.map((l) => l.itemId))])).map((i) => [i.id, i]));
     const lines = stored.map((l) => this.priceLine(l, items.get(l.itemId), restaurant.id));
-    const refs = await this.refsMap([restaurant.image_id, restaurant.logo_id, ...lines.map((l) => (l.item ? stringsOf(l.item.photo_ids)[0] : null))]);
+    const [refs, viewer] = await Promise.all([this.refsMap([restaurant.image_id, restaurant.logo_id, ...lines.map((l) => (l.item ? stringsOf(l.item.photo_ids)[0] : null))]), this.viewerOf(customerId, [restaurant.id])]);
     const cur = restaurant.currency;
     const subtotal = lines.filter((l) => l.available).reduce((s, l) => s + l.unitPrice * l.stored.quantity, 0);
     const free = restaurant.free_delivery_over != null && subtotal >= restaurant.free_delivery_over;
@@ -79,7 +79,7 @@ export class FoodBasket extends FoodCatalog {
       restaurant,
       lines,
       basket: {
-        restaurant: this.restaurantCard(restaurant, refs),
+        restaurant: this.restaurantCard(restaurant, refs, this.now(), viewer),
         lines: out,
         itemCount: lines.reduce((s, l) => s + l.stored.quantity, 0),
         subtotal: money(subtotal, cur),

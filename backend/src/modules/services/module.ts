@@ -1,6 +1,7 @@
 import { defineModule } from '../../kernel/module-system/index.js';
 import { spec } from '../../spec/services.js';
 import { storeRoutes } from './http/store.js';
+import { mongoMigrations } from './migrations.js';
 import { adminRoutes } from './http/admin.js';
 import { ServicesRepository } from './repository.js';
 import { schemas } from './schema.js';
@@ -14,8 +15,9 @@ import { ServicesService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.0.0',
+  version: '1.1.0',
   schemas,
+  mongoMigrations,
   register(ctx) {
     const service = new ServicesService({ repo: new ServicesRepository(ctx.mongo), ctx });
     ctx.provide(service);

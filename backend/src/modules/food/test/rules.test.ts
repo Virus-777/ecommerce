@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkChoices, choicesPriced, discountBadge, etaLabel, etaWindow, groupsOf, lowestUnitPrice, makeRef, openStateOf, shortName } from '../domain/rules.js';
+import { checkChoices, choicesPriced, discountBadge, etaLabel, etaWindow, geocodeInputOf, groupsOf, lowestUnitPrice, makeRef, openStateOf, orderedItemsOf, shortName } from '../domain/rules.js';
 import { EXTRAS_GROUP, SIZE_GROUP } from './helpers.js';
 
 const LA = 'America/Los_Angeles';
@@ -71,5 +71,24 @@ describe('labels', () => {
     expect(makeRef()).toMatch(/^FD-[2-9A-HJ-NP-Z]{5}$/);
     expect(shortName('Dana Ross')).toBe('Dana R.');
     expect(shortName('')).toBe('Customer');
+  });
+});
+
+describe('places and reviews', () => {
+  const at = (address: string | null, city: string | null, region: string | null = null, postal_code: string | null = null) => ({ address, city, region, postal_code });
+  it('reads a restaurant address for the geocoder', () => {
+    expect(geocodeInputOf(at('118 Bay Rd', 'Portland, OR'))).toEqual({ line1: '118 Bay Rd', city: 'Portland', region: 'OR' });
+    expect(geocodeInputOf(at(' 9 Harbor Way ', 'Portland', 'OR', '97209'))).toEqual({ line1: '9 Harbor Way', city: 'Portland', region: 'OR', postalCode: '97209' });
+    // a region given apart wins over a different state written in the city
+    expect(geocodeInputOf(at(null, 'Vancouver, BC', 'WA'))).toEqual({ city: 'Vancouver, BC', region: 'WA' });
+    expect(geocodeInputOf(at(null, 'vancouver, wa', 'WA'))).toEqual({ city: 'vancouver', region: 'WA' });
+    expect(geocodeInputOf(at('1 Main St', null))).toBeNull();
+    expect(geocodeInputOf(at('1 Main St', '  '))).toBeNull();
+  });
+
+  it('lists what a reviewer ordered', () => {
+    expect(orderedItemsOf([{ name: 'Margherita pizza 12"', quantity: 2 }, { name: 'Tiramisu', quantity: 1 }])).toEqual(['2 × Margherita pizza 12"', 'Tiramisu']);
+    expect(orderedItemsOf(null)).toEqual([]);
+    expect(orderedItemsOf([null, { quantity: 3 }])).toEqual([]);
   });
 });

@@ -1,6 +1,6 @@
 import { contains, type ModuleStore } from '../../kernel/mongo/index.js';
 import type { Page, PageRequest } from '../../kernel/lib/pagination.js';
-import type { AuthorRow, CompanyRow, FarmSetupRow, GameRow, IndustryRow, InquiryRow, PhonePicksRow, PostRow, RankingRow, ReactionRow, ReplyRow, ReportRow, TopicRow } from './ports.js';
+import type { AuthorRow, CompanyRow, FarmSetupRow, FollowRow, GameKeyRow, GameRow, IndustryRow, InquiryRow, PhonePicksRow, PlayerRow, PostRow, PrizeAwardRow, PrizeWeekRow, RankingRow, ReactionRow, ReplyLikeRow, ReplyRow, ReportRow, ReviewRow, SaveRow, ScoreRow, TopicRow } from './ports.js';
 
 export type Lock = { forUpdate?: boolean };
 export type SlugTable = 'topics' | 'authors' | 'posts' | 'industries' | 'companies' | 'games';
@@ -27,6 +27,15 @@ export class DepartmentsRepository {
       inquiries: store.table<InquiryRow>('inquiries'),
       games: store.table<GameRow>('games'),
       rankings: store.table<RankingRow>('rankings'),
+      saves: store.table<SaveRow>('blog_saves'),
+      follows: store.table<FollowRow>('blog_follows'),
+      replyLikes: store.table<ReplyLikeRow>('blog_reply_likes'),
+      reviews: store.table<ReviewRow>('reviews'),
+      players: store.table<PlayerRow>('players'),
+      keys: store.table<GameKeyRow>('game_keys'),
+      scores: store.table<ScoreRow>('scores'),
+      prizeWeeks: store.table<PrizeWeekRow>('prize_weeks'),
+      awards: store.table<PrizeAwardRow>('prize_awards'),
     };
   }
 
@@ -169,6 +178,8 @@ export class DepartmentsRepository {
   async deletePostCascade(id: string): Promise<void> {
     const replyIds = await this.#t.replies.distinct<string>('id', { post_id: id });
     await this.#t.reactions.deleteMany({ post_id: id });
+    await this.#t.saves.deleteMany({ post_id: id });
+    await this.#t.replyLikes.deleteMany({ post_id: id });
     await this.#t.replies.deleteMany({ post_id: id });
     await this.#t.reports.deleteMany({ $or: [{ target_type: 'post', target_id: id }, ...(replyIds.length ? [{ target_type: 'reply', target_id: { $in: replyIds } }] : [])] });
     await this.#t.posts.delete(id);
@@ -200,6 +211,8 @@ export class DepartmentsRepository {
   }
   /** Deletes a reply with the replies that answer it */
   async deleteReplyCascade(id: string): Promise<void> {
+    const answers = await this.#t.replies.distinct<string>('id', { parent_id: id });
+    await this.#t.replyLikes.deleteMany({ reply_id: { $in: [id, ...answers] } });
     await this.#t.replies.deleteMany({ parent_id: id });
     await this.#t.replies.delete(id);
   }
@@ -300,15 +313,18 @@ export class DepartmentsRepository {
   /** Deletes a company with its inquiries */
   async deleteCompanyCascade(id: string): Promise<void> {
     await this.#t.inquiries.deleteMany({ company_id: id });
+    await this.#t.reviews.deleteMany({ target_type: 'company', target_id: id });
     await this.#t.companies.delete(id);
   }
-  pageCompanies(f: { status?: string; industryId?: string; hiddenIndustryIds?: string[]; q?: string }, page: PageRequest): Promise<Page<CompanyRow>> {
+  /** Companies in staff order; the page always carries the total */
+  async pageCompanies(f: { status?: string; industryId?: string; hiddenIndustryIds?: string[]; q?: string }, page: PageRequest): Promise<Page<CompanyRow>> {
     const filter: Record<string, unknown> = {};
     if (f.status) filter.status = f.status;
     if (f.industryId) filter.industry_id = f.industryId;
     else if (f.hiddenIndustryIds?.length) filter.industry_id = { $nin: f.hiddenIndustryIds };
     if (f.q?.trim()) filter.$or = [{ name: contains(f.q) }, { tagline: contains(f.q) }, { city: contains(f.q) }];
-    return this.#t.companies.page(filter, page, { column: 'position', direction: 'asc' });
+    const res = await this.#t.companies.page(filter, page, { column: 'position', direction: 'asc' });
+    return res.total === undefined ? { ...res, total: await this.#t.companies.count(filter) } : res;
   }
   /** The next position at the end of the list */
   async nextCompanyPosition(): Promise<number> {
@@ -355,9 +371,14 @@ export class DepartmentsRepository {
   updateGame(id: string, patch: Partial<GameRow>): Promise<GameRow | undefined> {
     return this.#t.games.update(id, patch);
   }
-  /** Deletes a game with its ranking tables */
+  /** Deletes a game with its ranking tables, reviews, server keys, scores and prize weeks */
   async deleteGameCascade(id: string): Promise<void> {
     await this.#t.rankings.deleteMany({ game_id: id });
+    await this.#t.reviews.deleteMany({ target_type: 'game', target_id: id });
+    await this.#t.keys.deleteMany({ game_id: id });
+    await this.#t.scores.deleteMany({ game_id: id });
+    await this.#t.prizeWeeks.deleteMany({ game_id: id });
+    await this.#t.awards.deleteMany({ game_id: id });
     await this.#t.games.delete(id);
   }
   async nextGamePosition(): Promise<number> {
@@ -378,6 +399,236 @@ export class DepartmentsRepository {
   }
   saveRanking(row: RankingRow): Promise<RankingRow> {
     return this.#t.rankings.upsert(row, { key: ['game_id', 'period'], update: { entries: row.entries, updated_by: row.updated_by, updated_at: row.updated_at } });
+  }
+
+  /* ---------------------------------------------------------------- blog saves, follows and reply likes */
+
+  getSave(customerId: string, postId: string): Promise<SaveRow | undefined> {
+    return this.#t.saves.findOne({ customer_id: customerId, post_id: postId });
+  }
+  insertSave(row: SaveRow): Promise<SaveRow | undefined> {
+    return this.#t.saves.insertIfAbsent(row, ['customer_id', 'post_id']);
+  }
+  deleteSave(customerId: string, postId: string): Promise<number> {
+    return this.#t.saves.deleteMany({ customer_id: customerId, post_id: postId });
+  }
+  pageSaves(customerId: string, page: PageRequest): Promise<Page<SaveRow>> {
+    return this.#t.saves.page({ customer_id: customerId }, page, { column: 'saved_at', direction: 'desc' });
+  }
+
+  getFollow(customerId: string, authorId: string): Promise<FollowRow | undefined> {
+    return this.#t.follows.findOne({ customer_id: customerId, author_id: authorId });
+  }
+  insertFollow(row: FollowRow): Promise<FollowRow | undefined> {
+    return this.#t.follows.insertIfAbsent(row, ['author_id', 'customer_id']);
+  }
+  deleteFollow(customerId: string, authorId: string): Promise<number> {
+    return this.#t.follows.deleteMany({ customer_id: customerId, author_id: authorId });
+  }
+  countFollowers(authorId: string): Promise<number> {
+    return this.#t.follows.count({ author_id: authorId });
+  }
+  /** Followers per author */
+  async followerCounts(authorIds: string[]): Promise<Map<string, number>> {
+    if (!authorIds.length) return new Map();
+    const rows = await this.#t.follows.aggregate<{ _id: string; n: number }>([{ $match: { author_id: { $in: authorIds } } }, { $group: { _id: '$author_id', n: { $sum: 1 } } }]);
+    return new Map(rows.map((r) => [String(r._id), r.n]));
+  }
+  followerIds(authorId: string): Promise<string[]> {
+    return this.#t.follows.distinct<string>('customer_id', { author_id: authorId });
+  }
+  pageFollows(customerId: string, page: PageRequest): Promise<Page<FollowRow>> {
+    return this.#t.follows.page({ customer_id: customerId }, page, { column: 'followed_at', direction: 'desc' });
+  }
+
+  getReplyLike(replyId: string, customerId: string): Promise<ReplyLikeRow | undefined> {
+    return this.#t.replyLikes.findOne({ reply_id: replyId, customer_id: customerId });
+  }
+  insertReplyLike(row: ReplyLikeRow): Promise<ReplyLikeRow | undefined> {
+    return this.#t.replyLikes.insertIfAbsent(row, ['reply_id', 'customer_id']);
+  }
+  deleteReplyLike(replyId: string, customerId: string): Promise<number> {
+    return this.#t.replyLikes.deleteMany({ reply_id: replyId, customer_id: customerId });
+  }
+  countReplyLikes(replyId: string): Promise<number> {
+    return this.#t.replyLikes.count({ reply_id: replyId });
+  }
+  /** Which of a post's replies the customer liked */
+  async likedReplyIds(postId: string, customerId: string): Promise<Set<string>> {
+    return new Set(await this.#t.replyLikes.distinct<string>('reply_id', { post_id: postId, customer_id: customerId }));
+  }
+
+  /* ---------------------------------------------------------------- reviews */
+
+  getReview(id: string): Promise<ReviewRow | undefined> {
+    return this.#t.reviews.get(id);
+  }
+  reviewOf(target: ReviewRow['target_type'], targetId: string, customerId: string): Promise<ReviewRow | undefined> {
+    return this.#t.reviews.findOne({ target_type: target, target_id: targetId, customer_id: customerId });
+  }
+  /** Inserts the review, or changes stars, text and name of the customer's existing one (hidden stays as it is) */
+  saveReview(row: ReviewRow): Promise<ReviewRow> {
+    return this.#t.reviews.upsert(row, { key: ['target_type', 'target_id', 'customer_id'], update: { stars: row.stars, text: row.text, name: row.name, updated_at: row.updated_at } });
+  }
+  updateReview(id: string, patch: Partial<ReviewRow>): Promise<ReviewRow | undefined> {
+    return this.#t.reviews.update(id, patch);
+  }
+  pageVisibleReviews(target: ReviewRow['target_type'], targetId: string, stars: number | undefined, page: PageRequest): Promise<Page<ReviewRow>> {
+    return this.#t.reviews.page({ target_type: target, target_id: targetId, hidden: false, ...(stars ? { stars } : {}) }, page, { column: 'updated_at', direction: 'desc' });
+  }
+  /** Visible reviews per target and stars: { targetId → { stars → count } } */
+  async ratingCounts(target: ReviewRow['target_type'], targetIds: string[]): Promise<Map<string, Map<number, number>>> {
+    const out = new Map<string, Map<number, number>>();
+    if (!targetIds.length) return out;
+    const rows = await this.#t.reviews.aggregate<{ _id: { t: string; s: number }; n: number }>([
+      { $match: { target_type: target, target_id: { $in: targetIds }, hidden: false } },
+      { $group: { _id: { t: '$target_id', s: '$stars' }, n: { $sum: 1 } } },
+    ]);
+    for (const r of rows) {
+      const m = out.get(String(r._id.t)) ?? new Map<number, number>();
+      m.set(Number(r._id.s), r.n);
+      out.set(String(r._id.t), m);
+    }
+    return out;
+  }
+  async hiddenReviewCounts(target: ReviewRow['target_type'], targetIds: string[]): Promise<Map<string, number>> {
+    if (!targetIds.length) return new Map();
+    const rows = await this.#t.reviews.aggregate<{ _id: string; n: number }>([{ $match: { target_type: target, target_id: { $in: targetIds }, hidden: true } }, { $group: { _id: '$target_id', n: { $sum: 1 } } }]);
+    return new Map(rows.map((r) => [String(r._id), r.n]));
+  }
+  pageAdminReviews(f: { target?: string; targetId?: string; hidden?: boolean; stars?: number }, page: PageRequest): Promise<Page<ReviewRow>> {
+    const filter: Record<string, unknown> = {};
+    if (f.target) filter.target_type = f.target;
+    if (f.targetId) filter.target_id = f.targetId;
+    if (f.hidden !== undefined) filter.hidden = f.hidden;
+    if (f.stars) filter.stars = f.stars;
+    return this.#t.reviews.page(filter, page, { column: 'updated_at', direction: 'desc' });
+  }
+
+  /* ---------------------------------------------------------------- players and server keys */
+
+  playerByCustomer(customerId: string): Promise<PlayerRow | undefined> {
+    return this.#t.players.findOne({ customer_id: customerId });
+  }
+  playerByCode(code: string): Promise<PlayerRow | undefined> {
+    return this.#t.players.findOne({ code });
+  }
+  playersByCustomers(customerIds: string[]): Promise<PlayerRow[]> {
+    return customerIds.length ? this.#t.players.find({ customer_id: { $in: customerIds } }) : Promise.resolve([]);
+  }
+  /** Undefined when the customer already has a player ID or the code is taken */
+  insertPlayer(row: PlayerRow): Promise<PlayerRow | undefined> {
+    return this.#t.players.insertIfAbsent(row);
+  }
+  updatePlayer(id: string, patch: Partial<PlayerRow>): Promise<PlayerRow | undefined> {
+    return this.#t.players.update(id, patch);
+  }
+
+  listKeys(gameId: string): Promise<GameKeyRow[]> {
+    return this.#t.keys.find({ game_id: gameId }, { sort: { created_at: -1 } });
+  }
+  getKey(id: string): Promise<GameKeyRow | undefined> {
+    return this.#t.keys.get(id);
+  }
+  keyByHash(hash: string): Promise<GameKeyRow | undefined> {
+    return this.#t.keys.findOne({ key_hash: hash });
+  }
+  insertKey(row: GameKeyRow): Promise<GameKeyRow> {
+    return this.#t.keys.insert(row);
+  }
+  updateKey(id: string, patch: Partial<GameKeyRow>): Promise<GameKeyRow | undefined> {
+    return this.#t.keys.update(id, patch);
+  }
+  countActiveKeys(gameId: string): Promise<number> {
+    return this.#t.keys.count({ game_id: gameId, status: 'active' });
+  }
+  async activeKeyCounts(gameIds: string[]): Promise<Map<string, number>> {
+    if (!gameIds.length) return new Map();
+    const rows = await this.#t.keys.aggregate<{ _id: string; n: number }>([{ $match: { game_id: { $in: gameIds }, status: 'active' } }, { $group: { _id: '$game_id', n: { $sum: 1 } } }]);
+    return new Map(rows.map((r) => [String(r._id), r.n]));
+  }
+
+  /* ---------------------------------------------------------------- scores */
+
+  scoreByPartnerId(gameId: string, partnerScoreId: string): Promise<ScoreRow | undefined> {
+    return this.#t.scores.findOne({ game_id: gameId, partner_score_id: partnerScoreId });
+  }
+  /** Undefined when the game already has a score with this partner id */
+  insertScore(row: ScoreRow): Promise<ScoreRow | undefined> {
+    return this.#t.scores.insertIfAbsent(row, ['game_id', 'partner_score_id']);
+  }
+  countScores(f: { gameId?: string; customerId?: string }): Promise<number> {
+    return this.#t.scores.count({ ...(f.gameId ? { game_id: f.gameId } : {}), ...(f.customerId ? { customer_id: f.customerId } : {}) });
+  }
+  async scoreCounts(gameIds: string[]): Promise<Map<string, number>> {
+    if (!gameIds.length) return new Map();
+    const rows = await this.#t.scores.aggregate<{ _id: string; n: number }>([{ $match: { game_id: { $in: gameIds } } }, { $group: { _id: '$game_id', n: { $sum: 1 } } }]);
+    return new Map(rows.map((r) => [String(r._id), r.n]));
+  }
+  hasScores(gameId: string): Promise<boolean> {
+    return this.#t.scores.exists({ game_id: gameId });
+  }
+  /** The best score of each player in a game, within a prize week or a market day, or (all time) before an instant */
+  async bests(gameId: string, f: { week?: string; day?: string; before?: Date; customerId?: string } = {}): Promise<{ customerId: string; score: number; at: Date }[]> {
+    const match: Record<string, unknown> = { game_id: gameId };
+    if (f.week) match.week = f.week;
+    if (f.day) match.day = f.day;
+    if (f.before) match.played_at = { $lt: f.before };
+    if (f.customerId) match.customer_id = f.customerId;
+    const rows = await this.#t.scores.aggregate<{ _id: string; score: number; at: Date }>([
+      { $match: match },
+      { $sort: { score: -1, played_at: 1 } },
+      { $group: { _id: '$customer_id', score: { $first: '$score' }, at: { $first: '$played_at' } } },
+    ]);
+    return rows.map((r) => ({ customerId: String(r._id), score: r.score, at: new Date(r.at) }));
+  }
+  /** Players with a score in each game's prize week */
+  async weekPlayerCounts(gameIds: string[], week: string): Promise<Map<string, number>> {
+    if (!gameIds.length) return new Map();
+    const rows = await this.#t.scores.aggregate<{ _id: string; n: number }>([{ $match: { game_id: { $in: gameIds }, week } }, { $group: { _id: { g: '$game_id', c: '$customer_id' } } }, { $group: { _id: '$_id.g', n: { $sum: 1 } } }]);
+    return new Map(rows.map((r) => [String(r._id), r.n]));
+  }
+
+  /* ---------------------------------------------------------------- prize weeks and awards */
+
+  getPrizeWeek(gameId: string, week: string): Promise<PrizeWeekRow | undefined> {
+    return this.#t.prizeWeeks.findOne({ game_id: gameId, week });
+  }
+  savePrizeWeek(row: PrizeWeekRow): Promise<PrizeWeekRow> {
+    return this.#t.prizeWeeks.upsert(row, { key: ['game_id', 'week'], update: { state: row.state, winners: row.winners, updated_at: row.updated_at } });
+  }
+  awardOf(gameId: string, week: string, customerId: string): Promise<PrizeAwardRow | undefined> {
+    return this.#t.awards.findOne({ game_id: gameId, week, customer_id: customerId });
+  }
+  insertAward(row: PrizeAwardRow): Promise<PrizeAwardRow | undefined> {
+    return this.#t.awards.insertIfAbsent(row, ['game_id', 'week', 'customer_id']);
+  }
+  updateAward(id: string, patch: Partial<PrizeAwardRow>): Promise<PrizeAwardRow | undefined> {
+    return this.#t.awards.update(id, patch);
+  }
+  pageAwards(gameId: string, f: { week?: string; state?: string }, page: PageRequest): Promise<Page<PrizeAwardRow>> {
+    return this.#t.awards.page({ game_id: gameId, ...(f.week ? { week: f.week } : {}), ...(f.state ? { state: f.state } : {}) }, page, { column: 'created_at', direction: 'desc' });
+  }
+
+  /* ---------------------------------------------------------------- personal data export */
+
+  /** Every row about a customer, by any of their ids (account id or customers-module id) */
+  async customerData(ids: string[]) {
+    const mine = { $in: ids };
+    const [reactions, replies, reports, saves, follows, replyLikes, inquiries, reviews, players, scores, awards] = await Promise.all([
+      this.#t.reactions.find({ customer_id: mine }, { sort: { at: 1 } }),
+      this.#t.replies.find({ customer_id: mine }, { sort: { created_at: 1 } }),
+      this.#t.reports.find({ reporter_id: mine }, { sort: { created_at: 1 } }),
+      this.#t.saves.find({ customer_id: mine }, { sort: { saved_at: 1 } }),
+      this.#t.follows.find({ customer_id: mine }, { sort: { followed_at: 1 } }),
+      this.#t.replyLikes.find({ customer_id: mine }, { sort: { at: 1 } }),
+      this.#t.inquiries.find({ customer_id: mine }, { sort: { created_at: 1 } }),
+      this.#t.reviews.find({ customer_id: mine }, { sort: { created_at: 1 } }),
+      this.#t.players.find({ customer_id: mine }, { sort: { created_at: 1 } }),
+      this.#t.scores.find({ customer_id: mine }, { sort: { played_at: 1 } }),
+      this.#t.awards.find({ customer_id: mine }, { sort: { created_at: 1 } }),
+    ]);
+    return { reactions, replies, reports, saves, follows, replyLikes, inquiries, reviews, players, scores, awards };
   }
 
   /* ---------------------------------------------------------------- slugs */

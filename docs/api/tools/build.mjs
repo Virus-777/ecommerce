@@ -109,6 +109,18 @@ const REACT_SCREENS = [
   ['admin/departments-software-app', 'admin', 'Departments', 'Edit app'],
   ['admin/departments-food', 'admin', 'Departments', 'Food delivery'],
   ['admin/departments-rewards', 'admin', 'Departments', 'Daily rewards'],
+  ['store/saved', 'store', 'Departments', 'Saved places and posts'],
+  ['store/food-reviews', 'store', 'Departments', 'Restaurant reviews'],
+  ['store/booking-map', 'store', 'Departments', 'Booking map'],
+  ['store/provider', 'store', 'Departments', 'Service provider'],
+  ['store/devices', 'store', 'Departments', 'My devices'],
+  ['store/device', 'store', 'Departments', 'Register a device'],
+  ['store/play-player', 'store', 'Departments', 'Your player ID'],
+  ['store/farm-orders', 'store', 'Departments', 'My farm orders'],
+  ['store/farm-order-detail', 'store', 'Departments', 'Farm order'],
+  ['admin/departments-reviews', 'admin', 'Departments', 'Department reviews'],
+  ['admin/departments-farm-orders', 'admin', 'Departments', 'Farm orders and dealers'],
+  ['admin/departments-devices', 'admin', 'Departments', 'Registered devices'],
 ];
 const SCREENS = loadScreens();
 

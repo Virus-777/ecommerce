@@ -43,6 +43,10 @@ export const adminRoutes = (service: SoftwareService) =>
     listPurchasesAdmin: async ({ query, page }) => service.listPurchasesAdmin(query, page),
     /** POST /entitlements: Give a customer an app (support goodwill or a payment settled elsewhere) */
     grantApp: async ({ body, actor, requestId }) => service.grantApp(body, { actor, requestId }),
+    /** GET /entitlements: Who owns which app, with licence keys, newest first */
+    listEntitlementsAdmin: async ({ query, page }) => service.listEntitlementsAdmin(query, page),
+    /** POST /entitlements/{id}/reissue-licence: Replace an owner's licence key */
+    reissueLicence: async ({ params, body, actor, requestId }) => service.reissueLicence(params.id, body, { actor, requestId }),
     /** GET /reviews: Reviews, newest first */
     listReviewsAdmin: async ({ query, page }) => service.listReviewsAdmin(query, page),
     /** POST /reviews/{id}/moderate: Hide or show a review */

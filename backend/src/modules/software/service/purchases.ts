@@ -1,7 +1,8 @@
 /**
  * Owning apps: free apps on Get, purchases of an app or a pack paid with a card through payments purchase intents
  * (authorize, then capture at once), the bank challenge and retries, the asynchronous outcomes payments publishes,
- * the library, downloads, staff grants and the customer's data export.
+ * the library with licence keys, downloads (any signed-in customer), staff grants, the owners list and licence
+ * reissues, and the customer's data export.
  *
  * Money safety: the purchase is one row per Idempotency-Key; payments allows one live intent per purchase and
  * answers the same key with the first result; entitlements are unique per (customer, app), so a redelivered event
@@ -15,8 +16,8 @@ import type { Page, PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type { DownloadLink } from '../../../spec/media.js';
 import type { AuthorizeResult, MethodSelection, PaymentOptions, PurchasePaymentStatus } from '../../../spec/payments.js';
-import type { Entitlement, GrantInput, LibraryApp, PurchaseAdmin, PurchaseInput, SoftwarePurchase } from '../../../spec/software.js';
-import { ABANDON_AFTER_MS, PURCHASE_STATUS_LABEL, currentAmount, makeRef, type PurchaseStatus } from '../domain/rules.js';
+import type { Entitlement, EntitlementAdmin, GrantInput, LibraryApp, PurchaseAdmin, PurchaseInput, ReissueLicenceInput, SoftwarePurchase } from '../../../spec/software.js';
+import { ABANDON_AFTER_MS, PURCHASE_STATUS_LABEL, currentAmount, keyTail, makeRef, normaliseLicenceKey, type PurchaseStatus } from '../domain/rules.js';
 import { softwarePurchaseMachine } from '../domain/state-machines.js';
 import type { AppRow, EntitlementRow, PurchaseRow } from '../ports.js';
 import { actorKey, fileOf, filesOf, invalid, notFound, requireText, stringsOf, unique, type By } from './base.js';
@@ -64,8 +65,8 @@ export class SoftwarePurchases extends SoftwareCatalog {
     };
   }
 
-  private entitlementOut(e: EntitlementRow, a: Pick<AppRow, 'id' | 'slug' | 'title'>): Entitlement {
-    return { appId: a.id, slug: a.slug, title: a.title, source: e.source, ownedAt: e.created_at.toISOString() };
+  private entitlementOut(e: EntitlementRow, a: Pick<AppRow, 'id' | 'slug' | 'title' | 'free'>): Entitlement {
+    return { appId: a.id, slug: a.slug, title: a.title, source: e.source, ownedAt: e.created_at.toISOString(), licenceKey: a.free ? null : e.licence_key };
   }
 
   /** The customer's own purchase; another customer's is NOT_FOUND */
@@ -81,7 +82,7 @@ export class SoftwarePurchases extends SoftwareCatalog {
   async getFreeApp(customerId: string, slug: string): Promise<Entitlement> {
     const a = await this.publishedApp(slug);
     if (!a.free) throw this.ctx.error('NOT_FREE', 'This app is paid; buy it instead.');
-    const row = await this.repo.insertEntitlement({ id: newId(), customer_id: customerId, app_id: a.id, source: 'free', purchase_id: null, granted_by: null, created_at: this.now() });
+    const row = await this.repo.insertEntitlement({ id: newId(), customer_id: customerId, app_id: a.id, source: 'free', purchase_id: null, granted_by: null, licence_key: null, licence_issued_at: null, licence_reissues: null, created_at: this.now() });
     if (row) await this.repo.bump(a.id, { owners: 1 });
     return this.entitlementOut(row ?? (await this.repo.entitlement(customerId, a.id))!, a);
   }
@@ -243,8 +244,13 @@ export class SoftwarePurchases extends SoftwareCatalog {
       if (p.intent_id !== intentId || !OPEN.includes(p.status)) return { p, granted: null };
       const now = this.now();
       const granted: string[] = [];
-      for (const item of itemsOf(p.items)) {
-        const row = await tx.insertEntitlement({ id: newId(), customer_id: p.customer_id, app_id: item.appId, source: p.pack_id ? 'pack' : 'purchase', purchase_id: p.id, granted_by: null, created_at: now });
+      const items = itemsOf(p.items);
+      const apps = new Map((await tx.appsByIds(items.map((i) => i.appId))).map((a) => [a.id, a]));
+      for (const item of items) {
+        if (await tx.entitlement(p.customer_id, item.appId)) continue; // owned already (a pack buyer keeps what they had)
+        // a bought app is paid: its licence key comes with it (an app deleted meanwhile still gets one)
+        const licence = await this.licenceFor(apps.get(item.appId) ?? { free: false }, now, tx);
+        const row = await tx.insertEntitlement({ id: newId(), customer_id: p.customer_id, app_id: item.appId, source: p.pack_id ? 'pack' : 'purchase', purchase_id: p.id, granted_by: null, ...licence, created_at: now });
         if (!row) continue; // owned already (a pack buyer keeps what they had)
         granted.push(item.appId);
         await tx.bump(item.appId, { owners: 1 });
@@ -318,21 +324,22 @@ export class SoftwarePurchases extends SoftwareCatalog {
   async listLibrary(customerId: string, page: PageRequest): Promise<Page<LibraryApp>> {
     const paged = await this.repo.pageCustomerEntitlements(customerId, page);
     const apps = new Map((await this.repo.appsByIds(paged.items.map((e) => e.app_id))).map((a) => [a.id, a]));
-    const rows = paged.items.filter((e) => apps.has(e.app_id));
+    const rows = await Promise.all(paged.items.filter((e) => apps.has(e.app_id)).map((e) => this.ensureLicence(e, apps.get(e.app_id)!)));
     const cards = await this.appCards(rows.map((e) => apps.get(e.app_id)!), customerId);
-    return { ...paged, items: rows.map((e, i) => ({ app: cards[i]!, source: e.source, ownedAt: e.created_at.toISOString() })) };
+    return { ...paged, items: rows.map((e, i) => ({ app: cards[i]!, source: e.source, ownedAt: e.created_at.toISOString(), licence: this.licenceOut(e, apps.get(e.app_id)!) })) };
   }
 
   /* ---------------------------------------------------------------- downloads */
 
   /**
    * A signed link (media.signedDownload, downloadUrlTtlMinutes) to the package, or to a database by its file id, for
-   * an owner (NOT_OWNED otherwise; an owner keeps downloading a hidden app). Counts a download for the package.
+   * any signed-in customer: owning the app is not needed (owner decision 2026-10-22; a paid app is unlocked by its
+   * licence key). A hidden app is downloaded by its owners only. Counts a download for the package.
    */
   async createDownload(customerId: string, slug: string, input: { fileId?: string | null }, principal: Principal): Promise<DownloadLink> {
     const a = await this.repo.appBySlug(slug);
     if (!a || a.status === 'draft' || a.status === 'in_review') throw notFound('App');
-    if (!(await this.repo.entitlement(customerId, a.id))) throw this.ctx.error('NOT_OWNED', 'Get or buy the app first.');
+    if (a.status !== 'published' && !(await this.repo.entitlement(customerId, a.id))) throw notFound('App');
     const file = input.fileId ? filesOf(a.databases).find((f) => f.id === input.fileId) : fileOf(a.package);
     if (!file) throw this.ctx.error('FILE_MISSING', "That file isn't available yet.");
     let link: DownloadLink;
@@ -384,11 +391,94 @@ export class SoftwarePurchases extends SoftwareCatalog {
     if (!a) throw notFound('App');
     const customers = this.ctx.tryUse('customers');
     if (customers && !(await this.soft('customers.getCustomer', () => customers.getCustomer(input.customerId), null))) throw notFound('Customer');
-    const row = await this.repo.insertEntitlement({ id: newId(), customer_id: input.customerId, app_id: a.id, source: 'staff', purchase_id: null, granted_by: actorKey(by.actor), created_at: this.now() });
+    if (await this.repo.entitlement(input.customerId, a.id)) throw this.ctx.error('ALREADY_OWNED', 'The customer already owns this app.');
+    const now = this.now();
+    const row = await this.repo.insertEntitlement({ id: newId(), customer_id: input.customerId, app_id: a.id, source: 'staff', purchase_id: null, granted_by: actorKey(by.actor), ...(await this.licenceFor(a, now)), created_at: now });
     if (!row) throw this.ctx.error('ALREADY_OWNED', 'The customer already owns this app.');
     await this.repo.bump(a.id, { owners: 1 });
-    await this.audit({ action: 'software.entitlement.grant', actionLabel: 'Gave a customer an app', category: 'customers', target: { type: 'customer', id: input.customerId, label: a.title }, reason, after: { appId: a.id, source: 'staff' } }, by);
+    await this.audit({ action: 'software.entitlement.grant', actionLabel: 'Gave a customer an app', category: 'customers', target: { type: 'customer', id: input.customerId, label: a.title }, reason, after: { appId: a.id, source: 'staff', licenceKey: keyTail(row.licence_key) } }, by);
     return this.entitlementOut(row, a);
+  }
+
+  /** EntitlementAdmin rows: the app, the customer (customers when on), the purchase reference */
+  private async entitlementsAdmin(rows: EntitlementRow[]): Promise<EntitlementAdmin[]> {
+    const [apps, purchases] = await Promise.all([this.repo.appsByIds(unique(rows.map((e) => e.app_id))), this.repo.purchasesByIds(unique(rows.map((e) => e.purchase_id).filter((id): id is string => Boolean(id))))]);
+    const appById = new Map(apps.map((a) => [a.id, a]));
+    const refById = new Map(purchases.map((p) => [p.id, p.ref]));
+    const icons = await this.refsMap(apps.map((a) => a.icon_id), 'thumb');
+    const customers = this.ctx.tryUse('customers');
+    const people = new Map(
+      await Promise.all(
+        unique(rows.map((e) => e.customer_id)).map(async (id) => {
+          const c = customers ? await this.soft('customers.getCustomer', () => customers.getCustomer(id), null) : null;
+          return [id, { name: c?.displayName ?? null, email: c?.email ?? null }] as const;
+        }),
+      ),
+    );
+    return rows.map((e) => {
+      const a = appById.get(e.app_id);
+      const free = a?.free ?? false;
+      return {
+        id: e.id,
+        app: { id: e.app_id, slug: a?.slug ?? '', title: a?.title ?? 'Deleted app', icon: a?.icon_id ? (icons.get(a.icon_id) ?? null) : null },
+        free,
+        customer: { id: e.customer_id, ...(people.get(e.customer_id) ?? { name: null, email: null }) },
+        source: e.source,
+        ownedAt: e.created_at.toISOString(),
+        purchaseId: e.purchase_id,
+        purchaseRef: e.purchase_id ? (refById.get(e.purchase_id) ?? null) : null,
+        grantedBy: e.granted_by,
+        licenceKey: free ? null : e.licence_key,
+        licenceIssuedAt: !free && e.licence_issued_at ? e.licence_issued_at.toISOString() : null,
+        licenceReissues: e.licence_reissues ?? 0,
+      };
+    });
+  }
+
+  /**
+   * GET /admin/software/entitlements: an app's owners, a customer's apps, or a search (q) by licence key (typed with
+   * or without dashes), SW- purchase reference, or the customer's email or name (customers' search).
+   */
+  async listEntitlementsAdmin(q: { appId?: string; customerId?: string; q?: string }, page: PageRequest): Promise<Page<EntitlementAdmin>> {
+    const term = q.q?.trim();
+    const f: Parameters<typeof this.repo.pageAdminEntitlements>[0] = { appId: q.appId, customerId: q.customerId };
+    if (term) {
+      const key = normaliseLicenceKey(term);
+      if (key) f.licenceKey = key;
+      else if (/^SW-/i.test(term)) f.purchaseIds = (await this.repo.purchasesByRef(term.toUpperCase())).map((p) => p.id);
+      else {
+        const customers = this.ctx.tryUse('customers');
+        const found = customers ? await this.soft('customers.searchCustomers', () => customers.searchCustomers({ search: term }, { limit: 50 }), null) : null;
+        f.customerIds = found?.items.map((c) => c.id) ?? [];
+      }
+    }
+    const paged = await this.repo.pageAdminEntitlements(f, page);
+    return { ...paged, items: await this.entitlementsAdmin(paged.items) };
+  }
+
+  /**
+   * Replaces an owner's licence key (a leaked or mistyped key): a new key, the old one stops working. Audited with
+   * the reason and the keys' last five characters; the customer is told (software.licence.reissued).
+   */
+  async reissueLicence(id: string, input: ReissueLicenceInput, by: By): Promise<EntitlementAdmin> {
+    const reason = requireText(input?.reason, 'reason', 500, 'Give a reason');
+    const e = await this.repo.getEntitlement(id);
+    if (!e) throw notFound('Entitlement');
+    const a = await this.repo.getApp(e.app_id);
+    if (!a) throw notFound('App');
+    if (a.free) throw this.ctx.error('NO_LICENCE', 'The app is free, so there is no licence key to replace.');
+    const key = await this.newLicenceKey();
+    const { before, after } = await this.repo.transaction(async (tx) => {
+      const x = (await tx.getEntitlement(id, { forUpdate: true }))!;
+      const row = (await tx.updateEntitlement(x.id, { licence_key: key, licence_issued_at: this.now(), licence_reissues: (x.licence_reissues ?? 0) + 1 }))!;
+      return { before: x, after: row };
+    });
+    await this.audit(
+      { action: 'software.licence.reissue', actionLabel: 'Replaced a licence key', category: 'customers', target: { type: 'customer', id: after.customer_id, label: a.title }, reason, before: { licenceKey: keyTail(before.licence_key) }, after: { licenceKey: keyTail(after.licence_key), reissues: after.licence_reissues } },
+      by,
+    );
+    this.ctx.events.publish('software.licence.reissued', { entitlementId: after.id, customerId: after.customer_id, appId: a.id, slug: a.slug, title: a.title }, { actor: by.actor, ...(by.requestId ? { requestId: by.requestId } : {}) });
+    return (await this.entitlementsAdmin([after]))[0]!;
   }
 
   /* ---------------------------------------------------------------- events from payments */
@@ -448,7 +538,7 @@ export class SoftwarePurchases extends SoftwareCatalog {
         module: 'software',
         records: purchases.map((p) => ({ ref: p.ref, title: p.title, apps: itemsOf(p.items).map((i) => i.title), amount: { amount: Number(p.amount), currency: p.currency }, status: p.status, method: p.method_label, createdAt: p.created_at.toISOString(), paidAt: p.paid_at?.toISOString() ?? null })),
       },
-      { key: 'software_apps', title: 'Apps you own', module: 'software', records: owned.map((e) => ({ app: apps.get(e.app_id)?.title ?? 'Deleted app', source: e.source, ownedAt: e.created_at.toISOString() })) },
+      { key: 'software_apps', title: 'Apps you own', module: 'software', records: owned.map((e) => ({ app: apps.get(e.app_id)?.title ?? 'Deleted app', source: e.source, ownedAt: e.created_at.toISOString(), licenceKey: e.licence_key })) },
       { key: 'software_reviews', title: 'App reviews', module: 'software', records: reviews.map((r) => ({ app: apps.get(r.app_id)?.title ?? 'Deleted app', stars: r.stars, text: r.text, hidden: r.hidden, createdAt: r.created_at.toISOString(), updatedAt: r.updated_at.toISOString() })) },
     ];
   }

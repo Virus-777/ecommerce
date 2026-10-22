@@ -113,6 +113,42 @@ export const SavedAddress: z.ZodType<SavedAddress> = z.object({
   updatedAt: z.iso.datetime({ offset: true }),
 }).register(common.apiTypes, { id: "customers.SavedAddress" });
 
+export interface GeoPoint {
+  /** WGS84 degrees */
+  lat: number;
+  /** WGS84 degrees */
+  lng: number;
+}
+
+export const GeoPoint: z.ZodType<GeoPoint> = z.object({
+  lat: z.number().describe("WGS84 degrees"),
+  lng: z.number().describe("WGS84 degrees"),
+}).register(common.apiTypes, { id: "customers.GeoPoint" });
+
+export interface CustomerLocation {
+  point: GeoPoint;
+  city: string;
+  /** State code, e.g. OR */
+  region: string;
+  /** The default address the point comes from */
+  addressId: string;
+  /** The address's first line, e.g. 1120 SW 5th Ave */
+  label: string;
+  /** How exact the point is: the ZIP centroid or only the city's */
+  precision?: "zip" | "city" | null;
+}
+
+export const CustomerLocation: z.ZodType<CustomerLocation> = z.object({
+  get point() {
+    return GeoPoint;
+  },
+  city: z.string(),
+  region: z.string().describe("State code, e.g. OR"),
+  addressId: z.uuid().describe("The default address the point comes from"),
+  label: z.string().describe("The address's first line, e.g. 1120 SW 5th Ave"),
+  precision: z.enum(["zip", "city"]).describe("How exact the point is: the ZIP centroid or only the city's").nullish(),
+}).register(common.apiTypes, { id: "customers.CustomerLocation" });
+
 export interface AddressInput {
   label?: string | null;
   address: common.Address;
@@ -972,6 +1008,10 @@ export interface CustomersPublicApi {
   searchCustomers(filter: { search?: string, statuses?: string[], verification?: string, joinedFrom?: string, joinedTo?: string }, page: common.PageInput): Promise<common.Page<CustomerSnapshot>>;
   /** Export rows for reports dataset customers.admin.accounts (the filtered customer list) Used by: reports. */
   exportRows(dataset: string, filters: unknown, principal: identity.Principal, cursor?: string): Promise<{ rows: unknown[], nextCursor?: string }>;
+  /** The customer's point from their geocoded default delivery address (city and label from that address), or null when they have no default address or it could not be geocoded. The store then shows the city without a distance. No device location is used. Used by: food, services, farm, departments. */
+  customerLocation(customerId: string): Promise<CustomerLocation | null>;
+  /** A point for an address through the geocoder provider (ZIP centroid, falling back to the city centroid), or null when unknown or no provider is configured. Other modules geocode staff-entered addresses (restaurants, providers, dealers) with it. Used by: food, services, farm, departments. */
+  geocodeAddress(input: { line1?: string, city: string, region: string, postalCode?: string, country?: string }): Promise<GeoPoint | null>;
 }
 
 /* ------------------------------------------------------------------ tables (row types) */
@@ -1017,6 +1057,13 @@ export interface CustomersDb {
     delivery_instructions: string | null;
     is_default: boolean;
     validated_at: Date | null;
+    /** WGS84 latitude from the geocoder; internal, never in store responses */
+    lat: string | null;
+    /** WGS84 longitude */
+    lng: string | null;
+    /** last geocoding attempt; set with null lat/lng when the address could not be placed */
+    geocoded_at: Date | null;
+    geocode_precision: 'zip' | 'city' | null;
     last_used_at: Date | null;
     deleted_at: Date | null;
     created_at: Date;
@@ -1729,8 +1776,8 @@ export const spec = defineModuleSpec({
   chapters: [3,4,6,7,17,18,19],
   summary: "The customer side of an account: profile, saved addresses, marketing consent, recently viewed products, the Account tab overview, guest order access, data export and account closure, and the staff view of customer accounts with notes and recorded account actions. Credentials, sessions and verification belong to identity.",
   dependsOn: ["identity"],
-  optionalDeps: ["orders","returns","support","messaging","wallet","reviews","wishlist","payments","catalog","offers","trust","reports","notifications","access","audit","media","workqueues","software","food","rewards"],
-  publicApi: ["getCustomer","getCustomerByUserId","getAddressForOrder","rememberCheckoutAddress","canPlaceOrders","canWriteReviews","canGuestOrder","canSendMessages","getMarketingConsent","validateAddress","listRecentlyViewed","listRecentlyViewedItems","searchCustomers","exportRows"],
+  optionalDeps: ["orders","returns","support","messaging","wallet","reviews","wishlist","payments","catalog","offers","trust","reports","notifications","access","audit","media","workqueues","software","food","rewards","services","departments"],
+  publicApi: ["getCustomer","getCustomerByUserId","getAddressForOrder","rememberCheckoutAddress","canPlaceOrders","canWriteReviews","canGuestOrder","canSendMessages","getMarketingConsent","validateAddress","listRecentlyViewed","listRecentlyViewedItems","searchCustomers","exportRows","customerLocation","geocodeAddress"],
   permissions: [
     {
       "key": "customers.accounts.view",
@@ -1945,6 +1992,10 @@ export const spec = defineModuleSpec({
     "customers.prune-recently-viewed": {
       "schedule": "daily",
       "does": "Delete rows older than recentlyViewedRetentionDays and guest rows whose session expired"
+    },
+    "customers.geocode-addresses": {
+      "schedule": "every 10 min",
+      "does": "Backfill: geocode saved addresses that were never geocoded (addresses saved before geocoding existed, or while the geocoder failed), and retry addresses the geocoder could not place after a week. Batches of 200; defaults first"
     }
   },
   settings: {
@@ -2252,6 +2303,10 @@ export const spec = defineModuleSpec({
         "delivery_instructions",
         "is_default",
         "validated_at",
+        "lat",
+        "lng",
+        "geocoded_at",
+        "geocode_precision",
         "last_used_at",
         "deleted_at",
         "created_at",
@@ -2263,13 +2318,21 @@ export const spec = defineModuleSpec({
         "phone",
         "delivery_instructions",
         "validated_at",
+        "lat",
+        "lng",
+        "geocoded_at",
+        "geocode_precision",
         "last_used_at",
         "deleted_at"
       ],
-      "decimal": [],
+      "decimal": [
+        "lat",
+        "lng"
+      ],
       "binary": [],
       "dates": [
         "validated_at",
+        "geocoded_at",
         "last_used_at",
         "deleted_at",
         "created_at",
@@ -2357,6 +2420,35 @@ export const spec = defineModuleSpec({
                 "null"
               ]
             },
+            "lat": {
+              "bsonType": [
+                "decimal",
+                "null"
+              ]
+            },
+            "lng": {
+              "bsonType": [
+                "decimal",
+                "null"
+              ]
+            },
+            "geocoded_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "geocode_precision": {
+              "bsonType": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "zip",
+                "city",
+                null
+              ]
+            },
             "last_used_at": {
               "bsonType": [
                 "date",
@@ -2395,6 +2487,12 @@ export const spec = defineModuleSpec({
           "partial": {
             "is_default": true,
             "deleted_at": null
+          }
+        },
+        {
+          "name": "addresses_geocoded_at_198bd4",
+          "key": {
+            "geocoded_at": 1
           }
         }
       ],

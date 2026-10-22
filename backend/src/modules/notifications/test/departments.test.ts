@@ -56,14 +56,15 @@ describe('food orders', () => {
 });
 
 describe('software purchases and Daily rewards', () => {
-  it('tells the customer a paid purchase is ready to download', async () => {
+  it('tells the customer a paid purchase is theirs and where the licence key is', async () => {
     const c = world.customer();
     const purchaseId = newId();
     await publish(app, 'software.purchase.paid', { purchaseId, ref: 'SW-4K7Q2', customerId: c.customerId, title: 'PixelCraft Studio', amount: money(2499), appIds: [newId()] });
-    const [notice] = await inbox(as.customer(c));
-    expect(notice).toMatchObject({ topicKey: 'customer.software.purchase', title: 'PixelCraft Studio is ready to download' });
-    expect(notice.body).toContain('$24.99');
+    await publish(app, 'software.purchase.paid', { purchaseId: newId(), ref: 'SW-PACK1', customerId: c.customerId, title: 'Creator Pack', amount: money(4999), appIds: [newId(), newId()] });
+    const [pack, notice] = await inbox(as.customer(c));
+    expect(notice).toMatchObject({ topicKey: 'customer.software.purchase', title: 'PixelCraft Studio is yours', body: 'PixelCraft Studio is yours. Your licence key is in Softwares › My apps.' });
     expect(notice.link).toMatchObject({ kind: 'software_purchase', id: purchaseId, screen: 'store/software-purchase', ref: 'SW-4K7Q2' });
+    expect(pack.body).toBe('Creator Pack is yours. Its apps and their licence keys are in Softwares › My apps.');
   });
 
   it('gives the customer the code of the coupon they got for points', async () => {

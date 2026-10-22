@@ -3,15 +3,16 @@
  * pictures (icons and screenshots: content_image uploads) and files (packages and databases: software_package
  * uploads), and validation helpers. The parts build on it (base → catalog → purchases → service).
  */
+import { randomBytes } from 'node:crypto';
 import type { Principal } from '../../../kernel/auth/index.js';
 import { AppError, isAppError } from '../../../kernel/errors/index.js';
 import type { ModuleContext } from '../../../kernel/module-system/index.js';
 import type * as audit from '../../../spec/audit.js';
 import type * as common from '../../../spec/common.js';
 import type { MediaAsset } from '../../../spec/media.js';
-import type { AppFile } from '../../../spec/software.js';
-import { sizeLabel } from '../domain/rules.js';
-import type { StoredFile } from '../ports.js';
+import type { AppFile, OwnedLicence } from '../../../spec/software.js';
+import { devicesLabel, makeLicenceKey, sizeLabel } from '../domain/rules.js';
+import type { AppRow, EntitlementRow, StoredFile } from '../ports.js';
 import type { SoftwareRepository } from '../repository.js';
 
 export interface SoftwareServiceDeps {
@@ -129,6 +130,40 @@ export class SoftwareBase {
     const customers = this.ctx.tryUse('customers');
     const c = customers ? await this.soft('customers.getCustomer', () => customers.getCustomer(customerId), null) : null;
     return c?.displayName ?? null;
+  }
+
+  /* ---------------------------------------------------------------- licence keys */
+
+  /** A licence key no entitlement uses yet */
+  protected async newLicenceKey(repo: SoftwareRepository = this.repo): Promise<string> {
+    for (let i = 0; i < 10; i++) {
+      const key = makeLicenceKey(randomBytes);
+      if (!(await repo.licenceKeyTaken(key))) return key;
+    }
+    throw new Error('software: no free licence key');
+  }
+
+  /** The licence columns of a new entitlement: a key for a paid app, none for a free one */
+  protected async licenceFor(app: Pick<AppRow, 'free'> | undefined, now: Date, repo: SoftwareRepository = this.repo): Promise<Pick<EntitlementRow, 'licence_key' | 'licence_issued_at' | 'licence_reissues'>> {
+    if (!app || app.free) return { licence_key: null, licence_issued_at: null, licence_reissues: null };
+    return { licence_key: await this.newLicenceKey(repo), licence_issued_at: now, licence_reissues: null };
+  }
+
+  /**
+   * An owner's entitlement of a paid app that has no key yet gets one: made before keys existed and missed by the
+   * migration, or the app was free when they got it. Once (a concurrent request's key wins).
+   */
+  protected async ensureLicence(e: EntitlementRow, app: Pick<AppRow, 'free'>): Promise<EntitlementRow> {
+    if (app.free || e.licence_key) return e;
+    const set = await this.repo.setLicenceIfMissing(e.id, await this.newLicenceKey(), this.now());
+    return set ?? (await this.repo.getEntitlement(e.id)) ?? e;
+  }
+
+  /** The key as its owner sees it; null for free apps */
+  protected licenceOut(e: EntitlementRow | undefined, app: Pick<AppRow, 'free' | 'licence_devices'>): OwnedLicence | null {
+    if (!e || app.free || !e.licence_key) return null;
+    const devices = app.licence_devices ?? null;
+    return { key: e.licence_key, devices, devicesLabel: devicesLabel(devices), issuedAt: (e.licence_issued_at ?? e.created_at).toISOString() };
   }
 
   /* ---------------------------------------------------------------- pictures */

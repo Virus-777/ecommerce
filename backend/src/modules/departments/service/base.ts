@@ -7,7 +7,7 @@ import { AppError, isAppError } from '../../../kernel/errors/index.js';
 import type { ModuleContext } from '../../../kernel/module-system/index.js';
 import type * as audit from '../../../spec/audit.js';
 import type * as common from '../../../spec/common.js';
-import { isValidSlug, slugOf } from '../domain/rules.js';
+import { isValidSlug, replyAuthorName, slugOf } from '../domain/rules.js';
 import type { DepartmentsRepository, SlugTable } from '../repository.js';
 
 export interface DepartmentsServiceDeps {
@@ -82,6 +82,18 @@ export class DepartmentsBase {
       this.ctx.log.debug({ err, what }, 'departments: optional data unavailable');
       return fallback;
     }
+  }
+
+  /**
+   * How a customer is shown on reviews and rankings: first name and last initial ("Mina P."), else Customer. By the
+   * customers-module id, falling back to the account id (the store principal's customerId is null without a record).
+   */
+  protected async customerName(customerId: string, accountId?: string | null): Promise<string> {
+    const customers = this.ctx.tryUse('customers');
+    if (!customers) return replyAuthorName(null);
+    const byId = await this.soft('customers.getCustomer', typeof customers.getCustomer === 'function' ? () => customers.getCustomer(customerId) : undefined, null);
+    const c = byId ?? (await this.soft('customers.getCustomerByUserId', () => customers.getCustomerByUserId(accountId ?? customerId), null));
+    return replyAuthorName(c?.displayName);
   }
 
   /* ---------------------------------------------------------------- slugs */

@@ -2680,11 +2680,39 @@
       },
       {
         "name": "software.purchase.paid",
-        "does": "Customer: a software purchase is paid and ready to download (in-app, topic customer.software.purchase)"
+        "does": "Customer: a software purchase is paid; the app (or the pack's apps) and the licence key are in Softwares › My apps (in-app, topic customer.software.purchase)"
+      },
+      {
+        "name": "software.licence.reissued",
+        "does": "Customer: staff replaced their licence key for an app; the old key no longer works (in-app, topic customer.software.licence)"
       },
       {
         "name": "rewards.reward.redeemed",
         "does": "Customer: the coupon they got for Daily rewards points is ready, with its code (in-app, topic customer.rewards.coupon)"
+      },
+      {
+        "name": "farm.order.placed",
+        "does": "Customer: their farm order was placed and waits for the dealer to confirm the delivery date (in-app, topic customer.farm.order)"
+      },
+      {
+        "name": "farm.order.status_changed",
+        "does": "Customer: their farm order was confirmed (and what was charged), rescheduled, sent out, delivered, rejected or cancelled, or its payment failed (in-app, topic customer.farm.order)"
+      },
+      {
+        "name": "services.device.verified",
+        "does": "Customer: their registered device is verified, with its Post-sale cover date (in-app, topic customer.services.device)"
+      },
+      {
+        "name": "services.device.rejected",
+        "does": "Customer: their registered device couldn't be verified (or its verification was withdrawn), with the reason (in-app, topic customer.services.device)"
+      },
+      {
+        "name": "departments.blog.followed_author_posted",
+        "does": "Customer: a blog author they follow published a post (in-app, topic customer.blogs.followed_author; optional)"
+      },
+      {
+        "name": "departments.play.prize_awarded",
+        "does": "Customer: they won a Play center prize week and their coupon is in Account › Coupons (in-app, topic customer.play.prize)"
       },
       {
         "name": "access.approval.requested",

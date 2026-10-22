@@ -175,6 +175,12 @@ export class SoftwareRepository {
     if (f.q) filter.$or = [{ ref: contains(f.q) }, ...(f.customerIds?.length ? [{ customer_id: { $in: f.customerIds } }] : [])];
     return this.#t.purchases.page(filter, page, { column: 'created_at', direction: 'desc' });
   }
+  purchasesByRef(ref: string): Promise<PurchaseRow[]> {
+    return this.#t.purchases.find({ ref });
+  }
+  purchasesByIds(ids: readonly string[]): Promise<PurchaseRow[]> {
+    return ids.length ? this.#t.purchases.find({ id: { $in: [...ids] } }) : Promise.resolve([]);
+  }
   /** requires_action purchases last changed before `before`, oldest first */
   staleChallenges(before: Date, limit: number): Promise<PurchaseRow[]> {
     return this.#t.purchases.find({ status: 'requires_action', updated_at: { $lt: before } }, { sort: { updated_at: 1 }, limit });
@@ -188,9 +194,35 @@ export class SoftwareRepository {
 
   /* ---------------------------------------------------------------- entitlements */
 
-  /** The entitlement, unless the customer owns the app already (undefined then) */
+  /**
+   * The entitlement, unless the customer owns the app already (undefined then). Only (customer, app) decides: a
+   * licence key drawn twice (checked before, so practically never) fails instead of passing for "owned already".
+   */
   insertEntitlement(row: EntitlementRow): Promise<EntitlementRow | undefined> {
-    return this.#t.entitlements.insertIfAbsent(row);
+    return this.#t.entitlements.insertIfAbsent(row, ['customer_id', 'app_id']);
+  }
+  getEntitlement(id: string, lock?: Lock): Promise<EntitlementRow | undefined> {
+    return this.#t.entitlements.get(id, lock);
+  }
+  updateEntitlement(id: string, patch: Partial<EntitlementRow>): Promise<EntitlementRow | undefined> {
+    return this.#t.entitlements.update(id, patch);
+  }
+  licenceKeyTaken(key: string): Promise<boolean> {
+    return this.#t.entitlements.exists({ licence_key: key });
+  }
+  /** Gives an entitlement its first licence key; undefined when it has one already (another request was first) */
+  setLicenceIfMissing(id: string, key: string, now: Date): Promise<EntitlementRow | undefined> {
+    return this.#t.entitlements.updateOne({ id, licence_key: null }, { licence_key: key, licence_issued_at: now });
+  }
+  /** Staff's list: by app, by customer, by licence key, by purchase, or by customers found elsewhere; newest first */
+  pageAdminEntitlements(f: { appId?: string; customerId?: string; licenceKey?: string; purchaseIds?: string[]; customerIds?: string[] }, page: PageRequest): Promise<Page<EntitlementRow>> {
+    const filter: Record<string, unknown> = {};
+    if (f.appId) filter.app_id = f.appId;
+    if (f.customerId) filter.customer_id = f.customerId;
+    if (f.licenceKey) filter.licence_key = f.licenceKey;
+    if (f.purchaseIds) filter.purchase_id = { $in: f.purchaseIds };
+    if (f.customerIds) filter.customer_id = f.customerId ? (f.customerIds.includes(f.customerId) ? f.customerId : { $in: [] }) : { $in: f.customerIds };
+    return this.#t.entitlements.page(filter, page, { column: 'created_at', direction: 'desc' });
   }
   entitlement(customerId: string, appId: string): Promise<EntitlementRow | undefined> {
     return this.#t.entitlements.findOne({ customer_id: customerId, app_id: appId });

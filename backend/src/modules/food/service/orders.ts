@@ -37,7 +37,7 @@ export class FoodOrders extends FoodBasket {
   private orderRestaurant(o: OrderRow, r: RestaurantRow | undefined, refs: Refs): RestaurantCard {
     if (r) return this.restaurantCard(r, refs);
     const s = snapshotOf(o.restaurant);
-    return { id: o.restaurant_id, slug: s.slug, name: s.name, cuisine: s.cuisine, image: s.imageId ? (refs.get(s.imageId) ?? null) : null, logo: s.logoId ? (refs.get(s.logoId) ?? null) : null, city: s.city, rating: null, ratingCount: 0, deliveryLabel: deliveryLabel(s.deliveryMin, s.deliveryMax), feeLabel: feeLabel(money(o.delivery_fee, o.currency)), promoBadge: null, open: false, openLabel: 'Closed today' };
+    return { id: o.restaurant_id, slug: s.slug, name: s.name, cuisine: s.cuisine, image: s.imageId ? (refs.get(s.imageId) ?? null) : null, logo: s.logoId ? (refs.get(s.logoId) ?? null) : null, city: s.city, rating: null, ratingCount: 0, deliveryLabel: deliveryLabel(s.deliveryMin, s.deliveryMax), feeLabel: feeLabel(money(o.delivery_fee, o.currency)), promoBadge: null, open: false, openLabel: 'Closed today', distanceLabel: null, saved: false };
   }
 
   private async outputParts(rows: OrderRow[]) {
@@ -617,6 +617,11 @@ export class FoodOrders extends FoodBasket {
         })),
       });
     if (reviews.length) out.push({ key: 'food_reviews', title: 'Food reviews', module: 'food', records: reviews.map((r) => ({ order: refById.get(r.order_id) ?? null, stars: r.stars, text: r.text, shownAs: r.name, hidden: r.hidden, date: r.created_at.toISOString() })) });
+    const saved = (await Promise.all(ids.map((id) => this.repo.savedOf(id)))).flat();
+    if (saved.length) {
+      const names = new Map((await this.repo.restaurantsByIds(unique(saved.map((s) => s.restaurant_id)))).map((r) => [r.id, r.name]));
+      out.push({ key: 'food_saved_restaurants', title: 'Saved restaurants', module: 'food', records: saved.map((s) => ({ restaurant: names.get(s.restaurant_id) ?? null, savedAt: s.created_at.toISOString() })) });
+    }
     return out;
   }
 }

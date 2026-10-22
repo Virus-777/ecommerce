@@ -11,16 +11,22 @@
     "Services: what is included, requirements, supported models, OS versions, hand-over options, price tables, duration, slot length",
     "Availability: free time slots from the provider's hours, the service's slot length and the bookings already made",
     "Requests and bookings with a status customers and staff follow (requested, confirmed, in progress, completed, cancelled, declined)",
-    "Reviews customers leave after a completed request, and the ratings shown on services and providers"
+    "Reviews customers leave after a completed request, and the ratings shown on services and providers",
+    "Saved providers (Booking's save button and the app's Saved page)",
+    "Provider points for the map and distances: the staff pin, else the staff-entered address geocoded (customers.geocodeAddress)",
+    "Registered devices for Post-sale: the phones customers register, staff verification and the warranty cover period, and the $0 price of covered-by-warranty services for a covered device"
   ],
   "notOwns": [
     "Payment: customers pay the provider (2026-10-22 decision: no online payment for requests and bookings in v1)",
     "Product sales (phones, farm machines): catalog, cart and checkout",
-    "Pictures: media (content_image uploads)"
+    "Pictures: media (content_image uploads)",
+    "The customer's location: customers.customerLocation (their geocoded default delivery address; no device location)"
   ],
   "dependsOn": ["media"],
   "optionalDeps": ["customers", "audit", "notifications"],
-  "publicApi": [],
+  "publicApi": [
+    { "name": "exportCustomerData", "signature": "(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]", "desc": "The customer's service requests and bookings (reference, service, provider, time, contact, details, device, status history), reviews, saved providers and registered devices (with the full IMEI) for the personal data export. Requests and reviews are found by the account id, saved providers and devices by the customers-module id (and the account id they fall back to). Staff notes are left out.", "usedBy": ["customers"] }
+  ],
   "types": {
     "Contacts": { "phone": "string?", "email": "email?", "website": "url?", "address": "string?" },
     "GeoPoint": { "lat": "number", "lng": "number" },
@@ -44,17 +50,23 @@
       "category": "ServiceCategoryRef?", "city": "string?", "verified": "bool",
       "rating": "RatingSummary",
       "fromPrice": { "type": "Money?", "desc": "Lowest price of its published services" },
-      "nextFree": { "type": "string?", "desc": "Booking providers: e.g. Next free: Today 3:30 PM" }
+      "nextFree": { "type": "string?", "desc": "Booking providers: e.g. Next free: Today 3:30 PM" },
+      "address": { "type": "string?", "desc": "Street address, e.g. 412 SE Morrison St, Portland, OR 97214" },
+      "location": { "type": "GeoPoint?", "desc": "Map pin: the staff pin, else the address geocoded; null when unknown" },
+      "distance": { "type": "string?", "desc": "From the customer's default delivery address, e.g. 1.2 mi; null for visitors, customers without a geocoded default address, or a provider without a point" },
+      "openLabel": { "type": "string?", "desc": "From its hours now (provider time zone): Open until 8 pm, Opens at 9 am, Closed now or Closed today" },
+      "saved": { "type": "bool", "desc": "The signed-in customer saved this provider; false for visitors" }
     },
     "Provider": {
       "id": "uuid", "slug": "string", "name": "string", "logo": "MediaRef?", "cover": "MediaRef?",
       "kind": "string?", "category": "ServiceCategoryRef?", "city": "string?", "verified": "bool",
       "rating": "RatingSummary", "fromPrice": "Money?", "nextFree": "string?",
+      "address": "string?", "distance": "string?", "openLabel": "string?", "saved": "bool",
       "photos": "MediaRef[]",
-      "description": "text?",
+      "description": { "type": "text?", "desc": "About the provider" },
       "since": { "type": "int?", "desc": "Year founded" },
       "contacts": "Contacts",
-      "location": { "type": "GeoPoint?", "desc": "Map pin" },
+      "location": { "type": "GeoPoint?", "desc": "Map pin: the staff pin, else the address geocoded" },
       "hours": "OpeningHours",
       "staff": "ProviderStaff[]",
       "replyTime": { "type": "string?", "desc": "e.g. Replies within 1 hour" },
@@ -65,7 +77,10 @@
       "kind": "string?", "categoryId": "uuid?", "areas": "enum(os_install|post_sale|welfare|booking)[]",
       "city": "string?", "verified": "bool", "photos": "MediaRef[]", "description": "text?", "since": "int?",
       "contacts": "Contacts",
-      "location": "GeoPoint?", "hours": "OpeningHours", "staff": "ProviderStaff[]", "replyTime": "string?",
+      "location": { "type": "GeoPoint?", "desc": "The pin staff set" },
+      "point": { "type": "GeoPoint?", "desc": "Where the map and distances place it: the pin, else the address geocoded when saved" },
+      "pointSource": { "type": "enum(pin|address)?", "desc": "Where point comes from; null when the address could not be geocoded" },
+      "hours": "OpeningHours", "staff": "ProviderStaff[]", "replyTime": "string?",
       "status": "enum(published|hidden)", "serviceCount": "int", "openRequestCount": "int",
       "createdAt": "datetime", "updatedAt": "datetime"
     },
@@ -74,7 +89,7 @@
       "categoryId": { "type": "uuid?", "desc": "Booking providers: the booking category (Beauty, Health…)" },
       "city": "string?", "verified": "bool?", "photos": "MediaRef[]?", "description": "text?", "since": "int?",
       "contacts": "Contacts?",
-      "location": "GeoPoint?", "hours": "OpeningHours?", "staff": "ProviderStaff[]?", "replyTime": "string?",
+      "location": { "type": "GeoPoint?", "desc": "A pin; without one the address (contacts.address and city) is geocoded" }, "hours": "OpeningHours?", "staff": "ProviderStaff[]?", "replyTime": "string?",
       "status": "enum(published|hidden)?"
     },
     "PriceRow": { "label": { "type": "string", "desc": "e.g. Galaxy S26 Ultra, or Weekly" }, "detail": { "type": "string?", "desc": "e.g. 3+ visits a week" }, "price": { "type": "string", "desc": "Display text, e.g. $229, $24/hr, Free" } },
@@ -90,7 +105,9 @@
       "supportedLabel": { "type": "string?", "desc": "e.g. Samsung, Pixel, Xiaomi" },
       "coverage": { "type": "string?", "desc": "Where it is offered, e.g. Millbrook and 15 km around" },
       "tags": { "type": "string[]", "desc": "Short facts on the card, e.g. Free pickup" },
-      "rating": "RatingSummary"
+      "rating": "RatingSummary",
+      "distance": { "type": "string?", "desc": "The provider's distance from the customer's default delivery address, e.g. 1.2 mi; null when unknown" },
+      "coveredByWarranty": { "type": "bool", "desc": "Post-sale: free for a registered device under Marketly post-sale cover" }
     },
     "Service": {
       "id": "uuid", "slug": "string", "area": "enum(os_install|post_sale|welfare|booking)",
@@ -98,7 +115,7 @@
       "category": "ServiceCategoryRef?", "provider": "ProviderCard",
       "badge": "string?", "fromPrice": "Money?", "priceUnit": "enum(fixed|hour|visit|night|free)",
       "durationLabel": "string?", "supportedLabel": "string?", "coverage": "string?", "tags": "string[]",
-      "rating": "RatingSummary",
+      "rating": "RatingSummary", "distance": "string?", "coveredByWarranty": "bool",
       "description": "text?",
       "included": "string[]",
       "requirements": { "type": "string[]", "desc": "Eligibility and requirements" },
@@ -108,6 +125,8 @@
       "priceTable": { "type": "PriceRow[]", "desc": "Price by model, or schedule and prices" },
       "priceTableTitle": { "type": "string?", "desc": "e.g. Price by model, Schedule and prices" },
       "terms": { "type": "string[]", "desc": "e.g. warranty terms" },
+      "fullTerms": { "type": "text?", "desc": "The full terms behind Read full terms (plain text, paragraphs split by blank lines); null when there are none" },
+      "yourDevice": { "type": "CoveredDevicePrice?", "desc": "Covered-by-warranty post-sale services, for a signed-in customer with a verified device whose cover runs today: its $0 price and the sticky bar" },
       "steps": { "type": "ServiceStep[]", "desc": "How it works, in order" },
       "slotMinutes": { "type": "int?", "desc": "Bookable services: the length of one slot; null when the service is requested without a time" },
       "durationMinutes": "int?",
@@ -122,6 +141,7 @@
       "durationLabel": "string?", "supportedLabel": "string?", "coverage": "string?", "tags": "string[]",
       "description": "text?", "included": "string[]", "requirements": "string[]", "supported": "string[]", "osVersions": "string[]",
       "handover": "HandoverOption[]", "priceTable": "PriceRow[]", "priceTableTitle": "string?", "terms": "string[]", "steps": "ServiceStep[]",
+      "fullTerms": "text?", "coveredByWarranty": "bool",
       "slotMinutes": "int?", "durationMinutes": "int?",
       "status": "enum(published|hidden)", "position": "int", "rating": "RatingSummary", "openRequestCount": "int",
       "createdAt": "datetime", "updatedAt": "datetime"
@@ -133,6 +153,8 @@
       "durationLabel": "string?", "supportedLabel": "string?", "coverage": "string?", "tags": "string[]?",
       "description": "text?", "included": "string[]?", "requirements": "string[]?", "supported": "string[]?", "osVersions": "string[]?",
       "handover": "HandoverOption[]?", "priceTable": "PriceRow[]?", "priceTableTitle": "string?", "terms": "string[]?", "steps": "ServiceStep[]?",
+      "fullTerms": { "type": "text?", "desc": "At most 20,000 characters" },
+      "coveredByWarranty": { "type": "bool?", "desc": "Post-sale services only: free for a covered registered device" },
       "slotMinutes": { "type": "int?", "desc": "15–480; set for services booked at a time" }, "durationMinutes": "int?",
       "status": "enum(published|hidden)?", "position": "int?"
     },
@@ -152,8 +174,13 @@
       "serviceId": "uuid",
       "slotStart": { "type": "datetime?", "desc": "Bookable services: the chosen slot (must still be free)" },
       "staffId": { "type": "string?", "desc": "A chosen staff member; any free one when omitted" },
+      "deviceId": { "type": "uuid?", "desc": "OS install and post-sale: one of my registered devices. A verified device under cover makes a covered-by-warranty service $0" },
       "contact": "RequestContact",
       "details": "RequestDetails?"
+    },
+    "RequestDevice": {
+      "id": "uuid", "label": { "type": "string", "desc": "e.g. Galaxy S26 Ultra · 256 GB" }, "imeiLast4": "string",
+      "covered": { "type": "bool", "desc": "The request is free under the device's warranty cover" }
     },
     "ServiceRequest": {
       "id": "uuid", "ref": { "type": "string", "desc": "Short code shown to the customer, e.g. SR-4K7Q2" },
@@ -165,7 +192,8 @@
       "staff": "ProviderStaff?",
       "contact": "RequestContact",
       "details": "RequestDetails",
-      "priceLabel": { "type": "string?", "desc": "e.g. from $29, paid at the shop" },
+      "priceLabel": { "type": "string?", "desc": "e.g. from $29 · pay at the provider, or $0 · covered by your warranty" },
+      "device": { "type": "RequestDevice?", "desc": "The registered device the request is for" },
       "providerNote": { "type": "string?", "desc": "What the provider or staff said, e.g. a decline reason" },
       "canCancel": "bool", "canReview": "bool",
       "history": { "type": "StatusChange[]", "desc": "Status changes, oldest first" },
@@ -176,6 +204,7 @@
       "status": "enum(requested|confirmed|in_progress|completed|cancelled|declined)",
       "serviceId": "uuid", "serviceTitle": "string", "providerId": "uuid", "providerName": "string",
       "customerId": "uuid", "slotStart": "datetime?", "slotEnd": "datetime?", "staff": "ProviderStaff?",
+      "device": "RequestDevice?",
       "contact": "RequestContact",
       "details": "RequestDetails", "providerNote": "string?", "staffNote": "string?",
       "history": "StatusChange[]",
@@ -189,14 +218,86 @@
     },
     "ServiceReview": { "id": "uuid", "rating": "int", "text": "string?", "authorName": "string", "createdAt": "datetime" },
     "ReviewInput": { "rating": { "type": "int", "desc": "1–5" }, "text": { "type": "string?", "desc": "At most 1,000 characters" } },
-    "ReviewAdmin": { "id": "uuid", "serviceId": "uuid", "serviceTitle": "string", "requestId": "uuid", "rating": "int", "text": "string?", "authorName": "string", "status": "enum(visible|hidden)", "createdAt": "datetime" }
+    "ReviewAdmin": { "id": "uuid", "serviceId": "uuid", "serviceTitle": "string", "requestId": "uuid", "rating": "int", "text": "string?", "authorName": "string", "status": "enum(visible|hidden)", "createdAt": "datetime" },
+    "CustomerArea": {
+      "located": { "type": "bool", "desc": "The customer has a geocoded default delivery address, so lists show distances and sort by Nearest" },
+      "city": { "type": "string?", "desc": "The default address's city (the Welfare location button, N services near Portland); null when not located" },
+      "region": { "type": "string?", "desc": "State code, e.g. OR" },
+      "addressLabel": { "type": "string?", "desc": "The address's first line, e.g. 1120 SW 5th Ave" }
+    },
+    "ProviderSaved": { "providerId": "uuid", "saved": "bool" },
+    "CoveredDevicePrice": {
+      "deviceId": "uuid",
+      "label": { "type": "string", "desc": "The device, e.g. Galaxy S26 Ultra" },
+      "priceRowLabel": { "type": "string?", "desc": "The price table row matched to the device's model (the app marks it · your phone); null when no row matches" },
+      "normalPrice": { "type": "string?", "desc": "What it costs without cover, struck through: the matched row's price, else the service's from price, e.g. $229" },
+      "price": { "type": "Money", "desc": "What the customer pays: 0" },
+      "priceText": { "type": "string", "desc": "$0" },
+      "barLabel": { "type": "string", "desc": "Sticky bar line, e.g. Galaxy S26 Ultra · warranty" },
+      "coveredUntil": "date",
+      "coverageLabel": { "type": "string", "desc": "e.g. Covered to Oct 2027" }
+    },
+    "Device": {
+      "id": "uuid",
+      "brand": { "type": "string", "desc": "e.g. Samsung" },
+      "model": { "type": "string", "desc": "e.g. Galaxy S26 Ultra" },
+      "storage": { "type": "string?", "desc": "e.g. 256 GB" },
+      "label": { "type": "string", "desc": "Model and storage, e.g. Galaxy S26 Ultra · 256 GB" },
+      "imeiLast4": { "type": "string", "desc": "The full IMEI is never returned to the customer" },
+      "imeiLabel": { "type": "string", "desc": "IMEI ending 4417" },
+      "purchaseDate": "date",
+      "purchaseLabel": { "type": "string", "desc": "Bought Oct 2, 2026" },
+      "orderRef": { "type": "string?", "desc": "The Marketly order it was bought in, if given" },
+      "status": "enum(pending|verified|rejected)",
+      "statusLabel": { "type": "string", "desc": "Waiting for verification, Covered to Oct 2027, Cover ended Oct 2027 or Not verified" },
+      "covered": { "type": "bool", "desc": "Verified and its cover runs today" },
+      "coveredUntil": { "type": "date?", "desc": "Set by staff when verifying" },
+      "coverageLabel": { "type": "string?", "desc": "Covered to Oct 2027 while covered; null otherwise" },
+      "rejectReason": { "type": "string?", "desc": "Why staff could not verify it" },
+      "canEdit": { "type": "bool", "desc": "Pending or rejected devices can be changed (a rejected one goes back to pending)" },
+      "createdAt": "datetime"
+    },
+    "DeviceInput": {
+      "brand": "string", "model": "string", "storage": "string?",
+      "imei": { "type": "string", "desc": "15 digits (spaces and dashes are ignored), Luhn-checked" },
+      "purchaseDate": { "type": "date", "desc": "Not in the future" },
+      "orderRef": { "type": "string?", "desc": "Optional Marketly order reference" }
+    },
+    "DeviceAdmin": {
+      "id": "uuid", "customerId": "uuid", "customerName": { "type": "string?", "desc": "From customers, when known" },
+      "brand": "string", "model": "string", "storage": "string?", "label": "string",
+      "imei": { "type": "string?", "desc": "The full IMEI", "permission": "services.devices.manage", "mask": "hide" },
+      "imeiLast4": "string", "purchaseDate": "date", "orderRef": "string?",
+      "status": "enum(pending|verified|rejected)",
+      "coveredUntil": "date?",
+      "suggestedCoveredUntil": { "type": "date", "desc": "The purchase date plus 12 months: the default when verifying" },
+      "covered": "bool",
+      "rejectReason": "string?", "staffNote": "string?",
+      "verifiedAt": "datetime?", "verifiedBy": { "type": "string?", "desc": "Who verified it, e.g. staff:<id>" },
+      "requestCount": { "type": "int", "desc": "Requests made for this device" },
+      "history": { "type": "StatusChange[]", "desc": "Status changes, oldest first" },
+      "createdAt": "datetime", "updatedAt": "datetime"
+    },
+    "DeviceAdminUpdate": {
+      "brand": "string?", "model": "string?", "storage": "string?",
+      "imei": { "type": "string?", "desc": "15 digits, Luhn-checked" },
+      "purchaseDate": "date?", "orderRef": "string?",
+      "coveredUntil": { "type": "date?", "desc": "Verified devices: change the end of the cover" },
+      "staffNote": { "type": "string?", "desc": "Staff only" }
+    },
+    "DeviceVerifyInput": {
+      "coveredUntil": { "type": "date?", "desc": "End of the warranty cover; default the purchase date plus 12 months" },
+      "staffNote": "string?"
+    }
   },
   "tables": [
     { "name": "categories", "columns": { "id": "uuid pk", "area": "text", "slug": "text", "name": "text", "icon": "text?", "position": "int", "visible": "bool" }, "indexes": ["unique (area, slug)", "(area, position)"] },
-    { "name": "providers", "columns": { "id": "uuid pk", "slug": "text unique", "name": "text", "logo": "jsonb?", "cover": "jsonb?", "kind": "text?", "category_id": "uuid? → categories", "city": "text?", "verified": "bool", "photos": "jsonb", "description": "text?", "since": "int?", "contacts": "jsonb", "location": "jsonb?", "hours": "jsonb", "staff": "jsonb", "reply_time": "text?", "status": "text", "rating_sum": "int", "rating_count": "int", "rating_stars": "jsonb", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(status, name)", "(category_id, status)"] },
-    { "name": "services", "columns": { "id": "uuid pk", "slug": "text unique", "area": "text", "provider_id": "uuid → providers", "category_id": "uuid? → categories", "title": "text", "summary": "text?", "image": "jsonb?", "photos": "jsonb", "badge": "text?", "from_price": "bigint?", "currency": "text", "price_unit": "text", "duration_label": "text?", "supported_label": "text?", "coverage": "text?", "tags": "jsonb", "description": "text?", "included": "jsonb", "requirements": "jsonb", "supported": "jsonb", "os_versions": "jsonb", "handover": "jsonb", "price_table": "jsonb", "price_table_title": "text?", "terms": "jsonb", "steps": "jsonb", "slot_minutes": "int?", "duration_minutes": "int?", "status": "text", "position": "int", "rating_sum": "int", "rating_count": "int", "rating_stars": "jsonb", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(area, status, position)", "(provider_id, status, position)", "(category_id, status, position)"] },
-    { "name": "requests", "columns": { "id": "uuid pk", "ref": "text unique", "area": "text", "service_id": "uuid → services", "provider_id": "uuid → providers", "customer_id": "uuid", "slot_start": "timestamptz?", "slot_end": "timestamptz?", "staff_id": "text?", "contact": "jsonb", "details": "jsonb", "status": "text", "provider_note": "text?", "staff_note": "text?", "history": "jsonb", "reviewed": "bool", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(customer_id, created_at)", "(area, status, created_at)", "(provider_id, slot_start)", "(service_id, slot_start)"] },
-    { "name": "reviews", "columns": { "id": "uuid pk", "service_id": "uuid → services", "provider_id": "uuid → providers", "request_id": "uuid unique → requests", "customer_id": "uuid", "author_name": "text", "rating": "int", "text": "text?", "status": "text", "created_at": "timestamptz" }, "indexes": ["(service_id, status, created_at)"] }
+    { "name": "providers", "columns": { "id": "uuid pk", "slug": "text unique", "name": "text", "logo": "jsonb?", "cover": "jsonb?", "kind": "text?", "category_id": "uuid? → categories", "city": "text?", "verified": "bool", "photos": "jsonb", "description": "text?", "since": "int?", "contacts": "jsonb", "location": "jsonb?", "point": "jsonb? (the address geocoded when there is no pin)", "hours": "jsonb", "staff": "jsonb", "reply_time": "text?", "status": "text", "rating_sum": "int", "rating_count": "int", "rating_stars": "jsonb", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(status, name)", "(category_id, status)"] },
+    { "name": "services", "columns": { "id": "uuid pk", "slug": "text unique", "area": "text", "provider_id": "uuid → providers", "category_id": "uuid? → categories", "title": "text", "summary": "text?", "image": "jsonb?", "photos": "jsonb", "badge": "text?", "from_price": "bigint?", "currency": "text", "price_unit": "text", "duration_label": "text?", "supported_label": "text?", "coverage": "text?", "tags": "jsonb", "description": "text?", "included": "jsonb", "requirements": "jsonb", "supported": "jsonb", "os_versions": "jsonb", "handover": "jsonb", "price_table": "jsonb", "price_table_title": "text?", "terms": "jsonb", "full_terms": "text?", "covered_by_warranty": "bool", "steps": "jsonb", "slot_minutes": "int?", "duration_minutes": "int?", "status": "text", "position": "int", "rating_sum": "int", "rating_count": "int", "rating_stars": "jsonb", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(area, status, position)", "(provider_id, status, position)", "(category_id, status, position)"] },
+    { "name": "requests", "columns": { "id": "uuid pk", "ref": "text unique", "area": "text", "service_id": "uuid → services", "provider_id": "uuid → providers", "customer_id": "uuid", "slot_start": "timestamptz?", "slot_end": "timestamptz?", "staff_id": "text?", "device_id": "uuid? → devices", "device": "jsonb? (RequestDevice at the time of the request)", "contact": "jsonb", "details": "jsonb", "status": "text", "provider_note": "text?", "staff_note": "text?", "history": "jsonb", "reviewed": "bool", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(customer_id, created_at)", "(area, status, created_at)", "(provider_id, slot_start)", "(service_id, slot_start)", "(device_id)"] },
+    { "name": "reviews", "columns": { "id": "uuid pk", "service_id": "uuid → services", "provider_id": "uuid → providers", "request_id": "uuid unique → requests", "customer_id": "uuid", "author_name": "text", "rating": "int", "text": "text?", "status": "text", "created_at": "timestamptz" }, "indexes": ["(service_id, status, created_at)"] },
+    { "name": "saved_providers", "desc": "Providers customers saved (customers-module id)", "columns": { "id": "uuid pk", "customer_id": "uuid", "provider_id": "uuid → providers", "created_at": "timestamptz" }, "indexes": ["unique (customer_id, provider_id)", "(customer_id, created_at)", "(provider_id)"] },
+    { "name": "devices", "desc": "Phones customers registered for post-sale cover (customers-module id)", "columns": { "id": "uuid pk", "customer_id": "uuid", "brand": "text", "model": "text", "storage": "text?", "imei": "text (15 digits)", "imei_last4": "text", "purchase_date": "date", "order_ref": "text?", "status": "text (pending|verified|rejected)", "covered_until": "date?", "reject_reason": "text?", "staff_note": "text?", "verified_at": "timestamptz?", "verified_by": "text?", "history": "jsonb", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(customer_id, created_at)", "(status, created_at)", "(imei)"] }
   ],
   "stateMachines": [
     {
@@ -207,21 +308,39 @@
         ["in_progress", "complete", "completed"], ["in_progress", "cancel", "cancelled"]
       ],
       "notes": "Customers cancel while requested or confirmed (a booking up to 2 hours before its slot). Staff confirm, start, complete, decline or cancel on the provider's behalf. A cancelled or declined booking frees its slot."
+    },
+    {
+      "name": "Registered device", "field": "Device.status", "initial": "pending",
+      "transitions": [
+        ["pending", "verify", "verified"], ["pending", "reject", "rejected"],
+        ["rejected", "resubmit", "pending"], ["rejected", "verify", "verified"],
+        ["verified", "reject", "rejected"]
+      ],
+      "notes": "Customers register a device (pending) and may change it while pending or rejected; changing a rejected one resubmits it. Staff verify it with a cover end date (default the purchase date plus 12 months) or reject it with a reason, and may withdraw a verification."
     }
   ],
   "endpoints": [
     { "id": "listCategories", "area": "store", "method": "GET", "path": "/categories", "summary": "Visible categories of an area in order", "auth": "visitor", "query": { "area": "enum(os_install|post_sale|welfare|booking)" }, "response": "ServiceCategory[]", "screens": ["store/phones", "store/welfare", "store/booking"] },
-    { "id": "listServices", "area": "store", "method": "GET", "path": "/services", "summary": "Published services of an area", "auth": "visitor", "paging": true, "query": { "area": "enum(os_install|post_sale|welfare|booking)", "category": { "type": "string?", "desc": "Category slug" }, "q": "string?", "sort": "enum(recommended|price|rating)?" }, "response": "ServiceCard", "screens": ["store/phones", "store/welfare"] },
-    { "id": "getService", "area": "store", "method": "GET", "path": "/services/{slug}", "summary": "A service with its provider, price table, terms, steps and newest reviews", "auth": "visitor", "params": { "slug": "string" }, "response": "Service", "errors": ["NOT_FOUND"], "screens": ["store/service", "store/welfare-service"] },
+    { "id": "getMyArea", "area": "store", "method": "GET", "path": "/area", "summary": "Where the lists measure distances from", "desc": "The city of the signed-in customer's geocoded default delivery address: the Welfare location button and the N services near Portland line (N is the list's total). Visitors and customers without one get located: false.", "auth": "visitor", "scope": "own-customer", "response": "CustomerArea", "screens": ["store/welfare", "store/phones", "store/booking"] },
+    { "id": "listServices", "area": "store", "method": "GET", "path": "/services", "summary": "Published services of an area", "desc": "Cards carry the provider's distance when the customer is located. sort=nearest puts the closest providers first (services without a provider point last); without a location it reads as recommended.", "auth": "visitor", "scope": "own-customer", "paging": true, "query": { "area": "enum(os_install|post_sale|welfare|booking)", "category": { "type": "string?", "desc": "Category slug" }, "q": "string?", "sort": "enum(recommended|nearest|price|rating)?" }, "response": "ServiceCard", "screens": ["store/phones", "store/welfare"] },
+    { "id": "getService", "area": "store", "method": "GET", "path": "/services/{slug}", "summary": "A service with its provider, price table, terms, full terms, steps and newest reviews", "desc": "For a signed-in customer: the provider's distance and saved flag, and on covered-by-warranty post-sale services the $0 price for their covered device (yourDevice).", "auth": "visitor", "scope": "own-customer", "params": { "slug": "string" }, "response": "Service", "errors": ["NOT_FOUND"], "screens": ["store/service", "store/welfare-service"] },
     { "id": "listServiceReviews", "area": "store", "method": "GET", "path": "/services/{id}/reviews", "summary": "A service's reviews, newest first", "auth": "visitor", "params": { "id": "uuid" }, "paging": true, "response": "ServiceReview", "screens": ["store/service"] },
-    { "id": "listProviders", "area": "store", "method": "GET", "path": "/providers", "summary": "Published providers of an area (Booking: Available near you)", "auth": "visitor", "paging": true, "query": { "area": "enum(os_install|post_sale|welfare|booking)", "category": "string?", "q": "string?" }, "response": "ProviderCard", "screens": ["store/booking"] },
-    { "id": "getProvider", "area": "store", "method": "GET", "path": "/providers/{slug}", "summary": "A provider's page with its services, hours and staff", "auth": "visitor", "params": { "slug": "string" }, "query": { "area": "enum(os_install|post_sale|welfare|booking)?" }, "response": "Provider", "errors": ["NOT_FOUND"], "screens": ["store/booking-provider"] },
+    { "id": "listProviders", "area": "store", "method": "GET", "path": "/providers", "summary": "Published providers of an area (Booking: Available near you, and the map)", "desc": "Each card carries its map point (location), distance and saved flag. sort=nearest puts the closest first (providers without a point last); without a location it reads as name.", "auth": "visitor", "scope": "own-customer", "paging": true, "query": { "area": "enum(os_install|post_sale|welfare|booking)", "category": "string?", "q": "string?", "sort": "enum(name|nearest|rating)?" }, "response": "ProviderCard", "screens": ["store/booking", "store/booking-map"] },
+    { "id": "getProvider", "area": "store", "method": "GET", "path": "/providers/{slug}", "summary": "A provider's page with its services, hours and staff", "desc": "Name, rating, city, address and distance, about (description), contacts, hours and the published services (of one area when given): the Booking provider page and the OS install and Post-sale provider page.", "auth": "visitor", "scope": "own-customer", "params": { "slug": "string" }, "query": { "area": "enum(os_install|post_sale|welfare|booking)?" }, "response": "Provider", "errors": ["NOT_FOUND"], "screens": ["store/booking-provider", "store/provider"] },
+    { "id": "listSavedProviders", "area": "store", "method": "GET", "path": "/saved-providers", "summary": "Providers I saved, newest first", "desc": "Hidden providers are left out.", "auth": "customer", "paging": true, "query": { "area": { "type": "enum(os_install|post_sale|welfare|booking)?", "desc": "Only providers with published services of this area" } }, "response": "ProviderCard", "screens": ["store/saved", "store/booking"] },
+    { "id": "saveProvider", "area": "store", "method": "PUT", "path": "/saved-providers/{providerId}", "summary": "Save a provider", "desc": "Saving a saved provider changes nothing.", "auth": "customer", "params": { "providerId": "uuid" }, "response": "ProviderSaved", "errors": ["NOT_FOUND", "SAVED_LIMIT"], "screens": ["store/booking-provider", "store/booking", "store/provider"] },
+    { "id": "unsaveProvider", "area": "store", "method": "DELETE", "path": "/saved-providers/{providerId}", "summary": "Remove a provider from my saved ones", "desc": "Removing one that is not saved changes nothing.", "auth": "customer", "params": { "providerId": "uuid" }, "response": "ProviderSaved", "screens": ["store/booking-provider", "store/booking", "store/provider", "store/saved"] },
     { "id": "getAvailability", "area": "store", "method": "GET", "path": "/services/{id}/availability", "summary": "Free time slots of a bookable service, day by day", "auth": "visitor", "params": { "id": "uuid" }, "query": { "from": { "type": "date?", "desc": "Default today (market time)" }, "days": { "type": "int?", "desc": "1–14, default 7" }, "staffId": "string?" }, "response": "AvailabilityDay[]", "errors": ["NOT_FOUND"], "screens": ["store/booking-provider"] },
-    { "id": "createRequest", "area": "store", "method": "POST", "path": "/requests", "summary": "Request or book a service", "desc": "A bookable service needs slotStart, which must still be free (SLOT_TAKEN otherwise).", "auth": "customer", "body": "RequestInput", "response": "ServiceRequest", "status": 201, "idempotent": true, "errors": ["NOT_FOUND", "SLOT_TAKEN", "SLOT_REQUIRED"], "screens": ["store/service", "store/welfare-service", "store/booking-provider"] },
+    { "id": "createRequest", "area": "store", "method": "POST", "path": "/requests", "summary": "Request or book a service", "desc": "A bookable service needs slotStart, which must still be free (SLOT_TAKEN otherwise). With deviceId the request records the device; a covered-by-warranty service for a verified device under cover is priced $0.", "auth": "customer", "body": "RequestInput", "response": "ServiceRequest", "status": 201, "idempotent": true, "errors": ["NOT_FOUND", "SLOT_TAKEN", "SLOT_REQUIRED"], "screens": ["store/service", "store/welfare-service", "store/booking-provider"] },
     { "id": "listMyRequests", "area": "store", "method": "GET", "path": "/requests", "summary": "My requests and bookings, newest first", "auth": "customer", "paging": true, "query": { "area": "enum(os_install|post_sale|welfare|booking)?", "state": { "type": "enum(open|past)?", "desc": "open: requested, confirmed, in progress; past: the rest" } }, "response": "ServiceRequest", "screens": ["store/my-requests", "store/booking"] },
     { "id": "getMyRequest", "area": "store", "method": "GET", "path": "/requests/{id}", "summary": "One of my requests", "auth": "customer", "params": { "id": "uuid" }, "response": "ServiceRequest", "errors": ["NOT_FOUND"], "screens": ["store/my-request"] },
     { "id": "cancelMyRequest", "area": "store", "method": "POST", "path": "/requests/{id}/cancel", "summary": "Cancel my request or booking", "auth": "customer", "params": { "id": "uuid" }, "body": { "reason": "string?" }, "response": "ServiceRequest", "errors": ["NOT_FOUND", "ILLEGAL_TRANSITION", "TOO_LATE_TO_CANCEL"], "screens": ["store/my-request"] },
     { "id": "reviewMyRequest", "area": "store", "method": "POST", "path": "/requests/{id}/review", "summary": "Rate a completed request", "auth": "customer", "params": { "id": "uuid" }, "body": "ReviewInput", "response": "ServiceRequest", "status": 201, "errors": ["NOT_FOUND", "ILLEGAL_TRANSITION", "ALREADY_REVIEWED"], "screens": ["store/my-request"] },
+    { "id": "listMyDevices", "area": "store", "method": "GET", "path": "/devices", "summary": "My registered devices, newest first", "desc": "At most 10 per customer, so not paged.", "auth": "customer", "response": "Device[]", "screens": ["store/phones", "store/devices", "store/service"] },
+    { "id": "registerDevice", "area": "store", "method": "POST", "path": "/devices", "summary": "Register a device for post-sale cover", "desc": "Saved as pending until staff verify it. The IMEI must pass the Luhn check and not be registered by anyone already (pending or verified).", "auth": "customer", "body": "DeviceInput", "response": "Device", "status": 201, "idempotent": true, "errors": ["IMEI_TAKEN", "DEVICE_LIMIT"], "screens": ["store/devices", "store/device"] },
+    { "id": "getMyDevice", "area": "store", "method": "GET", "path": "/devices/{id}", "summary": "One of my devices", "auth": "customer", "params": { "id": "uuid" }, "response": "Device", "errors": ["NOT_FOUND"], "screens": ["store/device"] },
+    { "id": "updateMyDevice", "area": "store", "method": "PATCH", "path": "/devices/{id}", "summary": "Change a pending or rejected device", "desc": "A rejected device goes back to pending. Verified devices can't be changed (DEVICE_LOCKED).", "auth": "customer", "params": { "id": "uuid" }, "body": "DeviceInput", "response": "Device", "errors": ["NOT_FOUND", "IMEI_TAKEN", "DEVICE_LOCKED"], "screens": ["store/device"] },
+    { "id": "removeMyDevice", "area": "store", "method": "DELETE", "path": "/devices/{id}", "summary": "Remove one of my devices", "desc": "Requests already made keep their device details.", "auth": "customer", "params": { "id": "uuid" }, "response": null, "status": 204, "errors": ["NOT_FOUND"], "screens": ["store/device"] },
 
     { "id": "listCategoriesAdmin", "area": "admin", "method": "GET", "path": "/categories", "summary": "Categories of an area", "auth": "staff", "permission": "services.view", "query": { "area": "enum(os_install|post_sale|welfare|booking)?" }, "response": "ServiceCategory[]", "screens": ["admin/departments-services"] },
     { "id": "createCategory", "area": "admin", "method": "POST", "path": "/categories", "summary": "Add a category", "auth": "staff", "permission": "services.manage", "body": "ServiceCategoryInput", "response": "ServiceCategory", "status": 201, "errors": ["SLUG_TAKEN"], "audited": true, "screens": ["admin/departments-services"] },
@@ -241,18 +360,26 @@
     { "id": "getRequestAdmin", "area": "admin", "method": "GET", "path": "/requests/{id}", "summary": "A request", "auth": "staff", "permission": "services.view", "params": { "id": "uuid" }, "response": "RequestAdmin", "errors": ["NOT_FOUND"], "screens": ["admin/departments-services"] },
     { "id": "updateRequest", "area": "admin", "method": "PATCH", "path": "/requests/{id}", "summary": "Confirm, start, complete, decline or cancel a request; move a booking; add notes", "auth": "staff", "permission": "services.requests.manage", "params": { "id": "uuid" }, "body": "RequestUpdate", "response": "RequestAdmin", "errors": ["NOT_FOUND", "ILLEGAL_TRANSITION", "SLOT_TAKEN"], "audited": true, "events": ["services.request.status_changed"], "screens": ["admin/departments-services"] },
     { "id": "listReviewsAdmin", "area": "admin", "method": "GET", "path": "/reviews", "summary": "Reviews, newest first", "auth": "staff", "permission": "services.view", "paging": true, "query": { "status": "enum(visible|hidden)?", "serviceId": "uuid?" }, "response": "ReviewAdmin", "screens": ["admin/departments-services"] },
-    { "id": "moderateReview", "area": "admin", "method": "PATCH", "path": "/reviews/{id}", "summary": "Hide or show a review", "auth": "staff", "permission": "services.manage", "params": { "id": "uuid" }, "body": { "status": "enum(visible|hidden)" }, "response": "ReviewAdmin", "errors": ["NOT_FOUND"], "audited": true, "screens": ["admin/departments-services"] }
+    { "id": "moderateReview", "area": "admin", "method": "PATCH", "path": "/reviews/{id}", "summary": "Hide or show a review", "auth": "staff", "permission": "services.manage", "params": { "id": "uuid" }, "body": { "status": "enum(visible|hidden)" }, "response": "ReviewAdmin", "errors": ["NOT_FOUND"], "audited": true, "screens": ["admin/departments-services"] },
+    { "id": "listDevicesAdmin", "area": "admin", "method": "GET", "path": "/devices", "summary": "Registered devices, newest first", "auth": "staff", "permission": "services.view", "paging": true, "query": { "status": "enum(pending|verified|rejected)?", "customerId": "uuid?", "q": { "type": "string?", "desc": "Brand, model, order ref or IMEI digits" } }, "response": "DeviceAdmin", "screens": ["admin/departments-devices"] },
+    { "id": "getDeviceAdmin", "area": "admin", "method": "GET", "path": "/devices/{id}", "summary": "A registered device", "auth": "staff", "permission": "services.view", "params": { "id": "uuid" }, "response": "DeviceAdmin", "errors": ["NOT_FOUND"], "screens": ["admin/departments-devices"] },
+    { "id": "verifyDevice", "area": "admin", "method": "POST", "path": "/devices/{id}/verify", "summary": "Verify a device and set its cover end", "desc": "coveredUntil defaults to the purchase date plus 12 months and can't be before the purchase date.", "auth": "staff", "permission": "services.devices.manage", "params": { "id": "uuid" }, "body": "DeviceVerifyInput", "response": "DeviceAdmin", "errors": ["NOT_FOUND", "ILLEGAL_TRANSITION"], "audited": true, "events": ["services.device.verified"], "screens": ["admin/departments-devices"] },
+    { "id": "rejectDevice", "area": "admin", "method": "POST", "path": "/devices/{id}/reject", "summary": "Reject a device, or withdraw its verification", "auth": "staff", "permission": "services.devices.manage", "params": { "id": "uuid" }, "body": { "reason": { "type": "string", "desc": "Shown to the customer, e.g. The IMEI doesn't match the order" }, "staffNote": "string?" }, "response": "DeviceAdmin", "errors": ["NOT_FOUND", "ILLEGAL_TRANSITION"], "audited": true, "events": ["services.device.rejected"], "screens": ["admin/departments-devices"] },
+    { "id": "updateDeviceAdmin", "area": "admin", "method": "PATCH", "path": "/devices/{id}", "summary": "Correct a device's details, its cover end or the staff note", "auth": "staff", "permission": "services.devices.manage", "params": { "id": "uuid" }, "body": "DeviceAdminUpdate", "response": "DeviceAdmin", "errors": ["NOT_FOUND", "IMEI_TAKEN"], "audited": true, "screens": ["admin/departments-devices"] }
   ],
   "events": {
     "publishes": [
-      { "name": "services.request.status_changed", "when": "Staff or the customer change a request's status", "payload": { "requestId": "uuid", "customerId": "uuid", "status": "string", "ref": "string" } }
+      { "name": "services.request.status_changed", "when": "Staff or the customer change a request's status", "payload": { "requestId": "uuid", "customerId": "uuid", "status": "string", "ref": "string" } },
+      { "name": "services.device.verified", "when": "Staff verify a registered device", "payload": { "deviceId": "uuid", "customerId": { "type": "uuid", "desc": "customers-module id (the account id for an account without a customer record)" }, "label": "string", "coveredUntil": "date" } },
+      { "name": "services.device.rejected", "when": "Staff reject a registered device or withdraw its verification", "payload": { "deviceId": "uuid", "customerId": "uuid", "label": "string", "reason": "string" } }
     ],
     "consumes": []
   },
   "permissions": [
     { "key": "services.view", "audience": "staff", "desc": "See providers, services, requests and reviews in Admin › Departments" },
     { "key": "services.manage", "audience": "staff", "desc": "Providers, categories, services; hide reviews" },
-    { "key": "services.requests.manage", "audience": "staff", "desc": "Confirm, complete, decline and move requests and bookings" }
+    { "key": "services.requests.manage", "audience": "staff", "desc": "Confirm, complete, decline and move requests and bookings" },
+    { "key": "services.devices.manage", "audience": "staff", "desc": "Verify or reject registered devices, set their warranty cover and see full IMEIs" }
   ],
   "settings": [
     { "key": "cancelCutoffMinutes", "type": "int", "default": 120, "desc": "Customers cancel a booking up to this long before its slot", "min": 0 }
@@ -264,7 +391,11 @@
     "SLOT_TAKEN": { "status": 409, "meaning": "That time was just booked; pick another." },
     "SLOT_REQUIRED": { "status": 400, "meaning": "Pick a time for this service." },
     "TOO_LATE_TO_CANCEL": { "status": 409, "meaning": "It is too close to the booking to cancel in the app; call the provider." },
-    "ALREADY_REVIEWED": { "status": 409, "meaning": "You already rated this." }
+    "ALREADY_REVIEWED": { "status": 409, "meaning": "You already rated this." },
+    "SAVED_LIMIT": { "status": 409, "meaning": "You saved the most providers you can; remove one first." },
+    "IMEI_TAKEN": { "status": 409, "meaning": "This phone is already registered." },
+    "DEVICE_LIMIT": { "status": 409, "meaning": "You registered the most devices you can; remove one first." },
+    "DEVICE_LOCKED": { "status": 409, "meaning": "A verified device can't be changed; remove it and register it again, or contact support." }
   },
   "notes": [
     "Areas: os_install and post_sale are the Phones department's OS install and Post-sale services tabs; welfare is Welfare services; booking is Booking. A provider can serve several areas.",
@@ -272,6 +403,10 @@
     "Slots: the provider's opening hours of the day, cut into slotMinutes from opening time; a slot is taken when a requested, confirmed or in-progress booking of the same service (and the same staff member when one is chosen; any free staff member otherwise) overlaps it; past slots are not available.",
     "Ratings come only from reviews of completed requests (one per request). RatingSummary.average is null without reviews.",
     "Request refs are SR- plus five characters from 23456789ABCDEFGHJKLMNPQRSTUVWXYZ.",
-    "The customer's name on a review is their first name and last initial (customers.getProfile), else Customer."
+    "The customer's name on a review is their first name and last initial (customers.getProfile), else Customer.",
+    "Distances (2026-10-22): from customers.customerLocation (the customer's geocoded default delivery address) to the provider's point, as 1.2 mi / 14 mi (kernel/lib/geo.ts). A provider's point is the staff pin, else its address (contacts.address and city) geocoded with customers.geocodeAddress when staff save it. Visitors and customers without a located address see no distance; Nearest then falls back to the normal order.",
+    "Saved providers and registered devices are keyed by the customers-module id (the account id when the account has no customer record); requests and reviews keep the account id.",
+    "Registered devices: the IMEI is 15 digits with a valid Luhn check digit; customers only ever get its last 4 digits back, staff with services.devices.manage see it whole. One pending or verified registration per IMEI; at most 10 devices per customer.",
+    "Covered by warranty: a post-sale service flagged coveredByWarranty is $0 for a verified device whose coveredUntil is today or later. The normal price shown struck through is the price table row that matches the device's model (row labels like Galaxy S25 / S25+ match Galaxy S25 and Galaxy S25+), else the service's from price."
   ]
 }

@@ -11,8 +11,9 @@
  * The staff account needs the departments manage keys (Content Manager, or Business Owner with it). Development
  * servers only: the app session uses the development app proof.
  */
-import { seedDepartments } from './simulate/departments-data.js';
-import { seedFood } from './simulate/food-data.js';
+import { seedDepartmentActivity, seedDepartments } from './simulate/departments-data.js';
+import { seedFarm } from './simulate/farm-data.js';
+import { seedFood, seedFoodReviews } from './simulate/food-data.js';
 import { seedRewards } from './simulate/rewards-data.js';
 import { seedServices } from './simulate/services-data.js';
 import { apiUploader, seedSoftware } from './simulate/software-data.js';
@@ -59,5 +60,8 @@ console.log('Department pages content added:', added);
 console.log('Services, providers and categories added:', await seedServices(admin));
 console.log('Softwares categories, apps, files and packs added:', await seedSoftware(admin, apiUploader(base, staff)));
 console.log('Food categories, restaurants and menus added:', await seedFood(admin));
+console.log('Food reviews added (sample customers order and rate):', await seedFoodReviews(admin, request, () => appSession('store')));
+console.log('Farm dealers added:', await seedFarm(admin));
 const reviewer = reviewerToken ? (method: 'GET' | 'POST' | 'PATCH' | 'PUT', path: string, body?: unknown) => request(method, `/api${path}`, body, reviewerToken) : undefined;
 console.log(reviewer ? 'Daily rewards added:' : 'Daily rewards added (campaigns waiting for funding need another staff member: set SEED_REVIEWER_EMAIL and SEED_REVIEWER_PASSWORD, or confirm them in Admin › Promotions and run again):', await seedRewards(admin, { reviewer }));
+console.log('Company and game reviews, Play center keys, players and scores added:', await seedDepartmentActivity(admin, request, () => appSession('store')));

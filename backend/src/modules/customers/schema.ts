@@ -57,6 +57,10 @@ const addresses = new Schema(
     delivery_instructions: { type: String, default: null },
     is_default: { type: Boolean, required: true },
     validated_at: { type: Date, default: null },
+    lat: { type: Schema.Types.Decimal128, default: null }, // WGS84 latitude from the geocoder; internal, never in store responses
+    lng: { type: Schema.Types.Decimal128, default: null }, // WGS84 longitude
+    geocoded_at: { type: Date, default: null }, // last geocoding attempt; set with null lat/lng when the address could not be placed
+    geocode_precision: { type: String, default: null, enum: ["zip","city",null] },
     last_used_at: { type: Date, default: null },
     deleted_at: { type: Date, default: null },
     created_at: { type: Date, required: true },
@@ -68,6 +72,7 @@ const addresses = new Schema(
 );
 addresses.index({"customer_id":1}, {"name":"addresses_customer_id_dc4488"});
 addresses.index({"customer_id":1}, {"name":"addresses_customer_id_86b96d","unique":true,"partialFilterExpression":{"is_default":true,"deleted_at":null}});
+addresses.index({"geocoded_at":1}, {"name":"addresses_geocoded_at_198bd4"});
 
 const marketing_preferences = new Schema(
   {

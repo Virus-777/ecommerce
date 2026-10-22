@@ -4,13 +4,13 @@
   "group": "Growth",
   "phase": 2,
   "chapters": [],
-  "summary": "The app's Softwares department: apps for phones and PCs that customers download. Staff keep the categories, apps, files, packs and the home rails in Admin › Departments › Softwares. Free apps are owned on Get; paid apps and packs are bought with a card in their own payment flow (payments purchase intents, not cart and checkout), and owners download the files through signed links.",
+  "summary": "The app's Softwares department: apps for phones and PCs that customers download. Staff keep the categories, apps, files, packs and the home rails in Admin › Departments › Softwares. Free apps are owned on Get; paid apps and packs are bought with a card in their own payment flow (payments purchase intents, not cart and checkout) and come with a licence key. Any signed-in customer downloads the files through signed links.",
   "owns": [
     "Software categories (Applications, AI, Games, Education, Business, …) with icons and order",
     "Apps: title, company, brief, icon, screenshots, descriptions, what you get, price and sale price, files (package and optional databases), version, what's new, version history, runtime platforms, minimum requirements, notice, permissions, status",
     "Packs: several apps sold together for one price",
     "Home rails of the Recommended tab (staff pick, newest, a category, a platform or top rated)",
-    "Purchases (SW- references) and their payment status; entitlements (who owns which app); downloads and views counted per app",
+    "Purchases (SW- references) and their payment status; entitlements (who owns which app) with a licence key for paid apps; downloads and views counted per app",
     "Ratings and reviews from owners"
   ],
   "notOwns": [
@@ -47,7 +47,13 @@
       "owned": { "type": "bool", "desc": "The signed-in customer owns it; false for visitors" }
     },
     "AppFile": { "id": { "type": "uuid", "desc": "media asset id" }, "kind": "enum(package|database)", "name": { "type": "string", "desc": "File name" }, "sizeBytes": "int", "sizeLabel": "string", "uploadedAt": "datetime?" },
-    "AppFiles": { "package": "AppFile?", "databases": "AppFile[]", "databasesNote": { "type": "string?", "desc": "e.g. Preset library and LUT packs, needed for offline use" } },
+    "AppFiles": { "package": "AppFile?", "databases": "AppFile[]", "databasesNote": { "type": "string?", "desc": "e.g. Preset library and LUT packs, needed for offline use" }, "databasesSizeBytes": { "type": "int", "desc": "All databases together; 0 without databases" }, "databasesSizeLabel": { "type": "string?", "desc": "e.g. 340 MB (Download databases · 340 MB); null without databases" } },
+    "OwnedLicence": {
+      "key": { "type": "string", "desc": "XXXXX-XXXXX-XXXXX-XXXXX, the key that unlocks the app" },
+      "devices": { "type": "int?", "desc": "Devices one key unlocks; null when the app sets no limit" },
+      "devicesLabel": { "type": "string", "desc": "e.g. Use on up to 2 devices, Use on any number of devices" },
+      "issuedAt": { "type": "datetime", "desc": "When this key was issued (a reissue replaces the key)" }
+    },
     "AppPermission": { "name": { "type": "string", "desc": "e.g. Storage" }, "desc": { "type": "string", "desc": "e.g. Open and save photos on this device" } },
     "VersionEntry": { "version": "string", "date": "date", "notes": "string?" },
     "RatingSummary": { "average": { "type": "number?", "desc": "Null without reviews" }, "count": "int", "stars": { "type": "int[]", "desc": "Counts for 5, 4, 3, 2 and 1 stars" } },
@@ -57,14 +63,16 @@
       "id": "uuid", "slug": "string", "title": "string", "company": "CompanyRef", "brief": "string", "icon": "MediaRef?", "category": "CategoryRef",
       "subcategory": { "type": "string?", "desc": "e.g. Photo editing" },
       "screenshots": "MediaRef[]", "description": "string", "moreDescription": "string?", "whatYouGet": "string[]",
-      "price": "AppPrice", "licenceLabel": { "type": "string?", "desc": "e.g. One-time purchase · 2 devices" },
+      "price": "AppPrice", "licenceLabel": { "type": "string?", "desc": "e.g. One-time purchase · 2 devices" }, "licenceDevices": { "type": "int?", "desc": "Devices one licence key unlocks; null when not limited (and for free apps)" },
       "version": "string?", "releasedAt": { "type": "date?", "desc": "When the current version came out (Updated)" }, "whatsNew": "string?", "versionHistory": { "type": "VersionEntry[]", "desc": "Earlier versions, newest first" },
-      "files": { "type": "AppFiles", "desc": "Names and sizes only; downloads go through POST /apps/{slug}/downloads" },
+      "files": { "type": "AppFiles", "desc": "Names and sizes only (shown to everyone: Download app · 1.2 GB, Download databases · 340 MB); downloads go through POST /apps/{slug}/downloads" },
       "sizeBytes": "int", "sizeLabel": "string",
+      "canDownload": { "type": "bool", "desc": "The caller may download the files: any signed-in customer (no purchase needed); false for visitors, who sign in first" },
       "platforms": "enum(android|ios|windows|macos|linux|web)[]", "platformLabels": { "type": "string[]", "desc": "Runtime platforms with minimum versions, e.g. Windows 10+" }, "minRequirements": "string?",
       "notice": { "type": "string?", "desc": "Shown in a highlighted box" }, "permissions": "AppPermission[]",
       "views": "int", "downloads": "int", "ratings": "RatingSummary", "reviews": { "type": "AppReview[]", "desc": "Newest three" },
-      "allowReviews": "bool", "owned": "bool", "canReview": { "type": "bool", "desc": "Owner who has not reviewed yet" }, "myReview": "AppReview?"
+      "allowReviews": "bool", "owned": "bool", "canReview": { "type": "bool", "desc": "Owner who has not reviewed yet" }, "myReview": "AppReview?",
+      "licence": { "type": "OwnedLicence?", "desc": "The owner's licence key for a paid app; null for visitors, customers who don't own it and free apps" }
     },
     "PackApp": { "id": "uuid", "slug": "string", "title": "string", "icon": "MediaRef?" },
     "PackCard": {
@@ -94,13 +102,13 @@
     "RetryPaymentInput": { "method": "payments.MethodSelection", "returnUrl": "url" },
     "CompleteActionInput": { "resultToken": "string" },
     "DownloadInput": { "fileId": { "type": "uuid?", "desc": "A database file; the package when absent" } },
-    "Entitlement": { "appId": "uuid", "slug": "string", "title": "string", "source": "enum(free|purchase|pack|staff)", "ownedAt": "datetime" },
-    "LibraryApp": { "app": "AppCard", "source": "enum(free|purchase|pack|staff)", "ownedAt": "datetime" },
+    "Entitlement": { "appId": "uuid", "slug": "string", "title": "string", "source": "enum(free|purchase|pack|staff)", "ownedAt": "datetime", "licenceKey": { "type": "string?", "desc": "Paid apps only" } },
+    "LibraryApp": { "app": "AppCard", "source": "enum(free|purchase|pack|staff)", "ownedAt": "datetime", "licence": { "type": "OwnedLicence?", "desc": "Paid apps only (My apps shows the key)" } },
     "AppAdminRow": { "id": "uuid", "slug": "string", "title": "string", "company": "CompanyRef", "icon": "MediaRef?", "category": "CategoryRef", "price": "AppPrice", "sizeLabel": "string", "platforms": "enum(android|ios|windows|macos|linux|web)[]", "rating": "number?", "ratingCount": "int", "downloads": "int", "views": "int", "version": "string?", "status": "enum(draft|in_review|published|hidden)", "updatedAt": "datetime" },
     "AppAdmin": {
       "id": "uuid", "slug": "string", "title": "string", "company": "CompanyRef", "categoryId": "uuid", "subcategory": "string?", "brief": "string", "icon": "MediaRef?",
       "screenshots": "MediaRef[]", "description": "string", "moreDescription": "string?", "whatYouGet": "string[]",
-      "price": "AppPrice", "licenceLabel": "string?", "files": "AppFiles", "sizeBytes": "int", "sizeLabel": "string",
+      "price": "AppPrice", "licenceLabel": "string?", "licenceDevices": "int?", "files": "AppFiles", "sizeBytes": "int", "sizeLabel": "string",
       "version": "string?", "releasedAt": "date?", "whatsNew": "string?", "versionHistory": "VersionEntry[]",
       "platforms": "enum(android|ios|windows|macos|linux|web)[]", "platformLabels": "string[]", "minRequirements": "string?", "notice": "string?", "permissions": "AppPermission[]",
       "status": "enum(draft|in_review|published|hidden)", "showInDepartment": { "type": "bool", "desc": "Listed in rails, categories and search; a hidden-from-department app still opens by link" }, "allowReviews": "bool", "position": "int",
@@ -111,7 +119,7 @@
       "title": "string", "slug": "string?", "company": "CompanyRef", "categoryId": "uuid", "subcategory": "string?", "brief": { "type": "string", "desc": "Up to 60 characters" },
       "iconId": { "type": "uuid?", "desc": "content_image upload, square, at least 512 × 512" }, "screenshotIds": { "type": "uuid[]?", "desc": "Up to 10 content_image uploads, in order" },
       "description": "string", "moreDescription": "string?", "whatYouGet": "string[]?",
-      "free": "bool", "price": { "type": "Money?", "desc": "Required when not free" }, "salePrice": { "type": "Money?", "desc": "Below price" }, "saleEndsAt": { "type": "datetime?", "desc": "Required with salePrice" }, "licenceLabel": "string?",
+      "free": "bool", "price": { "type": "Money?", "desc": "Required when not free" }, "salePrice": { "type": "Money?", "desc": "Below price" }, "saleEndsAt": { "type": "datetime?", "desc": "Required with salePrice" }, "licenceLabel": "string?", "licenceDevices": { "type": "int?", "desc": "Devices one licence key unlocks, 1 to 100; empty when not limited. Paid apps only (ignored for free apps)" },
       "packageId": { "type": "uuid?", "desc": "software_package upload; needed to publish" }, "databaseIds": { "type": "uuid[]?", "desc": "software_package uploads" }, "databasesNote": "string?",
       "version": "string?", "releasedAt": "date?", "whatsNew": "string?", "versionHistory": "VersionEntry[]?",
       "platforms": "enum(android|ios|windows|macos|linux|web)[]", "platformLabels": "string[]?", "minRequirements": "string?", "notice": "string?", "permissions": "AppPermission[]?",
@@ -128,15 +136,23 @@
     },
     "ReviewAdmin": { "id": "uuid", "app": "PackApp", "name": "string", "customerId": "uuid", "stars": "int", "text": "string?", "hidden": "bool", "date": "datetime" },
     "ReviewModeration": { "hidden": "bool", "reason": "string?" },
-    "GrantInput": { "customerId": "uuid", "appId": "uuid", "reason": "string" }
+    "GrantInput": { "customerId": "uuid", "appId": "uuid", "reason": "string" },
+    "EntitlementAdmin": {
+      "id": "uuid", "app": "PackApp", "free": { "type": "bool", "desc": "The app is free now (no licence key)" },
+      "customer": { "id": "uuid", "name": "string?", "email": "email?" },
+      "source": "enum(free|purchase|pack|staff)", "ownedAt": "datetime",
+      "purchaseId": "uuid?", "purchaseRef": { "type": "string?", "desc": "SW- reference of the purchase that granted it" }, "grantedBy": { "type": "string?", "desc": "Staff who gave it (source staff)" },
+      "licenceKey": { "type": "string?", "desc": "Paid apps only" }, "licenceIssuedAt": "datetime?", "licenceReissues": { "type": "int", "desc": "Times staff replaced the key" }
+    },
+    "ReissueLicenceInput": { "reason": { "type": "string", "desc": "Why the key is replaced, e.g. the customer's key leaked; kept in the action history" } }
   },
   "tables": [
     { "name": "categories", "columns": { "id": "uuid pk", "slug": "text unique", "name": "text", "icon": "text?", "position": "int", "visible": "bool", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(position)"] },
-    { "name": "apps", "columns": { "id": "uuid pk", "slug": "text unique", "title": "text", "company": "jsonb (CompanyRef)", "category_id": "uuid → categories", "subcategory": "text?", "brief": "text", "icon_id": "uuid?", "screenshot_ids": "jsonb", "description": "text", "more_description": "text?", "what_you_get": "jsonb", "free": "bool", "price": "bigint?", "sale_price": "bigint?", "sale_ends_at": "timestamptz?", "currency": "text", "licence_label": "text?", "package": "jsonb? (AppFile)", "databases": "jsonb (AppFile[])", "databases_note": "text?", "size_bytes": "bigint", "version": "text?", "released_at": "date?", "whats_new": "text?", "version_history": "jsonb", "platforms": "text[]", "platform_labels": "jsonb", "min_requirements": "text?", "notice": "text?", "permissions": "jsonb", "status": "text (draft|in_review|published|hidden)", "show_in_department": "bool", "allow_reviews": "bool", "position": "int", "views": "bigint", "downloads": "bigint", "owners": "int", "rating_sum": "int", "rating_count": "int", "rating_stars": "jsonb", "search_text": "text", "created_at": "timestamptz", "updated_at": "timestamptz", "updated_by": "text?" }, "indexes": ["(status, show_in_department, category_id, position)", "(status, released_at)", "(status, sale_ends_at)", "(status, rating_count)"] },
+    { "name": "apps", "columns": { "id": "uuid pk", "slug": "text unique", "title": "text", "company": "jsonb (CompanyRef)", "category_id": "uuid → categories", "subcategory": "text?", "brief": "text", "icon_id": "uuid?", "screenshot_ids": "jsonb", "description": "text", "more_description": "text?", "what_you_get": "jsonb", "free": "bool", "price": "bigint?", "sale_price": "bigint?", "sale_ends_at": "timestamptz?", "currency": "text", "licence_label": "text?", "licence_devices": "int? (devices one licence key unlocks; null = not limited)", "package": "jsonb? (AppFile)", "databases": "jsonb (AppFile[])", "databases_note": "text?", "size_bytes": "bigint", "version": "text?", "released_at": "date?", "whats_new": "text?", "version_history": "jsonb", "platforms": "text[]", "platform_labels": "jsonb", "min_requirements": "text?", "notice": "text?", "permissions": "jsonb", "status": "text (draft|in_review|published|hidden)", "show_in_department": "bool", "allow_reviews": "bool", "position": "int", "views": "bigint", "downloads": "bigint", "owners": "int", "rating_sum": "int", "rating_count": "int", "rating_stars": "jsonb", "search_text": "text", "created_at": "timestamptz", "updated_at": "timestamptz", "updated_by": "text?" }, "indexes": ["(status, show_in_department, category_id, position)", "(status, released_at)", "(status, sale_ends_at)", "(status, rating_count)"] },
     { "name": "packs", "columns": { "id": "uuid pk", "slug": "text unique", "name": "text", "summary": "text?", "app_ids": "jsonb", "price": "bigint", "currency": "text", "licence_label": "text?", "visible": "bool", "position": "int", "sold": "int", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(visible, position)"] },
     { "name": "rails", "desc": "The Recommended tab's rails, one row per rail", "columns": { "key": "text pk", "title": "text", "source": "text", "style": "text", "category_id": "uuid?", "platform": "text?", "app_ids": "jsonb", "limit": "int", "visible": "bool", "position": "int", "updated_at": "timestamptz" }, "indexes": ["(position)"] },
     { "name": "purchases", "columns": { "id": "uuid pk", "ref": "text unique", "customer_id": "uuid", "app_id": "uuid?", "pack_id": "uuid?", "title": "text", "items": "jsonb (PurchaseItem[])", "amount": "bigint", "currency": "text", "status": "text (pending_payment|requires_action|paid|failed|cancelled)", "intent_id": "uuid?", "attempts": "int", "method_label": "text?", "decline_message": "text?", "idempotency_key": "text unique", "created_at": "timestamptz", "updated_at": "timestamptz", "paid_at": "timestamptz?" }, "indexes": ["(customer_id, created_at)", "(status, created_at)", "(intent_id)"] },
-    { "name": "entitlements", "columns": { "id": "uuid pk", "customer_id": "uuid", "app_id": "uuid → apps", "source": "text (free|purchase|pack|staff)", "purchase_id": "uuid?", "granted_by": "text?", "created_at": "timestamptz" }, "indexes": ["unique (customer_id, app_id)", "(app_id)"] },
+    { "name": "entitlements", "columns": { "id": "uuid pk", "customer_id": "uuid", "app_id": "uuid → apps", "source": "text (free|purchase|pack|staff)", "purchase_id": "uuid?", "granted_by": "text?", "licence_key": "text? unique (XXXXX-XXXXX-XXXXX-XXXXX; paid apps only)", "licence_issued_at": "timestamptz?", "licence_reissues": "int? (times staff replaced the key; null = never)", "created_at": "timestamptz" }, "indexes": ["unique (customer_id, app_id)", "(app_id)", "(created_at)"] },
     { "name": "reviews", "columns": { "id": "uuid pk", "app_id": "uuid → apps", "customer_id": "uuid", "name": "text", "stars": "int", "text": "text?", "hidden": "bool", "hidden_reason": "text?", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["unique (app_id, customer_id)", "(app_id, hidden, created_at)"] }
   ],
   "stateMachines": [
@@ -157,7 +173,7 @@
     { "id": "listAppReviews", "area": "store", "method": "GET", "path": "/apps/{slug}/reviews", "summary": "An app's reviews, newest first", "auth": "visitor", "paging": true, "params": { "slug": "string" }, "query": { "stars": "int?" }, "response": "AppReview", "errors": ["NOT_FOUND"], "screens": ["store/software-app"] },
     { "id": "reviewApp", "area": "store", "method": "POST", "path": "/apps/{slug}/reviews", "summary": "Rate an app you own, or change your rating", "auth": "customer", "params": { "slug": "string" }, "body": "ReviewInput", "response": "AppReview", "errors": ["NOT_FOUND", "NOT_OWNED", "REVIEWS_OFF"], "screens": ["store/software-app"] },
     { "id": "getFreeApp", "area": "store", "method": "POST", "path": "/apps/{slug}/get", "summary": "Own a free app", "desc": "Records the entitlement; the same answer when already owned.", "auth": "customer", "params": { "slug": "string" }, "response": "Entitlement", "errors": ["NOT_FOUND", "NOT_FREE"], "screens": ["store/software-app", "store/software-apps"] },
-    { "id": "createDownload", "area": "store", "method": "POST", "path": "/apps/{slug}/downloads", "summary": "A signed link to download an owned app's package or a database", "desc": "Counts a download for the package. Links last media's downloadUrlTtlMinutes.", "auth": "customer", "params": { "slug": "string" }, "body": "DownloadInput", "response": "media.DownloadLink", "errors": ["NOT_FOUND", "NOT_OWNED", "FILE_MISSING"], "screens": ["store/software-app"] },
+    { "id": "createDownload", "area": "store", "method": "POST", "path": "/apps/{slug}/downloads", "summary": "A signed link to download an app's package or a database", "desc": "Any signed-in customer, whether or not they own the app (owner decision 2026-10-22: paid apps are unlocked by the licence key, not by the download). Published apps; a hidden app only for its owners (NOT_FOUND otherwise). Counts a download for the package. Links last media's downloadUrlTtlMinutes.", "auth": "customer", "params": { "slug": "string" }, "body": "DownloadInput", "response": "media.DownloadLink", "errors": ["NOT_FOUND", "FILE_MISSING"], "screens": ["store/software-app", "store/software-library"] },
     { "id": "getPaymentOptions", "area": "store", "method": "GET", "path": "/payment-options", "summary": "Saved cards and a new-card session for buying an app or a pack", "auth": "customer", "query": { "appId": "uuid?", "packId": "uuid?" }, "response": "payments.PaymentOptions", "errors": ["NOT_FOUND", "NOT_FOR_SALE"], "screens": ["store/software-app", "store/software"] },
     { "id": "createPurchase", "area": "store", "method": "POST", "path": "/purchases", "summary": "Buy an app or a pack", "desc": "Authorizes the card through payments.authorizePurchase. accepted → captured at once, paid, entitlements granted; requires_action → the bank challenge in payment.nextAction (finish with complete-action); failed → payment.decline; pending_check → pending_payment until payments says. A pack grants every app in it the customer doesn't own yet.", "auth": "customer", "body": "PurchaseInput", "response": "SoftwarePurchase", "status": 201, "idempotent": true, "errors": ["NOT_FOUND", "NOT_FOR_SALE", "ALREADY_OWNED", "PRICE_CHANGED", "VALIDATION_FAILED"], "screens": ["store/software-app", "store/software"] },
     { "id": "getPurchase", "area": "store", "method": "GET", "path": "/purchases/{id}", "summary": "A purchase and its payment status", "auth": "customer", "params": { "id": "uuid" }, "query": { "refresh": { "type": "bool?", "desc": "Ask the provider about a pending payment first" } }, "response": "SoftwarePurchase", "errors": ["NOT_FOUND"], "screens": ["store/software-purchase"] },
@@ -183,13 +199,16 @@
     { "id": "setRails", "area": "admin", "method": "PUT", "path": "/rails", "summary": "Replace the Recommended tab's rails", "auth": "staff", "permission": "software.manage", "body": "RailsInput", "response": "RailAdmin[]", "errors": ["VALIDATION_FAILED"], "audited": true, "screens": ["admin/departments-software"] },
     { "id": "listPurchasesAdmin", "area": "admin", "method": "GET", "path": "/purchases", "summary": "Purchases, newest first", "auth": "staff", "permission": "software.view", "paging": true, "query": { "status": "enum(pending_payment|requires_action|paid|failed|cancelled)?", "appId": "uuid?", "q": { "type": "string?", "desc": "SW- reference or customer email" } }, "response": "PurchaseAdmin", "screens": ["admin/departments-software"] },
     { "id": "grantApp", "area": "admin", "method": "POST", "path": "/entitlements", "summary": "Give a customer an app (support goodwill or a payment settled elsewhere)", "auth": "staff", "permission": "software.manage", "body": "GrantInput", "response": "Entitlement", "status": 201, "errors": ["NOT_FOUND", "ALREADY_OWNED"], "audited": true, "screens": ["admin/departments-software"] },
+    { "id": "listEntitlementsAdmin", "area": "admin", "method": "GET", "path": "/entitlements", "summary": "Who owns which app, with licence keys, newest first", "desc": "The owners of an app (appId), a customer's apps (customerId), or a search by licence key, SW- reference or customer email (q).", "auth": "staff", "permission": "software.view", "paging": true, "query": { "appId": "uuid?", "customerId": "uuid?", "q": { "type": "string?", "desc": "Licence key, SW- reference or customer email" } }, "response": "EntitlementAdmin", "screens": ["admin/departments-software", "admin/departments-software-app"] },
+    { "id": "reissueLicence", "area": "admin", "method": "POST", "path": "/entitlements/{id}/reissue-licence", "summary": "Replace an owner's licence key", "desc": "Issues a new key for a paid app's entitlement; the old key stops working. The action history keeps the reason and the last five characters of both keys. The customer is notified (software.licence.reissued).", "auth": "staff", "permission": "software.manage", "params": { "id": "uuid" }, "body": "ReissueLicenceInput", "response": "EntitlementAdmin", "errors": ["NOT_FOUND", "NO_LICENCE", "VALIDATION_FAILED"], "audited": true, "events": ["software.licence.reissued"], "screens": ["admin/departments-software", "admin/departments-software-app"] },
     { "id": "listReviewsAdmin", "area": "admin", "method": "GET", "path": "/reviews", "summary": "Reviews, newest first", "auth": "staff", "permission": "software.view", "paging": true, "query": { "appId": "uuid?", "hidden": "bool?", "stars": "int?" }, "response": "ReviewAdmin", "screens": ["admin/departments-software"] },
     { "id": "moderateReview", "area": "admin", "method": "POST", "path": "/reviews/{id}/moderate", "summary": "Hide or show a review", "auth": "staff", "permission": "software.manage", "params": { "id": "uuid" }, "body": "ReviewModeration", "response": "ReviewAdmin", "errors": ["NOT_FOUND"], "audited": true, "screens": ["admin/departments-software"] }
   ],
   "events": {
     "publishes": [
       { "name": "software.purchase.paid", "when": "A purchase is paid and its apps are owned", "payload": { "purchaseId": "uuid", "ref": "string", "customerId": "uuid", "title": "string", "amount": "Money", "appIds": "uuid[]" } },
-      { "name": "software.purchase.failed", "when": "A purchase's payment fails", "payload": { "purchaseId": "uuid", "ref": "string", "customerId": "uuid", "title": "string" } }
+      { "name": "software.purchase.failed", "when": "A purchase's payment fails", "payload": { "purchaseId": "uuid", "ref": "string", "customerId": "uuid", "title": "string" } },
+      { "name": "software.licence.reissued", "when": "Staff replace an owner's licence key (the old key stops working)", "payload": { "entitlementId": "uuid", "customerId": "uuid", "appId": "uuid", "slug": "string", "title": "string" } }
     ],
     "consumes": [
       { "name": "payments.purchase.authorized", "does": "module software: capture and mark the purchase paid (a payment that was pending or finished its bank challenge outside the app)" },
@@ -201,7 +220,7 @@
   ],
   "permissions": [
     { "key": "software.view", "audience": "staff", "desc": "See apps, packs, purchases and reviews in Admin › Departments › Softwares" },
-    { "key": "software.manage", "audience": "staff", "desc": "Categories, apps and their files, packs, rails, hide reviews, give an app to a customer" }
+    { "key": "software.manage", "audience": "staff", "desc": "Categories, apps and their files, packs, rails, hide reviews, give an app to a customer, reissue a licence key" }
   ],
   "settings": [],
   "integrations": [],
@@ -215,7 +234,8 @@
     "PRICE_CHANGED": { "status": 409, "meaning": "The price changed; details.amount is the new price." },
     "REVIEWS_OFF": { "status": 409, "meaning": "Reviews are turned off for this app." },
     "FILE_MISSING": { "status": 404, "meaning": "That file isn't available yet." },
-    "FILE_NOT_READY": { "status": 409, "meaning": "An uploaded file isn't ready or has the wrong purpose." }
+    "FILE_NOT_READY": { "status": 409, "meaning": "An uploaded file isn't ready or has the wrong purpose." },
+    "NO_LICENCE": { "status": 409, "meaning": "The app is free, so this entitlement has no licence key." }
   },
   "notes": [
     "2026-10-22 (user): software gets its own payment flow, not cart and checkout. The card is charged at once (authorize, then capture) and the apps are owned immediately; refunds are handled outside the app for now.",
@@ -224,6 +244,8 @@
     "Size: package plus databases, from the media assets' sizes. Labels use 1,000-based units (MB, GB) with one decimal above 1 GB.",
     "Rails: manual (the staff's apps in order), newest (releasedAt), category, platform (e.g. windows and macos for PC apps) and top_rated (ratings with at least 3 reviews). Default rails: Recommended for you (manual, carousel), New apps (newest, list), Games (category games, carousel), Browsers (category browsers, list), PC apps (platform windows, carousel).",
     "The reviewer's name is their first name and last initial (customers.getCustomer), else Customer. Ratings count only visible reviews.",
-    "Customers are customers-module ids (the store principal's customerId), as payments and promotions use."
+    "Customers are customers-module ids (the store principal's customerId), as payments and promotions use.",
+    "2026-10-22 (user): anyone signed in can download an app's files (package and databases) without owning it; the Download buttons always show. Buying a paid app issues a licence key that unlocks it on as many devices as the app's licence says (licenceDevices). Free apps need no key.",
+    "Licence keys: XXXXX-XXXXX-XXXXX-XXXXX from 23456789ABCDEFGHJKLMNPQRSTUVWXYZ (no 0/O, 1/I/L), unique. Issued with every entitlement of a paid app (purchase, pack, staff grant) when it is created; entitlements of paid apps made before keys existed get theirs from the 2026-10-22 migration, and an entitlement still without one (an app that became paid later) gets it the next time the owner opens the app or My apps. The key is shown to its owner (GET /apps/{slug} licence, GET /library) and to staff (GET /admin/software/entitlements); staff replace it with reissue-licence (audited). Activation and device counting happen in the app's own licence check, not here."
   ]
 }

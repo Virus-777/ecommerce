@@ -8,14 +8,14 @@
 import { Schema } from 'mongoose';
 import { collectionOptions, DATE, integer } from '../../kernel/mongo/schemas.js';
 
-/** One per checkout payment attempt, or per purchase payment attempt (software, food) */
+/** One per checkout payment attempt, or per purchase payment attempt (software, food, farm) */
 const intents = new Schema(
   {
     _id: { type: String, required: true }, // id
     ref: { type: String, required: true },
     purpose: { type: String, required: true, enum: ["checkout","purchase"] },
-    purchase_module: { type: String, default: null }, // software|food; purchase intents only
-    purchase_ref_id: { type: String, default: null }, // the purchase or food order id in that module
+    purchase_module: { type: String, default: null }, // software|food|farm; purchase intents only
+    purchase_ref_id: { type: String, default: null }, // the purchase, food order or farm order id in that module
     purchase_ref: { type: String, default: null },
     checkout_session_id: { type: String, default: null }, // null for purchase intents
     attempt_no: { type: Number, required: true, validate: integer },

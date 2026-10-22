@@ -14,10 +14,13 @@ The app's Food delivery department: restaurants staff keep in Admin › Departme
 - The customer's basket (one restaurant at a time)
 - Food orders (FD- references) with their status, delivery estimate and payment
 - Ratings and reviews of delivered orders, shown on restaurants and items
+- Customers' saved restaurants (the heart on a restaurant, Account › Saved)
+- Restaurant points (geocoded from the address, or a pin staff set) and the distance labels on restaurant cards
 
 **Not here:**
 - Card payments: payments purchase intents (authorizePurchase, completeAction, capturePurchase, voidIntent)
 - Delivery addresses: customers (getAddressForOrder)
+- Where the customer is and turning addresses into points: customers (customerLocation, geocodeAddress)
 - Pictures: media (content_image uploads)
 - Ads above the restaurants: advertising placement food_top
 - Cart, checkout and orders of the main store: food never goes there (2026-10-22 decision)
@@ -29,6 +32,11 @@ The app's Food delivery department: restaurants staff keep in Admin › Departme
 | GET | `/api/store/food/categories` | Visible food categories in order | visitor | `FoodCategory[]` |
 | GET | `/api/store/food/restaurants` | Published restaurants, open ones first | visitor | Page<RestaurantCard> |
 | GET | `/api/store/food/restaurants/{slug}` | A restaurant with its menu | visitor | `Restaurant` |
+| GET | `/api/store/food/restaurants/{slug}/reviews` | A restaurant's reviews, newest first | visitor | Page<RestaurantReview> |
+| GET | `/api/store/food/restaurants/{slug}/ratings` | A restaurant's rating summary: average, count and count per star | visitor | `RestaurantRatings` |
+| GET | `/api/store/food/saved-restaurants` | My saved restaurants, last saved first | customer | Page<RestaurantCard> |
+| PUT | `/api/store/food/saved-restaurants/{slug}` | Save a restaurant (the heart) | customer | 204 No content |
+| DELETE | `/api/store/food/saved-restaurants/{slug}` | Remove a restaurant from my saved ones | customer | 204 No content |
 | GET | `/api/store/food/items` | Menu items across restaurants | visitor | Page<MenuItemCard> |
 | GET | `/api/store/food/items/{id}` | A menu item with its photos, sizes and extras | visitor | `MenuItem` |
 | GET | `/api/store/food/basket` | My food basket with prices worked out now | customer | `Basket` |
@@ -131,6 +139,8 @@ The app's Food delivery department: restaurants staff keep in Admin › Departme
 | promoBadge | `string?` Short badge on the card, e.g. Free delivery |
 | open | `bool` |
 | openLabel | `string` e.g. Open until 11 PM, or Closed · opens 5 PM |
+| distanceLabel | `string?` e.g. 1.2 mi from the customer's default delivery address; null for visitors, customers without a geocoded default address and restaurants without a point (the card shows city instead) |
+| saved | `bool` The signed-in customer saved this restaurant; false for visitors |
 
 ### OptionChoice
 
@@ -209,6 +219,8 @@ The app's Food delivery department: restaurants staff keep in Admin › Departme
 | open | `bool` |
 | openLabel | `string` |
 | hours | `OpeningDay[]` |
+| distanceLabel | `string?` e.g. 1.2 mi, shown after the address in the meta line (Pizza · Italian · 118 Bay Rd · 1.2 mi); null as on RestaurantCard |
+| saved | `bool` The heart in the top bar: the signed-in customer saved it; false for visitors |
 | sections | `MenuSection[]` Popular first (items marked popular), then the restaurant's sections in order |
 
 ### MenuItem
@@ -319,6 +331,26 @@ The app's Food delivery department: restaurants staff keep in Admin › Departme
 | text | `string?` |
 | date | `datetime` |
 
+### RestaurantReview
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| name | `string` First name and last initial, e.g. Maya R. |
+| stars | `int` 1 to 5 |
+| text | `string?` |
+| date | `datetime` |
+| items | `string[]` What the reviewer ordered, from the order: e.g. 2 × Margherita pizza 12", Tiramisu; empty when the order is gone |
+
+### RestaurantRatings
+
+| Field | Type |
+|---|---|
+| restaurantId | `uuid` |
+| slug | `string` |
+| name | `string` |
+| ratings | `RatingSummary` Average, count and the count per star (5 to 1) of the visible reviews |
+
 ### ReviewInput
 
 | Field | Type |
@@ -398,9 +430,13 @@ The app's Food delivery department: restaurants staff keep in Admin › Departme
 | photos | `MediaRef[]` |
 | address | `string?` |
 | city | `string?` |
+| region | `string?` State code, e.g. OR |
+| postalCode | `string?` |
 | phone | `string?` |
 | hours | `OpeningDay[]` |
 | timeZone | `string` |
+| point | `customers.GeoPoint?` Where the restaurant is on the map; distances on cards are measured from it |
+| pointSource | `enum(geocoded|staff)?` geocoded: from the address (customers.geocodeAddress); staff: a pin staff set. Null: no point yet (the geocoder could not place the address) |
 | deliveryMinMinutes | `int` |
 | deliveryMaxMinutes | `int` |
 | deliveryFee | `Money` |
@@ -426,11 +462,14 @@ The app's Food delivery department: restaurants staff keep in Admin › Departme
 | imageId | `uuid?` |
 | logoId | `uuid?` |
 | photoIds | `uuid[]?` |
-| address | `string?` |
-| city | `string?` |
+| address | `string?` Street line, e.g. 118 Bay Rd |
+| city | `string?` e.g. Portland (Portland, OR is read as city and state when region is empty) |
+| region | `string?` State code, e.g. OR |
+| postalCode | `string?` |
 | phone | `string?` |
 | hours | `OpeningDay[]?` |
 | timeZone | `string?` |
+| point | `customers.GeoPoint?` A pin staff set on the map, kept until staff send null. Null drops the pin and the point is geocoded from the address again; left out keeps a staff pin, else the address is geocoded when it changed or has no point yet |
 | deliveryMinMinutes | `int` |
 | deliveryMaxMinutes | `int` |
 | deliveryFee | `Money` |
@@ -613,6 +652,11 @@ Indexes: `(position)`
 | photo_ids | jsonb |
 | address | text? |
 | city | text? |
+| region | text? |
+| postal_code | text? |
+| lat | numeric(9,6)? (WGS84 latitude) |
+| lng | numeric(9,6)? (WGS84 longitude) |
+| point_source | text? (geocoded|staff) |
 | phone | text? |
 | hours | jsonb |
 | time_zone | text |
@@ -721,6 +765,17 @@ Indexes: `(restaurant_id, section_id, position)`, `(recommended, available)`
 
 Indexes: `(customer_id, created_at)`, `(status, created_at)`, `(restaurant_id, status, created_at)`, `(intent_id)`
 
+**saved_restaurants**: A customer's saved restaurants (one row per customer and restaurant)
+
+| Column | Type |
+|---|---|
+| id | uuid pk |
+| customer_id | uuid |
+| restaurant_id | uuid → restaurants |
+| created_at | timestamptz |
+
+Indexes: `(customer_id, restaurant_id) unique`, `(customer_id, created_at)`, `(restaurant_id)`
+
 **reviews**
 
 | Column | Type |
@@ -754,7 +809,7 @@ Indexes: `(restaurant_id, hidden, created_at)`
 
 | Function | Signature | Used by |
 |---|---|---|
-| exportCustomerData | `(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]`<br>The customer's food orders (reference, restaurant, items, amounts, address, status, dates) and reviews for the personal data export | customers |
+| exportCustomerData | `(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]`<br>The customer's food orders (reference, restaurant, items, amounts, address, status, dates), reviews and saved restaurants for the personal data export | customers |
 
 ## Permissions
 
@@ -785,6 +840,7 @@ Indexes: `(restaurant_id, hidden, created_at)`
 
 | Job | Schedule | Does |
 |---|---|---|
+| `food.geocode-restaurants` | on boot | Backfill: geocode restaurants that have an address but no point (restaurants added before points existed, or while the geocoder could not place them) through customers.geocodeAddress. Staff pins are never touched |
 | `food.expire-unaccepted` | every 5 min | Decline placed orders not accepted within acceptMinutes (void the payment, tell the customer); cancel payment_pending orders left in a bank challenge for 30 minutes |
 
 ## Settings
@@ -800,4 +856,7 @@ Indexes: `(restaurant_id, hidden, created_at)`
 - Open: from the restaurant's hours in its time zone (default the market time zone); paused restaurants show as closed. openLabel: Open until 11 PM, Closes soon · 10:45 PM (within 30 minutes), Closed · opens 5 PM, Closed today.
 - ETA: from acceptance plus the delivery minutes (deliveryMin–deliveryMax); before acceptance etaLabel shows the delivery time, e.g. Usually 20–30 min.
 - Ratings: one review per delivered order; it counts for the restaurant and for every item in the order. The reviewer's name is their first name and last initial (customers.getCustomer), else Customer.
-- Customers are customers-module ids (the store principal's customerId), as payments uses. Distances are not shown (no customer location); cards show the restaurant's city.
+- Customers are customers-module ids (the store principal's customerId), as payments uses.
+- Distances (owner decision 2026-10-22): from the customer's geocoded default delivery address (customers.customerLocation) to the restaurant's point, labelled by kernel/lib/geo.ts (0.3 mi, 1.2 mi, 14 mi). Shown on restaurant cards (lists, saved, the item page, the basket) and in the restaurant's meta line. Visitors and customers without a location get distanceLabel null and the card shows the city. Order cards show no distance.
+- Restaurant points: geocoded from address, city, region and postal code (customers.geocodeAddress) when a restaurant is added or its address changes, unless staff set a pin (point). A failed geocode never fails the save; the food.geocode-restaurants job tries again on the next deploy.
+- Saved restaurants: PUT and DELETE /saved-restaurants/{slug} are safe to repeat. Reviews screen (store/food-reviews): GET /restaurants/{slug}/ratings for the summary on top, GET /restaurants/{slug}/reviews for the list.

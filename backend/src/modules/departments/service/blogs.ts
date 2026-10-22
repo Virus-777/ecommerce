@@ -6,7 +6,7 @@
 import { newId } from '../../../kernel/lib/ids.js';
 import { pageOf, type Page, type PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
-import type { BlogAuthor, BlogAuthorAdmin, BlogAuthorCard, BlogAuthorInput, BlogPost, BlogPostAdmin, BlogPostCard, BlogPostInput, BlogReactionResult, BlogReply, BlogReplyAdmin, BlogReportAdmin, BlogReportInput, BlogTopic, BlogTopicInput, BlogTopicRef } from '../../../spec/departments.js';
+import type { BlogAuthor, BlogAuthorAdmin, BlogAuthorCard, BlogAuthorInput, BlogFollowResult, BlogPost, BlogPostAdmin, BlogPostCard, BlogPostInput, BlogReactionResult, BlogReply, BlogReplyAdmin, BlogReplyLikeResult, BlogReportAdmin, BlogReportInput, BlogSaveResult, BlogTopic, BlogTopicInput, BlogTopicRef } from '../../../spec/departments.js';
 import { LIMITS, plainText, readMinutes, replyAuthorName, sanitizeHtml } from '../domain/rules.js';
 import type { AuthorRow, PostRow, ReplyRow, ReportRow, TopicRow } from '../ports.js';
 import { actorKey, invalid, iso, mediaOf, notFound, optionalText, requireText, unique, type By, type StoredMedia } from './base.js';
@@ -141,11 +141,11 @@ export class DepartmentsBlogs extends DepartmentsFarm {
   /* ---------------------------------------------------------------- authors */
 
   private async authorsAdmin(rows: AuthorRow[]): Promise<BlogAuthorAdmin[]> {
-    const [counts, likes, refs] = await Promise.all([this.repo.postCounts('author_id', { all: true }), this.repo.likesByAuthor(), this.refsMap(rows.map((a) => mediaOf(a.avatar)?.id))]);
+    const [counts, likes, refs, followers] = await Promise.all([this.repo.postCounts('author_id', { all: true }), this.repo.likesByAuthor(), this.refsMap(rows.map((a) => mediaOf(a.avatar)?.id)), this.repo.followerCounts(rows.map((a) => a.id))]);
     const reports = await Promise.all(rows.map(async (a) => this.repo.countUpheldAbout(a.id, await this.repo.postIdsOfAuthor(a.id))));
     return rows.map((a, i) => {
       const avatar = mediaOf(a.avatar);
-      return { id: a.id, slug: a.slug, name: a.name, avatar: avatar ? (refs.get(avatar.id) ?? null) : null, email: a.email, bio: a.bio, postCount: counts.get(a.id) ?? 0, likeCount: likes.get(a.id) ?? 0, reportCount: reports[i]!, createdAt: a.created_at.toISOString(), updatedAt: a.updated_at.toISOString() };
+      return { id: a.id, slug: a.slug, name: a.name, avatar: avatar ? (refs.get(avatar.id) ?? null) : null, email: a.email, bio: a.bio, postCount: counts.get(a.id) ?? 0, likeCount: likes.get(a.id) ?? 0, reportCount: reports[i]!, followerCount: followers.get(a.id) ?? 0, createdAt: a.created_at.toISOString(), updatedAt: a.updated_at.toISOString() };
     });
   }
 
@@ -191,12 +191,73 @@ export class DepartmentsBlogs extends DepartmentsFarm {
     await this.audit({ action: 'departments.blogs.author.delete', actionLabel: 'Deleted a blog author', target: { type: 'blog_author', id, label: a.name }, before: a }, by);
   }
 
-  async getBlogAuthor(slug: string): Promise<BlogAuthor> {
+  /** An author's profile; `customerId` (customers-module id) answers following */
+  async getBlogAuthor(slug: string, customerId: string | null = null): Promise<BlogAuthor> {
     const a = await this.repo.authorBySlug(slug);
     if (!a) throw notFound('Author');
-    const [counts, likes, refs, postIds] = await Promise.all([this.repo.postCounts('author_id'), this.repo.likesByAuthor(), this.refsMap([mediaOf(a.avatar)?.id]), this.repo.postIdsOfAuthor(a.id)]);
+    const [counts, likes, refs, postIds, followers, follow] = await Promise.all([
+      this.repo.postCounts('author_id'),
+      this.repo.likesByAuthor(),
+      this.refsMap([mediaOf(a.avatar)?.id]),
+      this.repo.postIdsOfAuthor(a.id),
+      this.repo.countFollowers(a.id),
+      customerId ? this.repo.getFollow(customerId, a.id) : Promise.resolve(undefined),
+    ]);
     const avatar = mediaOf(a.avatar);
-    return { id: a.id, slug: a.slug, name: a.name, avatar: avatar ? (refs.get(avatar.id) ?? null) : null, email: a.email, bio: a.bio, postCount: counts.get(a.id) ?? 0, likeCount: likes.get(a.id) ?? 0, reportCount: await this.repo.countUpheldAbout(a.id, postIds), joinedAt: a.created_at.toISOString() };
+    return { id: a.id, slug: a.slug, name: a.name, avatar: avatar ? (refs.get(avatar.id) ?? null) : null, email: a.email, bio: a.bio, postCount: counts.get(a.id) ?? 0, likeCount: likes.get(a.id) ?? 0, reportCount: await this.repo.countUpheldAbout(a.id, postIds), joinedAt: a.created_at.toISOString(), followerCount: followers, following: Boolean(follow) };
+  }
+
+  /* ---------------------------------------------------------------- follows and saves */
+
+  async followBlogAuthor(authorId: string, customerId: string, following: boolean): Promise<BlogFollowResult> {
+    const a = await this.repo.getAuthor(authorId);
+    if (!a) throw notFound('Author');
+    if (following) await this.repo.insertFollow({ id: newId(), author_id: a.id, customer_id: customerId, followed_at: this.now() });
+    else await this.repo.deleteFollow(customerId, a.id);
+    return { following, followerCount: await this.repo.countFollowers(a.id) };
+  }
+
+  async listFollowedBlogAuthors(customerId: string, page: PageRequest): Promise<Page<BlogAuthorCard>> {
+    const res = await this.repo.pageFollows(customerId, page);
+    const authors = new Map((await this.repo.authorsByIds(res.items.map((f) => f.author_id))).map((a) => [a.id, a]));
+    const refs = await this.refsMap([...authors.values()].map((a) => mediaOf(a.avatar)?.id));
+    return { ...res, items: res.items.filter((f) => authors.has(f.author_id)).map((f) => this.authorCard(authors.get(f.author_id), refs)) };
+  }
+
+  async saveBlogPost(postId: string, customerId: string, saved: boolean): Promise<BlogSaveResult> {
+    if (saved) {
+      const p = await this.publishedPost(await this.repo.getPost(postId));
+      await this.repo.insertSave({ id: newId(), post_id: p.id, customer_id: customerId, saved_at: this.now() });
+    } else {
+      // unsaving works on a post that is gone or unpublished too
+      if (!(await this.repo.getPost(postId)) && !(await this.repo.getSave(customerId, postId))) throw notFound('Post');
+      await this.repo.deleteSave(customerId, postId);
+    }
+    return { saved };
+  }
+
+  /** Saved posts, last saved first; posts customers can no longer see are left out */
+  async listSavedBlogPosts(customerId: string, page: PageRequest): Promise<Page<BlogPostCard>> {
+    const res = await this.repo.pageSaves(customerId, page);
+    const [posts, hidden] = await Promise.all([this.repo.postsByIds(res.items.map((s) => s.post_id)), this.hiddenTopicIds()]);
+    const byId = new Map(posts.filter((p) => p.status === 'published' && !(p.topic_id && hidden.includes(p.topic_id))).map((p) => [p.id, p]));
+    const list = res.items.map((s) => byId.get(s.post_id)).filter((p): p is PostRow => Boolean(p));
+    return { ...res, items: await this.cards(list) };
+  }
+
+  /**
+   * A post was published for the first time: one departments.blog.followed_author_posted per follower of its author,
+   * for the notification ("Mina Park posted: Why soil microbes matter…")
+   */
+  private async tellFollowers(p: PostRow, by: By) {
+    try {
+      const [author, followers] = await Promise.all([this.repo.getAuthor(p.author_id), this.repo.followerIds(p.author_id)]);
+      for (const customerId of followers) {
+        this.ctx.events.publish('departments.blog.followed_author_posted', { customerId, postId: p.id, postSlug: p.slug, postTitle: p.title, authorId: p.author_id, authorName: author?.name ?? 'Marketly' }, by);
+      }
+    } catch (err) {
+      this.ctx.log.warn({ err, postId: p.id }, 'departments: followers not told about a new post');
+    }
   }
 
   async listBlogAuthorPosts(slug: string, page: PageRequest): Promise<Page<BlogPostCard>> {
@@ -219,16 +280,30 @@ export class DepartmentsBlogs extends DepartmentsFarm {
     return { ...res, items: await this.cards(res.items) };
   }
 
-  async getBlogPost(slug: string, customerId: string | null): Promise<BlogPost> {
+  /**
+   * A published post. `accountId` answers myReaction (reactions are kept by account id); `customerId` (customers-module
+   * id) answers saved.
+   */
+  async getBlogPost(slug: string, accountId: string | null, customerId: string | null = accountId): Promise<BlogPost> {
     const p = await this.publishedPost(await this.repo.postBySlug(slug));
     const hidden = await this.hiddenTopicIds();
-    const [previous, next, mine] = await Promise.all([this.repo.neighbour(p, 'previous', hidden), this.repo.neighbour(p, 'next', hidden), customerId ? this.repo.getReaction(p.id, customerId) : Promise.resolve(undefined)]);
+    const [previous, next, mine, saved, authorPosts, likes] = await Promise.all([
+      this.repo.neighbour(p, 'previous', hidden),
+      this.repo.neighbour(p, 'next', hidden),
+      accountId ? this.repo.getReaction(p.id, accountId) : Promise.resolve(undefined),
+      customerId ? this.repo.getSave(customerId, p.id) : Promise.resolve(undefined),
+      this.repo.countPosts({ authorId: p.author_id, status: 'published' }),
+      this.repo.likesByAuthor(),
+    ]);
     const list = [p, ...(previous ? [previous] : []), ...(next ? [next] : [])];
     const c = await this.postContext(list);
     return {
       ...this.cardOf(p, c),
       body: sanitizeHtml(p.body),
       myReaction: asReaction(mine?.reaction),
+      saved: Boolean(saved),
+      authorPostCount: authorPosts,
+      authorLikeCount: likes.get(p.author_id) ?? 0,
       previous: previous ? this.cardOf(previous, c) : null,
       next: next ? this.cardOf(next, c) : null,
     };
@@ -255,15 +330,28 @@ export class DepartmentsBlogs extends DepartmentsFarm {
 
   /* ---------------------------------------------------------------- replies */
 
-  private replyOut(r: ReplyRow, customerId: string | null): BlogReply {
-    return { id: r.id, postId: r.post_id, parentId: r.parent_id, authorName: r.author_name, text: r.text, createdAt: r.created_at.toISOString(), mine: Boolean(customerId && r.customer_id === customerId) };
+  /** `accountId` answers mine (replies are kept by account id); `liked` comes from the reply likes */
+  private replyOut(r: ReplyRow, accountId: string | null, liked = false): BlogReply {
+    return { id: r.id, postId: r.post_id, parentId: r.parent_id, authorName: r.author_name, text: r.text, createdAt: r.created_at.toISOString(), mine: Boolean(accountId && r.customer_id === accountId), likeCount: r.like_count ?? 0, liked };
   }
 
-  async listBlogReplies(postId: string, customerId: string | null, page: PageRequest): Promise<Page<BlogReply>> {
+  async listBlogReplies(postId: string, accountId: string | null, page: PageRequest, customerId: string | null = accountId): Promise<Page<BlogReply>> {
     const p = await this.repo.getPost(postId);
     if (!p || p.status !== 'published') return pageOf([], page);
-    const res = await this.repo.pageVisibleReplies(postId, page);
-    return { ...res, items: res.items.map((r) => this.replyOut(r, customerId)) };
+    const [res, liked] = await Promise.all([this.repo.pageVisibleReplies(postId, page), customerId ? this.repo.likedReplyIds(postId, customerId) : Promise.resolve(new Set<string>())]);
+    return { ...res, items: res.items.map((r) => this.replyOut(r, accountId, liked.has(r.id))) };
+  }
+
+  /** Likes a visible reply of a published post, or takes the like back; the count is recounted from the likes */
+  async likeBlogReply(replyId: string, customerId: string, liked: boolean): Promise<BlogReplyLikeResult> {
+    const r = await this.repo.getReply(replyId);
+    if (!r || r.status !== 'visible') throw notFound('Reply');
+    await this.publishedPost(await this.repo.getPost(r.post_id));
+    if (liked) await this.repo.insertReplyLike({ id: newId(), reply_id: r.id, post_id: r.post_id, customer_id: customerId, at: this.now() });
+    else await this.repo.deleteReplyLike(r.id, customerId);
+    const likeCount = await this.repo.countReplyLikes(r.id);
+    await this.repo.updateReply(r.id, { like_count: likeCount });
+    return { liked, likeCount };
   }
 
   /** The signed name of a reply: the customer's first name and last initial (customers), else Customer */
@@ -288,7 +376,7 @@ export class DepartmentsBlogs extends DepartmentsFarm {
       // one level: answering an answer joins its thread
       parentId = parent.parent_id ?? parent.id;
     }
-    const row: ReplyRow = { id: newId(), post_id: post.id, parent_id: parentId, customer_id: customerId, author_name: await this.replyName(customerId), text, status: 'visible', created_at: this.now() };
+    const row: ReplyRow = { id: newId(), post_id: post.id, parent_id: parentId, customer_id: customerId, author_name: await this.replyName(customerId), text, status: 'visible', like_count: 0, created_at: this.now() };
     await this.repo.insertReply(row);
     await this.recountReplies(post.id);
     return this.replyOut(row, customerId);
@@ -304,7 +392,7 @@ export class DepartmentsBlogs extends DepartmentsFarm {
   private async repliesAdmin(rows: ReplyRow[]): Promise<BlogReplyAdmin[]> {
     const [posts, reports] = await Promise.all([this.repo.postsByIds(unique(rows.map((r) => r.post_id))), this.repo.openReportCounts('reply', rows.map((r) => r.id))]);
     const titles = new Map(posts.map((p) => [p.id, p.title]));
-    return rows.map((r) => ({ id: r.id, postId: r.post_id, postTitle: titles.get(r.post_id) ?? 'Deleted post', parentId: r.parent_id, customerId: r.customer_id, authorName: r.author_name, text: r.text, status: r.status as BlogReplyAdmin['status'], openReportCount: reports.get(r.id) ?? 0, createdAt: r.created_at.toISOString() }));
+    return rows.map((r) => ({ id: r.id, postId: r.post_id, postTitle: titles.get(r.post_id) ?? 'Deleted post', parentId: r.parent_id, customerId: r.customer_id, authorName: r.author_name, text: r.text, status: r.status as BlogReplyAdmin['status'], openReportCount: reports.get(r.id) ?? 0, likeCount: r.like_count ?? 0, createdAt: r.created_at.toISOString() }));
   }
 
   async listBlogRepliesAdmin(q: { status?: 'visible' | 'hidden'; postId?: string; reported?: boolean }, page: PageRequest): Promise<Page<BlogReplyAdmin>> {
@@ -403,6 +491,7 @@ export class DepartmentsBlogs extends DepartmentsFarm {
     const row: PostRow = { id, slug: await this.slugFor('posts', input.slug, f.title), ...f, status, featured: input.featured ?? false, published_at: status === 'published' ? now : null, like_count: 0, dislike_count: 0, reply_count: 0, created_at: now, updated_at: now };
     await this.withMedia(id, f.title, [], f.cover ? [{ id: f.cover.id, path: 'cover' }] : [], () => this.repo.insertPost(row));
     await this.audit({ action: 'departments.blogs.post.create', actionLabel: status === 'published' ? 'Published a blog post' : 'Wrote a blog post', target: { type: 'blog_post', id, label: f.title }, after: { ...row, body: undefined } }, by);
+    if (status === 'published') await this.tellFollowers(row, by);
     return this.adminPost(row);
   }
 
@@ -418,6 +507,8 @@ export class DepartmentsBlogs extends DepartmentsFarm {
     const after = await this.withMedia(id, f.title, prev ? [prev] : ([] as StoredMedia[]), f.cover ? [{ id: f.cover.id, path: 'cover' }] : [], async () => (await this.repo.updatePost(id, patch))!);
     const label = status !== before.status ? (status === 'published' ? 'Published a blog post' : status === 'unpublished' ? 'Unpublished a blog post' : 'Moved a blog post back to draft') : 'Edited a blog post';
     await this.audit({ action: 'departments.blogs.post.update', actionLabel: label, target: { type: 'blog_post', id, label: f.title }, before: { ...before, body: undefined }, after: { ...after, body: undefined } }, by);
+    // only the first publishing is news: unpublishing and publishing again tells nobody
+    if (status === 'published' && !before.published_at) await this.tellFollowers(after, by);
     return this.adminPost(after);
   }
 

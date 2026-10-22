@@ -28,6 +28,8 @@ export const LIMITS = {
   short: 60,
   address: 200,
   city: 60,
+  region: 40,
+  postalCode: 12,
   phone: 40,
   promoText: 120,
   promoBadge: 30,
@@ -306,3 +308,27 @@ export function shortName(displayName: string | null | undefined): string {
 
 /** Lower-case words a search box matches */
 export const searchTextOf = (...parts: (string | null | undefined)[]) => parts.filter(Boolean).join(' ').toLowerCase().replace(/\s+/g, ' ').trim();
+
+/**
+ * What customers.geocodeAddress gets for a restaurant's address: the street line, city, region and postal code. A city
+ * written as "Portland, OR" with no region is read as the city and its state. Null without a city (nothing to place).
+ */
+export function geocodeInputOf(r: { address: string | null; city: string | null; region: string | null; postal_code: string | null }): { line1?: string; city: string; region: string; postalCode?: string } | null {
+  let city = r.city?.trim() ?? '';
+  let region = r.region?.trim() ?? '';
+  const split = /^(.+?),\s*([A-Za-z]{2})$/.exec(city);
+  if (split && (!region || region.toUpperCase() === split[2]!.toUpperCase())) {
+    city = split[1]!.trim();
+    region = split[2]!.toUpperCase();
+  }
+  if (!city) return null;
+  return { ...(r.address?.trim() ? { line1: r.address.trim() } : {}), city, region, ...(r.postal_code?.trim() ? { postalCode: r.postal_code.trim() } : {}) };
+}
+
+/** What a reviewer ordered, from the order's lines: "2 × Margherita pizza 12\"", "Tiramisu" */
+export function orderedItemsOf(lines: unknown): string[] {
+  if (!Array.isArray(lines)) return [];
+  return lines
+    .filter((l): l is { name: string; quantity?: number } => Boolean(l) && typeof (l as { name?: unknown }).name === 'string')
+    .map((l) => (Number.isInteger(l.quantity) && l.quantity! > 1 ? `${l.quantity} × ${l.name}` : l.name));
+}

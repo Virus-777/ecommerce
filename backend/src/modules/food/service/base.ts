@@ -5,6 +5,7 @@
  */
 import { AppError, isAppError } from '../../../kernel/errors/index.js';
 import { isTimeZone } from '../../../kernel/lib/dates.js';
+import { distanceLabel, isGeoPoint, type GeoPoint } from '../../../kernel/lib/geo.js';
 import { money, type Money } from '../../../kernel/lib/money.js';
 import type { ModuleContext } from '../../../kernel/module-system/index.js';
 import type * as audit from '../../../spec/audit.js';
@@ -26,6 +27,21 @@ export interface By {
 }
 
 export type Refs = Map<string, common.MediaRef>;
+
+/** Who looks at restaurant cards: the signed-in customer's point (their geocoded default address) and saved restaurants */
+export interface Viewer {
+  customerId: string | null;
+  point: GeoPoint | null;
+  saved: Set<string>;
+}
+export const NO_VIEWER: Viewer = { customerId: null, point: null, saved: new Set() };
+
+/** A restaurant's point (lat and lng are stored as numeric strings), or null */
+export const pointOf = (r: Pick<RestaurantRow, 'lat' | 'lng'>): GeoPoint | null => {
+  if (r.lat == null || r.lng == null) return null;
+  const p = { lat: Number(r.lat), lng: Number(r.lng) };
+  return isGeoPoint(p) ? p : null;
+};
 type UsageKind = 'content_block' | 'category_image';
 
 export const invalid = (path: string, message: string) => new AppError('VALIDATION_FAILED', message, { issues: [{ path, message }] });
@@ -131,7 +147,20 @@ export class FoodBase {
     return openStateOf(r.hours, at, this.zoneOf(r), r.status !== 'published');
   }
 
-  protected restaurantCard(r: RestaurantRow, refs: Refs, at = this.now()): RestaurantCard {
+  /**
+   * The viewer of restaurant cards: for a signed-in customer their location (customers.customerLocation; none when it
+   * fails) and which of these restaurants (all when not given) they saved
+   */
+  protected async viewerOf(customerId: string | null | undefined, restaurantIds?: string[]): Promise<Viewer> {
+    if (!customerId) return NO_VIEWER;
+    const [location, saved] = await Promise.all([
+      this.soft('customers.customerLocation', () => this.customers.customerLocation(customerId), null),
+      this.repo.savedIds(customerId, restaurantIds),
+    ]);
+    return { customerId, point: location && isGeoPoint(location.point) ? location.point : null, saved };
+  }
+
+  protected restaurantCard(r: RestaurantRow, refs: Refs, at = this.now(), viewer: Viewer = NO_VIEWER): RestaurantCard {
     const state = this.openState(r, at);
     return {
       id: r.id,
@@ -148,6 +177,8 @@ export class FoodBase {
       promoBadge: r.promo_badge,
       open: state.open,
       openLabel: state.label,
+      distanceLabel: distanceLabel(viewer.point, pointOf(r)),
+      saved: viewer.saved.has(r.id),
     };
   }
 

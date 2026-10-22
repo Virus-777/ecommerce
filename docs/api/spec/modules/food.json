@@ -11,11 +11,14 @@
     "Menus: sections and items with photos, description, price, was-price, diet tags, option groups (sizes, extras) and availability",
     "The customer's basket (one restaurant at a time)",
     "Food orders (FD- references) with their status, delivery estimate and payment",
-    "Ratings and reviews of delivered orders, shown on restaurants and items"
+    "Ratings and reviews of delivered orders, shown on restaurants and items",
+    "Customers' saved restaurants (the heart on a restaurant, Account › Saved)",
+    "Restaurant points (geocoded from the address, or a pin staff set) and the distance labels on restaurant cards"
   ],
   "notOwns": [
     "Card payments: payments purchase intents (authorizePurchase, completeAction, capturePurchase, voidIntent)",
     "Delivery addresses: customers (getAddressForOrder)",
+    "Where the customer is and turning addresses into points: customers (customerLocation, geocodeAddress)",
     "Pictures: media (content_image uploads)",
     "Ads above the restaurants: advertising placement food_top",
     "Cart, checkout and orders of the main store: food never goes there (2026-10-22 decision)"
@@ -23,7 +26,7 @@
   "dependsOn": ["media", "payments", "customers"],
   "optionalDeps": ["audit", "notifications"],
   "publicApi": [
-    { "name": "exportCustomerData", "signature": "(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]", "desc": "The customer's food orders (reference, restaurant, items, amounts, address, status, dates) and reviews for the personal data export", "usedBy": ["customers"] }
+    { "name": "exportCustomerData", "signature": "(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]", "desc": "The customer's food orders (reference, restaurant, items, amounts, address, status, dates), reviews and saved restaurants for the personal data export", "usedBy": ["customers"] }
   ],
   "types": {
     "FoodCategory": { "id": "uuid", "slug": "string", "name": "string", "icon": { "type": "string?", "desc": "Lucide icon name" }, "image": "MediaRef?", "position": "int", "visible": "bool", "restaurantCount": "int" },
@@ -35,7 +38,9 @@
       "rating": "number?", "ratingCount": "int",
       "deliveryLabel": { "type": "string", "desc": "e.g. 20–30 min" }, "feeLabel": { "type": "string", "desc": "e.g. $1.99 delivery, or Free delivery" },
       "promoBadge": { "type": "string?", "desc": "Short badge on the card, e.g. Free delivery" },
-      "open": "bool", "openLabel": { "type": "string", "desc": "e.g. Open until 11 PM, or Closed · opens 5 PM" }
+      "open": "bool", "openLabel": { "type": "string", "desc": "e.g. Open until 11 PM, or Closed · opens 5 PM" },
+      "distanceLabel": { "type": "string?", "desc": "e.g. 1.2 mi from the customer's default delivery address; null for visitors, customers without a geocoded default address and restaurants without a point (the card shows city instead)" },
+      "saved": { "type": "bool", "desc": "The signed-in customer saved this restaurant; false for visitors" }
     },
     "OptionChoice": { "id": "string", "name": "string", "priceDelta": { "type": "Money", "desc": "Added to the item price; negative for a smaller size" }, "default": "bool", "available": "bool" },
     "OptionGroup": { "id": "string", "name": { "type": "string", "desc": "e.g. Size, Extras" }, "required": "bool", "min": "int", "max": { "type": "int", "desc": "1 for a single choice" }, "choices": "OptionChoice[]" },
@@ -50,6 +55,8 @@
       "ratings": "RatingSummary", "deliveryLabel": "string", "deliveryFee": "Money", "feeLabel": "string", "freeDeliveryOver": "Money?", "minOrder": "Money?", "minOrderLabel": "string?",
       "promoText": { "type": "string?", "desc": "e.g. Free delivery on orders over $25 this week" }, "promoBadge": "string?",
       "open": "bool", "openLabel": "string", "hours": "OpeningDay[]",
+      "distanceLabel": { "type": "string?", "desc": "e.g. 1.2 mi, shown after the address in the meta line (Pizza · Italian · 118 Bay Rd · 1.2 mi); null as on RestaurantCard" },
+      "saved": { "type": "bool", "desc": "The heart in the top bar: the signed-in customer saved it; false for visitors" },
       "sections": { "type": "MenuSection[]", "desc": "Popular first (items marked popular), then the restaurant's sections in order" }
     },
     "MenuItem": {
@@ -71,6 +78,11 @@
     "OrderLine": { "itemId": "uuid", "name": "string", "image": "MediaRef?", "optionsLabel": "string?", "note": "string?", "unitPrice": "Money", "quantity": "int", "total": "Money" },
     "StatusChange": { "status": "string", "at": "datetime", "by": { "type": "string?", "desc": "Admin only: who changed it" }, "note": "string?" },
     "FoodReview": { "id": "uuid", "name": { "type": "string", "desc": "First name and last initial" }, "stars": "int", "text": "string?", "date": "datetime" },
+    "RestaurantReview": {
+      "id": "uuid", "name": { "type": "string", "desc": "First name and last initial, e.g. Maya R." }, "stars": { "type": "int", "desc": "1 to 5" }, "text": "string?", "date": "datetime",
+      "items": { "type": "string[]", "desc": "What the reviewer ordered, from the order: e.g. 2 × Margherita pizza 12\", Tiramisu; empty when the order is gone" }
+    },
+    "RestaurantRatings": { "restaurantId": "uuid", "slug": "string", "name": "string", "ratings": { "type": "RatingSummary", "desc": "Average, count and the count per star (5 to 1) of the visible reviews" } },
     "ReviewInput": { "stars": { "type": "int", "desc": "1 to 5" }, "text": { "type": "string?", "desc": "Up to 1,000 characters" } },
     "FoodOrder": {
       "id": "uuid", "ref": { "type": "string", "desc": "e.g. FD-9QX3M" },
@@ -96,14 +108,17 @@
     "CancelInput": { "reason": "string?" },
     "RestaurantAdmin": {
       "id": "uuid", "slug": "string", "name": "string", "cuisine": "string", "categoryIds": "uuid[]", "image": "MediaRef?", "logo": "MediaRef?", "photos": "MediaRef[]",
-      "address": "string?", "city": "string?", "phone": "string?", "hours": "OpeningDay[]", "timeZone": "string",
+      "address": "string?", "city": "string?", "region": { "type": "string?", "desc": "State code, e.g. OR" }, "postalCode": "string?", "phone": "string?", "hours": "OpeningDay[]", "timeZone": "string",
+      "point": { "type": "customers.GeoPoint?", "desc": "Where the restaurant is on the map; distances on cards are measured from it" },
+      "pointSource": { "type": "enum(geocoded|staff)?", "desc": "geocoded: from the address (customers.geocodeAddress); staff: a pin staff set. Null: no point yet (the geocoder could not place the address)" },
       "deliveryMinMinutes": "int", "deliveryMaxMinutes": "int", "deliveryFee": "Money", "freeDeliveryOver": "Money?", "minOrder": "Money?",
       "promoText": "string?", "promoBadge": "string?", "status": "enum(draft|published|paused|hidden)", "position": "int",
       "ratings": "RatingSummary", "itemCount": "int", "openOrders": "int", "updatedAt": "datetime"
     },
     "RestaurantInput": {
       "name": "string", "slug": "string?", "cuisine": "string", "categoryIds": "uuid[]?", "imageId": "uuid?", "logoId": "uuid?", "photoIds": "uuid[]?",
-      "address": "string?", "city": "string?", "phone": "string?", "hours": "OpeningDay[]?", "timeZone": "string?",
+      "address": { "type": "string?", "desc": "Street line, e.g. 118 Bay Rd" }, "city": { "type": "string?", "desc": "e.g. Portland (Portland, OR is read as city and state when region is empty)" }, "region": { "type": "string?", "desc": "State code, e.g. OR" }, "postalCode": "string?", "phone": "string?", "hours": "OpeningDay[]?", "timeZone": "string?",
+      "point": { "type": "customers.GeoPoint?", "desc": "A pin staff set on the map, kept until staff send null. Null drops the pin and the point is geocoded from the address again; left out keeps a staff pin, else the address is geocoded when it changed or has no point yet" },
       "deliveryMinMinutes": "int", "deliveryMaxMinutes": "int", "deliveryFee": "Money", "freeDeliveryOver": "Money?", "minOrder": "Money?",
       "promoText": "string?", "promoBadge": "string?", "status": { "type": "enum(draft|published|paused|hidden)?", "desc": "paused: shown as closed, no new orders" }, "position": "int?"
     },
@@ -133,11 +148,12 @@
   },
   "tables": [
     { "name": "categories", "columns": { "id": "uuid pk", "slug": "text unique", "name": "text", "icon": "text?", "image_id": "uuid?", "position": "int", "visible": "bool", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(position)"] },
-    { "name": "restaurants", "columns": { "id": "uuid pk", "slug": "text unique", "name": "text", "cuisine": "text", "category_ids": "jsonb", "image_id": "uuid?", "logo_id": "uuid?", "photo_ids": "jsonb", "address": "text?", "city": "text?", "phone": "text?", "hours": "jsonb", "time_zone": "text", "delivery_min": "int", "delivery_max": "int", "delivery_fee": "bigint", "free_delivery_over": "bigint?", "min_order": "bigint?", "currency": "text", "promo_text": "text?", "promo_badge": "text?", "status": "text (draft|published|paused|hidden)", "position": "int", "rating_sum": "int", "rating_count": "int", "rating_stars": "jsonb", "search_text": "text", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(status, position)"] },
+    { "name": "restaurants", "columns": { "id": "uuid pk", "slug": "text unique", "name": "text", "cuisine": "text", "category_ids": "jsonb", "image_id": "uuid?", "logo_id": "uuid?", "photo_ids": "jsonb", "address": "text?", "city": "text?", "region": "text?", "postal_code": "text?", "lat": "numeric(9,6)? (WGS84 latitude)", "lng": "numeric(9,6)? (WGS84 longitude)", "point_source": "text? (geocoded|staff)", "phone": "text?", "hours": "jsonb", "time_zone": "text", "delivery_min": "int", "delivery_max": "int", "delivery_fee": "bigint", "free_delivery_over": "bigint?", "min_order": "bigint?", "currency": "text", "promo_text": "text?", "promo_badge": "text?", "status": "text (draft|published|paused|hidden)", "position": "int", "rating_sum": "int", "rating_count": "int", "rating_stars": "jsonb", "search_text": "text", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(status, position)"] },
     { "name": "sections", "columns": { "id": "uuid pk", "restaurant_id": "uuid → restaurants", "name": "text", "position": "int" }, "indexes": ["(restaurant_id, position)"] },
     { "name": "items", "columns": { "id": "uuid pk", "restaurant_id": "uuid → restaurants", "section_id": "uuid → sections", "name": "text", "description": "text?", "photo_ids": "jsonb", "price": "bigint", "was_price": "bigint?", "currency": "text", "tag": "text?", "diet_tags": "jsonb", "popular": "bool", "recommended": "bool", "option_groups": "jsonb (OptionGroup[])", "available": "bool", "position": "int", "rating_sum": "int", "rating_count": "int", "rating_stars": "jsonb", "search_text": "text", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(restaurant_id, section_id, position)", "(recommended, available)"] },
     { "name": "baskets", "columns": { "id": "uuid pk", "customer_id": "uuid unique", "restaurant_id": "uuid?", "lines": "jsonb (stored lines: id, itemId, quantity, options, note)", "updated_at": "timestamptz" } },
     { "name": "orders", "columns": { "id": "uuid pk", "ref": "text unique", "customer_id": "uuid", "restaurant_id": "uuid → restaurants", "restaurant": "jsonb (name, slug, cuisine, image at order time)", "lines": "jsonb (OrderLine[])", "subtotal": "bigint", "delivery_fee": "bigint", "total": "bigint", "currency": "text", "address": "jsonb (Address)", "courier_note": "text?", "contact_phone": "text?", "status": "text (payment_pending|payment_failed|placed|accepted|preparing|on_the_way|delivered|cancelled|declined)", "history": "jsonb", "restaurant_note": "text?", "staff_note": "text?", "intent_id": "uuid?", "attempts": "int", "method_label": "text?", "eta_from": "timestamptz?", "eta_to": "timestamptz?", "placed_at": "timestamptz?", "accepted_at": "timestamptz?", "delivered_at": "timestamptz?", "reviewed": "bool", "idempotency_key": "text unique", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(customer_id, created_at)", "(status, created_at)", "(restaurant_id, status, created_at)", "(intent_id)"] },
+    { "name": "saved_restaurants", "desc": "A customer's saved restaurants (one row per customer and restaurant)", "columns": { "id": "uuid pk", "customer_id": "uuid", "restaurant_id": "uuid → restaurants", "created_at": "timestamptz" }, "indexes": ["(customer_id, restaurant_id) unique", "(customer_id, created_at)", "(restaurant_id)"] },
     { "name": "reviews", "columns": { "id": "uuid pk", "order_id": "uuid unique → orders", "restaurant_id": "uuid → restaurants", "item_ids": "jsonb", "customer_id": "uuid", "name": "text", "stars": "int", "text": "text?", "hidden": "bool", "hidden_reason": "text?", "created_at": "timestamptz" }, "indexes": ["(restaurant_id, hidden, created_at)"] }
   ],
   "stateMachines": [
@@ -151,10 +167,15 @@
   ],
   "endpoints": [
     { "id": "listCategories", "area": "store", "method": "GET", "path": "/categories", "summary": "Visible food categories in order", "auth": "visitor", "response": "FoodCategory[]", "screens": ["store/food"] },
-    { "id": "listRestaurants", "area": "store", "method": "GET", "path": "/restaurants", "summary": "Published restaurants, open ones first", "auth": "visitor", "paging": true, "query": { "category": { "type": "string?", "desc": "Category slug" }, "q": "string?", "sort": "enum(recommended|rating|delivery_time|fee)?" }, "response": "RestaurantCard", "screens": ["store/food", "store/food-restaurants"] },
-    { "id": "getRestaurant", "area": "store", "method": "GET", "path": "/restaurants/{slug}", "summary": "A restaurant with its menu", "auth": "visitor", "params": { "slug": "string" }, "response": "Restaurant", "errors": ["NOT_FOUND"], "screens": ["store/food-restaurant"] },
+    { "id": "listRestaurants", "area": "store", "method": "GET", "path": "/restaurants", "summary": "Published restaurants, open ones first", "auth": "visitor", "paging": true, "query": { "category": { "type": "string?", "desc": "Category slug" }, "q": "string?", "sort": { "type": "enum(recommended|rating|delivery_time|fee|nearest)?", "desc": "nearest: closest to the customer's default delivery address first (restaurants without a point last); as recommended for visitors and customers without a location" } }, "scope": "own-customer", "response": "RestaurantCard", "screens": ["store/food", "store/food-restaurants"] },
+    { "id": "getRestaurant", "area": "store", "method": "GET", "path": "/restaurants/{slug}", "summary": "A restaurant with its menu", "desc": "Signed-in customers also get saved and the distance from their default delivery address.", "auth": "visitor", "scope": "own-customer", "params": { "slug": "string" }, "response": "Restaurant", "errors": ["NOT_FOUND"], "screens": ["store/food-restaurant"] },
+    { "id": "listRestaurantReviews", "area": "store", "method": "GET", "path": "/restaurants/{slug}/reviews", "summary": "A restaurant's reviews, newest first", "desc": "Visible reviews only (staff can hide one). The rating summary on top of the screen comes from GET /restaurants/{slug}/ratings.", "auth": "visitor", "params": { "slug": "string" }, "paging": true, "query": { "stars": { "type": "int?", "desc": "Only reviews with this many stars (1 to 5)" } }, "response": "RestaurantReview", "errors": ["NOT_FOUND"], "screens": ["store/food-reviews"] },
+    { "id": "getRestaurantRatings", "area": "store", "method": "GET", "path": "/restaurants/{slug}/ratings", "summary": "A restaurant's rating summary: average, count and count per star", "auth": "visitor", "params": { "slug": "string" }, "response": "RestaurantRatings", "errors": ["NOT_FOUND"], "screens": ["store/food-reviews"] },
+    { "id": "listSavedRestaurants", "area": "store", "method": "GET", "path": "/saved-restaurants", "summary": "My saved restaurants, last saved first", "desc": "Restaurants staff hid or deleted are left out (a hidden one comes back when staff publish it again).", "auth": "customer", "paging": true, "response": "RestaurantCard", "screens": ["store/saved"] },
+    { "id": "saveRestaurant", "area": "store", "method": "PUT", "path": "/saved-restaurants/{slug}", "summary": "Save a restaurant (the heart)", "desc": "Saving a saved restaurant again changes nothing.", "auth": "customer", "params": { "slug": "string" }, "response": null, "status": 204, "errors": ["NOT_FOUND"], "screens": ["store/food-restaurant", "store/food", "store/food-restaurants", "store/saved"] },
+    { "id": "unsaveRestaurant", "area": "store", "method": "DELETE", "path": "/saved-restaurants/{slug}", "summary": "Remove a restaurant from my saved ones", "desc": "Removing one that isn't saved (or no longer exists) changes nothing.", "auth": "customer", "params": { "slug": "string" }, "response": null, "status": 204, "screens": ["store/food-restaurant", "store/food", "store/food-restaurants", "store/saved"] },
     { "id": "listItems", "area": "store", "method": "GET", "path": "/items", "summary": "Menu items across restaurants", "auth": "visitor", "paging": true, "query": { "recommended": { "type": "bool?", "desc": "Recommended foods" }, "category": "string?", "q": "string?" }, "response": "MenuItemCard", "screens": ["store/food", "store/food-items"] },
-    { "id": "getItem", "area": "store", "method": "GET", "path": "/items/{id}", "summary": "A menu item with its photos, sizes and extras", "auth": "visitor", "params": { "id": "uuid" }, "response": "MenuItem", "errors": ["NOT_FOUND"], "screens": ["store/food-item"] },
+    { "id": "getItem", "area": "store", "method": "GET", "path": "/items/{id}", "summary": "A menu item with its photos, sizes and extras", "auth": "visitor", "scope": "own-customer", "params": { "id": "uuid" }, "response": "MenuItem", "errors": ["NOT_FOUND"], "screens": ["store/food-item"] },
     { "id": "getBasket", "area": "store", "method": "GET", "path": "/basket", "summary": "My food basket with prices worked out now", "auth": "customer", "response": "Basket", "screens": ["store/food-restaurant", "store/food-basket"] },
     { "id": "addToBasket", "area": "store", "method": "POST", "path": "/basket/lines", "summary": "Add an item with its options", "desc": "The same item with the same options and note adds to the existing line. An item from another restaurant answers OTHER_RESTAURANT (details.restaurantName) unless replace is true.", "auth": "customer", "body": "BasketLineInput", "response": "Basket", "errors": ["NOT_FOUND", "OTHER_RESTAURANT", "OPTIONS_INVALID", "ITEM_UNAVAILABLE", "RESTAURANT_UNAVAILABLE"], "screens": ["store/food-item", "store/food-restaurant"] },
     { "id": "updateBasketLine", "area": "store", "method": "PATCH", "path": "/basket/lines/{lineId}", "summary": "Change a line's quantity or note; 0 removes it", "auth": "customer", "params": { "lineId": "string" }, "body": "BasketLineUpdate", "response": "Basket", "errors": ["NOT_FOUND"], "screens": ["store/food-basket", "store/food-restaurant"] },
@@ -200,6 +221,7 @@
     ]
   },
   "jobs": [
+    { "name": "food.geocode-restaurants", "schedule": "on boot", "does": "Backfill: geocode restaurants that have an address but no point (restaurants added before points existed, or while the geocoder could not place them) through customers.geocodeAddress. Staff pins are never touched" },
     { "name": "food.expire-unaccepted", "schedule": "every 5 min", "does": "Decline placed orders not accepted within acceptMinutes (void the payment, tell the customer); cancel payment_pending orders left in a bank challenge for 30 minutes" }
   ],
   "permissions": [
@@ -232,6 +254,9 @@
     "Open: from the restaurant's hours in its time zone (default the market time zone); paused restaurants show as closed. openLabel: Open until 11 PM, Closes soon · 10:45 PM (within 30 minutes), Closed · opens 5 PM, Closed today.",
     "ETA: from acceptance plus the delivery minutes (deliveryMin–deliveryMax); before acceptance etaLabel shows the delivery time, e.g. Usually 20–30 min.",
     "Ratings: one review per delivered order; it counts for the restaurant and for every item in the order. The reviewer's name is their first name and last initial (customers.getCustomer), else Customer.",
-    "Customers are customers-module ids (the store principal's customerId), as payments uses. Distances are not shown (no customer location); cards show the restaurant's city."
+    "Customers are customers-module ids (the store principal's customerId), as payments uses.",
+    "Distances (owner decision 2026-10-22): from the customer's geocoded default delivery address (customers.customerLocation) to the restaurant's point, labelled by kernel/lib/geo.ts (0.3 mi, 1.2 mi, 14 mi). Shown on restaurant cards (lists, saved, the item page, the basket) and in the restaurant's meta line. Visitors and customers without a location get distanceLabel null and the card shows the city. Order cards show no distance.",
+    "Restaurant points: geocoded from address, city, region and postal code (customers.geocodeAddress) when a restaurant is added or its address changes, unless staff set a pin (point). A failed geocode never fails the save; the food.geocode-restaurants job tries again on the next deploy.",
+    "Saved restaurants: PUT and DELETE /saved-restaurants/{slug} are safe to repeat. Reviews screen (store/food-reviews): GET /restaurants/{slug}/ratings for the summary on top, GET /restaurants/{slug}/reviews for the list."
   ]
 }

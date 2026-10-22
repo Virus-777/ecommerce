@@ -122,6 +122,10 @@ export interface BlogAuthor {
   /** Reports about the author and their posts that staff upheld */
   reportCount: number;
   joinedAt: string;
+  /** Customers following the author */
+  followerCount: number;
+  /** The signed-in customer follows the author; false for visitors */
+  following: boolean;
 }
 
 export const BlogAuthor: z.ZodType<BlogAuthor> = z.object({
@@ -137,6 +141,8 @@ export const BlogAuthor: z.ZodType<BlogAuthor> = z.object({
   likeCount: z.number().int().describe("Likes on the published posts"),
   reportCount: z.number().int().describe("Reports about the author and their posts that staff upheld"),
   joinedAt: z.iso.datetime({ offset: true }),
+  followerCount: z.number().int().describe("Customers following the author"),
+  following: z.boolean().describe("The signed-in customer follows the author; false for visitors"),
 }).register(common.apiTypes, { id: "departments.BlogAuthor" });
 
 export interface BlogAuthorAdmin {
@@ -150,6 +156,7 @@ export interface BlogAuthorAdmin {
   postCount: number;
   likeCount: number;
   reportCount: number;
+  followerCount: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -166,6 +173,7 @@ export const BlogAuthorAdmin: z.ZodType<BlogAuthorAdmin> = z.object({
   postCount: z.number().int().describe("All posts, drafts included"),
   likeCount: z.number().int(),
   reportCount: z.number().int(),
+  followerCount: z.number().int(),
   createdAt: z.iso.datetime({ offset: true }),
   updatedAt: z.iso.datetime({ offset: true }),
 }).register(common.apiTypes, { id: "departments.BlogAuthorAdmin" });
@@ -245,6 +253,12 @@ export interface BlogPost {
   body: string;
   /** The signed-in customer's reaction; null for visitors */
   myReaction?: "like" | "dislike" | null;
+  /** The signed-in customer saved the post (bookmark); false for visitors */
+  saved: boolean;
+  /** The author's published posts (the author card's 42 posts) */
+  authorPostCount: number;
+  /** Likes on the author's published posts */
+  authorLikeCount: number;
   /** The post published just before this one */
   previous?: BlogPostCard | null;
   /** The post published just after this one */
@@ -273,6 +287,9 @@ export const BlogPost: z.ZodType<BlogPost> = z.object({
   featured: z.boolean(),
   body: z.string().describe("Rich text as sanitized HTML (p, h2–h4, lists, links, tables, blockquote, strong/em)"),
   myReaction: z.enum(["like", "dislike"]).describe("The signed-in customer's reaction; null for visitors").nullish(),
+  saved: z.boolean().describe("The signed-in customer saved the post (bookmark); false for visitors"),
+  authorPostCount: z.number().int().describe("The author's published posts (the author card's 42 posts)"),
+  authorLikeCount: z.number().int().describe("Likes on the author's published posts"),
   get previous() {
     return BlogPostCard.nullish();
   },
@@ -383,6 +400,9 @@ export interface BlogReply {
   createdAt: string;
   /** Written by the signed-in customer (they can delete it) */
   mine: boolean;
+  likeCount: number;
+  /** The signed-in customer liked the reply; false for visitors */
+  liked: boolean;
 }
 
 export const BlogReply: z.ZodType<BlogReply> = z.object({
@@ -393,6 +413,8 @@ export const BlogReply: z.ZodType<BlogReply> = z.object({
   text: z.string(),
   createdAt: z.iso.datetime({ offset: true }),
   mine: z.boolean().describe("Written by the signed-in customer (they can delete it)"),
+  likeCount: z.number().int(),
+  liked: z.boolean().describe("The signed-in customer liked the reply; false for visitors"),
 }).register(common.apiTypes, { id: "departments.BlogReply" });
 
 export interface BlogReplyAdmin {
@@ -405,6 +427,7 @@ export interface BlogReplyAdmin {
   text: string;
   status: "visible" | "hidden";
   openReportCount: number;
+  likeCount: number;
   createdAt: string;
 }
 
@@ -418,8 +441,37 @@ export const BlogReplyAdmin: z.ZodType<BlogReplyAdmin> = z.object({
   text: z.string(),
   status: z.enum(["visible", "hidden"]),
   openReportCount: z.number().int(),
+  likeCount: z.number().int(),
   createdAt: z.iso.datetime({ offset: true }),
 }).register(common.apiTypes, { id: "departments.BlogReplyAdmin" });
+
+export interface BlogSaveResult {
+  saved: boolean;
+}
+
+export const BlogSaveResult: z.ZodType<BlogSaveResult> = z.object({
+  saved: z.boolean(),
+}).register(common.apiTypes, { id: "departments.BlogSaveResult" });
+
+export interface BlogFollowResult {
+  following: boolean;
+  followerCount: number;
+}
+
+export const BlogFollowResult: z.ZodType<BlogFollowResult> = z.object({
+  following: z.boolean(),
+  followerCount: z.number().int(),
+}).register(common.apiTypes, { id: "departments.BlogFollowResult" });
+
+export interface BlogReplyLikeResult {
+  liked: boolean;
+  likeCount: number;
+}
+
+export const BlogReplyLikeResult: z.ZodType<BlogReplyLikeResult> = z.object({
+  liked: z.boolean(),
+  likeCount: z.number().int(),
+}).register(common.apiTypes, { id: "departments.BlogReplyLikeResult" });
 
 export interface BlogReportInput {
   targetType: "post" | "reply" | "author";
@@ -531,6 +583,108 @@ export const GeoPoint: z.ZodType<GeoPoint> = z.object({
   lng: z.number(),
 }).register(common.apiTypes, { id: "departments.GeoPoint" });
 
+export interface RatingSummary {
+  /** Average stars of the visible reviews, one decimal; null without reviews */
+  average?: number | null;
+  count: number;
+  /** Counts for 5, 4, 3, 2 and 1 stars */
+  stars: number[];
+}
+
+export const RatingSummary: z.ZodType<RatingSummary> = z.object({
+  average: z.number().describe("Average stars of the visible reviews, one decimal; null without reviews").nullish(),
+  count: z.number().int(),
+  stars: z.array(z.number().int()).describe("Counts for 5, 4, 3, 2 and 1 stars"),
+}).register(common.apiTypes, { id: "departments.RatingSummary" });
+
+export interface DeptReview {
+  id: string;
+  /** First name and last initial, e.g. Dana R. */
+  name: string;
+  stars: number;
+  text?: string | null;
+  /** When it was written or last changed */
+  date: string;
+  mine: boolean;
+  /** Staff hid it (only ever true on the customer's own review: hidden reviews are not listed) */
+  hidden: boolean;
+}
+
+export const DeptReview: z.ZodType<DeptReview> = z.object({
+  id: z.uuid(),
+  name: z.string().describe("First name and last initial, e.g. Dana R."),
+  stars: z.number().int(),
+  text: z.string().nullish(),
+  date: z.iso.datetime({ offset: true }).describe("When it was written or last changed"),
+  mine: z.boolean(),
+  hidden: z.boolean().describe("Staff hid it (only ever true on the customer's own review: hidden reviews are not listed)"),
+}).register(common.apiTypes, { id: "departments.DeptReview" });
+
+export interface ReviewInput {
+  /** 1 to 5 */
+  stars: number;
+  /** Up to 1,000 characters */
+  text?: string | null;
+}
+
+export const ReviewInput: z.ZodType<ReviewInput> = z.object({
+  stars: z.number().int().describe("1 to 5"),
+  text: z.string().describe("Up to 1,000 characters").nullish(),
+}).register(common.apiTypes, { id: "departments.ReviewInput" });
+
+export interface ReviewTarget {
+  type: "company" | "game";
+  id: string;
+  slug: string;
+  name: string;
+}
+
+export const ReviewTarget: z.ZodType<ReviewTarget> = z.object({
+  type: z.enum(["company", "game"]),
+  id: z.uuid(),
+  slug: z.string(),
+  name: z.string(),
+}).register(common.apiTypes, { id: "departments.ReviewTarget" });
+
+export interface ReviewAdmin {
+  id: string;
+  target: ReviewTarget;
+  name: string;
+  customerId: string;
+  stars: number;
+  text?: string | null;
+  hidden: boolean;
+  hiddenReason?: string | null;
+  date: string;
+  createdAt: string;
+}
+
+export const ReviewAdmin: z.ZodType<ReviewAdmin> = z.object({
+  id: z.uuid(),
+  get target() {
+    return ReviewTarget;
+  },
+  name: z.string(),
+  customerId: z.uuid(),
+  stars: z.number().int(),
+  text: z.string().nullish(),
+  hidden: z.boolean(),
+  hiddenReason: z.string().nullish(),
+  date: z.iso.datetime({ offset: true }),
+  createdAt: z.iso.datetime({ offset: true }),
+}).register(common.apiTypes, { id: "departments.ReviewAdmin" });
+
+export interface ReviewModeration {
+  hidden: boolean;
+  /** Why it is hidden (kept for staff; up to 300 characters) */
+  reason?: string | null;
+}
+
+export const ReviewModeration: z.ZodType<ReviewModeration> = z.object({
+  hidden: z.boolean(),
+  reason: z.string().describe("Why it is hidden (kept for staff; up to 300 characters)").nullish(),
+}).register(common.apiTypes, { id: "departments.ReviewModeration" });
+
 export interface CompanyCard {
   id: string;
   slug: string;
@@ -540,6 +694,10 @@ export interface CompanyCard {
   city?: string | null;
   tagline?: string | null;
   verified: boolean;
+  /** Average stars of the visible reviews (★ 4.8); null without reviews */
+  rating?: number | null;
+  /** Visible reviews, the (312) next to the stars */
+  ratingCount: number;
 }
 
 export const CompanyCard: z.ZodType<CompanyCard> = z.object({
@@ -555,6 +713,8 @@ export const CompanyCard: z.ZodType<CompanyCard> = z.object({
   city: z.string().nullish(),
   tagline: z.string().nullish(),
   verified: z.boolean(),
+  rating: z.number().describe("Average stars of the visible reviews (★ 4.8); null without reviews").nullish(),
+  ratingCount: z.number().int().describe("Visible reviews, the (312) next to the stars"),
 }).register(common.apiTypes, { id: "departments.CompanyCard" });
 
 export interface Company {
@@ -566,6 +726,11 @@ export interface Company {
   city?: string | null;
   tagline?: string | null;
   verified: boolean;
+  rating?: number | null;
+  ratingCount: number;
+  ratingSummary: RatingSummary;
+  /** The signed-in customer's review; null for visitors and customers who have not reviewed */
+  myReview?: DeptReview | null;
   /** Plain text; blank lines separate paragraphs */
   description?: string | null;
   /** Carousel and gallery pictures in order (up to 12) */
@@ -591,6 +756,14 @@ export const Company: z.ZodType<Company> = z.object({
   city: z.string().nullish(),
   tagline: z.string().nullish(),
   verified: z.boolean(),
+  rating: z.number().nullish(),
+  ratingCount: z.number().int(),
+  get ratingSummary() {
+    return RatingSummary;
+  },
+  get myReview() {
+    return DeptReview.nullish();
+  },
   description: z.string().describe("Plain text; blank lines separate paragraphs").nullish(),
   get photos() {
     return z.array(common.MediaRef);
@@ -620,6 +793,9 @@ export interface CompanyAdmin {
   employees?: string | null;
   contacts: CompanyContacts;
   location?: GeoPoint | null;
+  rating?: number | null;
+  ratingCount: number;
+  hiddenReviewCount: number;
   status: "published" | "hidden";
   position: number;
   openInquiryCount: number;
@@ -652,6 +828,9 @@ export const CompanyAdmin: z.ZodType<CompanyAdmin> = z.object({
   get location() {
     return GeoPoint.nullish();
   },
+  rating: z.number().nullish(),
+  ratingCount: z.number().int(),
+  hiddenReviewCount: z.number().int(),
   status: z.enum(["published", "hidden"]),
   position: z.number().int(),
   openInquiryCount: z.number().int(),
@@ -782,6 +961,9 @@ export interface GameCard {
   featured: boolean;
   /** Top ranks win coupons (shows the Win coupons badge) */
   hasPrizes: boolean;
+  /** Average stars of the visible reviews (genre · ★ 4.6); null without reviews */
+  rating?: number | null;
+  ratingCount: number;
 }
 
 export const GameCard: z.ZodType<GameCard> = z.object({
@@ -798,19 +980,111 @@ export const GameCard: z.ZodType<GameCard> = z.object({
   playersLabel: z.string().describe("e.g. 12k players this week").nullish(),
   featured: z.boolean(),
   hasPrizes: z.boolean().describe("Top ranks win coupons (shows the Win coupons badge)"),
+  rating: z.number().describe("Average stars of the visible reviews (genre · ★ 4.6); null without reviews").nullish(),
+  ratingCount: z.number().int(),
 }).register(common.apiTypes, { id: "departments.GameCard" });
 
 export interface GamePrize {
-  /** e.g. #1 or #4–10 */
+  /** e.g. #1 or #4–10 (made from fromRank and toRank when they are set) */
   ranks: string;
   /** e.g. $20 coupon */
   reward: string;
+  /** First rank of the tier */
+  fromRank?: number | null;
+  /** Last rank of the tier */
+  toRank?: number | null;
 }
 
 export const GamePrize: z.ZodType<GamePrize> = z.object({
-  ranks: z.string().describe("e.g. #1 or #4–10"),
+  ranks: z.string().describe("e.g. #1 or #4–10 (made from fromRank and toRank when they are set)"),
   reward: z.string().describe("e.g. $20 coupon"),
+  fromRank: z.number().int().describe("First rank of the tier").nullish(),
+  toRank: z.number().int().describe("Last rank of the tier").nullish(),
 }).register(common.apiTypes, { id: "departments.GamePrize" });
+
+export interface GamePrizeAdmin {
+  ranks: string;
+  reward: string;
+  fromRank?: number | null;
+  toRank?: number | null;
+  /** The promotions coupon campaign whose codes the tier's winners get */
+  campaignId?: string | null;
+  campaignName?: string | null;
+  /** The campaign can give codes now (running or scheduled to start) */
+  campaignActive: boolean;
+}
+
+export const GamePrizeAdmin: z.ZodType<GamePrizeAdmin> = z.object({
+  ranks: z.string(),
+  reward: z.string(),
+  fromRank: z.number().int().nullish(),
+  toRank: z.number().int().nullish(),
+  campaignId: z.uuid().describe("The promotions coupon campaign whose codes the tier's winners get").nullish(),
+  campaignName: z.string().nullish(),
+  campaignActive: z.boolean().describe("The campaign can give codes now (running or scheduled to start)"),
+}).register(common.apiTypes, { id: "departments.GamePrizeAdmin" });
+
+export interface GamePrizeInput {
+  /** Label such as #4–10; made from fromRank and toRank when omitted */
+  ranks?: string | null;
+  /** e.g. $20 coupon */
+  reward: string;
+  /** 1–100; read from ranks (#1, #2–3) when omitted */
+  fromRank?: number | null;
+  toRank?: number | null;
+  /** A promotions coupon campaign; without one the tier is shown but nothing is issued */
+  campaignId?: string | null;
+}
+
+export const GamePrizeInput: z.ZodType<GamePrizeInput> = z.object({
+  ranks: z.string().describe("Label such as #4–10; made from fromRank and toRank when omitted").nullish(),
+  reward: z.string().describe("e.g. $20 coupon"),
+  fromRank: z.number().int().describe("1–100; read from ranks (#1, #2–3) when omitted").nullish(),
+  toRank: z.number().int().nullish(),
+  campaignId: z.uuid().describe("A promotions coupon campaign; without one the tier is shown but nothing is issued").nullish(),
+}).register(common.apiTypes, { id: "departments.GamePrizeInput" });
+
+export interface PrizeWeek {
+  /** Monday, market time */
+  startsOn: string;
+  /** Sunday, market time */
+  endsOn: string;
+  /** Midnight after Sunday, market time */
+  endsAt: string;
+  /** e.g. Ends Sun, Oct 25 */
+  endsLabel: string;
+}
+
+export const PrizeWeek: z.ZodType<PrizeWeek> = z.object({
+  startsOn: z.iso.date().describe("Monday, market time"),
+  endsOn: z.iso.date().describe("Sunday, market time"),
+  endsAt: z.iso.datetime({ offset: true }).describe("Midnight after Sunday, market time"),
+  endsLabel: z.string().describe("e.g. Ends Sun, Oct 25"),
+}).register(common.apiTypes, { id: "departments.PrizeWeek" });
+
+export interface PlayerStats {
+  /** The customer's player ID, e.g. MK-7F3K-92QD */
+  playerId: string;
+  /** Best score ever in this game; null before the first score */
+  best?: number | null;
+  /** Best score this prize week */
+  weekBest?: number | null;
+  /** Rank in this week's table; null without a score this week */
+  weekRank?: number | null;
+  /** Scores posted for the customer in this game */
+  gamesPlayed: number;
+  /** Points this week's best needs to reach the top 100; null when already in it or without a score this week */
+  pointsToTop100?: number | null;
+}
+
+export const PlayerStats: z.ZodType<PlayerStats> = z.object({
+  playerId: z.string().describe("The customer's player ID, e.g. MK-7F3K-92QD"),
+  best: z.number().int().describe("Best score ever in this game; null before the first score").nullish(),
+  weekBest: z.number().int().describe("Best score this prize week").nullish(),
+  weekRank: z.number().int().describe("Rank in this week's table; null without a score this week").nullish(),
+  gamesPlayed: z.number().int().describe("Scores posted for the customer in this game"),
+  pointsToTop100: z.number().int().describe("Points this week's best needs to reach the top 100; null when already in it or without a score this week").nullish(),
+}).register(common.apiTypes, { id: "departments.PlayerStats" });
 
 export interface Game {
   id: string;
@@ -822,10 +1096,23 @@ export interface Game {
   playersLabel?: string | null;
   featured: boolean;
   hasPrizes: boolean;
+  rating?: number | null;
+  ratingCount: number;
+  ratingSummary: RatingSummary;
+  /** The signed-in customer's review; null for visitors and customers who have not reviewed */
+  myReview?: DeptReview | null;
   description?: string | null;
   /** Short steps in order */
   howToPlay: string[];
   prizes: GamePrize[];
+  /** Footnote under the rewards, e.g. Coupons land in Account › Coupons on Monday. Minimum order $30. */
+  prizeNote?: string | null;
+  /** This prize week (Monday–Sunday, market time) */
+  week: PrizeWeek;
+  /** Rankings come from the scores the game posts (else the table staff keep) */
+  scoresLive: boolean;
+  /** The signed-in customer's best, this week's rank and games played; null for visitors */
+  you?: PlayerStats | null;
   /** False at this phase: the Play button says Coming soon */
   playable: boolean;
 }
@@ -844,10 +1131,26 @@ export const Game: z.ZodType<Game> = z.object({
   playersLabel: z.string().nullish(),
   featured: z.boolean(),
   hasPrizes: z.boolean(),
+  rating: z.number().nullish(),
+  ratingCount: z.number().int(),
+  get ratingSummary() {
+    return RatingSummary;
+  },
+  get myReview() {
+    return DeptReview.nullish();
+  },
   description: z.string().nullish(),
   howToPlay: z.array(z.string()).describe("Short steps in order"),
   get prizes() {
     return z.array(GamePrize);
+  },
+  prizeNote: z.string().describe("Footnote under the rewards, e.g. Coupons land in Account › Coupons on Monday. Minimum order $30.").nullish(),
+  get week() {
+    return PrizeWeek;
+  },
+  scoresLive: z.boolean().describe("Rankings come from the scores the game posts (else the table staff keep)"),
+  get you() {
+    return PlayerStats.nullish();
   },
   playable: z.boolean().describe("False at this phase: the Play button says Coming soon"),
 }).register(common.apiTypes, { id: "departments.Game" });
@@ -863,10 +1166,18 @@ export interface GameAdmin {
   featured: boolean;
   description?: string | null;
   howToPlay: string[];
-  prizes: GamePrize[];
+  prizes: GamePrizeAdmin[];
+  prizeNote?: string | null;
   status: "published" | "hidden";
   position: number;
   rankingsUpdatedAt?: string | null;
+  rating?: number | null;
+  ratingCount: number;
+  scoresLive: boolean;
+  /** Scores the game's server posted */
+  scoreCount: number;
+  /** Server keys that can post scores */
+  activeKeyCount: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -887,11 +1198,17 @@ export const GameAdmin: z.ZodType<GameAdmin> = z.object({
   description: z.string().nullish(),
   howToPlay: z.array(z.string()),
   get prizes() {
-    return z.array(GamePrize);
+    return z.array(GamePrizeAdmin);
   },
+  prizeNote: z.string().nullish(),
   status: z.enum(["published", "hidden"]),
   position: z.number().int(),
   rankingsUpdatedAt: z.iso.datetime({ offset: true }).nullish(),
+  rating: z.number().nullish(),
+  ratingCount: z.number().int(),
+  scoresLive: z.boolean(),
+  scoreCount: z.number().int().describe("Scores the game's server posted"),
+  activeKeyCount: z.number().int().describe("Server keys that can post scores"),
   createdAt: z.iso.datetime({ offset: true }),
   updatedAt: z.iso.datetime({ offset: true }),
 }).register(common.apiTypes, { id: "departments.GameAdmin" });
@@ -906,7 +1223,9 @@ export interface GameInput {
   featured?: boolean | null;
   description?: string | null;
   howToPlay?: string[] | null;
-  prizes?: GamePrize[] | null;
+  prizes?: GamePrizeInput[] | null;
+  /** Up to 200 characters */
+  prizeNote?: string | null;
   status?: "published" | "hidden" | null;
   position?: number | null;
 }
@@ -926,8 +1245,9 @@ export const GameInput: z.ZodType<GameInput> = z.object({
   description: z.string().nullish(),
   howToPlay: z.array(z.string()).nullish(),
   get prizes() {
-    return z.array(GamePrize).nullish();
+    return z.array(GamePrizeInput).nullish();
   },
+  prizeNote: z.string().describe("Up to 200 characters").nullish(),
   status: z.enum(["published", "hidden"]).nullish(),
   position: z.number().int().nullish(),
 }).register(common.apiTypes, { id: "departments.GameInput" });
@@ -951,6 +1271,8 @@ export interface RankingEntry {
   score: number;
   /** Places moved since the last update: positive up, negative down, 0 same, null new */
   change?: number | null;
+  /** The signed-in customer's row (posted scores only) */
+  mine?: boolean | null;
 }
 
 export const RankingEntry: z.ZodType<RankingEntry> = z.object({
@@ -958,14 +1280,39 @@ export const RankingEntry: z.ZodType<RankingEntry> = z.object({
   name: z.string(),
   score: z.number().int(),
   change: z.number().int().describe("Places moved since the last update: positive up, negative down, 0 same, null new").nullish(),
+  mine: z.boolean().describe("The signed-in customer's row (posted scores only)").nullish(),
 }).register(common.apiTypes, { id: "departments.RankingEntry" });
+
+export interface RankingYou {
+  /** Null without a score in the period */
+  rank?: number | null;
+  score?: number | null;
+  name: string;
+  /** e.g. 1,180 points to reach the top 100; null when already in it or without a score */
+  pointsToTop100?: number | null;
+}
+
+export const RankingYou: z.ZodType<RankingYou> = z.object({
+  rank: z.number().int().describe("Null without a score in the period").nullish(),
+  score: z.number().int().nullish(),
+  name: z.string(),
+  pointsToTop100: z.number().int().describe("e.g. 1,180 points to reach the top 100; null when already in it or without a score").nullish(),
+}).register(common.apiTypes, { id: "departments.RankingYou" });
 
 export interface RankingTable {
   game: GameCard;
   period: "today" | "week" | "all_time";
-  /** Best first (up to 100) */
+  /** Best first (up to 100); with q, the matching players with their real ranks */
   entries: RankingEntry[];
   updatedAt?: string | null;
+  /** scores: worked out from the scores the game posts (best score per player); staff: the table staff keep */
+  source: "scores" | "staff";
+  /** Players in the period's table */
+  playerCount: number;
+  /** This prize week (week ends Sun, Oct 25) */
+  week: PrizeWeek;
+  /** The signed-in customer's place (posted scores only); null for visitors and staff-kept tables */
+  you?: RankingYou | null;
 }
 
 export const RankingTable: z.ZodType<RankingTable> = z.object({
@@ -977,7 +1324,153 @@ export const RankingTable: z.ZodType<RankingTable> = z.object({
     return z.array(RankingEntry);
   },
   updatedAt: z.iso.datetime({ offset: true }).nullish(),
+  source: z.enum(["scores", "staff"]).describe("scores: worked out from the scores the game posts (best score per player); staff: the table staff keep"),
+  playerCount: z.number().int().describe("Players in the period's table"),
+  get week() {
+    return PrizeWeek;
+  },
+  get you() {
+    return RankingYou.nullish();
+  },
 }).register(common.apiTypes, { id: "departments.RankingTable" });
+
+export interface PlayPlayer {
+  /** Stable short code the customer copies into a game, e.g. MK-7F3K-92QD */
+  playerId: string;
+  /** How rankings show the customer: first name and last initial */
+  name: string;
+  /** Scores posted for the customer in every game */
+  gamesPlayed: number;
+  createdAt: string;
+}
+
+export const PlayPlayer: z.ZodType<PlayPlayer> = z.object({
+  playerId: z.string().describe("Stable short code the customer copies into a game, e.g. MK-7F3K-92QD"),
+  name: z.string().describe("How rankings show the customer: first name and last initial"),
+  gamesPlayed: z.number().int().describe("Scores posted for the customer in every game"),
+  createdAt: z.iso.datetime({ offset: true }),
+}).register(common.apiTypes, { id: "departments.PlayPlayer" });
+
+export interface PlayerLookup {
+  customerId: string;
+  name: string;
+  playerId: string;
+}
+
+export const PlayerLookup: z.ZodType<PlayerLookup> = z.object({
+  customerId: z.uuid(),
+  name: z.string(),
+  playerId: z.string(),
+}).register(common.apiTypes, { id: "departments.PlayerLookup" });
+
+export interface GameKey {
+  id: string;
+  /** The key's last characters, e.g. …k3Qd */
+  hint: string;
+  status: "active" | "revoked";
+  createdAt: string;
+  lastUsedAt?: string | null;
+  revokedAt?: string | null;
+}
+
+export const GameKey: z.ZodType<GameKey> = z.object({
+  id: z.uuid(),
+  hint: z.string().describe("The key's last characters, e.g. …k3Qd"),
+  status: z.enum(["active", "revoked"]),
+  createdAt: z.iso.datetime({ offset: true }),
+  lastUsedAt: z.iso.datetime({ offset: true }).nullish(),
+  revokedAt: z.iso.datetime({ offset: true }).nullish(),
+}).register(common.apiTypes, { id: "departments.GameKey" });
+
+export interface GameKeySecret {
+  key: GameKey;
+  /** The server key, shown this once (only its hash is kept). The game's server sends it in the X-Game-Key header */
+  secret: string;
+}
+
+export const GameKeySecret: z.ZodType<GameKeySecret> = z.object({
+  get key() {
+    return GameKey;
+  },
+  secret: z.string().describe("The server key, shown this once (only its hash is kept). The game's server sends it in the X-Game-Key header"),
+}).register(common.apiTypes, { id: "departments.GameKeySecret" });
+
+export interface ScoreInput {
+  /** The partner's own id of this score (1–100 characters); the same id is recorded once */
+  scoreId: string;
+  /** The player ID the customer copied from the app */
+  playerId: string;
+  /** 0 or more */
+  score: number;
+  /** When the game ended; now when omitted. At most scoreMaxAgeMinutes old, at most 5 minutes ahead */
+  playedAt?: string | null;
+}
+
+export const ScoreInput: z.ZodType<ScoreInput> = z.object({
+  scoreId: z.string().describe("The partner's own id of this score (1–100 characters); the same id is recorded once"),
+  playerId: z.string().describe("The player ID the customer copied from the app"),
+  score: z.number().int().describe("0 or more"),
+  playedAt: z.iso.datetime({ offset: true }).describe("When the game ended; now when omitted. At most scoreMaxAgeMinutes old, at most 5 minutes ahead").nullish(),
+}).register(common.apiTypes, { id: "departments.ScoreInput" });
+
+export interface ScoreReceipt {
+  id: string;
+  scoreId: string;
+  playerId: string;
+  score: number;
+  playedAt: string;
+  /** This scoreId was recorded before; nothing changed */
+  duplicate: boolean;
+  /** The player's best score in this game */
+  best: number;
+  /** The player's rank in this week's table */
+  weekRank?: number | null;
+}
+
+export const ScoreReceipt: z.ZodType<ScoreReceipt> = z.object({
+  id: z.uuid(),
+  scoreId: z.string(),
+  playerId: z.string(),
+  score: z.number().int(),
+  playedAt: z.iso.datetime({ offset: true }),
+  duplicate: z.boolean().describe("This scoreId was recorded before; nothing changed"),
+  best: z.number().int().describe("The player's best score in this game"),
+  weekRank: z.number().int().describe("The player's rank in this week's table").nullish(),
+}).register(common.apiTypes, { id: "departments.ScoreReceipt" });
+
+export interface PrizeAward {
+  id: string;
+  gameId: string;
+  /** Monday of the prize week */
+  week: string;
+  customerId: string;
+  name: string;
+  rank: number;
+  score: number;
+  reward: string;
+  campaignId: string;
+  code?: string | null;
+  state: "issued" | "failed";
+  /** Why the code could not be issued (tried again every hour) */
+  error?: string | null;
+  at: string;
+}
+
+export const PrizeAward: z.ZodType<PrizeAward> = z.object({
+  id: z.uuid(),
+  gameId: z.uuid(),
+  week: z.iso.date().describe("Monday of the prize week"),
+  customerId: z.uuid(),
+  name: z.string(),
+  rank: z.number().int(),
+  score: z.number().int(),
+  reward: z.string(),
+  campaignId: z.uuid(),
+  code: z.string().nullish(),
+  state: z.enum(["issued", "failed"]),
+  error: z.string().describe("Why the code could not be issued (tried again every hour)").nullish(),
+  at: z.iso.datetime({ offset: true }),
+}).register(common.apiTypes, { id: "departments.PrizeAward" });
 
 export interface RankingRowInput {
   name: string;
@@ -1119,10 +1612,58 @@ export const FarmAdmin: z.ZodType<FarmAdmin> = z.object({
 
 /* ------------------------------------------------------------------ events */
 
+/** departments.blog.followed_author_posted: A post is published for the first time: one event per customer following its author */
+export interface DepartmentsBlogFollowedAuthorPostedEvent {
+  customerId: string;
+  postId: string;
+  postSlug: string;
+  postTitle: string;
+  authorId: string;
+  authorName: string;
+}
+
+export const DepartmentsBlogFollowedAuthorPostedEvent: z.ZodType<DepartmentsBlogFollowedAuthorPostedEvent> = z.object({
+  customerId: z.uuid(),
+  postId: z.uuid(),
+  postSlug: z.string(),
+  postTitle: z.string(),
+  authorId: z.uuid(),
+  authorName: z.string(),
+});
+
+/** departments.play.prize_awarded: A prize week ended and a winner got their coupon code (once per game, week and winner) */
+export interface DepartmentsPlayPrizeAwardedEvent {
+  customerId: string;
+  gameId: string;
+  gameSlug: string;
+  gameTitle: string;
+  week: string;
+  rank: number;
+  reward: string;
+  code: string;
+  codeEndsAt?: string | null;
+}
+
+export const DepartmentsPlayPrizeAwardedEvent: z.ZodType<DepartmentsPlayPrizeAwardedEvent> = z.object({
+  customerId: z.uuid(),
+  gameId: z.uuid(),
+  gameSlug: z.string(),
+  gameTitle: z.string(),
+  week: z.iso.date(),
+  rank: z.number().int(),
+  reward: z.string(),
+  code: z.string(),
+  codeEndsAt: z.iso.datetime({ offset: true }).nullish(),
+});
+
 /* ------------------------------------------------------------------ public API (in-process) */
 
 /** What other modules may call in-process: `ctx.use('departments')` (or `ctx.tryUse` for an optional dependency). */
 export interface DepartmentsPublicApi {
+  /** A picked farm machine with its attachments as product cards (prices and availability now), like GET /farm/machines/{productId}; NOT_FOUND when it isn't picked or the store no longer shows it. Farm orders price machines and attachments with it. Used by: farm. */
+  getFarmMachine(productId: string): Promise<FarmMachine>;
+  /** The customer's blog reactions, replies, reports, saved posts, followed authors and reply likes; company inquiries; company and game reviews; Play center player ID, scores and prize coupons, for the personal data export. Reactions, replies, reports and inquiries are kept by account id, the rest by customers-module id (both ids are looked up everywhere) Used by: customers. */
+  exportCustomerData(input: { customerId: string, accountId: string }): Promise<common.CustomerDataSection[]>;
 }
 
 /* ------------------------------------------------------------------ tables (row types) */
@@ -1187,6 +1728,8 @@ export interface DepartmentsDb {
     author_name: string;
     text: string;
     status: string;
+    /** customers who liked it */
+    like_count: number;
     created_at: Date;
   };
   blog_reports: {
@@ -1252,7 +1795,9 @@ export interface DepartmentsDb {
     featured: boolean;
     description: string | null;
     how_to_play: Json;
+    /** tiers: ranks, reward, from_rank, to_rank, campaign_id */
     prizes: Json;
+    prize_note: string | null;
     status: string;
     position: number;
     created_at: Date;
@@ -1265,6 +1810,107 @@ export interface DepartmentsDb {
     period: string;
     entries: Json;
     updated_by: string | null;
+    updated_at: Date;
+  };
+  /** Posts a customer saved (bookmarks) */
+  blog_saves: {
+    id: string;
+    post_id: string;
+    customer_id: string;
+    saved_at: Date;
+  };
+  /** Authors a customer follows */
+  blog_follows: {
+    id: string;
+    author_id: string;
+    customer_id: string;
+    followed_at: Date;
+  };
+  blog_reply_likes: {
+    id: string;
+    reply_id: string;
+    post_id: string;
+    customer_id: string;
+    at: Date;
+  };
+  /** Customer reviews of companies and games: one per customer and target, editable */
+  reviews: {
+    id: string;
+    target_type: 'company' | 'game';
+    target_id: string;
+    customer_id: string;
+    /** first name and last initial when written */
+    name: string;
+    /** 1 to 5 */
+    stars: number;
+    text: string | null;
+    hidden: boolean;
+    hidden_reason: string | null;
+    created_at: Date;
+    updated_at: Date;
+  };
+  /** Play center player IDs: one stable short code per customer */
+  players: {
+    id: string;
+    /** MK-XXXX-XXXX */
+    code: string;
+    customer_id: string;
+    /** first name and last initial, refreshed when the customer opens it */
+    name: string;
+    created_at: Date;
+    updated_at: Date;
+  };
+  /** Server keys of game partners; only a SHA-256 hash of each key is kept */
+  game_keys: {
+    id: string;
+    game_id: string;
+    key_hash: string;
+    hint: string;
+    status: 'active' | 'revoked';
+    created_by: string | null;
+    created_at: Date;
+    last_used_at: Date | null;
+    revoked_at: Date | null;
+    revoked_by: string | null;
+  };
+  /** Scores game servers posted; day and week are the market day and the Monday of its prize week */
+  scores: {
+    id: string;
+    game_id: string;
+    partner_score_id: string;
+    player_id: string;
+    customer_id: string;
+    score: number;
+    played_at: Date;
+    day: string;
+    week: string;
+    received_at: Date;
+  };
+  /** Prize weeks whose winners were worked out: done once every winner has a code */
+  prize_weeks: {
+    id: string;
+    game_id: string;
+    week: string;
+    state: 'awarding' | 'done';
+    winners: number;
+    updated_at: Date;
+  };
+  /** One coupon per game, week and winner (promotions.issueCode, key play:<game>:<week>:<customer>) */
+  prize_awards: {
+    id: string;
+    game_id: string;
+    week: string;
+    customer_id: string;
+    name: string;
+    rank: number;
+    score: number;
+    reward: string;
+    campaign_id: string;
+    code: string | null;
+    code_id: string | null;
+    state: 'issued' | 'failed';
+    error: string | null;
+    created_at: Date;
     updated_at: Date;
   };
   /** One row (id farm): machine types and the picked machines with their attachments */
@@ -1365,7 +2011,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/blogs/posts/{slug}",
     auth: "visitor",
-    scope: "public",
+    scope: "own-customer",
     summary: "A published post with its body and the previous and next posts",
     params: () =>
       z.object({
@@ -1402,7 +2048,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/blogs/posts/{id}/replies",
     auth: "visitor",
-    scope: "public",
+    scope: "own-customer",
     summary: "Visible replies, oldest first",
     params: () =>
       z.object({
@@ -1452,12 +2098,100 @@ export const endpoints = defineEndpoints({
     screens: ["store/blog-post"],
     phase: 2,
   },
+  saveBlogPost: {
+    area: "store",
+    method: "POST",
+    path: "/blogs/posts/{id}/save",
+    auth: "customer",
+    scope: "own-customer",
+    summary: "Save or unsave a post (bookmark)",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => z.object({
+      saved: z.boolean(),
+    }),
+    response: () => BlogSaveResult,
+    status: 200,
+    errors: ["NOT_FOUND"],
+    screens: ["store/blog-post","store/saved"],
+    phase: 2,
+  },
+  listSavedBlogPosts: {
+    area: "store",
+    method: "GET",
+    path: "/blogs/saved",
+    auth: "customer",
+    scope: "own-customer",
+    summary: "My saved posts, last saved first",
+    desc: "Posts that are no longer published are left out.",
+    paging: true,
+    response: () => BlogPostCard,
+    status: 200,
+    screens: ["store/saved"],
+    phase: 2,
+  },
+  likeBlogReply: {
+    area: "store",
+    method: "POST",
+    path: "/blogs/replies/{id}/like",
+    auth: "customer",
+    scope: "own-customer",
+    summary: "Like a reply or take the like back",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => z.object({
+      liked: z.boolean(),
+    }),
+    response: () => BlogReplyLikeResult,
+    status: 200,
+    errors: ["NOT_FOUND"],
+    screens: ["store/blog-post"],
+    phase: 2,
+  },
+  followBlogAuthor: {
+    area: "store",
+    method: "POST",
+    path: "/blogs/authors/{id}/follow",
+    auth: "customer",
+    scope: "own-customer",
+    summary: "Follow or unfollow an author",
+    desc: "Followers hear about the author's new posts (departments.blog.followed_author_posted).",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => z.object({
+      following: z.boolean(),
+    }),
+    response: () => BlogFollowResult,
+    status: 200,
+    errors: ["NOT_FOUND"],
+    screens: ["store/blog-author"],
+    phase: 2,
+  },
+  listFollowedBlogAuthors: {
+    area: "store",
+    method: "GET",
+    path: "/blogs/following",
+    auth: "customer",
+    scope: "own-customer",
+    summary: "Authors I follow, last followed first",
+    paging: true,
+    response: () => BlogAuthorCard,
+    status: 200,
+    screens: ["store/saved"],
+    phase: 2,
+  },
   getBlogAuthor: {
     area: "store",
     method: "GET",
     path: "/blogs/authors/{slug}",
     auth: "visitor",
-    scope: "public",
+    scope: "own-customer",
     summary: "An author's profile",
     params: () =>
       z.object({
@@ -1521,6 +2255,7 @@ export const endpoints = defineEndpoints({
     auth: "visitor",
     scope: "public",
     summary: "Published companies in staff order",
+    desc: "The page always carries total (1,248 companies), also when paging by cursor.",
     query: () =>
       z.object({
         industry: z.string().describe("Industry slug").optional(),
@@ -1537,7 +2272,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/companies/{slug}",
     auth: "visitor",
-    scope: "public",
+    scope: "own-customer",
     summary: "A company page",
     params: () =>
       z.object({
@@ -1546,6 +2281,47 @@ export const endpoints = defineEndpoints({
     response: () => Company,
     status: 200,
     errors: ["NOT_FOUND"],
+    screens: ["store/company"],
+    phase: 2,
+  },
+  listCompanyReviews: {
+    area: "store",
+    method: "GET",
+    path: "/companies/{slug}/reviews",
+    auth: "visitor",
+    scope: "own-customer",
+    summary: "A company's visible reviews, newest first",
+    params: () =>
+      z.object({
+        slug: z.string(),
+      }),
+    query: () =>
+      z.object({
+        stars: z.coerce.number().int().describe("Only reviews with these stars").optional(),
+      }),
+    paging: true,
+    response: () => DeptReview,
+    status: 200,
+    errors: ["NOT_FOUND"],
+    screens: ["store/company"],
+    phase: 2,
+  },
+  reviewCompany: {
+    area: "store",
+    method: "POST",
+    path: "/companies/{slug}/reviews",
+    auth: "customer",
+    scope: "own-customer",
+    summary: "Rate a company, or change my review",
+    desc: "One review per customer: a second call changes it. A review staff hid stays hidden when it is changed.",
+    params: () =>
+      z.object({
+        slug: z.string(),
+      }),
+    body: () => ReviewInput,
+    response: () => DeptReview,
+    status: 200,
+    errors: ["NOT_FOUND","REVIEWS_NOT_ALLOWED"],
     screens: ["store/company"],
     phase: 2,
   },
@@ -1578,6 +2354,7 @@ export const endpoints = defineEndpoints({
     query: () =>
       z.object({
         genre: z.string().optional(),
+        q: z.string().describe("Search titles and genres").optional(),
       }),
     response: () => PlayGames,
     status: 200,
@@ -1589,7 +2366,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/play/games/{slug}",
     auth: "visitor",
-    scope: "public",
+    scope: "own-customer",
     summary: "A game's page",
     params: () =>
       z.object({
@@ -1601,18 +2378,73 @@ export const endpoints = defineEndpoints({
     screens: ["store/play-game"],
     phase: 2,
   },
+  listGameReviews: {
+    area: "store",
+    method: "GET",
+    path: "/play/games/{slug}/reviews",
+    auth: "visitor",
+    scope: "own-customer",
+    summary: "A game's visible reviews, newest first",
+    params: () =>
+      z.object({
+        slug: z.string(),
+      }),
+    query: () =>
+      z.object({
+        stars: z.coerce.number().int().describe("Only reviews with these stars").optional(),
+      }),
+    paging: true,
+    response: () => DeptReview,
+    status: 200,
+    errors: ["NOT_FOUND"],
+    screens: ["store/play-game"],
+    phase: 2,
+  },
+  reviewGame: {
+    area: "store",
+    method: "POST",
+    path: "/play/games/{slug}/reviews",
+    auth: "customer",
+    scope: "own-customer",
+    summary: "Rate a game, or change my review",
+    desc: "One review per customer: a second call changes it. A review staff hid stays hidden when it is changed.",
+    params: () =>
+      z.object({
+        slug: z.string(),
+      }),
+    body: () => ReviewInput,
+    response: () => DeptReview,
+    status: 200,
+    errors: ["NOT_FOUND","REVIEWS_NOT_ALLOWED"],
+    screens: ["store/play-game"],
+    phase: 2,
+  },
+  getMyPlayer: {
+    area: "store",
+    method: "GET",
+    path: "/play/player",
+    auth: "customer",
+    scope: "own-customer",
+    summary: "My player ID for game partners",
+    desc: "Issued on first use and never changes. The customer copies it into a partner's game, whose server posts their scores with it.",
+    response: () => PlayPlayer,
+    status: 200,
+    screens: ["store/play-player","store/play-game"],
+    phase: 2,
+  },
   getRankings: {
     area: "store",
     method: "GET",
     path: "/play/rankings",
     auth: "visitor",
-    scope: "public",
+    scope: "own-customer",
     summary: "A game's ranking table for a period",
-    desc: "Without game, the first published game.",
+    desc: "Without game, the first published game. A game whose server posts scores gets tables worked out from them (each player's best score in the period: today and this week in market time, the week running Monday–Sunday); a game without posted scores shows the table staff keep.",
     query: () =>
       z.object({
         game: z.string().describe("Game slug").optional(),
         period: z.enum(["today", "week", "all_time"]).optional(),
+        q: z.string().describe("Find players by name; matching rows keep their real ranks").optional(),
       }),
     response: () => RankingTable,
     status: 200,
@@ -1847,6 +2679,7 @@ export const endpoints = defineEndpoints({
     status: 201,
     errors: ["SLUG_TAKEN"],
     audited: true,
+    events: ["departments.blog.followed_author_posted"],
     screens: ["admin/departments-blogs"],
     phase: 2,
   },
@@ -1876,6 +2709,7 @@ export const endpoints = defineEndpoints({
     permission: "departments.blogs.manage",
     scope: "staff",
     summary: "Edit, publish or unpublish a post",
+    desc: "Publishing a post for the first time tells the author's followers (departments.blog.followed_author_posted).",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -1885,6 +2719,7 @@ export const endpoints = defineEndpoints({
     status: 200,
     errors: ["NOT_FOUND","SLUG_TAKEN"],
     audited: true,
+    events: ["departments.blog.followed_author_posted"],
     screens: ["admin/departments-blogs"],
     phase: 2,
   },
@@ -2298,6 +3133,181 @@ export const endpoints = defineEndpoints({
     screens: ["admin/departments-play"],
     phase: 2,
   },
+  listGameKeys: {
+    area: "admin",
+    method: "GET",
+    path: "/play/games/{id}/keys",
+    auth: "staff",
+    permission: "departments.view",
+    scope: "staff",
+    summary: "A game's server keys, newest first (never the keys themselves)",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    response: () => z.array(GameKey),
+    status: 200,
+    errors: ["NOT_FOUND"],
+    screens: ["admin/departments-play"],
+    phase: 2,
+  },
+  createGameKey: {
+    area: "admin",
+    method: "POST",
+    path: "/play/games/{id}/keys",
+    auth: "staff",
+    permission: "departments.play.keys",
+    scope: "staff",
+    summary: "Make a server key for the game's partner (shown once)",
+    desc: "At most two active keys per game, so a partner can switch keys without missing scores.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    response: () => GameKeySecret,
+    status: 201,
+    errors: ["NOT_FOUND","TOO_MANY_KEYS"],
+    audited: true,
+    screens: ["admin/departments-play"],
+    phase: 2,
+  },
+  rotateGameKey: {
+    area: "admin",
+    method: "POST",
+    path: "/play/games/{id}/keys/{keyId}/rotate",
+    auth: "staff",
+    permission: "departments.play.keys",
+    scope: "staff",
+    summary: "Replace a key: the old one stops working now and a new one is shown once",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+        keyId: z.uuid(),
+      }),
+    response: () => GameKeySecret,
+    status: 201,
+    errors: ["NOT_FOUND","ILLEGAL_TRANSITION"],
+    audited: true,
+    screens: ["admin/departments-play"],
+    phase: 2,
+  },
+  revokeGameKey: {
+    area: "admin",
+    method: "POST",
+    path: "/play/games/{id}/keys/{keyId}/revoke",
+    auth: "staff",
+    permission: "departments.play.keys",
+    scope: "staff",
+    summary: "Stop a key from posting scores",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+        keyId: z.uuid(),
+      }),
+    response: () => GameKey,
+    status: 200,
+    errors: ["NOT_FOUND","ILLEGAL_TRANSITION"],
+    audited: true,
+    screens: ["admin/departments-play"],
+    phase: 2,
+  },
+  listPrizeAwards: {
+    area: "admin",
+    method: "GET",
+    path: "/play/games/{id}/awards",
+    auth: "staff",
+    permission: "departments.view",
+    scope: "staff",
+    summary: "Coupons a game's prize weeks gave, newest week first",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    query: () =>
+      z.object({
+        week: z.iso.date().describe("Monday of a prize week").optional(),
+        state: z.enum(["issued", "failed"]).optional(),
+      }),
+    paging: true,
+    response: () => PrizeAward,
+    status: 200,
+    errors: ["NOT_FOUND"],
+    screens: ["admin/departments-play"],
+    phase: 2,
+  },
+  findPlayers: {
+    area: "admin",
+    method: "GET",
+    path: "/play/players",
+    auth: "staff",
+    permission: "departments.view",
+    scope: "staff",
+    summary: "Find customers' player IDs (to help a game partner)",
+    desc: "Searches customers by name or email (customers.searchCustomers) and answers up to 20 with their player IDs, issuing one to a customer who has none yet.",
+    query: () =>
+      z.object({
+        q: z.string().describe("Name or email, at least 2 characters"),
+      }),
+    response: () => z.array(PlayerLookup),
+    status: 200,
+    screens: ["admin/departments-play"],
+    phase: 2,
+  },
+  listDepartmentReviews: {
+    area: "admin",
+    method: "GET",
+    path: "/reviews",
+    auth: "staff",
+    permission: "departments.view",
+    scope: "staff",
+    summary: "Company and game reviews, last changed first",
+    query: () =>
+      z.object({
+        target: z.enum(["company", "game"]).optional(),
+        targetId: z.uuid().optional(),
+        hidden: z.stringbool().optional(),
+        stars: z.coerce.number().int().optional(),
+      }),
+    paging: true,
+    response: () => ReviewAdmin,
+    status: 200,
+    screens: ["admin/departments-reviews"],
+    phase: 2,
+  },
+  moderateDepartmentReview: {
+    area: "admin",
+    method: "POST",
+    path: "/reviews/{id}/moderate",
+    auth: "staff",
+    permission: "departments.reviews.manage",
+    scope: "staff",
+    summary: "Hide or show a company or game review",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => ReviewModeration,
+    response: () => ReviewAdmin,
+    status: 200,
+    errors: ["NOT_FOUND"],
+    audited: true,
+    screens: ["admin/departments-reviews"],
+    phase: 2,
+  },
+  postGameScore: {
+    area: "webhooks",
+    method: "POST",
+    path: "/play/scores",
+    auth: "provider",
+    scope: "public",
+    summary: "A game partner's server posts a customer's score",
+    desc: "Authenticated by the game's server key in the X-Game-Key header (Admin › Departments › Play center makes it; only its hash is kept), which also names the game. The customer is named by the player ID they copied from the app. The partner's scoreId makes the call safe to repeat: the same scoreId answers the first result with duplicate true (a different score under a used scoreId is SCORE_ID_REUSED). Hidden games refuse scores (GAME_NOT_ACTIVE).",
+    body: () => ScoreInput,
+    response: () => ScoreReceipt,
+    status: 200,
+    errors: ["UNKNOWN_PLAYER","GAME_NOT_ACTIVE","SCORE_ID_REUSED","SCORE_TOO_OLD"],
+    phase: 2,
+  },
 });
 
 /* ------------------------------------------------------------------ module spec */
@@ -2310,8 +3320,8 @@ export const spec = defineModuleSpec({
   chapters: [],
   summary: "The app's department pages opened from the home Departments rail: the Phones picks, Blogs (topics, staff authors, posts, reactions, replies and reports), the Companies directory (industries, company pages, inquiries) and the Play center (games and ranking tables). Staff manage all of it in Admin › Departments.",
   dependsOn: ["media"],
-  optionalDeps: ["search","customers","audit"],
-  publicApi: [],
+  optionalDeps: ["search","customers","audit","promotions"],
+  publicApi: ["getFarmMachine","exportCustomerData"],
   permissions: [
     {
       "key": "departments.view",
@@ -2341,22 +3351,47 @@ export const spec = defineModuleSpec({
     {
       "key": "departments.play.manage",
       "audience": "staff",
-      "desc": "Play center games and ranking tables"
+      "desc": "Play center games, prize tiers and ranking tables"
+    },
+    {
+      "key": "departments.play.keys",
+      "audience": "staff",
+      "desc": "Make, rotate and revoke the server keys game partners post scores with"
+    },
+    {
+      "key": "departments.reviews.manage",
+      "audience": "staff",
+      "desc": "Hide or show customers' company and game reviews"
     }
   ],
   approvalActions: [],
   stateMachines: {},
   events: {
     publishes: {
+      "departments.blog.followed_author_posted": { when: "A post is published for the first time: one event per customer following its author", payload: () => DepartmentsBlogFollowedAuthorPostedEvent },
+      "departments.play.prize_awarded": { when: "A prize week ended and a winner got their coupon code (once per game, week and winner)", payload: () => DepartmentsPlayPrizeAwardedEvent },
     },
     consumes: {},
   },
-  jobs: {},
+  jobs: {
+    "departments.award-prize-weeks": {
+      "schedule": "hourly",
+      "does": "For every game with prize tiers linked to coupon campaigns, works out the winners of each prize week that ended at least scoreMaxAgeMinutes ago (the last 4 weeks), issues each winner's coupon with promotions.issueCode (key play:<game>:<week>:<customer>, so a retry gives the same code) and publishes departments.play.prize_awarded. Winners whose code could not be issued are tried again next hour."
+    }
+  },
   settings: {
     "blogRepliesOpen": {
       "default": true,
       "desc": "Customers can reply to blog posts",
       "type": "bool"
+    },
+    "scoreMaxAgeMinutes": {
+      "default": 60,
+      "desc": "How old a posted score may be; a prize week is settled this long after it ends, so no late score can change it",
+      "type": "duration",
+      "min": 5,
+      "max": 1440,
+      "unit": "minutes"
     }
   },
   errorCodes: {
@@ -2371,6 +3406,30 @@ export const spec = defineModuleSpec({
     "ALREADY_REPORTED": {
       "status": 409,
       "meaning": "You already reported this."
+    },
+    "REVIEWS_NOT_ALLOWED": {
+      "status": 403,
+      "meaning": "This account can't write reviews right now."
+    },
+    "TOO_MANY_KEYS": {
+      "status": 409,
+      "meaning": "The game already has two active server keys; revoke or rotate one."
+    },
+    "UNKNOWN_PLAYER": {
+      "status": 422,
+      "meaning": "No customer has this player ID."
+    },
+    "GAME_NOT_ACTIVE": {
+      "status": 409,
+      "meaning": "The game is hidden and takes no scores."
+    },
+    "SCORE_ID_REUSED": {
+      "status": 409,
+      "meaning": "This scoreId was already used for a different player or score."
+    },
+    "SCORE_TOO_OLD": {
+      "status": 422,
+      "meaning": "The score was played too long ago (or in the future) to count."
     },
     "REPLIES_CLOSED": {
       "status": 409,
@@ -2848,6 +3907,7 @@ export const spec = defineModuleSpec({
         "author_name",
         "text",
         "status",
+        "like_count",
         "created_at"
       ],
       "nullable": [
@@ -2869,6 +3929,7 @@ export const spec = defineModuleSpec({
             "author_name",
             "text",
             "status",
+            "like_count",
             "created_at"
           ],
           "properties": {
@@ -2902,6 +3963,13 @@ export const spec = defineModuleSpec({
             },
             "status": {
               "bsonType": "string"
+            },
+            "like_count": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
             },
             "created_at": {
               "bsonType": "date"
@@ -3407,6 +4475,7 @@ export const spec = defineModuleSpec({
         "description",
         "how_to_play",
         "prizes",
+        "prize_note",
         "status",
         "position",
         "created_at",
@@ -3416,7 +4485,8 @@ export const spec = defineModuleSpec({
         "icon",
         "cover",
         "players_label",
-        "description"
+        "description",
+        "prize_note"
       ],
       "decimal": [],
       "binary": [],
@@ -3480,6 +4550,12 @@ export const spec = defineModuleSpec({
             },
             "how_to_play": {},
             "prizes": {},
+            "prize_note": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
             "status": {
               "bsonType": "string"
             },
@@ -3593,6 +4669,933 @@ export const spec = defineModuleSpec({
       ],
       "unenforced": []
     },
+    "blog_saves": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "post_id",
+        "customer_id",
+        "saved_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "saved_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "post_id",
+            "customer_id",
+            "saved_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "post_id": {
+              "bsonType": "string"
+            },
+            "customer_id": {
+              "bsonType": "string"
+            },
+            "saved_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "blog_saves_customer_id_post_id_f715df",
+          "key": {
+            "customer_id": 1,
+            "post_id": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "blog_saves_customer_id_saved_at_8ababc",
+          "key": {
+            "customer_id": 1,
+            "saved_at": 1
+          }
+        },
+        {
+          "name": "blog_saves_post_id_5e6537",
+          "key": {
+            "post_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "blog_follows": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "author_id",
+        "customer_id",
+        "followed_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "followed_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "author_id",
+            "customer_id",
+            "followed_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "author_id": {
+              "bsonType": "string"
+            },
+            "customer_id": {
+              "bsonType": "string"
+            },
+            "followed_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "blog_follows_author_id_customer_id_ed1705",
+          "key": {
+            "author_id": 1,
+            "customer_id": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "blog_follows_customer_id_followed_at_f24258",
+          "key": {
+            "customer_id": 1,
+            "followed_at": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "blog_reply_likes": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "reply_id",
+        "post_id",
+        "customer_id",
+        "at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "reply_id",
+            "post_id",
+            "customer_id",
+            "at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "reply_id": {
+              "bsonType": "string"
+            },
+            "post_id": {
+              "bsonType": "string"
+            },
+            "customer_id": {
+              "bsonType": "string"
+            },
+            "at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "blog_reply_likes_reply_id_customer_id_a9e7d5",
+          "key": {
+            "reply_id": 1,
+            "customer_id": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "blog_reply_likes_post_id_customer_id_e45bf1",
+          "key": {
+            "post_id": 1,
+            "customer_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "reviews": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "target_type",
+        "target_id",
+        "customer_id",
+        "name",
+        "stars",
+        "text",
+        "hidden",
+        "hidden_reason",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "text",
+        "hidden_reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "target_type",
+            "target_id",
+            "customer_id",
+            "name",
+            "stars",
+            "hidden",
+            "created_at",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "target_type": {
+              "bsonType": "string",
+              "enum": [
+                "company",
+                "game"
+              ]
+            },
+            "target_id": {
+              "bsonType": "string"
+            },
+            "customer_id": {
+              "bsonType": "string"
+            },
+            "name": {
+              "bsonType": "string"
+            },
+            "stars": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "text": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "hidden": {
+              "bsonType": "bool"
+            },
+            "hidden_reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "reviews_target_type_target_id_customer_id_dfdc1e",
+          "key": {
+            "target_type": 1,
+            "target_id": 1,
+            "customer_id": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "reviews_target_type_target_id_hidden_updated_at_df513e",
+          "key": {
+            "target_type": 1,
+            "target_id": 1,
+            "hidden": 1,
+            "updated_at": 1
+          }
+        },
+        {
+          "name": "reviews_hidden_updated_at_141b32",
+          "key": {
+            "hidden": 1,
+            "updated_at": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "players": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "code",
+        "customer_id",
+        "name",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "code",
+            "customer_id",
+            "name",
+            "created_at",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "code": {
+              "bsonType": "string"
+            },
+            "customer_id": {
+              "bsonType": "string"
+            },
+            "name": {
+              "bsonType": "string"
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "players_code_0faf86",
+          "key": {
+            "code": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "players_customer_id_5c2632",
+          "key": {
+            "customer_id": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "game_keys": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "game_id",
+        "key_hash",
+        "hint",
+        "status",
+        "created_by",
+        "created_at",
+        "last_used_at",
+        "revoked_at",
+        "revoked_by"
+      ],
+      "nullable": [
+        "created_by",
+        "last_used_at",
+        "revoked_at",
+        "revoked_by"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "last_used_at",
+        "revoked_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "game_id",
+            "key_hash",
+            "hint",
+            "status",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "game_id": {
+              "bsonType": "string"
+            },
+            "key_hash": {
+              "bsonType": "string"
+            },
+            "hint": {
+              "bsonType": "string"
+            },
+            "status": {
+              "bsonType": "string",
+              "enum": [
+                "active",
+                "revoked"
+              ]
+            },
+            "created_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "last_used_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "revoked_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "revoked_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "game_keys_key_hash_3dce99",
+          "key": {
+            "key_hash": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "game_keys_game_id_status_c696fa",
+          "key": {
+            "game_id": 1,
+            "status": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "scores": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "game_id",
+        "partner_score_id",
+        "player_id",
+        "customer_id",
+        "score",
+        "played_at",
+        "day",
+        "week",
+        "received_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "played_at",
+        "received_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "game_id",
+            "partner_score_id",
+            "player_id",
+            "customer_id",
+            "score",
+            "played_at",
+            "day",
+            "week",
+            "received_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "game_id": {
+              "bsonType": "string"
+            },
+            "partner_score_id": {
+              "bsonType": "string"
+            },
+            "player_id": {
+              "bsonType": "string"
+            },
+            "customer_id": {
+              "bsonType": "string"
+            },
+            "score": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "played_at": {
+              "bsonType": "date"
+            },
+            "day": {
+              "bsonType": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "week": {
+              "bsonType": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "received_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "scores_game_id_partner_score_id_10130f",
+          "key": {
+            "game_id": 1,
+            "partner_score_id": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "scores_game_id_week_score_2931ea",
+          "key": {
+            "game_id": 1,
+            "week": 1,
+            "score": 1
+          }
+        },
+        {
+          "name": "scores_game_id_day_score_b17cbe",
+          "key": {
+            "game_id": 1,
+            "day": 1,
+            "score": 1
+          }
+        },
+        {
+          "name": "scores_game_id_score_a923ec",
+          "key": {
+            "game_id": 1,
+            "score": 1
+          }
+        },
+        {
+          "name": "scores_game_id_customer_id_played_at_cbafcd",
+          "key": {
+            "game_id": 1,
+            "customer_id": 1,
+            "played_at": 1
+          }
+        },
+        {
+          "name": "scores_customer_id_dc4488",
+          "key": {
+            "customer_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "prize_weeks": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "game_id",
+        "week",
+        "state",
+        "winners",
+        "updated_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "game_id",
+            "week",
+            "state",
+            "winners",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "game_id": {
+              "bsonType": "string"
+            },
+            "week": {
+              "bsonType": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "state": {
+              "bsonType": "string",
+              "enum": [
+                "awarding",
+                "done"
+              ]
+            },
+            "winners": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "prize_weeks_game_id_week_b8ab29",
+          "key": {
+            "game_id": 1,
+            "week": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "prize_awards": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "game_id",
+        "week",
+        "customer_id",
+        "name",
+        "rank",
+        "score",
+        "reward",
+        "campaign_id",
+        "code",
+        "code_id",
+        "state",
+        "error",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "code",
+        "code_id",
+        "error"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "game_id",
+            "week",
+            "customer_id",
+            "name",
+            "rank",
+            "score",
+            "reward",
+            "campaign_id",
+            "state",
+            "created_at",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "game_id": {
+              "bsonType": "string"
+            },
+            "week": {
+              "bsonType": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "customer_id": {
+              "bsonType": "string"
+            },
+            "name": {
+              "bsonType": "string"
+            },
+            "rank": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "score": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "reward": {
+              "bsonType": "string"
+            },
+            "campaign_id": {
+              "bsonType": "string"
+            },
+            "code": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "code_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "state": {
+              "bsonType": "string",
+              "enum": [
+                "issued",
+                "failed"
+              ]
+            },
+            "error": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "prize_awards_game_id_week_customer_id_2474fa",
+          "key": {
+            "game_id": 1,
+            "week": 1,
+            "customer_id": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "prize_awards_game_id_week_rank_64d5fe",
+          "key": {
+            "game_id": 1,
+            "week": 1,
+            "rank": 1
+          }
+        },
+        {
+          "name": "prize_awards_state_week_f3cccf",
+          "key": {
+            "state": 1,
+            "week": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
     "farm_setup": {
       "idField": "id",
       "key": [
@@ -3658,6 +5661,8 @@ export const spec = defineModuleSpec({
 
 declare module '../kernel/events/event-map.js' {
   interface EventMap {
+    "departments.blog.followed_author_posted": DepartmentsBlogFollowedAuthorPostedEvent;
+    "departments.play.prize_awarded": DepartmentsPlayPrizeAwardedEvent;
   }
 }
 

@@ -84,4 +84,20 @@ export const adminRoutes = (service: DepartmentsService) =>
     getRankingsAdmin: async ({ params }) => service.getRankingsAdmin(params.id, params.period),
     /** PUT /play/games/{id}/rankings/{period}: Replace a game's ranking table for a period */
     setRankings: async ({ params, body, actor, requestId }) => service.setRankings(params.id, params.period, body, { actor, requestId }),
+    /** GET /play/games/{id}/keys: A game's server keys, newest first (never the keys themselves) */
+    listGameKeys: async ({ params }) => service.listGameKeys(params.id),
+    /** POST /play/games/{id}/keys: Make a server key for the game's partner (shown once) */
+    createGameKey: async ({ params, actor, requestId }) => service.createGameKey(params.id, { actor, requestId }),
+    /** POST /play/games/{id}/keys/{keyId}/rotate: Replace a key: the old one stops working now and a new one is shown once */
+    rotateGameKey: async ({ params, actor, requestId }) => service.rotateGameKey(params.id, params.keyId, { actor, requestId }),
+    /** POST /play/games/{id}/keys/{keyId}/revoke: Stop a key from posting scores */
+    revokeGameKey: async ({ params, actor, requestId }) => service.revokeGameKey(params.id, params.keyId, { actor, requestId }),
+    /** GET /play/games/{id}/awards: Coupons a game's prize weeks gave, newest week first */
+    listPrizeAwards: async ({ params, query, page }) => service.listPrizeAwards(params.id, query, page),
+    /** GET /play/players: Find customers' player IDs (to help a game partner) */
+    findPlayers: async ({ query }) => service.findPlayers(query.q),
+    /** GET /reviews: Company and game reviews, last changed first */
+    listDepartmentReviews: async ({ query, page }) => service.listDepartmentReviews(query, page),
+    /** POST /reviews/{id}/moderate: Hide or show a company or game review */
+    moderateDepartmentReview: async ({ params, body, actor, requestId }) => service.moderateDepartmentReview(params.id, body, { actor, requestId }),
   });

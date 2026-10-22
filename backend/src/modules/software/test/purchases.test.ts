@@ -149,12 +149,15 @@ describe('buying', () => {
 });
 
 describe('downloads', () => {
-  it('gives owners a signed link to the package (counted) or a database', async () => {
+  it('gives any signed-in customer a signed link to the package (counted) or a database, owner or not', async () => {
     const db = await k.pkg('presets.zip');
-    const a = await k.makeApp({ databaseIds: [db], databasesNote: 'Presets for offline use' });
+    const a = await k.makeApp({ databaseIds: [db], databasesNote: 'Presets for offline use', free: false, price: usd(2499) });
     const c = buyer();
-    expect((await k.store('POST', `/apps/${a.slug}/downloads`, {}, c.token)).body.error.code).toBe('NOT_OWNED');
-    await k.store('POST', `/apps/${a.slug}/get`, undefined, c.token);
+    // a visitor signs in first; the page says so
+    expect((await k.store('POST', `/apps/${a.slug}/downloads`, {})).status).toBe(401);
+    expect((await k.store('GET', `/apps/${a.slug}`)).body).toMatchObject({ canDownload: false, owned: false, licence: null });
+    expect((await k.store('GET', `/apps/${a.slug}`, undefined, c.token)).body).toMatchObject({ canDownload: true, owned: false, licence: null });
+    // no purchase needed: the paid app is unlocked by its licence key, not by the download
     const link = await k.store('POST', `/apps/${a.slug}/downloads`, {}, c.token);
     expect(link.status, JSON.stringify(link.body)).toBe(200);
     expect(link.body).toMatchObject({ fileName: a.files.package.name, contentType: 'application/zip' });
@@ -167,6 +170,20 @@ describe('downloads', () => {
     const detail = (await k.store('GET', `/apps/${a.slug}`)).body;
     expect(detail.downloads).toBe(1);
     expect(detail.files).toMatchObject({ databasesNote: 'Presets for offline use', databases: [expect.objectContaining({ id: db, kind: 'database' })] });
+    // the sizes on the Download buttons
+    expect(detail.files.databasesSizeBytes).toBe(detail.files.databases[0].sizeBytes);
+    expect(detail.files.databasesSizeLabel).toBe(detail.files.databases[0].sizeLabel);
+    expect(detail.files.package.sizeLabel).toMatch(/ (B|KB)$/);
+    expect((await k.store('GET', `/apps/${(await k.makeApp()).slug}`)).body.files).toMatchObject({ databases: [], databasesSizeBytes: 0, databasesSizeLabel: null });
+  });
+
+  it('keeps a hidden app downloadable by its owners only', async () => {
+    const a = await k.makeApp();
+    const owner = buyer();
+    await k.store('POST', `/apps/${a.slug}/get`, undefined, owner.token);
+    expect((await k.admin('PATCH', `/apps/${a.id}`, { title: a.title, company: a.company, categoryId: a.categoryId, brief: a.brief, description: a.description, free: true, platforms: a.platforms, status: 'hidden' })).status).toBe(200);
+    expect((await k.store('POST', `/apps/${a.slug}/downloads`, {}, owner.token)).status).toBe(200);
+    expect((await k.store('POST', `/apps/${a.slug}/downloads`, {}, buyer().token)).status).toBe(404);
   });
 });
 
@@ -180,7 +197,7 @@ describe('data export', () => {
     const sections = await service.exportCustomerData({ customerId: c.id, accountId: c.id });
     expect(sections.map((s) => s.key)).toEqual(['software_purchases', 'software_apps', 'software_reviews']);
     expect(sections[0].records).toEqual([expect.objectContaining({ ref: p.ref, status: 'paid', amount: usd(499) })]);
-    expect(sections[1].records).toEqual([expect.objectContaining({ app: a.title, source: 'purchase' })]);
+    expect(sections[1].records).toEqual([expect.objectContaining({ app: a.title, source: 'purchase', licenceKey: expect.stringMatching(/^[A-Z2-9]{5}(-[A-Z2-9]{5}){3}$/) })]);
     expect(sections[2].records).toEqual([expect.objectContaining({ stars: 4, text: 'Good' })]);
   });
 });

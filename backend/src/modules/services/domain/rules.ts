@@ -4,7 +4,8 @@
  */
 import { format as formatMoney, type Money } from '../../../kernel/lib/money.js';
 import { slugify } from '../../../kernel/lib/text.js';
-import { zonedTimeToUtc } from '../../../kernel/lib/clock.js';
+import { dateInZone, zonedTimeToUtc, zoneOffsetMs } from '../../../kernel/lib/clock.js';
+import { addMonths } from '../../../kernel/lib/dates.js';
 import type { OpeningDay, OpeningHours, RatingSummary, ServiceRequest } from '../../../spec/services.js';
 
 export const AREAS = ['os_install', 'post_sale', 'welfare', 'booking'] as const;
@@ -36,6 +37,7 @@ export const LIMITS = {
   address: 200,
   short: 80,
   days: 14,
+  fullTerms: 20000,
 } as const;
 
 /* ------------------------------------------------------------------ slugs */
@@ -179,4 +181,112 @@ export function shortName(displayName: string | null | undefined): string {
   const [first, ...rest] = parts;
   const last = rest.at(-1);
   return last ? `${first} ${last[0]!.toUpperCase()}.` : first!;
+}
+
+/* ------------------------------------------------------------------ open now */
+
+/** 7 pm, 7:30 pm */
+function shortTime(hhmm: string): string {
+  const m = minutesOf(hhmm);
+  const h = Math.floor(m / 60);
+  const min = m % 60;
+  return `${((h + 11) % 12) + 1}${min ? `:${String(min).padStart(2, '0')}` : ''} ${h < 12 ? 'am' : 'pm'}`;
+}
+
+/** "Open until 8 pm", "Opens at 9 am", "Closed now" (after closing) or "Closed today", from the hours at `now` in `tz` */
+export function openLabel(days: OpeningDay[], now: Date, tz: string): string {
+  const today = dateInZone(now, tz);
+  const d = days[weekdayIndex(today)];
+  if (!d?.open || !d.from || !d.to) return 'Closed today';
+  const local = new Date(now.getTime() + zoneOffsetMs(now, tz));
+  const minutes = local.getUTCHours() * 60 + local.getUTCMinutes();
+  if (minutes < minutesOf(d.from)) return `Opens at ${shortTime(d.from)}`;
+  if (minutes < minutesOf(d.to)) return `Open until ${shortTime(d.to)}`;
+  return 'Closed now';
+}
+
+/* ------------------------------------------------------------------ provider addresses */
+
+/**
+ * The parts of a staff-entered address for geocoding: "412 SE Morrison St, Portland, OR 97214" with city
+ * "Portland, OR" → line1 412 SE Morrison St, city Portland, region OR, postal code 97214. Null without a city.
+ */
+export function addressParts(address: string | null | undefined, city: string | null | undefined): { line1?: string; city: string; region: string; postalCode?: string } | null {
+  const parts = String(address ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  const all = [...parts, ...String(city ?? '').split(',').map((s) => s.trim()).filter(Boolean)];
+  const postalCode = all.join(' ').match(/\b(\d{5})(?:-\d{4})?\b/)?.[1];
+  const region = all.map((p) => p.match(/^([A-Z]{2})(?:\s+\d{5}(?:-\d{4})?)?$/)?.[1]).find(Boolean) ?? '';
+  const cityName = String(city ?? '').split(',')[0]?.trim() || (parts.length >= 2 ? parts[parts.length - 2]!.replace(/\s+\d{5}.*$/, '') : '') || '';
+  if (!cityName) return null;
+  const line1 = parts[0] && parts[0].toLowerCase() !== cityName.toLowerCase() ? parts[0] : undefined;
+  return { ...(line1 ? { line1 } : {}), city: cityName, region, ...(postalCode ? { postalCode } : {}) };
+}
+
+/* ------------------------------------------------------------------ registered devices */
+
+export const DEVICE_LIMIT = 10;
+export const SAVED_LIMIT = 200;
+/** Months of cover staff are offered by default when verifying */
+export const COVER_MONTHS = 12;
+
+/** The IMEI's digits: spaces, dashes and dots taken out */
+export const imeiDigits = (s: string | null | undefined) => String(s ?? '').replace(/[\s.-]/g, '');
+
+/** 15 digits whose last one is the Luhn check digit of the first 14 */
+export function isValidImei(digits: string): boolean {
+  if (!/^\d{15}$/.test(digits)) return false;
+  let sum = 0;
+  for (let i = 0; i < 15; i++) {
+    let d = Number(digits[14 - i]);
+    if (i % 2 === 1) {
+      d *= 2;
+      if (d > 9) d -= 9;
+    }
+    sum += d;
+  }
+  return sum % 10 === 0;
+}
+
+const monthFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'short', year: 'numeric' });
+const dateFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' });
+/** Oct 2027 for a YYYY-MM-DD day */
+export const monthYearLabel = (day: string) => monthFmt.format(new Date(`${day}T12:00:00Z`));
+/** Oct 2, 2026 for a YYYY-MM-DD day */
+export const longDateLabel = (day: string) => dateFmt.format(new Date(`${day}T12:00:00Z`));
+/** The day `months` months after a YYYY-MM-DD day (Jan 31 + 1 month = Feb 28) */
+export const addMonthsToDay = (day: string, months: number) => addMonths(new Date(`${day}T00:00:00Z`), months).toISOString().slice(0, 10);
+
+/** Galaxy S26 Ultra · 256 GB */
+export const deviceLabel = (model: string, storage?: string | null) => (storage ? `${model} · ${storage}` : model);
+
+const BRAND_WORDS = new Set(['samsung', 'google', 'apple', 'xiaomi', 'oneplus', 'motorola', 'oppo']);
+const norm = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/[^a-z0-9+ ]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w && !BRAND_WORDS.has(w))
+    .join(' ');
+
+/**
+ * The models a price row label names: "Galaxy S25 / S25+" → Galaxy S25, Galaxy S25+; "Pixel 10 / 10 Pro" → Pixel 10,
+ * Pixel 10 Pro. A later alternative borrows the words of the first one before its model number (Galaxy, Pixel).
+ */
+export function rowModels(label: string): string[] {
+  const alts = label.split('/').map((s) => s.trim()).filter(Boolean);
+  if (!alts.length) return [];
+  const head = alts[0]!.split(/\s+/);
+  const firstNumbered = head.findIndex((w) => /\d/.test(w));
+  const lead = firstNumbered > 0 ? head.slice(0, firstNumbered) : [];
+  return alts.map((a, i) => {
+    if (i === 0 || !lead.length) return a;
+    const first = a.split(/\s+/)[0]!.toLowerCase();
+    return lead.some((w) => w.toLowerCase() === first) ? a : `${lead.join(' ')} ${a}`;
+  });
+}
+
+/** The index of the price row whose label names the device's model, or -1 */
+export function matchPriceRow(rows: { label: string }[], brand: string, model: string): number {
+  const want = new Set([norm(model), norm(`${brand} ${model}`)]);
+  return rows.findIndex((r) => rowModels(r.label).some((m) => want.has(norm(m))));
 }

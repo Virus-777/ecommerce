@@ -197,6 +197,16 @@ export interface ProviderCard {
   fromPrice?: common.Money | null;
   /** Booking providers: e.g. Next free: Today 3:30 PM */
   nextFree?: string | null;
+  /** Street address, e.g. 412 SE Morrison St, Portland, OR 97214 */
+  address?: string | null;
+  /** Map pin: the staff pin, else the address geocoded; null when unknown */
+  location?: GeoPoint | null;
+  /** From the customer's default delivery address, e.g. 1.2 mi; null for visitors, customers without a geocoded default address, or a provider without a point */
+  distance?: string | null;
+  /** From its hours now (provider time zone): Open until 8 pm, Opens at 9 am, Closed now or Closed today */
+  openLabel?: string | null;
+  /** The signed-in customer saved this provider; false for visitors */
+  saved: boolean;
 }
 
 export const ProviderCard: z.ZodType<ProviderCard> = z.object({
@@ -222,6 +232,13 @@ export const ProviderCard: z.ZodType<ProviderCard> = z.object({
     return common.Money.nullish();
   },
   nextFree: z.string().describe("Booking providers: e.g. Next free: Today 3:30 PM").nullish(),
+  address: z.string().describe("Street address, e.g. 412 SE Morrison St, Portland, OR 97214").nullish(),
+  get location() {
+    return GeoPoint.nullish();
+  },
+  distance: z.string().describe("From the customer's default delivery address, e.g. 1.2 mi; null for visitors, customers without a geocoded default address, or a provider without a point").nullish(),
+  openLabel: z.string().describe("From its hours now (provider time zone): Open until 8 pm, Opens at 9 am, Closed now or Closed today").nullish(),
+  saved: z.boolean().describe("The signed-in customer saved this provider; false for visitors"),
 }).register(common.apiTypes, { id: "services.ProviderCard" });
 
 export interface Provider {
@@ -237,12 +254,17 @@ export interface Provider {
   rating: RatingSummary;
   fromPrice?: common.Money | null;
   nextFree?: string | null;
+  address?: string | null;
+  distance?: string | null;
+  openLabel?: string | null;
+  saved: boolean;
   photos: common.MediaRef[];
+  /** About the provider */
   description?: string | null;
   /** Year founded */
   since?: number | null;
   contacts: Contacts;
-  /** Map pin */
+  /** Map pin: the staff pin, else the address geocoded */
   location?: GeoPoint | null;
   hours: OpeningHours;
   staff: ProviderStaff[];
@@ -275,10 +297,14 @@ export const Provider: z.ZodType<Provider> = z.object({
     return common.Money.nullish();
   },
   nextFree: z.string().nullish(),
+  address: z.string().nullish(),
+  distance: z.string().nullish(),
+  openLabel: z.string().nullish(),
+  saved: z.boolean(),
   get photos() {
     return z.array(common.MediaRef);
   },
-  description: z.string().nullish(),
+  description: z.string().describe("About the provider").nullish(),
   since: z.number().int().describe("Year founded").nullish(),
   get contacts() {
     return Contacts;
@@ -313,7 +339,12 @@ export interface ProviderAdmin {
   description?: string | null;
   since?: number | null;
   contacts: Contacts;
+  /** The pin staff set */
   location?: GeoPoint | null;
+  /** Where the map and distances place it: the pin, else the address geocoded when saved */
+  point?: GeoPoint | null;
+  /** Where point comes from; null when the address could not be geocoded */
+  pointSource?: "pin" | "address" | null;
   hours: OpeningHours;
   staff: ProviderStaff[];
   replyTime?: string | null;
@@ -350,6 +381,10 @@ export const ProviderAdmin: z.ZodType<ProviderAdmin> = z.object({
   get location() {
     return GeoPoint.nullish();
   },
+  get point() {
+    return GeoPoint.nullish();
+  },
+  pointSource: z.enum(["pin", "address"]).describe("Where point comes from; null when the address could not be geocoded").nullish(),
   get hours() {
     return OpeningHours;
   },
@@ -378,6 +413,7 @@ export interface ProviderInput {
   description?: string | null;
   since?: number | null;
   contacts?: Contacts | null;
+  /** A pin; without one the address (contacts.address and city) is geocoded */
   location?: GeoPoint | null;
   hours?: OpeningHours | null;
   staff?: ProviderStaff[] | null;
@@ -487,6 +523,10 @@ export interface ServiceCard {
   /** Short facts on the card, e.g. Free pickup */
   tags: string[];
   rating: RatingSummary;
+  /** The provider's distance from the customer's default delivery address, e.g. 1.2 mi; null when unknown */
+  distance?: string | null;
+  /** Post-sale: free for a registered device under Marketly post-sale cover */
+  coveredByWarranty: boolean;
 }
 
 export const ServiceCard: z.ZodType<ServiceCard> = z.object({
@@ -519,6 +559,8 @@ export const ServiceCard: z.ZodType<ServiceCard> = z.object({
   get rating() {
     return RatingSummary;
   },
+  distance: z.string().describe("The provider's distance from the customer's default delivery address, e.g. 1.2 mi; null when unknown").nullish(),
+  coveredByWarranty: z.boolean().describe("Post-sale: free for a registered device under Marketly post-sale cover"),
 }).register(common.apiTypes, { id: "services.ServiceCard" });
 
 export interface Service {
@@ -539,6 +581,8 @@ export interface Service {
   coverage?: string | null;
   tags: string[];
   rating: RatingSummary;
+  distance?: string | null;
+  coveredByWarranty: boolean;
   description?: string | null;
   included: string[];
   /** Eligibility and requirements */
@@ -554,6 +598,10 @@ export interface Service {
   priceTableTitle?: string | null;
   /** e.g. warranty terms */
   terms: string[];
+  /** The full terms behind Read full terms (plain text, paragraphs split by blank lines); null when there are none */
+  fullTerms?: string | null;
+  /** Covered-by-warranty post-sale services, for a signed-in customer with a verified device whose cover runs today: its $0 price and the sticky bar */
+  yourDevice?: CoveredDevicePrice | null;
   /** How it works, in order */
   steps: ServiceStep[];
   /** Bookable services: the length of one slot; null when the service is requested without a time */
@@ -595,6 +643,8 @@ export const Service: z.ZodType<Service> = z.object({
   get rating() {
     return RatingSummary;
   },
+  distance: z.string().nullish(),
+  coveredByWarranty: z.boolean(),
   description: z.string().nullish(),
   included: z.array(z.string()),
   requirements: z.array(z.string()).describe("Eligibility and requirements"),
@@ -608,6 +658,10 @@ export const Service: z.ZodType<Service> = z.object({
   },
   priceTableTitle: z.string().describe("e.g. Price by model, Schedule and prices").nullish(),
   terms: z.array(z.string()).describe("e.g. warranty terms"),
+  fullTerms: z.string().describe("The full terms behind Read full terms (plain text, paragraphs split by blank lines); null when there are none").nullish(),
+  get yourDevice() {
+    return CoveredDevicePrice.nullish();
+  },
   get steps() {
     return z.array(ServiceStep);
   },
@@ -647,6 +701,8 @@ export interface ServiceAdmin {
   priceTableTitle?: string | null;
   terms: string[];
   steps: ServiceStep[];
+  fullTerms?: string | null;
+  coveredByWarranty: boolean;
   slotMinutes?: number | null;
   durationMinutes?: number | null;
   status: "published" | "hidden";
@@ -697,6 +753,8 @@ export const ServiceAdmin: z.ZodType<ServiceAdmin> = z.object({
   get steps() {
     return z.array(ServiceStep);
   },
+  fullTerms: z.string().nullish(),
+  coveredByWarranty: z.boolean(),
   slotMinutes: z.number().int().nullish(),
   durationMinutes: z.number().int().nullish(),
   status: z.enum(["published", "hidden"]),
@@ -735,6 +793,10 @@ export interface ServiceInput {
   priceTableTitle?: string | null;
   terms?: string[] | null;
   steps?: ServiceStep[] | null;
+  /** At most 20,000 characters */
+  fullTerms?: string | null;
+  /** Post-sale services only: free for a covered registered device */
+  coveredByWarranty?: boolean | null;
   /** 15–480; set for services booked at a time */
   slotMinutes?: number | null;
   durationMinutes?: number | null;
@@ -780,6 +842,8 @@ export const ServiceInput: z.ZodType<ServiceInput> = z.object({
   get steps() {
     return z.array(ServiceStep).nullish();
   },
+  fullTerms: z.string().describe("At most 20,000 characters").nullish(),
+  coveredByWarranty: z.boolean().describe("Post-sale services only: free for a covered registered device").nullish(),
   slotMinutes: z.number().int().describe("15–480; set for services booked at a time").nullish(),
   durationMinutes: z.number().int().nullish(),
   status: z.enum(["published", "hidden"]).nullish(),
@@ -853,6 +917,8 @@ export interface RequestInput {
   slotStart?: string | null;
   /** A chosen staff member; any free one when omitted */
   staffId?: string | null;
+  /** OS install and post-sale: one of my registered devices. A verified device under cover makes a covered-by-warranty service $0 */
+  deviceId?: string | null;
   contact: RequestContact;
   details?: RequestDetails | null;
 }
@@ -861,6 +927,7 @@ export const RequestInput: z.ZodType<RequestInput> = z.object({
   serviceId: z.uuid(),
   slotStart: z.iso.datetime({ offset: true }).describe("Bookable services: the chosen slot (must still be free)").nullish(),
   staffId: z.string().describe("A chosen staff member; any free one when omitted").nullish(),
+  deviceId: z.uuid().describe("OS install and post-sale: one of my registered devices. A verified device under cover makes a covered-by-warranty service $0").nullish(),
   get contact() {
     return RequestContact;
   },
@@ -868,6 +935,22 @@ export const RequestInput: z.ZodType<RequestInput> = z.object({
     return RequestDetails.nullish();
   },
 }).register(common.apiTypes, { id: "services.RequestInput" });
+
+export interface RequestDevice {
+  id: string;
+  /** e.g. Galaxy S26 Ultra · 256 GB */
+  label: string;
+  imeiLast4: string;
+  /** The request is free under the device's warranty cover */
+  covered: boolean;
+}
+
+export const RequestDevice: z.ZodType<RequestDevice> = z.object({
+  id: z.uuid(),
+  label: z.string().describe("e.g. Galaxy S26 Ultra · 256 GB"),
+  imeiLast4: z.string(),
+  covered: z.boolean().describe("The request is free under the device's warranty cover"),
+}).register(common.apiTypes, { id: "services.RequestDevice" });
 
 export interface ServiceRequest {
   id: string;
@@ -886,8 +969,10 @@ export interface ServiceRequest {
   staff?: ProviderStaff | null;
   contact: RequestContact;
   details: RequestDetails;
-  /** e.g. from $29, paid at the shop */
+  /** e.g. from $29 · pay at the provider, or $0 · covered by your warranty */
   priceLabel?: string | null;
+  /** The registered device the request is for */
+  device?: RequestDevice | null;
   /** What the provider or staff said, e.g. a decline reason */
   providerNote?: string | null;
   canCancel: boolean;
@@ -921,7 +1006,10 @@ export const ServiceRequest: z.ZodType<ServiceRequest> = z.object({
   get details() {
     return RequestDetails;
   },
-  priceLabel: z.string().describe("e.g. from $29, paid at the shop").nullish(),
+  priceLabel: z.string().describe("e.g. from $29 · pay at the provider, or $0 · covered by your warranty").nullish(),
+  get device() {
+    return RequestDevice.nullish();
+  },
   providerNote: z.string().describe("What the provider or staff said, e.g. a decline reason").nullish(),
   canCancel: z.boolean(),
   canReview: z.boolean(),
@@ -944,6 +1032,7 @@ export interface RequestAdmin {
   slotStart?: string | null;
   slotEnd?: string | null;
   staff?: ProviderStaff | null;
+  device?: RequestDevice | null;
   contact: RequestContact;
   details: RequestDetails;
   providerNote?: string | null;
@@ -967,6 +1056,9 @@ export const RequestAdmin: z.ZodType<RequestAdmin> = z.object({
   slotEnd: z.iso.datetime({ offset: true }).nullish(),
   get staff() {
     return ProviderStaff.nullish();
+  },
+  get device() {
+    return RequestDevice.nullish();
   },
   get contact() {
     return RequestContact;
@@ -1052,6 +1144,240 @@ export const ReviewAdmin: z.ZodType<ReviewAdmin> = z.object({
   createdAt: z.iso.datetime({ offset: true }),
 }).register(common.apiTypes, { id: "services.ReviewAdmin" });
 
+export interface CustomerArea {
+  /** The customer has a geocoded default delivery address, so lists show distances and sort by Nearest */
+  located: boolean;
+  /** The default address's city (the Welfare location button, N services near Portland); null when not located */
+  city?: string | null;
+  /** State code, e.g. OR */
+  region?: string | null;
+  /** The address's first line, e.g. 1120 SW 5th Ave */
+  addressLabel?: string | null;
+}
+
+export const CustomerArea: z.ZodType<CustomerArea> = z.object({
+  located: z.boolean().describe("The customer has a geocoded default delivery address, so lists show distances and sort by Nearest"),
+  city: z.string().describe("The default address's city (the Welfare location button, N services near Portland); null when not located").nullish(),
+  region: z.string().describe("State code, e.g. OR").nullish(),
+  addressLabel: z.string().describe("The address's first line, e.g. 1120 SW 5th Ave").nullish(),
+}).register(common.apiTypes, { id: "services.CustomerArea" });
+
+export interface ProviderSaved {
+  providerId: string;
+  saved: boolean;
+}
+
+export const ProviderSaved: z.ZodType<ProviderSaved> = z.object({
+  providerId: z.uuid(),
+  saved: z.boolean(),
+}).register(common.apiTypes, { id: "services.ProviderSaved" });
+
+export interface CoveredDevicePrice {
+  deviceId: string;
+  /** The device, e.g. Galaxy S26 Ultra */
+  label: string;
+  /** The price table row matched to the device's model (the app marks it · your phone); null when no row matches */
+  priceRowLabel?: string | null;
+  /** What it costs without cover, struck through: the matched row's price, else the service's from price, e.g. $229 */
+  normalPrice?: string | null;
+  /** What the customer pays: 0 */
+  price: common.Money;
+  /** $0 */
+  priceText: string;
+  /** Sticky bar line, e.g. Galaxy S26 Ultra · warranty */
+  barLabel: string;
+  coveredUntil: string;
+  /** e.g. Covered to Oct 2027 */
+  coverageLabel: string;
+}
+
+export const CoveredDevicePrice: z.ZodType<CoveredDevicePrice> = z.object({
+  deviceId: z.uuid(),
+  label: z.string().describe("The device, e.g. Galaxy S26 Ultra"),
+  priceRowLabel: z.string().describe("The price table row matched to the device's model (the app marks it · your phone); null when no row matches").nullish(),
+  normalPrice: z.string().describe("What it costs without cover, struck through: the matched row's price, else the service's from price, e.g. $229").nullish(),
+  get price() {
+    return common.Money;
+  },
+  priceText: z.string().describe("$0"),
+  barLabel: z.string().describe("Sticky bar line, e.g. Galaxy S26 Ultra · warranty"),
+  coveredUntil: z.iso.date(),
+  coverageLabel: z.string().describe("e.g. Covered to Oct 2027"),
+}).register(common.apiTypes, { id: "services.CoveredDevicePrice" });
+
+export interface Device {
+  id: string;
+  /** e.g. Samsung */
+  brand: string;
+  /** e.g. Galaxy S26 Ultra */
+  model: string;
+  /** e.g. 256 GB */
+  storage?: string | null;
+  /** Model and storage, e.g. Galaxy S26 Ultra · 256 GB */
+  label: string;
+  /** The full IMEI is never returned to the customer */
+  imeiLast4: string;
+  /** IMEI ending 4417 */
+  imeiLabel: string;
+  purchaseDate: string;
+  /** Bought Oct 2, 2026 */
+  purchaseLabel: string;
+  /** The Marketly order it was bought in, if given */
+  orderRef?: string | null;
+  status: "pending" | "verified" | "rejected";
+  /** Waiting for verification, Covered to Oct 2027, Cover ended Oct 2027 or Not verified */
+  statusLabel: string;
+  /** Verified and its cover runs today */
+  covered: boolean;
+  /** Set by staff when verifying */
+  coveredUntil?: string | null;
+  /** Covered to Oct 2027 while covered; null otherwise */
+  coverageLabel?: string | null;
+  /** Why staff could not verify it */
+  rejectReason?: string | null;
+  /** Pending or rejected devices can be changed (a rejected one goes back to pending) */
+  canEdit: boolean;
+  createdAt: string;
+}
+
+export const Device: z.ZodType<Device> = z.object({
+  id: z.uuid(),
+  brand: z.string().describe("e.g. Samsung"),
+  model: z.string().describe("e.g. Galaxy S26 Ultra"),
+  storage: z.string().describe("e.g. 256 GB").nullish(),
+  label: z.string().describe("Model and storage, e.g. Galaxy S26 Ultra · 256 GB"),
+  imeiLast4: z.string().describe("The full IMEI is never returned to the customer"),
+  imeiLabel: z.string().describe("IMEI ending 4417"),
+  purchaseDate: z.iso.date(),
+  purchaseLabel: z.string().describe("Bought Oct 2, 2026"),
+  orderRef: z.string().describe("The Marketly order it was bought in, if given").nullish(),
+  status: z.enum(["pending", "verified", "rejected"]),
+  statusLabel: z.string().describe("Waiting for verification, Covered to Oct 2027, Cover ended Oct 2027 or Not verified"),
+  covered: z.boolean().describe("Verified and its cover runs today"),
+  coveredUntil: z.iso.date().describe("Set by staff when verifying").nullish(),
+  coverageLabel: z.string().describe("Covered to Oct 2027 while covered; null otherwise").nullish(),
+  rejectReason: z.string().describe("Why staff could not verify it").nullish(),
+  canEdit: z.boolean().describe("Pending or rejected devices can be changed (a rejected one goes back to pending)"),
+  createdAt: z.iso.datetime({ offset: true }),
+}).register(common.apiTypes, { id: "services.Device" });
+
+export interface DeviceInput {
+  brand: string;
+  model: string;
+  storage?: string | null;
+  /** 15 digits (spaces and dashes are ignored), Luhn-checked */
+  imei: string;
+  /** Not in the future */
+  purchaseDate: string;
+  /** Optional Marketly order reference */
+  orderRef?: string | null;
+}
+
+export const DeviceInput: z.ZodType<DeviceInput> = z.object({
+  brand: z.string(),
+  model: z.string(),
+  storage: z.string().nullish(),
+  imei: z.string().describe("15 digits (spaces and dashes are ignored), Luhn-checked"),
+  purchaseDate: z.iso.date().describe("Not in the future"),
+  orderRef: z.string().describe("Optional Marketly order reference").nullish(),
+}).register(common.apiTypes, { id: "services.DeviceInput" });
+
+export interface DeviceAdmin {
+  id: string;
+  customerId: string;
+  /** From customers, when known */
+  customerName?: string | null;
+  brand: string;
+  model: string;
+  storage?: string | null;
+  label: string;
+  /** The full IMEI */
+  imei?: string | null;
+  imeiLast4: string;
+  purchaseDate: string;
+  orderRef?: string | null;
+  status: "pending" | "verified" | "rejected";
+  coveredUntil?: string | null;
+  /** The purchase date plus 12 months: the default when verifying */
+  suggestedCoveredUntil: string;
+  covered: boolean;
+  rejectReason?: string | null;
+  staffNote?: string | null;
+  verifiedAt?: string | null;
+  /** Who verified it, e.g. staff:<id> */
+  verifiedBy?: string | null;
+  /** Requests made for this device */
+  requestCount: number;
+  /** Status changes, oldest first */
+  history: StatusChange[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const DeviceAdmin: z.ZodType<DeviceAdmin> = z.object({
+  id: z.uuid(),
+  customerId: z.uuid(),
+  customerName: z.string().describe("From customers, when known").nullish(),
+  brand: z.string(),
+  model: z.string(),
+  storage: z.string().nullish(),
+  label: z.string(),
+  imei: z.string().describe("The full IMEI").nullish(),
+  imeiLast4: z.string(),
+  purchaseDate: z.iso.date(),
+  orderRef: z.string().nullish(),
+  status: z.enum(["pending", "verified", "rejected"]),
+  coveredUntil: z.iso.date().nullish(),
+  suggestedCoveredUntil: z.iso.date().describe("The purchase date plus 12 months: the default when verifying"),
+  covered: z.boolean(),
+  rejectReason: z.string().nullish(),
+  staffNote: z.string().nullish(),
+  verifiedAt: z.iso.datetime({ offset: true }).nullish(),
+  verifiedBy: z.string().describe("Who verified it, e.g. staff:<id>").nullish(),
+  requestCount: z.number().int().describe("Requests made for this device"),
+  get history() {
+    return z.array(StatusChange);
+  },
+  createdAt: z.iso.datetime({ offset: true }),
+  updatedAt: z.iso.datetime({ offset: true }),
+}).register(common.apiTypes, { id: "services.DeviceAdmin" });
+
+export interface DeviceAdminUpdate {
+  brand?: string | null;
+  model?: string | null;
+  storage?: string | null;
+  /** 15 digits, Luhn-checked */
+  imei?: string | null;
+  purchaseDate?: string | null;
+  orderRef?: string | null;
+  /** Verified devices: change the end of the cover */
+  coveredUntil?: string | null;
+  /** Staff only */
+  staffNote?: string | null;
+}
+
+export const DeviceAdminUpdate: z.ZodType<DeviceAdminUpdate> = z.object({
+  brand: z.string().nullish(),
+  model: z.string().nullish(),
+  storage: z.string().nullish(),
+  imei: z.string().describe("15 digits, Luhn-checked").nullish(),
+  purchaseDate: z.iso.date().nullish(),
+  orderRef: z.string().nullish(),
+  coveredUntil: z.iso.date().describe("Verified devices: change the end of the cover").nullish(),
+  staffNote: z.string().describe("Staff only").nullish(),
+}).register(common.apiTypes, { id: "services.DeviceAdminUpdate" });
+
+export interface DeviceVerifyInput {
+  /** End of the warranty cover; default the purchase date plus 12 months */
+  coveredUntil?: string | null;
+  staffNote?: string | null;
+}
+
+export const DeviceVerifyInput: z.ZodType<DeviceVerifyInput> = z.object({
+  coveredUntil: z.iso.date().describe("End of the warranty cover; default the purchase date plus 12 months").nullish(),
+  staffNote: z.string().nullish(),
+}).register(common.apiTypes, { id: "services.DeviceVerifyInput" });
+
 /* ------------------------------------------------------------------ events */
 
 /** services.request.status_changed: Staff or the customer change a request's status */
@@ -1069,10 +1395,43 @@ export const ServicesRequestStatusChangedEvent: z.ZodType<ServicesRequestStatusC
   ref: z.string(),
 });
 
+/** services.device.verified: Staff verify a registered device */
+export interface ServicesDeviceVerifiedEvent {
+  deviceId: string;
+  /** customers-module id (the account id for an account without a customer record) */
+  customerId: string;
+  label: string;
+  coveredUntil: string;
+}
+
+export const ServicesDeviceVerifiedEvent: z.ZodType<ServicesDeviceVerifiedEvent> = z.object({
+  deviceId: z.uuid(),
+  customerId: z.uuid().describe("customers-module id (the account id for an account without a customer record)"),
+  label: z.string(),
+  coveredUntil: z.iso.date(),
+});
+
+/** services.device.rejected: Staff reject a registered device or withdraw its verification */
+export interface ServicesDeviceRejectedEvent {
+  deviceId: string;
+  customerId: string;
+  label: string;
+  reason: string;
+}
+
+export const ServicesDeviceRejectedEvent: z.ZodType<ServicesDeviceRejectedEvent> = z.object({
+  deviceId: z.uuid(),
+  customerId: z.uuid(),
+  label: z.string(),
+  reason: z.string(),
+});
+
 /* ------------------------------------------------------------------ public API (in-process) */
 
 /** What other modules may call in-process: `ctx.use('services')` (or `ctx.tryUse` for an optional dependency). */
 export interface ServicesPublicApi {
+  /** The customer's service requests and bookings (reference, service, provider, time, contact, details, device, status history), reviews, saved providers and registered devices (with the full IMEI) for the personal data export. Requests and reviews are found by the account id, saved providers and devices by the customers-module id (and the account id they fall back to). Staff notes are left out. Used by: customers. */
+  exportCustomerData(input: { customerId: string, accountId: string }): Promise<common.CustomerDataSection[]>;
 }
 
 /* ------------------------------------------------------------------ tables (row types) */
@@ -1103,6 +1462,8 @@ export interface ServicesDb {
     since: number | null;
     contacts: Json;
     location: Json | null;
+    /** the address geocoded when there is no pin */
+    point: Json | null;
     hours: Json;
     staff: Json;
     reply_time: string | null;
@@ -1140,6 +1501,8 @@ export interface ServicesDb {
     price_table: Json;
     price_table_title: string | null;
     terms: Json;
+    full_terms: string | null;
+    covered_by_warranty: boolean;
     steps: Json;
     slot_minutes: number | null;
     duration_minutes: number | null;
@@ -1161,6 +1524,9 @@ export interface ServicesDb {
     slot_start: Date | null;
     slot_end: Date | null;
     staff_id: string | null;
+    device_id: string | null;
+    /** RequestDevice at the time of the request */
+    device: Json | null;
     contact: Json;
     details: Json;
     status: string;
@@ -1183,6 +1549,35 @@ export interface ServicesDb {
     status: string;
     created_at: Date;
   };
+  /** Providers customers saved (customers-module id) */
+  saved_providers: {
+    id: string;
+    customer_id: string;
+    provider_id: string;
+    created_at: Date;
+  };
+  /** Phones customers registered for post-sale cover (customers-module id) */
+  devices: {
+    id: string;
+    customer_id: string;
+    brand: string;
+    model: string;
+    storage: string | null;
+    /** 15 digits */
+    imei: string;
+    imei_last4: string;
+    purchase_date: string;
+    order_ref: string | null;
+    status: 'pending' | 'verified' | 'rejected';
+    covered_until: string | null;
+    reject_reason: string | null;
+    staff_note: string | null;
+    verified_at: Date | null;
+    verified_by: string | null;
+    history: Json;
+    created_at: Date;
+    updated_at: Date;
+  };
 }
 
 /* ------------------------------------------------------------------ endpoints */
@@ -1204,19 +1599,33 @@ export const endpoints = defineEndpoints({
     screens: ["store/phones","store/welfare","store/booking"],
     phase: 2,
   },
+  getMyArea: {
+    area: "store",
+    method: "GET",
+    path: "/area",
+    auth: "visitor",
+    scope: "own-customer",
+    summary: "Where the lists measure distances from",
+    desc: "The city of the signed-in customer's geocoded default delivery address: the Welfare location button and the N services near Portland line (N is the list's total). Visitors and customers without one get located: false.",
+    response: () => CustomerArea,
+    status: 200,
+    screens: ["store/welfare","store/phones","store/booking"],
+    phase: 2,
+  },
   listServices: {
     area: "store",
     method: "GET",
     path: "/services",
     auth: "visitor",
-    scope: "public",
+    scope: "own-customer",
     summary: "Published services of an area",
+    desc: "Cards carry the provider's distance when the customer is located. sort=nearest puts the closest providers first (services without a provider point last); without a location it reads as recommended.",
     query: () =>
       z.object({
         area: z.enum(["os_install", "post_sale", "welfare", "booking"]),
         category: z.string().describe("Category slug").optional(),
         q: z.string().optional(),
-        sort: z.enum(["recommended", "price", "rating"]).optional(),
+        sort: z.enum(["recommended", "nearest", "price", "rating"]).optional(),
       }),
     paging: true,
     response: () => ServiceCard,
@@ -1229,8 +1638,9 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/services/{slug}",
     auth: "visitor",
-    scope: "public",
-    summary: "A service with its provider, price table, terms, steps and newest reviews",
+    scope: "own-customer",
+    summary: "A service with its provider, price table, terms, full terms, steps and newest reviews",
+    desc: "For a signed-in customer: the provider's distance and saved flag, and on covered-by-warranty post-sale services the $0 price for their covered device (yourDevice).",
     params: () =>
       z.object({
         slug: z.string(),
@@ -1263,18 +1673,20 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/providers",
     auth: "visitor",
-    scope: "public",
-    summary: "Published providers of an area (Booking: Available near you)",
+    scope: "own-customer",
+    summary: "Published providers of an area (Booking: Available near you, and the map)",
+    desc: "Each card carries its map point (location), distance and saved flag. sort=nearest puts the closest first (providers without a point last); without a location it reads as name.",
     query: () =>
       z.object({
         area: z.enum(["os_install", "post_sale", "welfare", "booking"]),
         category: z.string().optional(),
         q: z.string().optional(),
+        sort: z.enum(["name", "nearest", "rating"]).optional(),
       }),
     paging: true,
     response: () => ProviderCard,
     status: 200,
-    screens: ["store/booking"],
+    screens: ["store/booking","store/booking-map"],
     phase: 2,
   },
   getProvider: {
@@ -1282,8 +1694,9 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/providers/{slug}",
     auth: "visitor",
-    scope: "public",
+    scope: "own-customer",
     summary: "A provider's page with its services, hours and staff",
+    desc: "Name, rating, city, address and distance, about (description), contacts, hours and the published services (of one area when given): the Booking provider page and the OS install and Post-sale provider page.",
     params: () =>
       z.object({
         slug: z.string(),
@@ -1295,7 +1708,60 @@ export const endpoints = defineEndpoints({
     response: () => Provider,
     status: 200,
     errors: ["NOT_FOUND"],
-    screens: ["store/booking-provider"],
+    screens: ["store/booking-provider","store/provider"],
+    phase: 2,
+  },
+  listSavedProviders: {
+    area: "store",
+    method: "GET",
+    path: "/saved-providers",
+    auth: "customer",
+    scope: "own-customer",
+    summary: "Providers I saved, newest first",
+    desc: "Hidden providers are left out.",
+    query: () =>
+      z.object({
+        area: z.enum(["os_install", "post_sale", "welfare", "booking"]).describe("Only providers with published services of this area").optional(),
+      }),
+    paging: true,
+    response: () => ProviderCard,
+    status: 200,
+    screens: ["store/saved","store/booking"],
+    phase: 2,
+  },
+  saveProvider: {
+    area: "store",
+    method: "PUT",
+    path: "/saved-providers/{providerId}",
+    auth: "customer",
+    scope: "own-customer",
+    summary: "Save a provider",
+    desc: "Saving a saved provider changes nothing.",
+    params: () =>
+      z.object({
+        providerId: z.uuid(),
+      }),
+    response: () => ProviderSaved,
+    status: 200,
+    errors: ["NOT_FOUND","SAVED_LIMIT"],
+    screens: ["store/booking-provider","store/booking","store/provider"],
+    phase: 2,
+  },
+  unsaveProvider: {
+    area: "store",
+    method: "DELETE",
+    path: "/saved-providers/{providerId}",
+    auth: "customer",
+    scope: "own-customer",
+    summary: "Remove a provider from my saved ones",
+    desc: "Removing one that is not saved changes nothing.",
+    params: () =>
+      z.object({
+        providerId: z.uuid(),
+      }),
+    response: () => ProviderSaved,
+    status: 200,
+    screens: ["store/booking-provider","store/booking","store/provider","store/saved"],
     phase: 2,
   },
   getAvailability: {
@@ -1328,7 +1794,7 @@ export const endpoints = defineEndpoints({
     auth: "customer",
     scope: "own-customer",
     summary: "Request or book a service",
-    desc: "A bookable service needs slotStart, which must still be free (SLOT_TAKEN otherwise).",
+    desc: "A bookable service needs slotStart, which must still be free (SLOT_TAKEN otherwise). With deviceId the request records the device; a covered-by-warranty service for a verified device under cover is priced $0.",
     body: () => RequestInput,
     response: () => ServiceRequest,
     status: 201,
@@ -1408,6 +1874,89 @@ export const endpoints = defineEndpoints({
     status: 201,
     errors: ["NOT_FOUND","ILLEGAL_TRANSITION","ALREADY_REVIEWED"],
     screens: ["store/my-request"],
+    phase: 2,
+  },
+  listMyDevices: {
+    area: "store",
+    method: "GET",
+    path: "/devices",
+    auth: "customer",
+    scope: "own-customer",
+    summary: "My registered devices, newest first",
+    desc: "At most 10 per customer, so not paged.",
+    response: () => z.array(Device),
+    status: 200,
+    screens: ["store/phones","store/devices","store/service"],
+    phase: 2,
+  },
+  registerDevice: {
+    area: "store",
+    method: "POST",
+    path: "/devices",
+    auth: "customer",
+    scope: "own-customer",
+    summary: "Register a device for post-sale cover",
+    desc: "Saved as pending until staff verify it. The IMEI must pass the Luhn check and not be registered by anyone already (pending or verified).",
+    body: () => DeviceInput,
+    response: () => Device,
+    status: 201,
+    errors: ["IMEI_TAKEN","DEVICE_LIMIT"],
+    idempotent: true,
+    screens: ["store/devices","store/device"],
+    phase: 2,
+  },
+  getMyDevice: {
+    area: "store",
+    method: "GET",
+    path: "/devices/{id}",
+    auth: "customer",
+    scope: "own-customer",
+    summary: "One of my devices",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    response: () => Device,
+    status: 200,
+    errors: ["NOT_FOUND"],
+    screens: ["store/device"],
+    phase: 2,
+  },
+  updateMyDevice: {
+    area: "store",
+    method: "PATCH",
+    path: "/devices/{id}",
+    auth: "customer",
+    scope: "own-customer",
+    summary: "Change a pending or rejected device",
+    desc: "A rejected device goes back to pending. Verified devices can't be changed (DEVICE_LOCKED).",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => DeviceInput,
+    response: () => Device,
+    status: 200,
+    errors: ["NOT_FOUND","IMEI_TAKEN","DEVICE_LOCKED"],
+    screens: ["store/device"],
+    phase: 2,
+  },
+  removeMyDevice: {
+    area: "store",
+    method: "DELETE",
+    path: "/devices/{id}",
+    auth: "customer",
+    scope: "own-customer",
+    summary: "Remove one of my devices",
+    desc: "Requests already made keep their device details.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    response: null,
+    status: 204,
+    errors: ["NOT_FOUND"],
+    screens: ["store/device"],
     phase: 2,
   },
   listCategoriesAdmin: {
@@ -1771,6 +2320,115 @@ export const endpoints = defineEndpoints({
     screens: ["admin/departments-services"],
     phase: 2,
   },
+  listDevicesAdmin: {
+    area: "admin",
+    method: "GET",
+    path: "/devices",
+    auth: "staff",
+    permission: "services.view",
+    scope: "staff",
+    sensitive: [{"path":["items","*","imei"],"permission":"services.devices.manage","mask":"hide"}],
+    summary: "Registered devices, newest first",
+    query: () =>
+      z.object({
+        status: z.enum(["pending", "verified", "rejected"]).optional(),
+        customerId: z.uuid().optional(),
+        q: z.string().describe("Brand, model, order ref or IMEI digits").optional(),
+      }),
+    paging: true,
+    response: () => DeviceAdmin,
+    status: 200,
+    screens: ["admin/departments-devices"],
+    phase: 2,
+  },
+  getDeviceAdmin: {
+    area: "admin",
+    method: "GET",
+    path: "/devices/{id}",
+    auth: "staff",
+    permission: "services.view",
+    scope: "staff",
+    sensitive: [{"path":["imei"],"permission":"services.devices.manage","mask":"hide"}],
+    summary: "A registered device",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    response: () => DeviceAdmin,
+    status: 200,
+    errors: ["NOT_FOUND"],
+    screens: ["admin/departments-devices"],
+    phase: 2,
+  },
+  verifyDevice: {
+    area: "admin",
+    method: "POST",
+    path: "/devices/{id}/verify",
+    auth: "staff",
+    permission: "services.devices.manage",
+    scope: "staff",
+    sensitive: [{"path":["imei"],"permission":"services.devices.manage","mask":"hide"}],
+    summary: "Verify a device and set its cover end",
+    desc: "coveredUntil defaults to the purchase date plus 12 months and can't be before the purchase date.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => DeviceVerifyInput,
+    response: () => DeviceAdmin,
+    status: 200,
+    errors: ["NOT_FOUND","ILLEGAL_TRANSITION"],
+    audited: true,
+    events: ["services.device.verified"],
+    screens: ["admin/departments-devices"],
+    phase: 2,
+  },
+  rejectDevice: {
+    area: "admin",
+    method: "POST",
+    path: "/devices/{id}/reject",
+    auth: "staff",
+    permission: "services.devices.manage",
+    scope: "staff",
+    sensitive: [{"path":["imei"],"permission":"services.devices.manage","mask":"hide"}],
+    summary: "Reject a device, or withdraw its verification",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => z.object({
+      reason: z.string().describe("Shown to the customer, e.g. The IMEI doesn't match the order"),
+      staffNote: z.string().nullish(),
+    }),
+    response: () => DeviceAdmin,
+    status: 200,
+    errors: ["NOT_FOUND","ILLEGAL_TRANSITION"],
+    audited: true,
+    events: ["services.device.rejected"],
+    screens: ["admin/departments-devices"],
+    phase: 2,
+  },
+  updateDeviceAdmin: {
+    area: "admin",
+    method: "PATCH",
+    path: "/devices/{id}",
+    auth: "staff",
+    permission: "services.devices.manage",
+    scope: "staff",
+    sensitive: [{"path":["imei"],"permission":"services.devices.manage","mask":"hide"}],
+    summary: "Correct a device's details, its cover end or the staff note",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => DeviceAdminUpdate,
+    response: () => DeviceAdmin,
+    status: 200,
+    errors: ["NOT_FOUND","IMEI_TAKEN"],
+    audited: true,
+    screens: ["admin/departments-devices"],
+    phase: 2,
+  },
 });
 
 /* ------------------------------------------------------------------ module spec */
@@ -1784,7 +2442,7 @@ export const spec = defineModuleSpec({
   summary: "Services customers request or book in the app's department pages: OS installs and post-sale repairs (Phones), welfare services and time-slot bookings. Staff keep the providers, their services and opening hours, and handle every request in Admin › Departments. No online payment at this phase: customers pay the provider.",
   dependsOn: ["media"],
   optionalDeps: ["customers","audit","notifications"],
-  publicApi: [],
+  publicApi: ["exportCustomerData"],
   permissions: [
     {
       "key": "services.view",
@@ -1800,6 +2458,11 @@ export const spec = defineModuleSpec({
       "key": "services.requests.manage",
       "audience": "staff",
       "desc": "Confirm, complete, decline and move requests and bookings"
+    },
+    {
+      "key": "services.devices.manage",
+      "audience": "staff",
+      "desc": "Verify or reject registered devices, set their warranty cover and see full IMEIs"
     }
   ],
   approvalActions: [],
@@ -1854,11 +2517,44 @@ export const spec = defineModuleSpec({
           "cancelled"
         ]
       ]
+    },
+    "Registered device": {
+      "field": "Device.status",
+      "initial": "pending",
+      "transitions": [
+        [
+          "pending",
+          "verify",
+          "verified"
+        ],
+        [
+          "pending",
+          "reject",
+          "rejected"
+        ],
+        [
+          "rejected",
+          "resubmit",
+          "pending"
+        ],
+        [
+          "rejected",
+          "verify",
+          "verified"
+        ],
+        [
+          "verified",
+          "reject",
+          "rejected"
+        ]
+      ]
     }
   },
   events: {
     publishes: {
       "services.request.status_changed": { when: "Staff or the customer change a request's status", payload: () => ServicesRequestStatusChangedEvent },
+      "services.device.verified": { when: "Staff verify a registered device", payload: () => ServicesDeviceVerifiedEvent },
+      "services.device.rejected": { when: "Staff reject a registered device or withdraw its verification", payload: () => ServicesDeviceRejectedEvent },
     },
     consumes: {},
   },
@@ -1895,6 +2591,22 @@ export const spec = defineModuleSpec({
     "ALREADY_REVIEWED": {
       "status": 409,
       "meaning": "You already rated this."
+    },
+    "SAVED_LIMIT": {
+      "status": 409,
+      "meaning": "You saved the most providers you can; remove one first."
+    },
+    "IMEI_TAKEN": {
+      "status": 409,
+      "meaning": "This phone is already registered."
+    },
+    "DEVICE_LIMIT": {
+      "status": 409,
+      "meaning": "You registered the most devices you can; remove one first."
+    },
+    "DEVICE_LOCKED": {
+      "status": 409,
+      "meaning": "A verified device can't be changed; remove it and register it again, or contact support."
     }
   },
   collections: {
@@ -2009,6 +2721,7 @@ export const spec = defineModuleSpec({
         "since",
         "contacts",
         "location",
+        "point",
         "hours",
         "staff",
         "reply_time",
@@ -2028,6 +2741,7 @@ export const spec = defineModuleSpec({
         "description",
         "since",
         "location",
+        "point",
         "reply_time"
       ],
       "decimal": [],
@@ -2113,6 +2827,7 @@ export const spec = defineModuleSpec({
             },
             "contacts": {},
             "location": {},
+            "point": {},
             "hours": {},
             "staff": {},
             "reply_time": {
@@ -2206,6 +2921,8 @@ export const spec = defineModuleSpec({
         "price_table",
         "price_table_title",
         "terms",
+        "full_terms",
+        "covered_by_warranty",
         "steps",
         "slot_minutes",
         "duration_minutes",
@@ -2228,6 +2945,7 @@ export const spec = defineModuleSpec({
         "coverage",
         "description",
         "price_table_title",
+        "full_terms",
         "slot_minutes",
         "duration_minutes"
       ],
@@ -2258,6 +2976,7 @@ export const spec = defineModuleSpec({
             "handover",
             "price_table",
             "terms",
+            "covered_by_warranty",
             "steps",
             "status",
             "position",
@@ -2362,6 +3081,15 @@ export const spec = defineModuleSpec({
               ]
             },
             "terms": {},
+            "full_terms": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "covered_by_warranty": {
+              "bsonType": "bool"
+            },
             "steps": {},
             "slot_minutes": {
               "bsonType": [
@@ -2464,6 +3192,8 @@ export const spec = defineModuleSpec({
         "slot_start",
         "slot_end",
         "staff_id",
+        "device_id",
+        "device",
         "contact",
         "details",
         "status",
@@ -2478,6 +3208,8 @@ export const spec = defineModuleSpec({
         "slot_start",
         "slot_end",
         "staff_id",
+        "device_id",
+        "device",
         "provider_note",
         "staff_note"
       ],
@@ -2552,6 +3284,13 @@ export const spec = defineModuleSpec({
                 "null"
               ]
             },
+            "device_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "device": {},
             "contact": {},
             "details": {},
             "status": {
@@ -2618,6 +3357,12 @@ export const spec = defineModuleSpec({
           "key": {
             "service_id": 1,
             "slot_start": 1
+          }
+        },
+        {
+          "name": "requests_device_id_220b2b",
+          "key": {
+            "device_id": 1
           }
         }
       ],
@@ -2730,6 +3475,256 @@ export const spec = defineModuleSpec({
         }
       ],
       "unenforced": []
+    },
+    "saved_providers": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "customer_id",
+        "provider_id",
+        "created_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "customer_id",
+            "provider_id",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "customer_id": {
+              "bsonType": "string"
+            },
+            "provider_id": {
+              "bsonType": "string"
+            },
+            "created_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "saved_providers_customer_id_provider_id_1e15e6",
+          "key": {
+            "customer_id": 1,
+            "provider_id": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "saved_providers_customer_id_created_at_a89138",
+          "key": {
+            "customer_id": 1,
+            "created_at": 1
+          }
+        },
+        {
+          "name": "saved_providers_provider_id_ee7ba5",
+          "key": {
+            "provider_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "devices": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "customer_id",
+        "brand",
+        "model",
+        "storage",
+        "imei",
+        "imei_last4",
+        "purchase_date",
+        "order_ref",
+        "status",
+        "covered_until",
+        "reject_reason",
+        "staff_note",
+        "verified_at",
+        "verified_by",
+        "history",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "storage",
+        "order_ref",
+        "covered_until",
+        "reject_reason",
+        "staff_note",
+        "verified_at",
+        "verified_by"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "verified_at",
+        "created_at",
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "customer_id",
+            "brand",
+            "model",
+            "imei",
+            "imei_last4",
+            "purchase_date",
+            "status",
+            "history",
+            "created_at",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "customer_id": {
+              "bsonType": "string"
+            },
+            "brand": {
+              "bsonType": "string"
+            },
+            "model": {
+              "bsonType": "string"
+            },
+            "storage": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "imei": {
+              "bsonType": "string"
+            },
+            "imei_last4": {
+              "bsonType": "string"
+            },
+            "purchase_date": {
+              "bsonType": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "order_ref": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "bsonType": "string",
+              "enum": [
+                "pending",
+                "verified",
+                "rejected"
+              ]
+            },
+            "covered_until": {
+              "bsonType": [
+                "string",
+                "null"
+              ],
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "reject_reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "staff_note": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "verified_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "verified_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "history": {},
+            "created_at": {
+              "bsonType": "date"
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "devices_customer_id_created_at_a89138",
+          "key": {
+            "customer_id": 1,
+            "created_at": 1
+          }
+        },
+        {
+          "name": "devices_status_created_at_de0a8c",
+          "key": {
+            "status": 1,
+            "created_at": 1
+          }
+        },
+        {
+          "name": "devices_imei_df586c",
+          "key": {
+            "imei": 1
+          }
+        }
+      ],
+      "unenforced": []
     }
   },
   endpoints,
@@ -2738,6 +3733,8 @@ export const spec = defineModuleSpec({
 declare module '../kernel/events/event-map.js' {
   interface EventMap {
     "services.request.status_changed": ServicesRequestStatusChangedEvent;
+    "services.device.verified": ServicesDeviceVerifiedEvent;
+    "services.device.rejected": ServicesDeviceRejectedEvent;
   }
 }
 

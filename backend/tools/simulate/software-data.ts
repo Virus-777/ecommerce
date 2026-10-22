@@ -9,12 +9,27 @@
  * one, and a package of a few KB (a real ZIP with a read-me, software_package) so downloads work in development.
  * Sizes shown in the app are the sizes of these files (media records what was uploaded), not the sizes on the
  * artboards. Screenshots are left empty. No ratings or reviews are made up.
+ *
+ * Licences: a paid app's devices count comes from its licence label ("One-time purchase · 2 devices" → 2; no label →
+ * not limited). The Android development customer (DEV_CUSTOMER_EMAIL), when that account exists, is given PixelCraft
+ * Studio by staff, so My apps and the app page show a licence key in development.
  */
 import { crc32, deflateSync } from 'node:zlib';
 import type { AdminCall } from './departments-data.js';
 
 const usd = (dollars: number) => ({ amount: Math.round(dollars * 100), currency: 'USD' });
 const slug = (s: string) => s.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+
+/** The customer the Android app signs in with in development: owns one paid app (a licence key to show) */
+export const DEV_CUSTOMER_EMAIL = 'android.dev.0ae9fb@example.com';
+/** The paid app the development customer owns */
+export const DEV_OWNED_APP = 'PixelCraft Studio';
+
+/** Devices one licence key unlocks, from the licence label; null = not limited */
+export const devicesOf = (label: unknown): number | null => {
+  const m = /\b(\d{1,3})\s*devices?\b/i.exec(typeof label === 'string' ? label : '');
+  return m ? Number(m[1]) : null;
+};
 
 /** The sale on the Deals tab: until Oct 31, 2026, 11:59 PM Pacific */
 export const SALE_ENDS_AT = '2026-11-01T06:59:00.000Z';
@@ -241,7 +256,7 @@ export function apiUploader(base: string, token: string): Uploader {
 /* ------------------------------------------------------------------ seed */
 
 export async function seedSoftware(admin: AdminCall, upload: Uploader): Promise<Record<string, number>> {
-  const out = { categories: 0, apps: 0, appsUpdated: 0, files: 0, packs: 0, packsUpdated: 0, rails: 0 };
+  const out = { categories: 0, apps: 0, appsUpdated: 0, files: 0, packs: 0, packsUpdated: 0, rails: 0, granted: 0 };
   // categories, in order
   const cats = (await admin('GET', '/admin/software/categories')) as { id: string; slug: string }[];
   const categoryId = new Map(cats.map((c) => [c.slug, c.id]));
@@ -285,6 +300,7 @@ export async function seedSoftware(admin: AdminCall, upload: Uploader): Promise<
       categoryId: categoryId.get(slug(category)),
       free: price == null,
       price: price != null ? usd(price) : null,
+      licenceDevices: price != null ? devicesOf(rest.licenceLabel) : null,
       salePrice: sale != null ? usd(sale) : null,
       saleEndsAt: sale != null ? SALE_ENDS_AT : null,
       platforms,
@@ -327,6 +343,19 @@ export async function seedSoftware(admin: AdminCall, upload: Uploader): Promise<
     for (const r of rails) if (r.source === 'category' && !r.categoryId) r.categoryId = categoryId.get(r.key) ?? null;
     await admin('PUT', '/admin/software/rails', { rails: rails.filter((r) => r.source !== 'category' || r.categoryId) });
     out.rails = 1;
+  }
+
+  // the development customer owns a paid app (its licence key shows in My apps); skipped when the account doesn't
+  // exist or the staff member may not look customers up
+  const owned = appId.get(slug(DEV_OWNED_APP));
+  const found = owned ? await admin('GET', `/admin/customers/customers?q=${encodeURIComponent(DEV_CUSTOMER_EMAIL)}&limit=5`).catch(() => null) : null;
+  const customer = (found?.items as { id: string; email: string }[] | undefined)?.find((c) => c.email === DEV_CUSTOMER_EMAIL);
+  if (owned && customer) {
+    const has = await admin('GET', `/admin/software/entitlements?appId=${owned}&customerId=${customer.id}`);
+    if (!has.items.length) {
+      await admin('POST', '/admin/software/entitlements', { customerId: customer.id, appId: owned, reason: 'Development sample: a paid app with a licence key' });
+      out.granted++;
+    }
   }
   return out;
 }

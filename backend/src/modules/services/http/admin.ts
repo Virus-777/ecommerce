@@ -5,7 +5,7 @@ import type { ServicesService } from '../service.js';
 /**
  * Admin API: /api/admin/services/…  (docs/api/modules/services.md)
  * Admin › Departments: categories, providers and services of the OS install, Post-sale, Welfare and Booking pages,
- * and the requests and reviews customers send. Writes are audited.
+ * the requests and reviews customers send, and the devices customers register for post-sale cover. Writes are audited.
  */
 export const adminRoutes = (service: ServicesService) =>
   routes(endpoints, 'admin', {
@@ -47,4 +47,14 @@ export const adminRoutes = (service: ServicesService) =>
     listReviewsAdmin: async ({ query, page }) => service.listReviewsAdmin(query, page),
     /** PATCH /reviews/{id}: Hide or show a review */
     moderateReview: async ({ params, body, actor, requestId }) => service.moderateReview(params.id, body, { actor, requestId }),
+    /** GET /devices: Registered devices, newest first */
+    listDevicesAdmin: async ({ query, page }) => service.listDevicesAdmin(query, page),
+    /** GET /devices/{id}: A registered device */
+    getDeviceAdmin: async ({ params }) => service.getDeviceAdmin(params.id),
+    /** POST /devices/{id}/verify: Verify a device and set its cover end */
+    verifyDevice: async ({ params, body, actor, requestId }) => service.verifyDevice(params.id, body ?? {}, { actor, requestId }),
+    /** POST /devices/{id}/reject: Reject a device, or withdraw its verification */
+    rejectDevice: async ({ params, body, actor, requestId }) => service.rejectDevice(params.id, body, { actor, requestId }),
+    /** PATCH /devices/{id}: Correct a device's details, its cover end or the staff note */
+    updateDeviceAdmin: async ({ params, body, actor, requestId }) => service.updateDeviceAdmin(params.id, body, { actor, requestId }),
   });

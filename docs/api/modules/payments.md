@@ -4,7 +4,7 @@ Charging customers through provider adapters (card, digital wallet): payment int
 
 - **Group:** Buying · **Launch phase:** 1 · **Plan chapters:** 6, 7, 13, 14
 - **Depends on:** [orders](orders.md) · **Optional:** [access](access.md), [customers](customers.md), [media](media.md), [wallet](wallet.md), [audit](audit.md), [checkout](checkout.md), [inventory](inventory.md), [promotions](promotions.md), [support](support.md), [trust](trust.md), [identity](identity.md)
-- **Required by:** [checkout](checkout.md), [finance](finance.md), [food](food.md), [returns](returns.md), [software](software.md), [wallet](wallet.md)
+- **Required by:** [checkout](checkout.md), [farm](farm.md), [finance](finance.md), [food](food.md), [returns](returns.md), [software](software.md), [wallet](wallet.md)
 
 ## Owns
 - Payment intents: one per checkout payment attempt, with tender split (card or wallet, plus store credit in phase 3), method snapshot and allocation to seller groups
@@ -133,9 +133,9 @@ Charging customers through provider adapters (card, digital wallet): payment int
 
 | Field | Type |
 |---|---|
-| module | `enum(software|food)` The module that owns the purchase |
-| refId | `uuid` The purchase or food order id in that module |
-| ref | `string` Its customer-facing reference, e.g. SW-4K7Q2 or FD-9QX3M |
+| module | `enum(software|food|farm)` The module that owns the purchase |
+| refId | `uuid` The purchase, food order or farm order id in that module |
+| ref | `string` Its customer-facing reference, e.g. SW-4K7Q2, FD-9QX3M or FM-7KQ2D |
 | customerId | `uuid` Customers-module id |
 | amount | `Money` |
 | method | `MethodSelection` |
@@ -147,7 +147,7 @@ Charging customers through provider adapters (card, digital wallet): payment int
 | Field | Type |
 |---|---|
 | intentId | `uuid` |
-| module | `enum(software|food)` |
+| module | `enum(software|food|farm)` |
 | refId | `uuid` |
 | state | `enum(accepted|pending|failed|requires_action|captured|voided)` accepted: authorized, not captured yet |
 | title | `string` |
@@ -564,15 +564,15 @@ The provider takes the money back when a chargeback opens; finance holds the sel
 
 ## Data (schema `payments`)
 
-**intents**: One per checkout payment attempt, or per purchase payment attempt (software, food)
+**intents**: One per checkout payment attempt, or per purchase payment attempt (software, food, farm)
 
 | Column | Type |
 |---|---|
 | id | uuid pk |
 | ref | text unique |
 | purpose | text (checkout|purchase) |
-| purchase_module | text? (software|food; purchase intents only) |
-| purchase_ref_id | uuid? (the purchase or food order id in that module) |
+| purchase_module | text? (software|food|farm; purchase intents only) |
+| purchase_ref_id | uuid? (the purchase, food order or farm order id in that module) |
 | purchase_ref | text? |
 | checkout_session_id | uuid? (null for purchase intents) |
 | attempt_no | int |
@@ -809,10 +809,10 @@ Indexes: `unique (kind, day)`
 | `payments.payment.pending_check` | The provider's answer is uncertain; the status-check job takes over | `{ intentId: uuid, checkoutSessionId: uuid, orderId: uuid?, customerId: uuid?, contactEmail: email?, amount: Money, since: datetime }` | notifications, workqueues |
 | `payments.payment.voided` | An authorization is released without capture | `{ intentId: uuid, checkoutSessionId: uuid, orderId: uuid?, reason: string }` | - |
 | `payments.payment.orphaned` | Money was authorized or captured but no order exists after the grace period | `{ intentId: uuid, checkoutSessionId: uuid, amount: Money, creditAmount: Money?, captured: bool, action: enum(voided|refund_started|needs_review) }` | - |
-| `payments.purchase.authorized` | A purchase intent is authorized (directly, after a bank challenge or after a pending check) | `{ intentId: uuid, module: enum(software|food), refId: uuid, customerId: uuid, amount: Money, methodLabel: string, at: datetime }` | food, software |
-| `payments.purchase.failed` | A purchase intent is declined, its bank challenge fails, or a pending check ends declined | `{ intentId: uuid, module: enum(software|food), refId: uuid, customerId: uuid, declineCategory: string, afterPendingCheck: bool, at: datetime }` | food, software |
-| `payments.purchase.captured` | A purchase intent is captured | `{ intentId: uuid, module: enum(software|food), refId: uuid, customerId: uuid, amount: Money, providerRef: string?, capturedAt: datetime }` | - |
-| `payments.purchase.voided` | A purchase authorization is released without capture | `{ intentId: uuid, module: enum(software|food), refId: uuid, reason: string }` | - |
+| `payments.purchase.authorized` | A purchase intent is authorized (directly, after a bank challenge or after a pending check) | `{ intentId: uuid, module: enum(software|food|farm), refId: uuid, customerId: uuid, amount: Money, methodLabel: string, at: datetime }` | farm, food, software |
+| `payments.purchase.failed` | A purchase intent is declined, its bank challenge fails, or a pending check ends declined | `{ intentId: uuid, module: enum(software|food|farm), refId: uuid, customerId: uuid, declineCategory: string, afterPendingCheck: bool, at: datetime }` | farm, food, software |
+| `payments.purchase.captured` | A purchase intent is captured | `{ intentId: uuid, module: enum(software|food|farm), refId: uuid, customerId: uuid, amount: Money, providerRef: string?, capturedAt: datetime }` | - |
+| `payments.purchase.voided` | A purchase authorization is released without capture | `{ intentId: uuid, module: enum(software|food|farm), refId: uuid, reason: string }` | - |
 | `payments.refund.status_changed` | Any refund status change (requested, processing, sent, failed, cancelled) | `{ refundId: uuid, ref: string, orderId: uuid, origin: string, originId: uuid?, from: string?, to: string, amount: Money, items: RefundItem[] }` | orders |
 | `payments.refund.sent` | The provider confirms the refund was sent (or store credit was granted) | `{ refundId: uuid, ref: string, orderId: uuid, orderRef: string?, customerId: uuid?, contactEmail: email?, origin: string, originId: uuid?, amount: Money, items: RefundItem[], destination: string, sentAt: datetime }` | finance, notifications, orders, reports, returns, shipping, support |
 | `payments.refund.failed` | A refund attempt failed | `{ refundId: uuid, ref: string, orderId: uuid, orderRef: string?, customerId: uuid?, contactEmail: email?, origin: string, originId: uuid?, amount: Money, reason: string, attempts: int, finalAttempt: bool }` | finance, notifications, returns, support |
@@ -836,15 +836,15 @@ Indexes: `unique (kind, day)`
 
 | Function | Signature | Used by |
 |---|---|---|
-| listOptions | `(owner: { customerId?: uuid, guestSessionId?: uuid }, amount: Money) => PaymentOptions`<br>Accepted brands, saved methods, wallet availability and a setup session for a new card | checkout, software, food |
+| listOptions | `(owner: { customerId?: uuid, guestSessionId?: uuid }, amount: Money) => PaymentOptions`<br>Accepted brands, saved methods, wallet availability and a setup session for a new card | checkout, software, food, farm |
 | authorize | `(input: AuthorizeInput, idempotencyKey: string) => AuthorizeResult`<br>Create an intent for a checkout attempt and authorize it. Returns accepted, failed (with decline), pending_check (uncertain) or requires_action. Only one non-failed intent per checkout session at a time; the same key returns the first result. | checkout |
 | linkOrder | `(intentId: uuid, orderId: uuid, allocations: Allocation[]) => void`<br>Attach the created order and its seller-group allocations. Also done on orders.order.placed. | checkout |
-| completeAction | `(intentId: uuid, resultToken: string, idempotencyKey: string) => AuthorizeResult`<br>Finish an authorization after a bank challenge or wallet confirmation (checkout calls it from POST /sessions/{id}/complete-action; software and food call it for purchase intents) | checkout, software, food |
+| completeAction | `(intentId: uuid, resultToken: string, idempotencyKey: string) => AuthorizeResult`<br>Finish an authorization after a bank challenge or wallet confirmation (checkout calls it from POST /sessions/{id}/complete-action; software, food and farm call it for purchase intents) | checkout, software, food, farm |
 | getIntentStatus | `(intentId: uuid, refresh?: bool) => PaymentStatusView`<br>Current customer-facing state; refresh asks the provider first | checkout |
-| voidIntent | `(intentId: uuid, reason: string) => void`<br>Release an authorization (abandoned checkout, order cancelled before capture, a food order declined or cancelled before delivery) | checkout, software, food |
-| authorizePurchase | `(input: PurchaseAuthorizeInput, idempotencyKey: string) => AuthorizeResult`<br>Create a purchase intent (a payment that is not a checkout order: a software purchase or a food order, 2026-10-22) and authorize it on the card. Returns accepted, failed, pending_check or requires_action like authorize. Only one non-failed intent per (module, refId) at a time; the same key returns the first result. Publishes payments.purchase.authorized or payments.purchase.failed, never the payments.payment.* events (those belong to checkout orders). | software, food |
-| capturePurchase | `(intentId: uuid) => void`<br>Capture the whole authorized amount of a purchase intent (software right after authorization; food when the order is delivered). Publishes payments.purchase.captured. Fails with ILLEGAL_TRANSITION unless the intent is an authorized purchase intent. | software, food |
-| getPurchaseStatus | `(intentId: uuid, refresh?: bool) => PurchasePaymentStatus`<br>Customer-facing state of a purchase intent; refresh asks the provider first | software, food |
+| voidIntent | `(intentId: uuid, reason: string) => void`<br>Release an authorization (abandoned checkout, order cancelled before capture, a food order declined or cancelled before delivery, a farm order rejected, cancelled or expired before the dealer confirms) | checkout, software, food, farm |
+| authorizePurchase | `(input: PurchaseAuthorizeInput, idempotencyKey: string) => AuthorizeResult`<br>Create a purchase intent (a payment that is not a checkout order: a software purchase, a food order, or a farm order paid in full or its pay-on-delivery deposit, 2026-10-22) and authorize it on the card. Returns accepted, failed, pending_check or requires_action like authorize. Only one non-failed intent per (module, refId) at a time; the same key returns the first result. Publishes payments.purchase.authorized or payments.purchase.failed, never the payments.payment.* events (those belong to checkout orders). | software, food, farm |
+| capturePurchase | `(intentId: uuid) => void`<br>Capture the whole authorized amount of a purchase intent (software right after authorization; food when the order is delivered; farm when the dealer confirms the order). Publishes payments.purchase.captured. Fails with ILLEGAL_TRANSITION unless the intent is an authorized purchase intent. | software, food, farm |
+| getPurchaseStatus | `(intentId: uuid, refresh?: bool) => PurchasePaymentStatus`<br>Customer-facing state of a purchase intent; refresh asks the provider first | software, food, farm |
 | remainingRefundable | `(orderId: uuid, orderItemIds?: uuid[]) => RefundableSummary`<br>Per item: paid, refunded, in flight (requested, processing and failed refunds) and remaining. The cap for every refund. | returns, orders, support, finance |
 | startRefund | `(input: StartRefundInput, idempotencyKey: string) => Refund`<br>Hand over an approved refund for execution. Fails with REFUND_EXCEEDS_REFUNDABLE or DUPLICATE_REFUND. Returns the existing refund for the same key or origin. | returns, finance, support |
 | getRefund | `(refundId: uuid) => Refund | null`<br>Execution status for mirrors in returns, support and orders | returns, support, orders |
@@ -922,7 +922,7 @@ Checked through the access module (limits per role, second reviewer).
 - **Secret store**: Provider API keys and webhook signing secrets
 
 ## Notes
-- Purchase intents (2026-10-22, departments phase 3): software purchases and food orders pay outside checkout. They are intents with purpose purchase, no checkout session and no order; the owning module calls authorizePurchase, completeAction, capturePurchase and voidIntent itself and follows payments.purchase.* events. The orphan sweep, capture on orders.order.accepted / shipment dispatch and the payments.payment.* events skip them. Refunds of captured purchases and their bookkeeping in finance are not built yet (software is captured at once and not refundable in the app; food is captured on delivery, so cancelled orders are only voided).
+- Purchase intents (2026-10-22, departments phase 3): software purchases, food orders and farm orders (paid in full, or the pay-on-delivery deposit) pay outside checkout. They are intents with purpose purchase, no checkout session and no order; the owning module calls authorizePurchase, completeAction, capturePurchase and voidIntent itself and follows payments.purchase.* events. The orphan sweep, capture on orders.order.accepted / shipment dispatch and the payments.payment.* events skip them. Refunds of captured purchases and their bookkeeping in finance are not built yet (software is captured at once and not refundable in the app; food is captured on delivery, so cancelled orders are only voided; farm is captured when the dealer confirms, and a captured farm order is not cancelled in the app).
 - No duplicate charges (scenario 3): checkout places with an Idempotency-Key; authorize is idempotent per key and allows one non-failed intent per checkout session; provider calls carry their own idempotency keys (intent id + operation); uncertain outcomes are resolved by retrieving from the provider, never by charging again.
 - Order of events at Place order: authorize (accepted or pending_check) → checkout creates the order (orders.createOrder) → linkOrder with seller-group allocations → orders.order.accepted → capture. A decline creates no order; the customer keeps the cart and delivery choices and can retry with the same or another method (new intent, same checkout session). If an order never appears, detect-orphans voids or refunds the money.
 - Capture per seller group: allocations record each group's share; with per_group_on_dispatch each group is captured when it ships and cancelled groups are never captured. At launch the default is one capture on acceptance ('charged once, when the order is accepted').

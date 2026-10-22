@@ -4,6 +4,7 @@
  * filtered and sorted here, and paged with pageOf.
  */
 import { isTimeZone } from '../../../kernel/lib/dates.js';
+import { distanceMiles, isGeoPoint, type GeoPoint } from '../../../kernel/lib/geo.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { money } from '../../../kernel/lib/money.js';
 import { pageOf, type Page, type PageRequest } from '../../../kernel/lib/pagination.js';
@@ -24,6 +25,8 @@ import type {
   RestaurantAdmin,
   RestaurantCard,
   RestaurantInput,
+  RestaurantRatings,
+  RestaurantReview,
 } from '../../../spec/food.js';
 import {
   averageOf,
@@ -32,6 +35,7 @@ import {
   deliveryLabel,
   discountBadge,
   feeLabel,
+  geocodeInputOf,
   groupsOf,
   INSTRUCTIONS_HINT,
   isHhmm,
@@ -40,12 +44,13 @@ import {
   lowestUnitPrice,
   moneyLabel,
   OPEN_STATUSES,
+  orderedItemsOf,
   ratingOf,
   searchTextOf,
   WEEKDAYS,
 } from '../domain/rules.js';
 import type { CategoryRow, ItemRow, RestaurantRow, SectionRow } from '../ports.js';
-import { FoodBase, invalid, notFound, optionalText, present, requireText, stringsOf, textList, unique, type By, type Refs } from './base.js';
+import { FoodBase, invalid, notFound, optionalText, pointOf, present, requireText, stringsOf, textList, unique, type By, type Refs } from './base.js';
 
 const RESTAURANT_STATUSES = ['draft', 'published', 'paused', 'hidden'] as const;
 const ICON = /^[a-z0-9]+(-[a-z0-9]+)*$/;
@@ -110,8 +115,9 @@ export class FoodCatalog extends FoodBase {
     }));
   }
 
-  async listRestaurants(q: { category?: string; q?: string; sort?: 'recommended' | 'rating' | 'delivery_time' | 'fee' }, page: PageRequest): Promise<Page<RestaurantCard>> {
-    let list = [...(await this.listedRestaurants()).values()];
+  async listRestaurants(q: { category?: string; q?: string; sort?: 'recommended' | 'rating' | 'delivery_time' | 'fee' | 'nearest' }, page: PageRequest, customerId: string | null = null): Promise<Page<RestaurantCard>> {
+    const [listed, viewer] = await Promise.all([this.listedRestaurants(), this.viewerOf(customerId)]);
+    let list = [...listed.values()];
     if (q.category) {
       const cat = await this.repo.categoryBySlug(q.category);
       list = cat && cat.visible ? list.filter((r) => stringsOf(r.category_ids).includes(cat.id)) : [];
@@ -125,20 +131,26 @@ export class FoodCatalog extends FoodBase {
       rating: (r) => -(averageOf(r.rating_sum, r.rating_count) ?? 0),
       delivery_time: (r) => r.delivery_min * 1000 + r.delivery_max,
       fee: (r) => r.delivery_fee,
+      // closest first; restaurants without a point last
+      nearest: (r) => {
+        const p = pointOf(r);
+        return viewer.point && p ? distanceMiles(viewer.point, p) : Number.MAX_SAFE_INTEGER;
+      },
     };
-    const by = key[q.sort ?? 'recommended'] ?? key.recommended!;
+    const sort = q.sort === 'nearest' && !viewer.point ? 'recommended' : (q.sort ?? 'recommended');
+    const by = key[sort] ?? key.recommended!;
     list.sort((a, b) => Number(open.get(b.id)) - Number(open.get(a.id)) || by(a) - by(b) || a.position - b.position || a.name.localeCompare(b.name));
     const paged = pageOf(list, page);
     const refs = await this.restaurantRefs(paged.items);
-    return { ...paged, items: paged.items.map((r) => this.restaurantCard(r, refs, now)) };
+    return { ...paged, items: paged.items.map((r) => this.restaurantCard(r, refs, now, viewer)) };
   }
 
-  async getRestaurant(slug: string): Promise<Restaurant> {
+  async getRestaurant(slug: string, customerId: string | null = null): Promise<Restaurant> {
     const r = await this.repo.restaurantBySlug(slug);
     if (!isListed(r)) throw notFound('Restaurant');
-    const [sections, items] = await Promise.all([this.repo.listSections(r.id), this.repo.listItems({ restaurantId: r.id })]);
+    const [sections, items, viewer] = await Promise.all([this.repo.listSections(r.id), this.repo.listItems({ restaurantId: r.id }), this.viewerOf(customerId, [r.id])]);
     const refs = await this.refsMap([r.image_id, r.logo_id, ...photoIdsOf(r.photo_ids), ...items.map((i) => photoIdsOf(i.photo_ids)[0])]);
-    const card = this.restaurantCard(r, refs);
+    const card = this.restaurantCard(r, refs, this.now(), viewer);
     const popular = items.filter((i) => i.popular);
     const out: MenuSection[] = [];
     // Popular takes the restaurant's id (no section row has it)
@@ -172,8 +184,56 @@ export class FoodCatalog extends FoodBase {
       open: state.open,
       openLabel: state.label,
       hours: daysOf(r.hours),
+      distanceLabel: card.distanceLabel ?? null,
+      saved: card.saved,
       sections: out,
     };
+  }
+
+  /* ---------------------------------------------------------------- reviews (store/food-reviews) */
+
+  /** A listed restaurant by slug, or NOT_FOUND */
+  private async listedBySlug(slug: string): Promise<RestaurantRow> {
+    const r = await this.repo.restaurantBySlug(slug);
+    if (!isListed(r)) throw notFound('Restaurant');
+    return r;
+  }
+
+  async listRestaurantReviews(slug: string, q: { stars?: number }, page: PageRequest): Promise<Page<RestaurantReview>> {
+    const r = await this.listedBySlug(slug);
+    if (q.stars != null && (!Number.isInteger(q.stars) || q.stars < 1 || q.stars > 5)) throw invalid('stars', 'Use 1 to 5');
+    const res = await this.repo.pageRestaurantReviews(r.id, { ...(q.stars != null ? { stars: q.stars } : {}) }, page);
+    const orders = new Map((await this.repo.ordersByIds(unique(res.items.map((v) => v.order_id)))).map((o) => [o.id, o]));
+    return {
+      ...res,
+      items: res.items.map((v) => ({ id: v.id, name: v.name, stars: v.stars, text: v.text, date: v.created_at.toISOString(), items: orderedItemsOf(orders.get(v.order_id)?.lines) })),
+    };
+  }
+
+  async getRestaurantRatings(slug: string): Promise<RestaurantRatings> {
+    const r = await this.listedBySlug(slug);
+    return { restaurantId: r.id, slug: r.slug, name: r.name, ratings: ratingOf(r.rating_sum, r.rating_count, r.rating_stars) };
+  }
+
+  /* ---------------------------------------------------------------- saved restaurants (store/saved) */
+
+  async listSavedRestaurants(customerId: string, page: PageRequest): Promise<Page<RestaurantCard>> {
+    const [saved, listed, viewer] = await Promise.all([this.repo.savedOf(customerId), this.listedRestaurants(), this.viewerOf(customerId)]);
+    const rows = saved.map((s) => listed.get(s.restaurant_id)).filter(isListed);
+    const paged = pageOf(rows, page);
+    const refs = await this.restaurantRefs(paged.items);
+    const now = this.now();
+    return { ...paged, items: paged.items.map((r) => this.restaurantCard(r, refs, now, viewer)) };
+  }
+
+  async saveRestaurant(customerId: string, slug: string): Promise<void> {
+    const r = await this.listedBySlug(slug);
+    await this.repo.saveRestaurant({ id: newId(), customer_id: customerId, restaurant_id: r.id, created_at: this.now() });
+  }
+
+  async unsaveRestaurant(customerId: string, slug: string): Promise<void> {
+    const r = await this.repo.restaurantBySlug(slug);
+    if (r) await this.repo.unsaveRestaurant(customerId, r.id);
   }
 
   async listItems(q: { recommended?: boolean; category?: string; q?: string }, page: PageRequest): Promise<Page<MenuItemCard>> {
@@ -192,15 +252,15 @@ export class FoodCatalog extends FoodBase {
     return { ...paged, items: paged.items.map((i) => this.itemCard(i, restaurants.get(i.restaurant_id)!, refs)) };
   }
 
-  async getItem(id: string): Promise<MenuItem> {
+  async getItem(id: string, customerId: string | null = null): Promise<MenuItem> {
     const i = await this.repo.getItem(id);
     const r = i ? await this.repo.getRestaurant(i.restaurant_id) : undefined;
     if (!i || !isListed(r)) throw notFound('Menu item');
-    const refs = await this.refsMap([r.image_id, r.logo_id, ...photoIdsOf(i.photo_ids)]);
+    const [refs, viewer] = await Promise.all([this.refsMap([r.image_id, r.logo_id, ...photoIdsOf(i.photo_ids)]), this.viewerOf(customerId, [r.id])]);
     const card = this.itemCard(i, r, refs);
     return {
       id: i.id,
-      restaurant: this.restaurantCard(r, refs),
+      restaurant: this.restaurantCard(r, refs, this.now(), viewer),
       name: i.name,
       description: i.description,
       photos: photoIdsOf(i.photo_ids).map((p) => refs.get(p)).filter(present),
@@ -294,9 +354,13 @@ export class FoodCatalog extends FoodBase {
       photos: photoIdsOf(r.photo_ids).map((id) => refs.get(id)).filter(present),
       address: r.address,
       city: r.city,
+      region: r.region ?? null,
+      postalCode: r.postal_code ?? null,
       phone: r.phone,
       hours: daysOf(r.hours),
       timeZone: this.zoneOf(r),
+      point: pointOf(r),
+      pointSource: pointOf(r) ? (r.point_source ?? 'geocoded') : null,
       deliveryMinMinutes: r.delivery_min,
       deliveryMaxMinutes: r.delivery_max,
       deliveryFee: money(r.delivery_fee, r.currency),
@@ -379,6 +443,8 @@ export class FoodCatalog extends FoodBase {
       photo_ids: photoIds,
       address: keep('address', before?.address ?? null, (v) => optionalText(v as string | null, 'address', LIMITS.address)),
       city: keep('city', before?.city ?? null, (v) => optionalText(v as string | null, 'city', LIMITS.city)),
+      region: keep('region', before?.region ?? null, (v) => optionalText(v as string | null, 'region', LIMITS.region)),
+      postal_code: keep('postalCode', before?.postal_code ?? null, (v) => optionalText(v as string | null, 'postalCode', LIMITS.postalCode)),
       phone: keep('phone', before?.phone ?? null, (v) => optionalText(v as string | null, 'phone', LIMITS.phone)),
       hours: keep('hours', daysOf(before?.hours), (v) => this.checkHours(v as OpeningDay[] | null)),
       time_zone: timeZone,
@@ -398,8 +464,52 @@ export class FoodCatalog extends FoodBase {
     return [...(f.image_id ? [{ id: f.image_id, path: 'imageId' }] : []), ...(f.logo_id ? [{ id: f.logo_id, path: 'logoId' }] : []), ...f.photo_ids.map((id, i) => ({ id, path: `photoIds[${i}]` }))];
   }
 
+  /** A point for an address through customers.geocodeAddress, or null (no city, unknown to the geocoder, or it failed) */
+  protected async geocode(r: { address: string | null; city: string | null; region: string | null; postal_code: string | null }): Promise<GeoPoint | null> {
+    const input = geocodeInputOf(r);
+    if (!input) return null;
+    try {
+      const p = await this.customers.geocodeAddress(input);
+      return p && isGeoPoint(p) ? p : null;
+    } catch (err) {
+      this.ctx.log.warn({ err, city: input.city }, 'food: could not geocode a restaurant address');
+      return null;
+    }
+  }
+
+  /**
+   * The point a restaurant is saved with (only the fields that change): a pin staff set (input.point) is kept until staff
+   * send null; otherwise the address is geocoded when the restaurant is new, its address changed or it has no point
+   * yet. A failed geocode leaves no point and never fails the save.
+   */
+  private async pointFields(input: RestaurantInput, f: { address: string | null; city: string | null; region: string | null; postal_code: string | null }, before?: RestaurantRow): Promise<Partial<Pick<RestaurantRow, 'lat' | 'lng' | 'point_source'>>> {
+    if (input.point) {
+      if (!isGeoPoint(input.point)) throw invalid('point', 'Use a latitude from -90 to 90 and a longitude from -180 to 180');
+      return { lat: input.point.lat.toFixed(6), lng: input.point.lng.toFixed(6), point_source: 'staff' };
+    }
+    if (before && input.point === undefined && before.point_source === 'staff') return {};
+    const moved = !before || input.point === null || before.address !== f.address || before.city !== f.city || (before.region ?? null) !== f.region || (before.postal_code ?? null) !== f.postal_code;
+    if (!moved && pointOf(before)) return {};
+    const p = await this.geocode(f);
+    return p ? { lat: p.lat.toFixed(6), lng: p.lng.toFixed(6), point_source: 'geocoded' } : { lat: null, lng: null, point_source: null };
+  }
+
+  /** food.geocode-restaurants: restaurants with an address but no point (not pinned by staff) are geocoded again */
+  async geocodeRestaurants(): Promise<void> {
+    let placed = 0;
+    const rows = await this.repo.restaurantsWithoutPoint();
+    for (const r of rows) {
+      const p = await this.geocode(r);
+      if (!p) continue;
+      await this.repo.updateRestaurant(r.id, { lat: p.lat.toFixed(6), lng: p.lng.toFixed(6), point_source: 'geocoded' });
+      placed++;
+    }
+    if (rows.length) this.ctx.log.info({ placed, without: rows.length - placed }, 'food: restaurant points geocoded');
+  }
+
   async createRestaurant(input: RestaurantInput, by: By): Promise<RestaurantAdmin> {
     const f = await this.restaurantFields(input);
+    const point = await this.pointFields(input, f);
     const id = newId();
     const now = this.now();
     const position = input.position ?? (await this.repo.maxRestaurantPosition()) + 1;
@@ -408,6 +518,9 @@ export class FoodCatalog extends FoodBase {
       this.repo.insertRestaurant({
         id,
         ...f,
+        lat: point.lat ?? null,
+        lng: point.lng ?? null,
+        point_source: point.point_source ?? null,
         category_ids: f.category_ids as never,
         photo_ids: f.photo_ids as never,
         hours: f.hours as never,
@@ -429,9 +542,10 @@ export class FoodCatalog extends FoodBase {
     const before = await this.repo.getRestaurant(id);
     if (!before) throw notFound('Restaurant');
     const f = await this.restaurantFields(input, before);
+    const point = await this.pointFields(input, f, before);
     const prev = [before.image_id, before.logo_id, ...photoIdsOf(before.photo_ids)].filter((x): x is string => Boolean(x));
     await this.withMedia('content_block', id, f.name, prev, this.restaurantMedia(f), () =>
-      this.repo.updateRestaurant(id, { ...f, category_ids: f.category_ids as never, photo_ids: f.photo_ids as never, hours: f.hours as never, ...(input.position != null ? { position: input.position } : {}), updated_at: this.now() }),
+      this.repo.updateRestaurant(id, { ...f, ...point, category_ids: f.category_ids as never, photo_ids: f.photo_ids as never, hours: f.hours as never, ...(input.position != null ? { position: input.position } : {}), updated_at: this.now() }),
     );
     await this.refreshSearch(id);
     const out = await this.getRestaurantAdmin(id);
@@ -447,6 +561,7 @@ export class FoodCatalog extends FoodBase {
     await this.repo.transaction(async (tx) => {
       await tx.deleteItemsOf(id);
       await tx.deleteSectionsOf(id);
+      await tx.deleteSavedOf(id);
       await tx.deleteRestaurant(id);
     });
     await this.detachAll('content_block', id, [r.image_id, r.logo_id, ...photoIdsOf(r.photo_ids)]);

@@ -1,9 +1,12 @@
 /**
  * Test harness for departments: the module with real media (uploads through media's HTTP API), and the answers a
  * test controls stubbed: search.getProductCards → cards from `k.cards` (missing ids are not shown);
- * customers.getCustomerByUserId → `k.names`; audit.record → recorded; settings → `k.settingsValues`.
+ * customers.getCustomerByUserId / getCustomer / searchCustomers → `k.names` (canWriteReviews refuses `k.blocked`);
+ * promotions coupon campaigns → `k.campaigns` (issueCode records `k.issued`, the same key gives the same code);
+ * audit.record → recorded; settings → `k.settingsValues`.
  */
 import type { FastifyInstance } from 'fastify';
+import { AppError } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import type * as audit from '../../../spec/audit.js';
 import type * as search from '../../../spec/search.js';
@@ -17,9 +20,19 @@ export interface Kit {
   clock: ReturnType<typeof movingClock>;
   cards: Map<string, search.ProductCard>;
   names: Map<string, string>;
+  /** Customer emails (customers.searchCustomers matches names and emails); a@example.com otherwise */
+  emails: Map<string, string>;
   audits: audit.RecordInput[];
   /** Setting overrides by full key ('departments.blogRepliesOpen'); the spec default applies otherwise */
   settingsValues: Record<string, unknown>;
+  /** Coupon campaigns promotions knows: active, or not (reason), and their names */
+  campaigns: Map<string, { name: string; active: boolean; reason?: string }>;
+  /** Codes promotions.issueCode gave, by idempotency key */
+  issued: Map<string, { campaignId: string; customerId: string; code: string }>;
+  /** Customers customers.canWriteReviews refuses */
+  blocked: Set<string>;
+  /** POST a score to the webhook with a game server key */
+  postScore(key: string | undefined, body: unknown): Promise<{ status: number; body: any }>;
   staff(permissions?: string[]): Record<string, string>;
   customer(accountId: string): Record<string, string>;
   visitor(): Record<string, string>;
@@ -34,14 +47,38 @@ export async function boot(): Promise<Kit> {
   const clock = movingClock();
   tokenClock.now = () => clock.now();
   tokenClock.ttlSeconds = 3600;
-  const k = { clock, cards: new Map<string, search.ProductCard>(), names: new Map<string, string>(), audits: [] as audit.RecordInput[], settingsValues: {} as Record<string, unknown> };
+  const k = { clock, cards: new Map<string, search.ProductCard>(), names: new Map<string, string>(), emails: new Map<string, string>(), audits: [] as audit.RecordInput[], settingsValues: {} as Record<string, unknown>, campaigns: new Map<string, { name: string; active: boolean; reason?: string }>(), issued: new Map<string, { campaignId: string; customerId: string; code: string }>(), blocked: new Set<string>() };
+    const snapshot = (id: string) => ({ id, userId: id, ref: 'CU-1', displayName: k.names.get(id)!, email: k.emails.get(id) ?? 'a@example.com', accountStatus: 'active', canOrder: true, canMessage: true }) as never;
   const app = await buildTestApp({
     only: ['departments', 'media'],
     clock,
     config: { rateLimits: false },
     apiStubs: {
       search: { getProductCards: async (ids: string[]) => ids.map((id) => k.cards.get(id)).filter((c): c is search.ProductCard => Boolean(c)) },
-      customers: { getCustomerByUserId: async (id: string) => (k.names.has(id) ? ({ id, userId: id, ref: 'CU-1', displayName: k.names.get(id)!, email: 'a@example.com', accountStatus: 'active', canOrder: true, canMessage: true } as never) : null) },
+      customers: {
+        getCustomerByUserId: async (id: string) => (k.names.has(id) ? snapshot(id) : null),
+        getCustomer: async (id: string) => (k.names.has(id) ? snapshot(id) : null),
+        canWriteReviews: async (id: string) => (k.blocked.has(id) ? { allowed: false, reason: 'restricted' } : { allowed: true }),
+        searchCustomers: (async (filter: { search?: string }) => {
+          const q = (filter.search ?? '').toLowerCase();
+          const items = [...k.names.keys()].filter((id) => k.names.get(id)!.toLowerCase().includes(q) || (k.emails.get(id) ?? 'a@example.com').includes(q)).map(snapshot);
+          return { items, nextCursor: null };
+        }) as never,
+      },
+      promotions: {
+        isCampaignActive: async (id: string) => {
+          const c = k.campaigns.get(id);
+          return !c ? { active: false, reason: 'not_found' } : c.active ? { active: true } : { active: false, reason: c.reason ?? 'ended' };
+        },
+        getPublicCampaign: (async (id: string) => (k.campaigns.has(id) ? { id, name: k.campaigns.get(id)!.name, description: null, period: { startsAt: '2026-01-01T00:00:00.000Z', endsAt: '2027-01-01T00:00:00.000Z' }, terms: null, status: 'running', code: null } : null)) as never,
+        issueCode: async (campaignId: string, customerId: string, key: string) => {
+          const c = k.campaigns.get(campaignId);
+          if (!c?.active) throw new AppError('CONFLICT', 'Campaign not active', undefined, 409);
+          const done = k.issued.get(key) ?? { campaignId, customerId, code: `PLAY-${k.issued.size + 1}` };
+          k.issued.set(key, done);
+          return { codeId: newId(), code: done.code, campaignId, title: c.name, endsAt: null };
+        },
+      },
       audit: {
         record: async (entry) => {
           k.audits.push(entry);
@@ -64,6 +101,11 @@ export async function boot(): Promise<Kit> {
     app,
     staff,
     customer: (accountId: string) => auth(callers.customer({ accountId })),
+    postScore: async (key: string | undefined, body: unknown) => {
+      const res = await app.inject({ method: 'POST', url: '/webhooks/departments/play/scores', headers: key ? { 'x-game-key': key } : {}, payload: body as never });
+      await app.kernel.events.drain();
+      return { status: res.statusCode, body: res.body ? res.json() : null };
+    },
     visitor: () => auth(callers.visitor()),
     call,
     admin: (method: Method, path: string, payload?: unknown, headers?: Record<string, string>) => call(method, `/api/admin/departments${path}`, payload, headers ?? staff()),

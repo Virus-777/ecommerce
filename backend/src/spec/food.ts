@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Json } from '../kernel/lib/json.js';
 import { defineEndpoints, defineModuleSpec } from '../kernel/spec/define.js';
 import * as common from './common.js';
+import * as customers from './customers.js';
 import * as payments from './payments.js';
 
 /** Food delivery: The app's Food delivery department: restaurants staff keep in Admin › Departments › Food delivery, their menus with sizes and extras, a basket that holds one restaurant's food, and food orders paid by card in their own payment flow (payments purchase intents, not cart and checkout). Staff move each order through accepted, preparing, on the way and delivered on the restaurant's behalf; the card is charged on delivery. */
@@ -103,6 +104,10 @@ export interface RestaurantCard {
   open: boolean;
   /** e.g. Open until 11 PM, or Closed · opens 5 PM */
   openLabel: string;
+  /** e.g. 1.2 mi from the customer's default delivery address; null for visitors, customers without a geocoded default address and restaurants without a point (the card shows city instead) */
+  distanceLabel?: string | null;
+  /** The signed-in customer saved this restaurant; false for visitors */
+  saved: boolean;
 }
 
 export const RestaurantCard: z.ZodType<RestaurantCard> = z.object({
@@ -124,6 +129,8 @@ export const RestaurantCard: z.ZodType<RestaurantCard> = z.object({
   promoBadge: z.string().describe("Short badge on the card, e.g. Free delivery").nullish(),
   open: z.boolean(),
   openLabel: z.string().describe("e.g. Open until 11 PM, or Closed · opens 5 PM"),
+  distanceLabel: z.string().describe("e.g. 1.2 mi from the customer's default delivery address; null for visitors, customers without a geocoded default address and restaurants without a point (the card shows city instead)").nullish(),
+  saved: z.boolean().describe("The signed-in customer saved this restaurant; false for visitors"),
 }).register(common.apiTypes, { id: "food.RestaurantCard" });
 
 export interface OptionChoice {
@@ -252,6 +259,10 @@ export interface Restaurant {
   open: boolean;
   openLabel: string;
   hours: OpeningDay[];
+  /** e.g. 1.2 mi, shown after the address in the meta line (Pizza · Italian · 118 Bay Rd · 1.2 mi); null as on RestaurantCard */
+  distanceLabel?: string | null;
+  /** The heart in the top bar: the signed-in customer saved it; false for visitors */
+  saved: boolean;
   /** Popular first (items marked popular), then the restaurant's sections in order */
   sections: MenuSection[];
 }
@@ -295,6 +306,8 @@ export const Restaurant: z.ZodType<Restaurant> = z.object({
   get hours() {
     return z.array(OpeningDay);
   },
+  distanceLabel: z.string().describe("e.g. 1.2 mi, shown after the address in the meta line (Pizza · Italian · 118 Bay Rd · 1.2 mi); null as on RestaurantCard").nullish(),
+  saved: z.boolean().describe("The heart in the top bar: the signed-in customer saved it; false for visitors"),
   get sections() {
     return z.array(MenuSection);
   },
@@ -528,6 +541,44 @@ export const FoodReview: z.ZodType<FoodReview> = z.object({
   date: z.iso.datetime({ offset: true }),
 }).register(common.apiTypes, { id: "food.FoodReview" });
 
+export interface RestaurantReview {
+  id: string;
+  /** First name and last initial, e.g. Maya R. */
+  name: string;
+  /** 1 to 5 */
+  stars: number;
+  text?: string | null;
+  date: string;
+  /** What the reviewer ordered, from the order: e.g. 2 × Margherita pizza 12", Tiramisu; empty when the order is gone */
+  items: string[];
+}
+
+export const RestaurantReview: z.ZodType<RestaurantReview> = z.object({
+  id: z.uuid(),
+  name: z.string().describe("First name and last initial, e.g. Maya R."),
+  stars: z.number().int().describe("1 to 5"),
+  text: z.string().nullish(),
+  date: z.iso.datetime({ offset: true }),
+  items: z.array(z.string()).describe("What the reviewer ordered, from the order: e.g. 2 × Margherita pizza 12\", Tiramisu; empty when the order is gone"),
+}).register(common.apiTypes, { id: "food.RestaurantReview" });
+
+export interface RestaurantRatings {
+  restaurantId: string;
+  slug: string;
+  name: string;
+  /** Average, count and the count per star (5 to 1) of the visible reviews */
+  ratings: RatingSummary;
+}
+
+export const RestaurantRatings: z.ZodType<RestaurantRatings> = z.object({
+  restaurantId: z.uuid(),
+  slug: z.string(),
+  name: z.string(),
+  get ratings() {
+    return RatingSummary;
+  },
+}).register(common.apiTypes, { id: "food.RestaurantRatings" });
+
 export interface ReviewInput {
   /** 1 to 5 */
   stars: number;
@@ -679,9 +730,16 @@ export interface RestaurantAdmin {
   photos: common.MediaRef[];
   address?: string | null;
   city?: string | null;
+  /** State code, e.g. OR */
+  region?: string | null;
+  postalCode?: string | null;
   phone?: string | null;
   hours: OpeningDay[];
   timeZone: string;
+  /** Where the restaurant is on the map; distances on cards are measured from it */
+  point?: customers.GeoPoint | null;
+  /** geocoded: from the address (customers.geocodeAddress); staff: a pin staff set. Null: no point yet (the geocoder could not place the address) */
+  pointSource?: "geocoded" | "staff" | null;
   deliveryMinMinutes: number;
   deliveryMaxMinutes: number;
   deliveryFee: common.Money;
@@ -714,11 +772,17 @@ export const RestaurantAdmin: z.ZodType<RestaurantAdmin> = z.object({
   },
   address: z.string().nullish(),
   city: z.string().nullish(),
+  region: z.string().describe("State code, e.g. OR").nullish(),
+  postalCode: z.string().nullish(),
   phone: z.string().nullish(),
   get hours() {
     return z.array(OpeningDay);
   },
   timeZone: z.string(),
+  get point() {
+    return customers.GeoPoint.nullish();
+  },
+  pointSource: z.enum(["geocoded", "staff"]).describe("geocoded: from the address (customers.geocodeAddress); staff: a pin staff set. Null: no point yet (the geocoder could not place the address)").nullish(),
   deliveryMinMinutes: z.number().int(),
   deliveryMaxMinutes: z.number().int(),
   get deliveryFee() {
@@ -750,11 +814,18 @@ export interface RestaurantInput {
   imageId?: string | null;
   logoId?: string | null;
   photoIds?: string[] | null;
+  /** Street line, e.g. 118 Bay Rd */
   address?: string | null;
+  /** e.g. Portland (Portland, OR is read as city and state when region is empty) */
   city?: string | null;
+  /** State code, e.g. OR */
+  region?: string | null;
+  postalCode?: string | null;
   phone?: string | null;
   hours?: OpeningDay[] | null;
   timeZone?: string | null;
+  /** A pin staff set on the map, kept until staff send null. Null drops the pin and the point is geocoded from the address again; left out keeps a staff pin, else the address is geocoded when it changed or has no point yet */
+  point?: customers.GeoPoint | null;
   deliveryMinMinutes: number;
   deliveryMaxMinutes: number;
   deliveryFee: common.Money;
@@ -775,13 +846,18 @@ export const RestaurantInput: z.ZodType<RestaurantInput> = z.object({
   imageId: z.uuid().nullish(),
   logoId: z.uuid().nullish(),
   photoIds: z.array(z.uuid()).nullish(),
-  address: z.string().nullish(),
-  city: z.string().nullish(),
+  address: z.string().describe("Street line, e.g. 118 Bay Rd").nullish(),
+  city: z.string().describe("e.g. Portland (Portland, OR is read as city and state when region is empty)").nullish(),
+  region: z.string().describe("State code, e.g. OR").nullish(),
+  postalCode: z.string().nullish(),
   phone: z.string().nullish(),
   get hours() {
     return z.array(OpeningDay).nullish();
   },
   timeZone: z.string().nullish(),
+  get point() {
+    return customers.GeoPoint.nullish();
+  },
   deliveryMinMinutes: z.number().int(),
   deliveryMaxMinutes: z.number().int(),
   get deliveryFee() {
@@ -1067,7 +1143,7 @@ export const FoodOrderStatusChangedEvent: z.ZodType<FoodOrderStatusChangedEvent>
 
 /** What other modules may call in-process: `ctx.use('food')` (or `ctx.tryUse` for an optional dependency). */
 export interface FoodPublicApi {
-  /** The customer's food orders (reference, restaurant, items, amounts, address, status, dates) and reviews for the personal data export Used by: customers. */
+  /** The customer's food orders (reference, restaurant, items, amounts, address, status, dates), reviews and saved restaurants for the personal data export Used by: customers. */
   exportCustomerData(input: { customerId: string, accountId: string }): Promise<common.CustomerDataSection[]>;
 }
 
@@ -1097,6 +1173,13 @@ export interface FoodDb {
     photo_ids: Json;
     address: string | null;
     city: string | null;
+    region: string | null;
+    postal_code: string | null;
+    /** WGS84 latitude */
+    lat: string | null;
+    /** WGS84 longitude */
+    lng: string | null;
+    point_source: 'geocoded' | 'staff' | null;
     phone: string | null;
     hours: Json;
     time_zone: string;
@@ -1190,6 +1273,13 @@ export interface FoodDb {
     created_at: Date;
     updated_at: Date;
   };
+  /** A customer's saved restaurants (one row per customer and restaurant) */
+  saved_restaurants: {
+    id: string;
+    customer_id: string;
+    restaurant_id: string;
+    created_at: Date;
+  };
   reviews: {
     id: string;
     order_id: string;
@@ -1225,13 +1315,13 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/restaurants",
     auth: "visitor",
-    scope: "public",
+    scope: "own-customer",
     summary: "Published restaurants, open ones first",
     query: () =>
       z.object({
         category: z.string().describe("Category slug").optional(),
         q: z.string().optional(),
-        sort: z.enum(["recommended", "rating", "delivery_time", "fee"]).optional(),
+        sort: z.enum(["recommended", "rating", "delivery_time", "fee", "nearest"]).describe("nearest: closest to the customer's default delivery address first (restaurants without a point last); as recommended for visitors and customers without a location").optional(),
       }),
     paging: true,
     response: () => RestaurantCard,
@@ -1244,8 +1334,9 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/restaurants/{slug}",
     auth: "visitor",
-    scope: "public",
+    scope: "own-customer",
     summary: "A restaurant with its menu",
+    desc: "Signed-in customers also get saved and the distance from their default delivery address.",
     params: () =>
       z.object({
         slug: z.string(),
@@ -1254,6 +1345,95 @@ export const endpoints = defineEndpoints({
     status: 200,
     errors: ["NOT_FOUND"],
     screens: ["store/food-restaurant"],
+    phase: 2,
+  },
+  listRestaurantReviews: {
+    area: "store",
+    method: "GET",
+    path: "/restaurants/{slug}/reviews",
+    auth: "visitor",
+    scope: "public",
+    summary: "A restaurant's reviews, newest first",
+    desc: "Visible reviews only (staff can hide one). The rating summary on top of the screen comes from GET /restaurants/{slug}/ratings.",
+    params: () =>
+      z.object({
+        slug: z.string(),
+      }),
+    query: () =>
+      z.object({
+        stars: z.coerce.number().int().describe("Only reviews with this many stars (1 to 5)").optional(),
+      }),
+    paging: true,
+    response: () => RestaurantReview,
+    status: 200,
+    errors: ["NOT_FOUND"],
+    screens: ["store/food-reviews"],
+    phase: 2,
+  },
+  getRestaurantRatings: {
+    area: "store",
+    method: "GET",
+    path: "/restaurants/{slug}/ratings",
+    auth: "visitor",
+    scope: "public",
+    summary: "A restaurant's rating summary: average, count and count per star",
+    params: () =>
+      z.object({
+        slug: z.string(),
+      }),
+    response: () => RestaurantRatings,
+    status: 200,
+    errors: ["NOT_FOUND"],
+    screens: ["store/food-reviews"],
+    phase: 2,
+  },
+  listSavedRestaurants: {
+    area: "store",
+    method: "GET",
+    path: "/saved-restaurants",
+    auth: "customer",
+    scope: "own-customer",
+    summary: "My saved restaurants, last saved first",
+    desc: "Restaurants staff hid or deleted are left out (a hidden one comes back when staff publish it again).",
+    paging: true,
+    response: () => RestaurantCard,
+    status: 200,
+    screens: ["store/saved"],
+    phase: 2,
+  },
+  saveRestaurant: {
+    area: "store",
+    method: "PUT",
+    path: "/saved-restaurants/{slug}",
+    auth: "customer",
+    scope: "own-customer",
+    summary: "Save a restaurant (the heart)",
+    desc: "Saving a saved restaurant again changes nothing.",
+    params: () =>
+      z.object({
+        slug: z.string(),
+      }),
+    response: null,
+    status: 204,
+    errors: ["NOT_FOUND"],
+    screens: ["store/food-restaurant","store/food","store/food-restaurants","store/saved"],
+    phase: 2,
+  },
+  unsaveRestaurant: {
+    area: "store",
+    method: "DELETE",
+    path: "/saved-restaurants/{slug}",
+    auth: "customer",
+    scope: "own-customer",
+    summary: "Remove a restaurant from my saved ones",
+    desc: "Removing one that isn't saved (or no longer exists) changes nothing.",
+    params: () =>
+      z.object({
+        slug: z.string(),
+      }),
+    response: null,
+    status: 204,
+    screens: ["store/food-restaurant","store/food","store/food-restaurants","store/saved"],
     phase: 2,
   },
   listItems: {
@@ -1280,7 +1460,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/items/{id}",
     auth: "visitor",
-    scope: "public",
+    scope: "own-customer",
     summary: "A menu item with its photos, sizes and extras",
     params: () =>
       z.object({
@@ -2017,6 +2197,10 @@ export const spec = defineModuleSpec({
     },
   },
   jobs: {
+    "food.geocode-restaurants": {
+      "schedule": "on boot",
+      "does": "Backfill: geocode restaurants that have an address but no point (restaurants added before points existed, or while the geocoder could not place them) through customers.geocodeAddress. Staff pins are never touched"
+    },
     "food.expire-unaccepted": {
       "schedule": "every 5 min",
       "does": "Decline placed orders not accepted within acceptMinutes (void the payment, tell the customer); cancel payment_pending orders left in a bank challenge for 30 minutes"
@@ -2204,6 +2388,11 @@ export const spec = defineModuleSpec({
         "photo_ids",
         "address",
         "city",
+        "region",
+        "postal_code",
+        "lat",
+        "lng",
+        "point_source",
         "phone",
         "hours",
         "time_zone",
@@ -2229,13 +2418,21 @@ export const spec = defineModuleSpec({
         "logo_id",
         "address",
         "city",
+        "region",
+        "postal_code",
+        "lat",
+        "lng",
+        "point_source",
         "phone",
         "free_delivery_over",
         "min_order",
         "promo_text",
         "promo_badge"
       ],
-      "decimal": [],
+      "decimal": [
+        "lat",
+        "lng"
+      ],
       "binary": [],
       "dates": [
         "created_at",
@@ -2311,6 +2508,41 @@ export const spec = defineModuleSpec({
               "bsonType": [
                 "string",
                 "null"
+              ]
+            },
+            "region": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "postal_code": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "lat": {
+              "bsonType": [
+                "decimal",
+                "null"
+              ]
+            },
+            "lng": {
+              "bsonType": [
+                "decimal",
+                "null"
+              ]
+            },
+            "point_source": {
+              "bsonType": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "geocoded",
+                "staff",
+                null
               ]
             },
             "phone": {
@@ -3027,6 +3259,82 @@ export const spec = defineModuleSpec({
           "name": "orders_intent_id_050910",
           "key": {
             "intent_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "saved_restaurants": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "customer_id",
+        "restaurant_id",
+        "created_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "customer_id",
+            "restaurant_id",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "customer_id": {
+              "bsonType": "string"
+            },
+            "restaurant_id": {
+              "bsonType": "string"
+            },
+            "created_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "saved_restaurants_customer_id_restaurant_id_be5a98",
+          "key": {
+            "customer_id": 1,
+            "restaurant_id": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "saved_restaurants_customer_id_created_at_a89138",
+          "key": {
+            "customer_id": 1,
+            "created_at": 1
+          }
+        },
+        {
+          "name": "saved_restaurants_restaurant_id_a3b595",
+          "key": {
+            "restaurant_id": 1
           }
         }
       ],

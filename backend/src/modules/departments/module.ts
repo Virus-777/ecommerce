@@ -2,6 +2,8 @@ import { defineModule } from '../../kernel/module-system/index.js';
 import { spec } from '../../spec/departments.js';
 import { storeRoutes } from './http/store.js';
 import { adminRoutes } from './http/admin.js';
+import { gameKeyVerifier, webhooksRoutes } from './http/webhooks.js';
+import { mongoMigrations } from './migrations.js';
 import { DepartmentsRepository } from './repository.js';
 import { schemas } from './schema.js';
 import { DepartmentsService } from './service.js';
@@ -14,11 +16,15 @@ import { DepartmentsService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.1.0',
+  version: '1.2.0',
   schemas,
+  mongoMigrations,
   register(ctx) {
     const service = new DepartmentsService({ repo: new DepartmentsRepository(ctx.mongo), ctx });
     ctx.provide(service);
-    ctx.http.routes(storeRoutes(service), adminRoutes(service));
+    ctx.http.routes(storeRoutes(service), adminRoutes(service), webhooksRoutes(service));
+    // game partners post scores with their game's server key (X-Game-Key), not a signature
+    ctx.http.webhookVerifier(gameKeyVerifier(service));
+    ctx.jobs.handle('departments.award-prize-weeks', () => service.awardPrizeWeeks());
   },
 });

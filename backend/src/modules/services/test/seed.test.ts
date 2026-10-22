@@ -18,8 +18,8 @@ describe('sample services (tools/simulate/services-data.ts)', () => {
       return res.body;
     };
     const categories = Object.values(SERVICE_CATEGORIES).flat().length;
-    expect(await seedServices(admin)).toEqual({ categories, providers: PROVIDERS.length, services: SERVICES.length });
-    expect(await seedServices(admin)).toEqual({ categories: 0, providers: 0, services: 0 });
+    expect(await seedServices(admin)).toEqual({ categories, providers: PROVIDERS.length, services: SERVICES.length, updated: 0 });
+    expect(await seedServices(admin)).toEqual({ categories: 0, providers: 0, services: 0, updated: 0 });
 
     const booking = (await k.store('GET', '/providers?area=booking')).body.items;
     const studio = booking.find((p: any) => p.name === 'Studio Nine Hair');
@@ -28,6 +28,14 @@ describe('sample services (tools/simulate/services-data.ts)', () => {
     const welfare = (await k.store('GET', '/services/in-home-elder-care')).body;
     expect(welfare.priceTable).toHaveLength(4);
     expect(welfare.requirements[0]).toBe('Adults 65+ or with a care plan from a doctor');
+    const screen = (await k.store('GET', '/services/screen-replacement')).body;
+    expect(screen).toMatchObject({ coveredByWarranty: true, provider: { name: 'FixPoint Mobile', location: { lat: 45.5351, lng: -122.6497 } } });
+    expect(screen.fullTerms).toMatch(/^FixPoint Mobile repair terms/);
+
+    // a service seeded before full terms and the warranty flag existed gets them, and keeps the rest
+    await k.call('PATCH', `/api/admin/services/services/${screen.id}`, { area: 'post_sale', title: screen.title, providerId: screen.provider.id, fromPrice: screen.fromPrice, priceTable: screen.priceTable, priceTableTitle: 'Price by model', fullTerms: null, coveredByWarranty: false });
+    expect(await seedServices(admin)).toEqual({ categories: 0, providers: 0, services: 0, updated: 1 });
+    expect((await k.store('GET', '/services/screen-replacement')).body).toMatchObject({ coveredByWarranty: true, priceTable: screen.priceTable, fullTerms: screen.fullTerms });
     expect((await k.store('GET', '/categories?area=post_sale')).body.map((c: any) => c.name)).toEqual(['Screen repair', 'Battery', 'Warranty', 'Data recovery', 'Trade-in']);
   });
 });

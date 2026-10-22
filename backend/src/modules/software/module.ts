@@ -1,5 +1,6 @@
 import { defineModule } from '../../kernel/module-system/index.js';
 import { spec } from '../../spec/software.js';
+import { mongoMigrations } from './migrations.js';
 import { storeRoutes } from './http/store.js';
 import { adminRoutes } from './http/admin.js';
 import { SoftwareRepository } from './repository.js';
@@ -14,8 +15,10 @@ import { SoftwareService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.0.0',
+  version: '1.1.0',
   schemas,
+  // 2026-10-22: licence keys for entitlements of paid apps made before keys existed, licence_devices from the labels
+  mongoMigrations,
   register(ctx) {
     const service = new SoftwareService({ repo: new SoftwareRepository(ctx.mongo), ctx });
     ctx.provide(service);

@@ -20,7 +20,7 @@ describe('sample Softwares (tools/simulate/software-data.ts)', () => {
     };
     const upload: Uploader = (f) => k.upload(f.purpose, f.fileName, f.contentType, f.body);
     const first = await seedSoftware(admin, upload);
-    expect(first).toMatchObject({ categories: SOFTWARE_CATEGORIES.length, apps: SOFTWARE_APPS.length, appsUpdated: 0, files: SOFTWARE_APPS.length * 2 + 1, packs: SOFTWARE_PACKS.length, rails: 1 });
+    expect(first).toMatchObject({ categories: SOFTWARE_CATEGORIES.length, apps: SOFTWARE_APPS.length, appsUpdated: 0, files: SOFTWARE_APPS.length * 2 + 1, packs: SOFTWARE_PACKS.length, rails: 1, granted: 0 });
     expect(await seedSoftware(admin, upload)).toMatchObject({ categories: 0, apps: 0, appsUpdated: SOFTWARE_APPS.length, files: 0, packs: 0, packsUpdated: SOFTWARE_PACKS.length, rails: 0 });
 
     const deals = (await k.store('GET', '/deals')).body;
@@ -49,7 +49,9 @@ describe('sample Softwares (tools/simulate/software-data.ts)', () => {
     expect(home.featuredPack.name).toBe('Office Pro pack');
 
     const pixel = (await k.store('GET', '/apps/pixelcraft-studio')).body;
-    expect(pixel).toMatchObject({ company: { name: 'Northlight Labs' }, subcategory: 'Photo editing', version: '3.4.1', releasedAt: '2026-10-14', platformLabels: ['Windows 10+', 'macOS 13+', 'Android 10+', 'iOS 16+'], licenceLabel: 'One-time purchase · 2 devices', ratings: { average: null, count: 0 } });
+    expect(pixel).toMatchObject({ company: { name: 'Northlight Labs' }, subcategory: 'Photo editing', version: '3.4.1', releasedAt: '2026-10-14', platformLabels: ['Windows 10+', 'macOS 13+', 'Android 10+', 'iOS 16+'], licenceLabel: 'One-time purchase · 2 devices', licenceDevices: 2, ratings: { average: null, count: 0 } });
+    expect(pixel.files.databasesSizeLabel).toBe(pixel.files.databases[0].sizeLabel);
+    expect((await k.store('GET', '/apps/noteflow')).body.licenceDevices).toBeNull();
     expect(pixel.permissions.map((p: any) => p.name)).toEqual(['Storage', 'Network', 'Camera']);
     expect(pixel.files.databases).toHaveLength(1);
     expect(pixel.files.package.name).toBe('PixelCraft-Studio-3.4.1.zip');

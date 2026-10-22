@@ -6,3 +6,5 @@ export type ProviderRow = ServicesDb['providers'];
 export type ServiceRow = ServicesDb['services'];
 export type RequestRow = ServicesDb['requests'];
 export type ReviewRow = ServicesDb['reviews'];
+export type SavedProviderRow = ServicesDb['saved_providers'];
+export type DeviceRow = ServicesDb['devices'];

@@ -1,7 +1,7 @@
 import type { ModuleStore } from '../../kernel/mongo/index.js';
 import { escapeRegExp } from '../../kernel/lib/text.js';
 import type { Page, PageRequest } from '../../kernel/lib/pagination.js';
-import type { BasketRow, CategoryRow, ItemRow, OrderRow, RestaurantRow, ReviewRow, SectionRow } from './ports.js';
+import type { BasketRow, CategoryRow, ItemRow, OrderRow, RestaurantRow, ReviewRow, SavedRestaurantRow, SectionRow } from './ports.js';
 
 export type Lock = { forUpdate?: boolean };
 
@@ -22,6 +22,7 @@ export class FoodRepository {
       baskets: store.table<BasketRow>('baskets'),
       orders: store.table<OrderRow>('orders'),
       reviews: store.table<ReviewRow>('reviews'),
+      saved: store.table<SavedRestaurantRow>('saved_restaurants'),
     };
   }
 
@@ -92,6 +93,10 @@ export class FoodRepository {
   async maxRestaurantPosition(): Promise<number> {
     const rows = await this.#t.restaurants.find({}, { sort: { position: -1 }, limit: 1 });
     return rows[0]?.position ?? 0;
+  }
+  /** Restaurants with an address or city but no point, not pinned by staff (the geocode backfill) */
+  restaurantsWithoutPoint(): Promise<RestaurantRow[]> {
+    return this.#t.restaurants.find({ lat: null, point_source: { $ne: 'staff' }, $or: [{ address: { $ne: null } }, { city: { $ne: null } }] }, { sort: { id: 1 } });
   }
   /** Restaurants that list a category */
   restaurantsInCategory(categoryId: string): Promise<RestaurantRow[]> {
@@ -223,6 +228,29 @@ export class FoodRepository {
     return this.#t.orders.find(filter, { sort: { [field]: 1, id: 1 }, limit });
   }
 
+  /* ---------------------------------------------------------------- saved restaurants */
+
+  /** Saves a restaurant for a customer; saving it again keeps the first row */
+  async saveRestaurant(row: SavedRestaurantRow): Promise<void> {
+    await this.#t.saved.insertIfAbsent(row, ['customer_id', 'restaurant_id']);
+  }
+  unsaveRestaurant(customerId: string, restaurantId: string): Promise<number> {
+    return this.#t.saved.deleteMany({ customer_id: customerId, restaurant_id: restaurantId });
+  }
+  /** Of these restaurants (all when not given), the ones the customer saved */
+  async savedIds(customerId: string, restaurantIds?: string[]): Promise<Set<string>> {
+    if (restaurantIds && !restaurantIds.length) return new Set();
+    const rows = await this.#t.saved.find({ customer_id: customerId, ...(restaurantIds ? { restaurant_id: { $in: restaurantIds } } : {}) });
+    return new Set(rows.map((r) => r.restaurant_id));
+  }
+  /** The customer's saved restaurants, last saved first */
+  savedOf(customerId: string): Promise<SavedRestaurantRow[]> {
+    return this.#t.saved.find({ customer_id: customerId }, { sort: { created_at: -1, id: -1 } });
+  }
+  deleteSavedOf(restaurantId: string): Promise<number> {
+    return this.#t.saved.deleteMany({ restaurant_id: restaurantId });
+  }
+
   /* ---------------------------------------------------------------- reviews */
 
   insertReview(row: ReviewRow): Promise<ReviewRow> {
@@ -239,6 +267,10 @@ export class FoodRepository {
   }
   updateReview(id: string, patch: Partial<ReviewRow>): Promise<ReviewRow | undefined> {
     return this.#t.reviews.update(id, patch);
+  }
+  /** A restaurant's visible reviews, newest first */
+  pageRestaurantReviews(restaurantId: string, f: { stars?: number }, page: PageRequest): Promise<Page<ReviewRow>> {
+    return this.#t.reviews.page({ restaurant_id: restaurantId, hidden: false, ...(f.stars != null ? { stars: f.stars } : {}) }, page, { column: 'created_at', direction: 'desc' });
   }
   pageAdminReviews(f: { restaurantId?: string; hidden?: boolean; stars?: number }, page: PageRequest): Promise<Page<ReviewRow>> {
     return this.#t.reviews.page({ ...(f.restaurantId ? { restaurant_id: f.restaurantId } : {}), ...(f.hidden != null ? { hidden: f.hidden } : {}), ...(f.stars != null ? { stars: f.stars } : {}) }, page, { column: 'created_at', direction: 'desc' });

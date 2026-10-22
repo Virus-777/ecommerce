@@ -49,6 +49,7 @@ import {
   currentAmount,
   isIconName,
   isValidSlug,
+  LICENCE_DEVICES_MAX,
   moneyLabel,
   packSaving,
   ratingOf,
@@ -316,7 +317,15 @@ export class SoftwareCatalog extends SoftwareBase {
 
   protected filesOut(a: AppRow): AppFiles {
     const pkg = fileOf(a.package);
-    return { package: pkg ? appFileOut(pkg) : null, databases: filesOf(a.databases).map(appFileOut), databasesNote: a.databases_note };
+    const databases = filesOf(a.databases);
+    const databasesSize = databases.reduce((s, d) => s + d.sizeBytes, 0);
+    return {
+      package: pkg ? appFileOut(pkg) : null,
+      databases: databases.map(appFileOut),
+      databasesNote: a.databases_note,
+      databasesSizeBytes: databasesSize,
+      databasesSizeLabel: databases.length ? sizeLabel(databasesSize) : null,
+    };
   }
 
   /**
@@ -335,7 +344,7 @@ export class SoftwareCatalog extends SoftwareBase {
     const a = await this.publishedApp(slug);
     const counted = await this.countView(a, principal);
     const customerId = await this.viewerOf(principal);
-    const [cats, refs, newest, owned, mine] = await Promise.all([
+    const [cats, refs, newest, entitlement, mine] = await Promise.all([
       this.categoryMap(),
       this.refsMap([a.icon_id, ...stringsOf(a.screenshot_ids)]),
       this.repo.newestReviews(a.id, 3),
@@ -343,6 +352,8 @@ export class SoftwareCatalog extends SoftwareBase {
       customerId ? this.repo.reviewOf(a.id, customerId) : Promise.resolve(undefined),
     ]);
     const size = Number(a.size_bytes);
+    // an owner of a paid app sees its licence key (issued now when it has none yet)
+    const owned = entitlement ? await this.ensureLicence(entitlement, a) : undefined;
     return {
       id: a.id,
       slug: a.slug,
@@ -360,6 +371,7 @@ export class SoftwareCatalog extends SoftwareBase {
       whatYouGet: stringsOf(a.what_you_get),
       price: appPrice(a, this.now()),
       licenceLabel: a.licence_label,
+      licenceDevices: a.free ? null : (a.licence_devices ?? null),
       version: a.version,
       releasedAt: a.released_at,
       whatsNew: a.whats_new,
@@ -367,6 +379,8 @@ export class SoftwareCatalog extends SoftwareBase {
       files: this.filesOut(a),
       sizeBytes: size,
       sizeLabel: sizeLabel(size),
+      // any signed-in customer downloads the files (owner decision 2026-10-22); visitors sign in first
+      canDownload: Boolean(customerId),
       platforms: platformsOf(a.platforms),
       platformLabels: stringsOf(a.platform_labels),
       minRequirements: a.min_requirements,
@@ -380,6 +394,7 @@ export class SoftwareCatalog extends SoftwareBase {
       owned: Boolean(owned),
       canReview: Boolean(owned) && a.allow_reviews && !mine,
       myReview: mine ? this.reviewOut(mine, customerId) : null,
+      licence: this.licenceOut(owned, a),
     };
   }
 
@@ -526,6 +541,7 @@ export class SoftwareCatalog extends SoftwareBase {
       whatYouGet: stringsOf(a.what_you_get),
       price: appPrice(a, this.now(), true),
       licenceLabel: a.licence_label,
+      licenceDevices: a.licence_devices ?? null,
       files: this.filesOut(a),
       sizeBytes: size,
       sizeLabel: sizeLabel(size),
@@ -601,6 +617,8 @@ export class SoftwareCatalog extends SoftwareBase {
     if (!(APP_STATUSES as readonly string[]).includes(status)) throw invalid('status', 'Unknown status');
     if (input.position != null && (!Number.isInteger(input.position) || input.position < 0)) throw invalid('position', 'Use a whole number, 0 or more');
     const subcategory = optionalText(keep(input.subcategory, before?.subcategory ?? null), 'subcategory', LIMITS.subcategory);
+    const licenceDevices = free ? null : (keep(input.licenceDevices, before?.licence_devices ?? null) ?? null);
+    if (licenceDevices != null && (!Number.isInteger(licenceDevices) || licenceDevices < 1 || licenceDevices > LICENCE_DEVICES_MAX)) throw invalid('licenceDevices', `Use a whole number from 1 to ${LICENCE_DEVICES_MAX}, or leave it empty for no limit`);
 
     return {
       category,
@@ -620,6 +638,7 @@ export class SoftwareCatalog extends SoftwareBase {
         sale_ends_at: saleEndsAt,
         currency: this.currency,
         licence_label: optionalText(keep(input.licenceLabel, before?.licence_label ?? null), 'licenceLabel', 60),
+        licence_devices: licenceDevices,
         databases_note: optionalText(keep(input.databasesNote, before?.databases_note ?? null), 'databasesNote', 200),
         version: optionalText(keep(input.version, before?.version ?? null), 'version', 30),
         released_at: releasedAt,

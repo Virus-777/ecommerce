@@ -386,7 +386,7 @@ export class Intents {
 
   /** payments.payment.voided for a checkout payment, payments.purchase.voided for a purchase */
   private pushVoided(batch: Batch, i: IntentRec, reason: string) {
-    if (isPurchase(i)) batch.push('payments.purchase.voided', { intentId: i.id, module: i.purchase_module as 'software' | 'food', refId: i.purchase_ref_id!, reason });
+    if (isPurchase(i)) batch.push('payments.purchase.voided', { intentId: i.id, module: i.purchase_module as 'software' | 'food' | 'farm', refId: i.purchase_ref_id!, reason });
     else batch.push('payments.payment.voided', { intentId: i.id, checkoutSessionId: checkoutSessionOf(i), orderId: i.order_id, reason });
   }
 

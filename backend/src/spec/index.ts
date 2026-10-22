@@ -11,6 +11,7 @@ import { spec as checkout } from './checkout.js';
 import { spec as content } from './content.js';
 import { spec as customers } from './customers.js';
 import { spec as departments } from './departments.js';
+import { spec as farm } from './farm.js';
 import { spec as finance } from './finance.js';
 import { spec as food } from './food.js';
 import { spec as fulfillmentService } from './fulfillment-service.js';
@@ -52,6 +53,7 @@ export const specs = {
   "content": content,
   "customers": customers,
   "departments": departments,
+  "farm": farm,
   "finance": finance,
   "food": food,
   "fulfillment-service": fulfillmentService,

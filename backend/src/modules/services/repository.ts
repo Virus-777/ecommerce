@@ -1,7 +1,7 @@
 import type { ModuleStore } from '../../kernel/mongo/index.js';
 import type { Page, PageRequest } from '../../kernel/lib/pagination.js';
 import { OPEN_STATUSES } from './domain/rules.js';
-import type { CategoryRow, ProviderRow, RequestRow, ReviewRow, ServiceRow } from './ports.js';
+import type { CategoryRow, DeviceRow, ProviderRow, RequestRow, ReviewRow, SavedProviderRow, ServiceRow } from './ports.js';
 
 export type Lock = { forUpdate?: boolean };
 
@@ -19,6 +19,8 @@ export class ServicesRepository {
       services: store.table<ServiceRow>('services'),
       requests: store.table<RequestRow>('requests'),
       reviews: store.table<ReviewRow>('reviews'),
+      saved_providers: store.table<SavedProviderRow>('saved_providers'),
+      devices: store.table<DeviceRow>('devices'),
     };
   }
 
@@ -184,5 +186,83 @@ export class ServicesRepository {
   }
   pageAdminReviews(f: { status?: string; serviceId?: string }, page: PageRequest): Promise<Page<ReviewRow>> {
     return this.#t.reviews.page({ ...(f.status ? { status: f.status } : {}), ...(f.serviceId ? { service_id: f.serviceId } : {}) }, page, { column: 'created_at', direction: 'desc' });
+  }
+
+  /* ---------------------------------------------------------------- personal data export */
+
+  /** All of a customer's requests (account id), oldest first */
+  allCustomerRequests(customerId: string): Promise<RequestRow[]> {
+    return this.#t.requests.find({ customer_id: customerId }, { sort: { created_at: 1 } });
+  }
+  /** All of a customer's reviews (account id), visible or hidden, oldest first */
+  allCustomerReviews(customerId: string): Promise<ReviewRow[]> {
+    return this.#t.reviews.find({ customer_id: customerId }, { sort: { created_at: 1 } });
+  }
+
+  /* ---------------------------------------------------------------- saved providers */
+
+  /** The customer's saves, newest first */
+  savedProviders(customerId: string): Promise<SavedProviderRow[]> {
+    return this.#t.saved_providers.find({ customer_id: customerId }, { sort: { created_at: -1 } });
+  }
+  async savedProviderIds(customerId: string, providerIds?: string[]): Promise<Set<string>> {
+    const rows = await this.#t.saved_providers.find({ customer_id: customerId, ...(providerIds ? { provider_id: { $in: providerIds } } : {}) });
+    return new Set(rows.map((r) => r.provider_id));
+  }
+  isProviderSaved(customerId: string, providerId: string): Promise<boolean> {
+    return this.#t.saved_providers.exists({ customer_id: customerId, provider_id: providerId });
+  }
+  countSavedProviders(customerId: string): Promise<number> {
+    return this.#t.saved_providers.count({ customer_id: customerId });
+  }
+  insertSavedProvider(row: SavedProviderRow): Promise<SavedProviderRow> {
+    return this.#t.saved_providers.insert(row);
+  }
+  async deleteSavedProvider(customerId: string, providerId: string): Promise<void> {
+    const row = await this.#t.saved_providers.findOne({ customer_id: customerId, provider_id: providerId });
+    if (row) await this.#t.saved_providers.delete(row.id);
+  }
+
+  /* ---------------------------------------------------------------- devices */
+
+  customerDevices(customerId: string): Promise<DeviceRow[]> {
+    return this.#t.devices.find({ customer_id: customerId }, { sort: { created_at: -1 } });
+  }
+  countCustomerDevices(customerId: string): Promise<number> {
+    return this.#t.devices.count({ customer_id: customerId });
+  }
+  getDevice(id: string, lock?: Lock): Promise<DeviceRow | undefined> {
+    return this.#t.devices.get(id, lock);
+  }
+  /** Whether another pending or verified registration has this IMEI */
+  imeiTaken(imei: string, exceptId?: string): Promise<boolean> {
+    return this.#t.devices.exists({ imei, status: { $in: ['pending', 'verified'] }, ...(exceptId ? { id: { $ne: exceptId } } : {}) });
+  }
+  insertDevice(row: DeviceRow): Promise<DeviceRow> {
+    return this.#t.devices.insert(row);
+  }
+  updateDevice(id: string, patch: Partial<DeviceRow>): Promise<DeviceRow | undefined> {
+    return this.#t.devices.update(id, patch);
+  }
+  deleteDevice(id: string): Promise<boolean> {
+    return this.#t.devices.delete(id);
+  }
+  pageAdminDevices(f: { status?: string; customerId?: string; q?: string }, page: PageRequest): Promise<Page<DeviceRow>> {
+    const filter: Record<string, unknown> = {};
+    if (f.status) filter.status = f.status;
+    if (f.customerId) filter.customer_id = f.customerId;
+    const q = f.q?.trim();
+    if (q) {
+      const rx = { $regex: q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' };
+      const digits = q.replace(/[\s.-]/g, '');
+      filter.$or = [{ brand: rx }, { model: rx }, { order_ref: rx }, ...(/^\d{2,15}$/.test(digits) ? [{ imei: { $regex: digits } }] : [])];
+    }
+    return this.#t.devices.page(filter, page, { column: 'created_at', direction: 'desc' });
+  }
+  /** Requests per device id */
+  async deviceRequestCounts(ids: string[]): Promise<Map<string, number>> {
+    if (!ids.length) return new Map();
+    const rows = await this.#t.requests.aggregate<{ _id: string; n: number }>([{ $match: { device_id: { $in: ids } } }, { $group: { _id: '$device_id', n: { $sum: 1 } } }]);
+    return new Map(rows.map((r) => [String(r._id), r.n]));
   }
 }

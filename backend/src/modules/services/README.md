@@ -14,28 +14,41 @@ Services customers request or book in the app's department pages: OS installs an
 - Availability: free time slots from the provider's hours, the service's slot length and the bookings already made
 - Requests and bookings with a status customers and staff follow (requested, confirmed, in progress, completed, cancelled, declined)
 - Reviews customers leave after a completed request, and the ratings shown on services and providers
+- Saved providers (Booking's save button and the app's Saved page)
+- Provider points for the map and distances: the staff pin, else the staff-entered address geocoded (customers.geocodeAddress)
+- Registered devices for Post-sale: the phones customers register, staff verification and the warranty cover period, and the $0 price of covered-by-warranty services for a covered device
 
 **Not here:**
 - Payment: customers pay the provider (2026-10-22 decision: no online payment for requests and bookings in v1)
 - Product sales (phones, farm machines): catalog, cart and checkout
 - Pictures: media (content_image uploads)
+- The customer's location: customers.customerLocation (their geocoded default delivery address; no device location)
 
 ## Store API
 
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
 | GET | `/api/store/services/categories` | Visible categories of an area in order | visitor | `ServiceCategory[]` |
+| GET | `/api/store/services/area` | Where the lists measure distances from | visitor | `CustomerArea` |
 | GET | `/api/store/services/services` | Published services of an area | visitor | Page<ServiceCard> |
-| GET | `/api/store/services/services/{slug}` | A service with its provider, price table, terms, steps and newest reviews | visitor | `Service` |
+| GET | `/api/store/services/services/{slug}` | A service with its provider, price table, terms, full terms, steps and newest reviews | visitor | `Service` |
 | GET | `/api/store/services/services/{id}/reviews` | A service's reviews, newest first | visitor | Page<ServiceReview> |
-| GET | `/api/store/services/providers` | Published providers of an area (Booking: Available near you) | visitor | Page<ProviderCard> |
+| GET | `/api/store/services/providers` | Published providers of an area (Booking: Available near you, and the map) | visitor | Page<ProviderCard> |
 | GET | `/api/store/services/providers/{slug}` | A provider's page with its services, hours and staff | visitor | `Provider` |
+| GET | `/api/store/services/saved-providers` | Providers I saved, newest first | customer | Page<ProviderCard> |
+| PUT | `/api/store/services/saved-providers/{providerId}` | Save a provider | customer | `ProviderSaved` |
+| DELETE | `/api/store/services/saved-providers/{providerId}` | Remove a provider from my saved ones | customer | `ProviderSaved` |
 | GET | `/api/store/services/services/{id}/availability` | Free time slots of a bookable service, day by day | visitor | `AvailabilityDay[]` |
 | POST | `/api/store/services/requests` | Request or book a service _(idempotent)_ | customer | `RequestInput` → `ServiceRequest` |
 | GET | `/api/store/services/requests` | My requests and bookings, newest first | customer | Page<ServiceRequest> |
 | GET | `/api/store/services/requests/{id}` | One of my requests | customer | `ServiceRequest` |
 | POST | `/api/store/services/requests/{id}/cancel` | Cancel my request or booking | customer | `{ reason: string? }` → `ServiceRequest` |
 | POST | `/api/store/services/requests/{id}/review` | Rate a completed request | customer | `ReviewInput` → `ServiceRequest` |
+| GET | `/api/store/services/devices` | My registered devices, newest first | customer | `Device[]` |
+| POST | `/api/store/services/devices` | Register a device for post-sale cover _(idempotent)_ | customer | `DeviceInput` → `Device` |
+| GET | `/api/store/services/devices/{id}` | One of my devices | customer | `Device` |
+| PATCH | `/api/store/services/devices/{id}` | Change a pending or rejected device | customer | `DeviceInput` → `Device` |
+| DELETE | `/api/store/services/devices/{id}` | Remove one of my devices | customer | 204 No content |
 
 ## Admin API
 
@@ -60,6 +73,11 @@ Services customers request or book in the app's department pages: OS installs an
 | PATCH | `/api/admin/services/requests/{id}` | Confirm, start, complete, decline or cancel a request; move a booking; add notes _(audited)_ | staff<br>`services.requests.manage` | `RequestUpdate` → `RequestAdmin` |
 | GET | `/api/admin/services/reviews` | Reviews, newest first | staff<br>`services.view` | Page<ReviewAdmin> |
 | PATCH | `/api/admin/services/reviews/{id}` | Hide or show a review _(audited)_ | staff<br>`services.manage` | `{ status: enum(visible|hidden) }` → `ReviewAdmin` |
+| GET | `/api/admin/services/devices` | Registered devices, newest first | staff<br>`services.view` | Page<DeviceAdmin> |
+| GET | `/api/admin/services/devices/{id}` | A registered device | staff<br>`services.view` | `DeviceAdmin` |
+| POST | `/api/admin/services/devices/{id}/verify` | Verify a device and set its cover end _(audited)_ | staff<br>`services.devices.manage` | `DeviceVerifyInput` → `DeviceAdmin` |
+| POST | `/api/admin/services/devices/{id}/reject` | Reject a device, or withdraw its verification _(audited)_ | staff<br>`services.devices.manage` | `{ reason: string, staffNote: string? }` → `DeviceAdmin` |
+| PATCH | `/api/admin/services/devices/{id}` | Correct a device's details, its cover end or the staff note _(audited)_ | staff<br>`services.devices.manage` | `DeviceAdminUpdate` → `DeviceAdmin` |
 
 ## Types
 
@@ -182,6 +200,11 @@ Services customers request or book in the app's department pages: OS installs an
 | rating | `RatingSummary` |
 | fromPrice | `Money?` Lowest price of its published services |
 | nextFree | `string?` Booking providers: e.g. Next free: Today 3:30 PM |
+| address | `string?` Street address, e.g. 412 SE Morrison St, Portland, OR 97214 |
+| location | `GeoPoint?` Map pin: the staff pin, else the address geocoded; null when unknown |
+| distance | `string?` From the customer's default delivery address, e.g. 1.2 mi; null for visitors, customers without a geocoded default address, or a provider without a point |
+| openLabel | `string?` From its hours now (provider time zone): Open until 8 pm, Opens at 9 am, Closed now or Closed today |
+| saved | `bool` The signed-in customer saved this provider; false for visitors |
 
 ### Provider
 
@@ -199,11 +222,15 @@ Services customers request or book in the app's department pages: OS installs an
 | rating | `RatingSummary` |
 | fromPrice | `Money?` |
 | nextFree | `string?` |
+| address | `string?` |
+| distance | `string?` |
+| openLabel | `string?` |
+| saved | `bool` |
 | photos | `MediaRef[]` |
-| description | `text?` |
+| description | `text?` About the provider |
 | since | `int?` Year founded |
 | contacts | `Contacts` |
-| location | `GeoPoint?` Map pin |
+| location | `GeoPoint?` Map pin: the staff pin, else the address geocoded |
 | hours | `OpeningHours` |
 | staff | `ProviderStaff[]` |
 | replyTime | `string?` e.g. Replies within 1 hour |
@@ -227,7 +254,9 @@ Services customers request or book in the app's department pages: OS installs an
 | description | `text?` |
 | since | `int?` |
 | contacts | `Contacts` |
-| location | `GeoPoint?` |
+| location | `GeoPoint?` The pin staff set |
+| point | `GeoPoint?` Where the map and distances place it: the pin, else the address geocoded when saved |
+| pointSource | `enum(pin|address)?` Where point comes from; null when the address could not be geocoded |
 | hours | `OpeningHours` |
 | staff | `ProviderStaff[]` |
 | replyTime | `string?` |
@@ -253,7 +282,7 @@ Services customers request or book in the app's department pages: OS installs an
 | description | `text?` |
 | since | `int?` |
 | contacts | `Contacts?` |
-| location | `GeoPoint?` |
+| location | `GeoPoint?` A pin; without one the address (contacts.address and city) is geocoded |
 | hours | `OpeningHours?` |
 | staff | `ProviderStaff[]?` |
 | replyTime | `string?` |
@@ -302,6 +331,8 @@ Services customers request or book in the app's department pages: OS installs an
 | coverage | `string?` Where it is offered, e.g. Millbrook and 15 km around |
 | tags | `string[]` Short facts on the card, e.g. Free pickup |
 | rating | `RatingSummary` |
+| distance | `string?` The provider's distance from the customer's default delivery address, e.g. 1.2 mi; null when unknown |
+| coveredByWarranty | `bool` Post-sale: free for a registered device under Marketly post-sale cover |
 
 ### Service
 
@@ -324,6 +355,8 @@ Services customers request or book in the app's department pages: OS installs an
 | coverage | `string?` |
 | tags | `string[]` |
 | rating | `RatingSummary` |
+| distance | `string?` |
+| coveredByWarranty | `bool` |
 | description | `text?` |
 | included | `string[]` |
 | requirements | `string[]` Eligibility and requirements |
@@ -333,6 +366,8 @@ Services customers request or book in the app's department pages: OS installs an
 | priceTable | `PriceRow[]` Price by model, or schedule and prices |
 | priceTableTitle | `string?` e.g. Price by model, Schedule and prices |
 | terms | `string[]` e.g. warranty terms |
+| fullTerms | `text?` The full terms behind Read full terms (plain text, paragraphs split by blank lines); null when there are none |
+| yourDevice | `CoveredDevicePrice?` Covered-by-warranty post-sale services, for a signed-in customer with a verified device whose cover runs today: its $0 price and the sticky bar |
 | steps | `ServiceStep[]` How it works, in order |
 | slotMinutes | `int?` Bookable services: the length of one slot; null when the service is requested without a time |
 | durationMinutes | `int?` |
@@ -370,6 +405,8 @@ Services customers request or book in the app's department pages: OS installs an
 | priceTableTitle | `string?` |
 | terms | `string[]` |
 | steps | `ServiceStep[]` |
+| fullTerms | `text?` |
+| coveredByWarranty | `bool` |
 | slotMinutes | `int?` |
 | durationMinutes | `int?` |
 | status | `enum(published|hidden)` |
@@ -408,6 +445,8 @@ Services customers request or book in the app's department pages: OS installs an
 | priceTableTitle | `string?` |
 | terms | `string[]?` |
 | steps | `ServiceStep[]?` |
+| fullTerms | `text?` At most 20,000 characters |
+| coveredByWarranty | `bool?` Post-sale services only: free for a covered registered device |
 | slotMinutes | `int?` 15–480; set for services booked at a time |
 | durationMinutes | `int?` |
 | status | `enum(published|hidden)?` |
@@ -451,8 +490,18 @@ Services customers request or book in the app's department pages: OS installs an
 | serviceId | `uuid` |
 | slotStart | `datetime?` Bookable services: the chosen slot (must still be free) |
 | staffId | `string?` A chosen staff member; any free one when omitted |
+| deviceId | `uuid?` OS install and post-sale: one of my registered devices. A verified device under cover makes a covered-by-warranty service $0 |
 | contact | `RequestContact` |
 | details | `RequestDetails?` |
+
+### RequestDevice
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| label | `string` e.g. Galaxy S26 Ultra · 256 GB |
+| imeiLast4 | `string` |
+| covered | `bool` The request is free under the device's warranty cover |
 
 ### ServiceRequest
 
@@ -471,7 +520,8 @@ Services customers request or book in the app's department pages: OS installs an
 | staff | `ProviderStaff?` |
 | contact | `RequestContact` |
 | details | `RequestDetails` |
-| priceLabel | `string?` e.g. from $29, paid at the shop |
+| priceLabel | `string?` e.g. from $29 · pay at the provider, or $0 · covered by your warranty |
+| device | `RequestDevice?` The registered device the request is for |
 | providerNote | `string?` What the provider or staff said, e.g. a decline reason |
 | canCancel | `bool` |
 | canReview | `bool` |
@@ -494,6 +544,7 @@ Services customers request or book in the app's department pages: OS installs an
 | slotStart | `datetime?` |
 | slotEnd | `datetime?` |
 | staff | `ProviderStaff?` |
+| device | `RequestDevice?` |
 | contact | `RequestContact` |
 | details | `RequestDetails` |
 | providerNote | `string?` |
@@ -542,6 +593,118 @@ Services customers request or book in the app's department pages: OS installs an
 | status | `enum(visible|hidden)` |
 | createdAt | `datetime` |
 
+### CustomerArea
+
+| Field | Type |
+|---|---|
+| located | `bool` The customer has a geocoded default delivery address, so lists show distances and sort by Nearest |
+| city | `string?` The default address's city (the Welfare location button, N services near Portland); null when not located |
+| region | `string?` State code, e.g. OR |
+| addressLabel | `string?` The address's first line, e.g. 1120 SW 5th Ave |
+
+### ProviderSaved
+
+| Field | Type |
+|---|---|
+| providerId | `uuid` |
+| saved | `bool` |
+
+### CoveredDevicePrice
+
+| Field | Type |
+|---|---|
+| deviceId | `uuid` |
+| label | `string` The device, e.g. Galaxy S26 Ultra |
+| priceRowLabel | `string?` The price table row matched to the device's model (the app marks it · your phone); null when no row matches |
+| normalPrice | `string?` What it costs without cover, struck through: the matched row's price, else the service's from price, e.g. $229 |
+| price | `Money` What the customer pays: 0 |
+| priceText | `string` $0 |
+| barLabel | `string` Sticky bar line, e.g. Galaxy S26 Ultra · warranty |
+| coveredUntil | `date` |
+| coverageLabel | `string` e.g. Covered to Oct 2027 |
+
+### Device
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| brand | `string` e.g. Samsung |
+| model | `string` e.g. Galaxy S26 Ultra |
+| storage | `string?` e.g. 256 GB |
+| label | `string` Model and storage, e.g. Galaxy S26 Ultra · 256 GB |
+| imeiLast4 | `string` The full IMEI is never returned to the customer |
+| imeiLabel | `string` IMEI ending 4417 |
+| purchaseDate | `date` |
+| purchaseLabel | `string` Bought Oct 2, 2026 |
+| orderRef | `string?` The Marketly order it was bought in, if given |
+| status | `enum(pending|verified|rejected)` |
+| statusLabel | `string` Waiting for verification, Covered to Oct 2027, Cover ended Oct 2027 or Not verified |
+| covered | `bool` Verified and its cover runs today |
+| coveredUntil | `date?` Set by staff when verifying |
+| coverageLabel | `string?` Covered to Oct 2027 while covered; null otherwise |
+| rejectReason | `string?` Why staff could not verify it |
+| canEdit | `bool` Pending or rejected devices can be changed (a rejected one goes back to pending) |
+| createdAt | `datetime` |
+
+### DeviceInput
+
+| Field | Type |
+|---|---|
+| brand | `string` |
+| model | `string` |
+| storage | `string?` |
+| imei | `string` 15 digits (spaces and dashes are ignored), Luhn-checked |
+| purchaseDate | `date` Not in the future |
+| orderRef | `string?` Optional Marketly order reference |
+
+### DeviceAdmin
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| customerId | `uuid` |
+| customerName | `string?` From customers, when known |
+| brand | `string` |
+| model | `string` |
+| storage | `string?` |
+| label | `string` |
+| imei | `string?` The full IMEI |
+| imeiLast4 | `string` |
+| purchaseDate | `date` |
+| orderRef | `string?` |
+| status | `enum(pending|verified|rejected)` |
+| coveredUntil | `date?` |
+| suggestedCoveredUntil | `date` The purchase date plus 12 months: the default when verifying |
+| covered | `bool` |
+| rejectReason | `string?` |
+| staffNote | `string?` |
+| verifiedAt | `datetime?` |
+| verifiedBy | `string?` Who verified it, e.g. staff:<id> |
+| requestCount | `int` Requests made for this device |
+| history | `StatusChange[]` Status changes, oldest first |
+| createdAt | `datetime` |
+| updatedAt | `datetime` |
+
+### DeviceAdminUpdate
+
+| Field | Type |
+|---|---|
+| brand | `string?` |
+| model | `string?` |
+| storage | `string?` |
+| imei | `string?` 15 digits, Luhn-checked |
+| purchaseDate | `date?` |
+| orderRef | `string?` |
+| coveredUntil | `date?` Verified devices: change the end of the cover |
+| staffNote | `string?` Staff only |
+
+### DeviceVerifyInput
+
+| Field | Type |
+|---|---|
+| coveredUntil | `date?` End of the warranty cover; default the purchase date plus 12 months |
+| staffNote | `string?` |
+
 ## Status flows
 
 ### Service request (`ServiceRequest.status`)
@@ -561,6 +724,20 @@ stateDiagram-v2
 ```
 
 Customers cancel while requested or confirmed (a booking up to 2 hours before its slot). Staff confirm, start, complete, decline or cancel on the provider's behalf. A cancelled or declined booking frees its slot.
+
+### Registered device (`Device.status`)
+
+```mermaid
+stateDiagram-v2
+  [*] --> pending
+  pending --> verified: verify
+  pending --> rejected: reject
+  rejected --> pending: resubmit
+  rejected --> verified: verify
+  verified --> rejected: reject
+```
+
+Customers register a device (pending) and may change it while pending or rejected; changing a rejected one resubmits it. Staff verify it with a cover end date (default the purchase date plus 12 months) or reject it with a reason, and may withdraw a verification.
 
 ## Data (schema `services`)
 
@@ -596,6 +773,7 @@ Indexes: `unique (area, slug)`, `(area, position)`
 | since | int? |
 | contacts | jsonb |
 | location | jsonb? |
+| point | jsonb? (the address geocoded when there is no pin) |
 | hours | jsonb |
 | staff | jsonb |
 | reply_time | text? |
@@ -638,6 +816,8 @@ Indexes: `(status, name)`, `(category_id, status)`
 | price_table | jsonb |
 | price_table_title | text? |
 | terms | jsonb |
+| full_terms | text? |
+| covered_by_warranty | bool |
 | steps | jsonb |
 | slot_minutes | int? |
 | duration_minutes | int? |
@@ -664,6 +844,8 @@ Indexes: `(area, status, position)`, `(provider_id, status, position)`, `(catego
 | slot_start | timestamptz? |
 | slot_end | timestamptz? |
 | staff_id | text? |
+| device_id | uuid? → devices |
+| device | jsonb? (RequestDevice at the time of the request) |
 | contact | jsonb |
 | details | jsonb |
 | status | text |
@@ -674,7 +856,7 @@ Indexes: `(area, status, position)`, `(provider_id, status, position)`, `(catego
 | created_at | timestamptz |
 | updated_at | timestamptz |
 
-Indexes: `(customer_id, created_at)`, `(area, status, created_at)`, `(provider_id, slot_start)`, `(service_id, slot_start)`
+Indexes: `(customer_id, created_at)`, `(area, status, created_at)`, `(provider_id, slot_start)`, `(service_id, slot_start)`, `(device_id)`
 
 **reviews**
 
@@ -693,11 +875,55 @@ Indexes: `(customer_id, created_at)`, `(area, status, created_at)`, `(provider_i
 
 Indexes: `(service_id, status, created_at)`
 
+**saved_providers**: Providers customers saved (customers-module id)
+
+| Column | Type |
+|---|---|
+| id | uuid pk |
+| customer_id | uuid |
+| provider_id | uuid → providers |
+| created_at | timestamptz |
+
+Indexes: `unique (customer_id, provider_id)`, `(customer_id, created_at)`, `(provider_id)`
+
+**devices**: Phones customers registered for post-sale cover (customers-module id)
+
+| Column | Type |
+|---|---|
+| id | uuid pk |
+| customer_id | uuid |
+| brand | text |
+| model | text |
+| storage | text? |
+| imei | text (15 digits) |
+| imei_last4 | text |
+| purchase_date | date |
+| order_ref | text? |
+| status | text (pending|verified|rejected) |
+| covered_until | date? |
+| reject_reason | text? |
+| staff_note | text? |
+| verified_at | timestamptz? |
+| verified_by | text? |
+| history | jsonb |
+| created_at | timestamptz |
+| updated_at | timestamptz |
+
+Indexes: `(customer_id, created_at)`, `(status, created_at)`, `(imei)`
+
 ## Events
 
 | Publishes | When | Payload | Consumed by |
 |---|---|---|---|
 | `services.request.status_changed` | Staff or the customer change a request's status | `{ requestId: uuid, customerId: uuid, status: string, ref: string }` | notifications |
+| `services.device.verified` | Staff verify a registered device | `{ deviceId: uuid, customerId: uuid, label: string, coveredUntil: date }` | notifications |
+| `services.device.rejected` | Staff reject a registered device or withdraw its verification | `{ deviceId: uuid, customerId: uuid, label: string, reason: string }` | notifications |
+
+## In-process API (for other modules)
+
+| Function | Signature | Used by |
+|---|---|---|
+| exportCustomerData | `(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]`<br>The customer's service requests and bookings (reference, service, provider, time, contact, details, device, status history), reviews, saved providers and registered devices (with the full IMEI) for the personal data export. Requests and reviews are found by the account id, saved providers and devices by the customers-module id (and the account id they fall back to). Staff notes are left out. | customers |
 
 ## Permissions
 
@@ -706,6 +932,7 @@ Indexes: `(service_id, status, created_at)`
 | `services.view` | staff | See providers, services, requests and reviews in Admin › Departments |
 | `services.manage` | staff | Providers, categories, services; hide reviews |
 | `services.requests.manage` | staff | Confirm, complete, decline and move requests and bookings |
+| `services.devices.manage` | staff | Verify or reject registered devices, set their warranty cover and see full IMEIs |
 
 ## Error codes
 
@@ -717,6 +944,10 @@ Indexes: `(service_id, status, created_at)`
 | `SLOT_REQUIRED` | 400 | Pick a time for this service. |
 | `TOO_LATE_TO_CANCEL` | 409 | It is too close to the booking to cancel in the app; call the provider. |
 | `ALREADY_REVIEWED` | 409 | You already rated this. |
+| `SAVED_LIMIT` | 409 | You saved the most providers you can; remove one first. |
+| `IMEI_TAKEN` | 409 | This phone is already registered. |
+| `DEVICE_LIMIT` | 409 | You registered the most devices you can; remove one first. |
+| `DEVICE_LOCKED` | 409 | A verified device can't be changed; remove it and register it again, or contact support. |
 
 ## Settings
 
@@ -731,3 +962,7 @@ Indexes: `(service_id, status, created_at)`
 - Ratings come only from reviews of completed requests (one per request). RatingSummary.average is null without reviews.
 - Request refs are SR- plus five characters from 23456789ABCDEFGHJKLMNPQRSTUVWXYZ.
 - The customer's name on a review is their first name and last initial (customers.getProfile), else Customer.
+- Distances (2026-10-22): from customers.customerLocation (the customer's geocoded default delivery address) to the provider's point, as 1.2 mi / 14 mi (kernel/lib/geo.ts). A provider's point is the staff pin, else its address (contacts.address and city) geocoded with customers.geocodeAddress when staff save it. Visitors and customers without a located address see no distance; Nearest then falls back to the normal order.
+- Saved providers and registered devices are keyed by the customers-module id (the account id when the account has no customer record); requests and reviews keep the account id.
+- Registered devices: the IMEI is 15 digits with a valid Luhn check digit; customers only ever get its last 4 digits back, staff with services.devices.manage see it whole. One pending or verified registration per IMEI; at most 10 devices per customer.
+- Covered by warranty: a post-sale service flagged coveredByWarranty is $0 for a verified device whose coveredUntil is today or later. The normal price shown struck through is the price table row that matches the device's model (row labels like Galaxy S25 / S25+ match Galaxy S25 and Galaxy S25+), else the service's from price.

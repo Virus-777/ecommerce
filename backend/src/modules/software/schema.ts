@@ -46,6 +46,7 @@ const apps = new Schema(
     sale_ends_at: { type: Date, default: null },
     currency: { type: String, required: true },
     licence_label: { type: String, default: null },
+    licence_devices: { type: Number, default: null, validate: integer }, // devices one licence key unlocks; null = not limited
     package: { type: Schema.Types.Mixed, default: null }, // AppFile
     databases: { type: Schema.Types.Mixed }, // AppFile[]
     databases_note: { type: String, default: null },
@@ -167,14 +168,19 @@ const entitlements = new Schema(
     source: { type: String, required: true, enum: ["free","purchase","pack","staff"] },
     purchase_id: { type: String, default: null },
     granted_by: { type: String, default: null },
+    licence_key: { type: String, default: null }, // XXXXX-XXXXX-XXXXX-XXXXX; paid apps only
+    licence_issued_at: { type: Date, default: null },
+    licence_reissues: { type: Number, default: null, validate: integer }, // times staff replaced the key; null = never
     created_at: { type: Date, required: true },
     /** lock-by-write counter (kernel/mongo/table.ts) */
     _lock: Number,
   },
   collectionOptions("software.entitlements"),
 );
+entitlements.index({"licence_key":1}, {"name":"entitlements_licence_key_8be2ce","unique":true,"partialFilterExpression":{"licence_key":{"$gte":""}}});
 entitlements.index({"customer_id":1,"app_id":1}, {"name":"entitlements_customer_id_app_id_2bee7e","unique":true});
 entitlements.index({"app_id":1}, {"name":"entitlements_app_id_1d3d17"});
+entitlements.index({"created_at":1}, {"name":"entitlements_created_at_f6b874"});
 
 const reviews = new Schema(
   {

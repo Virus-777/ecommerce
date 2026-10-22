@@ -195,3 +195,45 @@ export const DEFAULT_RAILS: readonly DefaultRail[] = [
   { key: 'browsers', title: 'Browsers', source: 'category', style: 'list', categorySlug: 'browsers', limit: 3 },
   { key: 'pc-apps', title: 'PC apps', source: 'platform', style: 'carousel', platform: 'windows', limit: 10 },
 ];
+
+/* ------------------------------------------------------------------ licence keys */
+
+/** XXXXX-XXXXX-XXXXX-XXXXX from the unambiguous alphabet (no 0/O, 1/I/L) */
+export const LICENCE_KEY_PATTERN = /^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{5}(-[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{5}){3}$/;
+export const LICENCE_DEVICES_MAX = 100;
+
+/** A new licence key: four groups of five characters, drawn from a cryptographic source by default */
+export function makeLicenceKey(randomBytes: (n: number) => Uint8Array): string {
+  // 32 characters divide 256 evenly, so a byte modulo 32 is uniform
+  const bytes = randomBytes(20);
+  let s = '';
+  for (let i = 0; i < 20; i++) {
+    if (i && i % 5 === 0) s += '-';
+    s += REF_ALPHABET[bytes[i]! % REF_ALPHABET.length];
+  }
+  return s;
+}
+
+/** A licence key as a customer may type it: upper case, spaces and dashes in any place (null when it is not one) */
+export function normaliseLicenceKey(text: string): string | null {
+  const raw = text.toUpperCase().replace(/[\s-]+/g, '');
+  if (raw.length !== 20) return null;
+  const key = raw.match(/.{5}/g)!.join('-');
+  return LICENCE_KEY_PATTERN.test(key) ? key : null;
+}
+
+/** The devices one key unlocks, read from a licence label written before licenceDevices existed ("One-time purchase · 2 devices") */
+export function devicesFromLabel(label: string | null | undefined): number | null {
+  const m = /\b(\d{1,3})\s*devices?\b/i.exec(label ?? '');
+  const n = m ? Number(m[1]) : NaN;
+  return Number.isInteger(n) && n >= 1 && n <= LICENCE_DEVICES_MAX ? n : null;
+}
+
+/** "Use on up to 2 devices", "Use on 1 device", "Use on any number of devices" */
+export function devicesLabel(devices: number | null | undefined): string {
+  if (!devices) return 'Use on any number of devices';
+  return devices === 1 ? 'Use on 1 device' : `Use on up to ${devices} devices`;
+}
+
+/** The last five characters of a key, for the action history */
+export const keyTail = (key: string | null | undefined) => (key ? `…${key.slice(-5)}` : null);

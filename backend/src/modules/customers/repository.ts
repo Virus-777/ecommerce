@@ -185,11 +185,22 @@ export class CustomersRepository {
     return customerIds.length ? this.#t.addresses.find({ customer_id: oneOf([...new Set(customerIds)]), is_default: true, deleted_at: null }) : [];
   }
 
+  /**
+   * Addresses for the geocoding backfill: never geocoded, or not placed and last tried before `retryBefore`.
+   * Defaults first (they are the customers' locations), oldest first; `skip` leaves out ones already tried this run.
+   */
+  addressesToGeocode(retryBefore: Date, limit: number, skip: readonly string[] = []): Promise<AddressRow[]> {
+    return this.#t.addresses.find(
+      { deleted_at: null, $or: [{ geocoded_at: null }, { lat: null, geocoded_at: { $lt: retryBefore } }], ...(skip.length ? { id: { $nin: [...skip] } } : {}) },
+      { sort: { is_default: -1, created_at: 1 }, limit },
+    );
+  }
+
   /** Overwrites personal fields of every address and soft-deletes them (closure) */
   async anonymiseAddresses(customerId: string, now: Date): Promise<void> {
     await this.#t.addresses.updateMany(
       { customer_id: customerId },
-      { label: null, name: 'Removed', line1: 'Removed', line2: null, city: 'Removed', postal_code: '00000', phone: null, delivery_instructions: null, is_default: false, deleted_at: now, updated_at: now },
+      { label: null, name: 'Removed', line1: 'Removed', line2: null, city: 'Removed', postal_code: '00000', phone: null, delivery_instructions: null, lat: null, lng: null, geocode_precision: null, is_default: false, deleted_at: now, updated_at: now },
     );
   }
 

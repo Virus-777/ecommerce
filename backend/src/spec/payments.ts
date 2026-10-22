@@ -122,10 +122,10 @@ export const AuthorizeInput: z.ZodType<AuthorizeInput> = z.object({
 
 export interface PurchaseAuthorizeInput {
   /** The module that owns the purchase */
-  module: "software" | "food";
-  /** The purchase or food order id in that module */
+  module: "software" | "food" | "farm";
+  /** The purchase, food order or farm order id in that module */
   refId: string;
-  /** Its customer-facing reference, e.g. SW-4K7Q2 or FD-9QX3M */
+  /** Its customer-facing reference, e.g. SW-4K7Q2, FD-9QX3M or FM-7KQ2D */
   ref: string;
   /** Customers-module id */
   customerId: string;
@@ -138,9 +138,9 @@ export interface PurchaseAuthorizeInput {
 }
 
 export const PurchaseAuthorizeInput: z.ZodType<PurchaseAuthorizeInput> = z.object({
-  module: z.enum(["software", "food"]).describe("The module that owns the purchase"),
-  refId: z.uuid().describe("The purchase or food order id in that module"),
-  ref: z.string().describe("Its customer-facing reference, e.g. SW-4K7Q2 or FD-9QX3M"),
+  module: z.enum(["software", "food", "farm"]).describe("The module that owns the purchase"),
+  refId: z.uuid().describe("The purchase, food order or farm order id in that module"),
+  ref: z.string().describe("Its customer-facing reference, e.g. SW-4K7Q2, FD-9QX3M or FM-7KQ2D"),
   customerId: z.uuid().describe("Customers-module id"),
   get amount() {
     return common.Money;
@@ -154,7 +154,7 @@ export const PurchaseAuthorizeInput: z.ZodType<PurchaseAuthorizeInput> = z.objec
 
 export interface PurchasePaymentStatus {
   intentId: string;
-  module: "software" | "food";
+  module: "software" | "food" | "farm";
   refId: string;
   /** accepted: authorized, not captured yet */
   state: "accepted" | "pending" | "failed" | "requires_action" | "captured" | "voided";
@@ -169,7 +169,7 @@ export interface PurchasePaymentStatus {
 
 export const PurchasePaymentStatus: z.ZodType<PurchasePaymentStatus> = z.object({
   intentId: z.uuid(),
-  module: z.enum(["software", "food"]),
+  module: z.enum(["software", "food", "farm"]),
   refId: z.uuid(),
   state: z.enum(["accepted", "pending", "failed", "requires_action", "captured", "voided"]).describe("accepted: authorized, not captured yet"),
   title: z.string(),
@@ -1086,7 +1086,7 @@ export const PaymentsPaymentOrphanedEvent: z.ZodType<PaymentsPaymentOrphanedEven
 /** payments.purchase.authorized: A purchase intent is authorized (directly, after a bank challenge or after a pending check) */
 export interface PaymentsPurchaseAuthorizedEvent {
   intentId: string;
-  module: "software" | "food";
+  module: "software" | "food" | "farm";
   refId: string;
   customerId: string;
   amount: common.Money;
@@ -1096,7 +1096,7 @@ export interface PaymentsPurchaseAuthorizedEvent {
 
 export const PaymentsPurchaseAuthorizedEvent: z.ZodType<PaymentsPurchaseAuthorizedEvent> = z.object({
   intentId: z.uuid(),
-  module: z.enum(["software", "food"]),
+  module: z.enum(["software", "food", "farm"]),
   refId: z.uuid(),
   customerId: z.uuid(),
   get amount() {
@@ -1109,7 +1109,7 @@ export const PaymentsPurchaseAuthorizedEvent: z.ZodType<PaymentsPurchaseAuthoriz
 /** payments.purchase.failed: A purchase intent is declined, its bank challenge fails, or a pending check ends declined */
 export interface PaymentsPurchaseFailedEvent {
   intentId: string;
-  module: "software" | "food";
+  module: "software" | "food" | "farm";
   refId: string;
   customerId: string;
   declineCategory: string;
@@ -1119,7 +1119,7 @@ export interface PaymentsPurchaseFailedEvent {
 
 export const PaymentsPurchaseFailedEvent: z.ZodType<PaymentsPurchaseFailedEvent> = z.object({
   intentId: z.uuid(),
-  module: z.enum(["software", "food"]),
+  module: z.enum(["software", "food", "farm"]),
   refId: z.uuid(),
   customerId: z.uuid(),
   declineCategory: z.string(),
@@ -1130,7 +1130,7 @@ export const PaymentsPurchaseFailedEvent: z.ZodType<PaymentsPurchaseFailedEvent>
 /** payments.purchase.captured: A purchase intent is captured */
 export interface PaymentsPurchaseCapturedEvent {
   intentId: string;
-  module: "software" | "food";
+  module: "software" | "food" | "farm";
   refId: string;
   customerId: string;
   amount: common.Money;
@@ -1140,7 +1140,7 @@ export interface PaymentsPurchaseCapturedEvent {
 
 export const PaymentsPurchaseCapturedEvent: z.ZodType<PaymentsPurchaseCapturedEvent> = z.object({
   intentId: z.uuid(),
-  module: z.enum(["software", "food"]),
+  module: z.enum(["software", "food", "farm"]),
   refId: z.uuid(),
   customerId: z.uuid(),
   get amount() {
@@ -1153,14 +1153,14 @@ export const PaymentsPurchaseCapturedEvent: z.ZodType<PaymentsPurchaseCapturedEv
 /** payments.purchase.voided: A purchase authorization is released without capture */
 export interface PaymentsPurchaseVoidedEvent {
   intentId: string;
-  module: "software" | "food";
+  module: "software" | "food" | "farm";
   refId: string;
   reason: string;
 }
 
 export const PaymentsPurchaseVoidedEvent: z.ZodType<PaymentsPurchaseVoidedEvent> = z.object({
   intentId: z.uuid(),
-  module: z.enum(["software", "food"]),
+  module: z.enum(["software", "food", "farm"]),
   refId: z.uuid(),
   reason: z.string(),
 });
@@ -1388,23 +1388,23 @@ export const PaymentsMethodRemovedEvent: z.ZodType<PaymentsMethodRemovedEvent> =
 
 /** What other modules may call in-process: `ctx.use('payments')` (or `ctx.tryUse` for an optional dependency). */
 export interface PaymentsPublicApi {
-  /** Accepted brands, saved methods, wallet availability and a setup session for a new card Used by: checkout, software, food. */
+  /** Accepted brands, saved methods, wallet availability and a setup session for a new card Used by: checkout, software, food, farm. */
   listOptions(owner: { customerId?: string, guestSessionId?: string }, amount: common.Money): Promise<PaymentOptions>;
   /** Create an intent for a checkout attempt and authorize it. Returns accepted, failed (with decline), pending_check (uncertain) or requires_action. Only one non-failed intent per checkout session at a time; the same key returns the first result. Used by: checkout. */
   authorize(input: AuthorizeInput, idempotencyKey: string): Promise<AuthorizeResult>;
   /** Attach the created order and its seller-group allocations. Also done on orders.order.placed. Used by: checkout. */
   linkOrder(intentId: string, orderId: string, allocations: Allocation[]): Promise<void>;
-  /** Finish an authorization after a bank challenge or wallet confirmation (checkout calls it from POST /sessions/{id}/complete-action; software and food call it for purchase intents) Used by: checkout, software, food. */
+  /** Finish an authorization after a bank challenge or wallet confirmation (checkout calls it from POST /sessions/{id}/complete-action; software, food and farm call it for purchase intents) Used by: checkout, software, food, farm. */
   completeAction(intentId: string, resultToken: string, idempotencyKey: string): Promise<AuthorizeResult>;
   /** Current customer-facing state; refresh asks the provider first Used by: checkout. */
   getIntentStatus(intentId: string, refresh?: boolean): Promise<PaymentStatusView>;
-  /** Release an authorization (abandoned checkout, order cancelled before capture, a food order declined or cancelled before delivery) Used by: checkout, software, food. */
+  /** Release an authorization (abandoned checkout, order cancelled before capture, a food order declined or cancelled before delivery, a farm order rejected, cancelled or expired before the dealer confirms) Used by: checkout, software, food, farm. */
   voidIntent(intentId: string, reason: string): Promise<void>;
-  /** Create a purchase intent (a payment that is not a checkout order: a software purchase or a food order, 2026-10-22) and authorize it on the card. Returns accepted, failed, pending_check or requires_action like authorize. Only one non-failed intent per (module, refId) at a time; the same key returns the first result. Publishes payments.purchase.authorized or payments.purchase.failed, never the payments.payment.* events (those belong to checkout orders). Used by: software, food. */
+  /** Create a purchase intent (a payment that is not a checkout order: a software purchase, a food order, or a farm order paid in full or its pay-on-delivery deposit, 2026-10-22) and authorize it on the card. Returns accepted, failed, pending_check or requires_action like authorize. Only one non-failed intent per (module, refId) at a time; the same key returns the first result. Publishes payments.purchase.authorized or payments.purchase.failed, never the payments.payment.* events (those belong to checkout orders). Used by: software, food, farm. */
   authorizePurchase(input: PurchaseAuthorizeInput, idempotencyKey: string): Promise<AuthorizeResult>;
-  /** Capture the whole authorized amount of a purchase intent (software right after authorization; food when the order is delivered). Publishes payments.purchase.captured. Fails with ILLEGAL_TRANSITION unless the intent is an authorized purchase intent. Used by: software, food. */
+  /** Capture the whole authorized amount of a purchase intent (software right after authorization; food when the order is delivered; farm when the dealer confirms the order). Publishes payments.purchase.captured. Fails with ILLEGAL_TRANSITION unless the intent is an authorized purchase intent. Used by: software, food, farm. */
   capturePurchase(intentId: string): Promise<void>;
-  /** Customer-facing state of a purchase intent; refresh asks the provider first Used by: software, food. */
+  /** Customer-facing state of a purchase intent; refresh asks the provider first Used by: software, food, farm. */
   getPurchaseStatus(intentId: string, refresh?: boolean): Promise<PurchasePaymentStatus>;
   /** Per item: paid, refunded, in flight (requested, processing and failed refunds) and remaining. The cap for every refund. Used by: returns, orders, support, finance. */
   remainingRefundable(orderId: string, orderItemIds?: string[]): Promise<RefundableSummary>;
@@ -1432,14 +1432,14 @@ export interface PaymentsPublicApi {
 
 /** Rows of this module's spec tables, as repositories read them from its collections (`payments.<table>`, ctx.mongo.table(name)). */
 export interface PaymentsDb {
-  /** One per checkout payment attempt, or per purchase payment attempt (software, food) */
+  /** One per checkout payment attempt, or per purchase payment attempt (software, food, farm) */
   intents: {
     id: string;
     ref: string;
     purpose: 'checkout' | 'purchase';
-    /** software|food; purchase intents only */
+    /** software|food|farm; purchase intents only */
     purchase_module: string | null;
-    /** the purchase or food order id in that module */
+    /** the purchase, food order or farm order id in that module */
     purchase_ref_id: string | null;
     purchase_ref: string | null;
     /** null for purchase intents */

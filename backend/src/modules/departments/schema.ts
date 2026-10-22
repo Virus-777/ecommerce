@@ -6,7 +6,7 @@
  * (kernel/mongo/schema.ts); repositories reach them through ctx.mongo.table(name).
  */
 import { Schema } from 'mongoose';
-import { collectionOptions, integer } from '../../kernel/mongo/schemas.js';
+import { collectionOptions, DATE, integer } from '../../kernel/mongo/schemas.js';
 
 /** One row (id phones): the products of the Phone tab in order */
 const phone_picks = new Schema(
@@ -104,6 +104,7 @@ const blog_replies = new Schema(
     author_name: { type: String, required: true },
     text: { type: String, required: true },
     status: { type: String, required: true },
+    like_count: { type: Number, required: true, validate: integer }, // customers who liked it
     created_at: { type: Date, required: true },
     /** lock-by-write counter (kernel/mongo/table.ts) */
     _lock: Number,
@@ -209,7 +210,8 @@ const games = new Schema(
     featured: { type: Boolean, required: true },
     description: { type: String, default: null },
     how_to_play: { type: Schema.Types.Mixed },
-    prizes: { type: Schema.Types.Mixed },
+    prizes: { type: Schema.Types.Mixed }, // tiers: ranks, reward, from_rank, to_rank, campaign_id
+    prize_note: { type: String, default: null },
     status: { type: String, required: true },
     position: { type: Number, required: true, validate: integer },
     created_at: { type: Date, required: true },
@@ -237,6 +239,181 @@ const rankings = new Schema(
   collectionOptions("departments.rankings"),
 );
 rankings.index({"game_id":1,"period":1}, {"name":"rankings_game_id_period_e2c735","unique":true});
+
+/** Posts a customer saved (bookmarks) */
+const blog_saves = new Schema(
+  {
+    _id: { type: String, required: true }, // id
+    post_id: { type: String, required: true },
+    customer_id: { type: String, required: true },
+    saved_at: { type: Date, required: true },
+    /** lock-by-write counter (kernel/mongo/table.ts) */
+    _lock: Number,
+  },
+  collectionOptions("departments.blog_saves"),
+);
+blog_saves.index({"customer_id":1,"post_id":1}, {"name":"blog_saves_customer_id_post_id_f715df","unique":true});
+blog_saves.index({"customer_id":1,"saved_at":1}, {"name":"blog_saves_customer_id_saved_at_8ababc"});
+blog_saves.index({"post_id":1}, {"name":"blog_saves_post_id_5e6537"});
+
+/** Authors a customer follows */
+const blog_follows = new Schema(
+  {
+    _id: { type: String, required: true }, // id
+    author_id: { type: String, required: true },
+    customer_id: { type: String, required: true },
+    followed_at: { type: Date, required: true },
+    /** lock-by-write counter (kernel/mongo/table.ts) */
+    _lock: Number,
+  },
+  collectionOptions("departments.blog_follows"),
+);
+blog_follows.index({"author_id":1,"customer_id":1}, {"name":"blog_follows_author_id_customer_id_ed1705","unique":true});
+blog_follows.index({"customer_id":1,"followed_at":1}, {"name":"blog_follows_customer_id_followed_at_f24258"});
+
+const blog_reply_likes = new Schema(
+  {
+    _id: { type: String, required: true }, // id
+    reply_id: { type: String, required: true },
+    post_id: { type: String, required: true },
+    customer_id: { type: String, required: true },
+    at: { type: Date, required: true },
+    /** lock-by-write counter (kernel/mongo/table.ts) */
+    _lock: Number,
+  },
+  collectionOptions("departments.blog_reply_likes"),
+);
+blog_reply_likes.index({"reply_id":1,"customer_id":1}, {"name":"blog_reply_likes_reply_id_customer_id_a9e7d5","unique":true});
+blog_reply_likes.index({"post_id":1,"customer_id":1}, {"name":"blog_reply_likes_post_id_customer_id_e45bf1"});
+
+/** Customer reviews of companies and games: one per customer and target, editable */
+const reviews = new Schema(
+  {
+    _id: { type: String, required: true }, // id
+    target_type: { type: String, required: true, enum: ["company","game"] },
+    target_id: { type: String, required: true },
+    customer_id: { type: String, required: true },
+    name: { type: String, required: true }, // first name and last initial when written
+    stars: { type: Number, required: true, validate: integer }, // 1 to 5
+    text: { type: String, default: null },
+    hidden: { type: Boolean, required: true },
+    hidden_reason: { type: String, default: null },
+    created_at: { type: Date, required: true },
+    updated_at: { type: Date, required: true },
+    /** lock-by-write counter (kernel/mongo/table.ts) */
+    _lock: Number,
+  },
+  collectionOptions("departments.reviews"),
+);
+reviews.index({"target_type":1,"target_id":1,"customer_id":1}, {"name":"reviews_target_type_target_id_customer_id_dfdc1e","unique":true});
+reviews.index({"target_type":1,"target_id":1,"hidden":1,"updated_at":1}, {"name":"reviews_target_type_target_id_hidden_updated_at_df513e"});
+reviews.index({"hidden":1,"updated_at":1}, {"name":"reviews_hidden_updated_at_141b32"});
+
+/** Play center player IDs: one stable short code per customer */
+const players = new Schema(
+  {
+    _id: { type: String, required: true }, // id
+    code: { type: String, required: true }, // MK-XXXX-XXXX
+    customer_id: { type: String, required: true },
+    name: { type: String, required: true }, // first name and last initial, refreshed when the customer opens it
+    created_at: { type: Date, required: true },
+    updated_at: { type: Date, required: true },
+    /** lock-by-write counter (kernel/mongo/table.ts) */
+    _lock: Number,
+  },
+  collectionOptions("departments.players"),
+);
+players.index({"code":1}, {"name":"players_code_0faf86","unique":true});
+players.index({"customer_id":1}, {"name":"players_customer_id_5c2632","unique":true});
+
+/** Server keys of game partners; only a SHA-256 hash of each key is kept */
+const game_keys = new Schema(
+  {
+    _id: { type: String, required: true }, // id
+    game_id: { type: String, required: true },
+    key_hash: { type: String, required: true },
+    hint: { type: String, required: true },
+    status: { type: String, required: true, enum: ["active","revoked"] },
+    created_by: { type: String, default: null },
+    created_at: { type: Date, required: true },
+    last_used_at: { type: Date, default: null },
+    revoked_at: { type: Date, default: null },
+    revoked_by: { type: String, default: null },
+    /** lock-by-write counter (kernel/mongo/table.ts) */
+    _lock: Number,
+  },
+  collectionOptions("departments.game_keys"),
+);
+game_keys.index({"key_hash":1}, {"name":"game_keys_key_hash_3dce99","unique":true});
+game_keys.index({"game_id":1,"status":1}, {"name":"game_keys_game_id_status_c696fa"});
+
+/** Scores game servers posted; day and week are the market day and the Monday of its prize week */
+const scores = new Schema(
+  {
+    _id: { type: String, required: true }, // id
+    game_id: { type: String, required: true },
+    partner_score_id: { type: String, required: true },
+    player_id: { type: String, required: true },
+    customer_id: { type: String, required: true },
+    score: { type: Number, required: true, validate: integer },
+    played_at: { type: Date, required: true },
+    day: { type: String, required: true, match: DATE },
+    week: { type: String, required: true, match: DATE },
+    received_at: { type: Date, required: true },
+    /** lock-by-write counter (kernel/mongo/table.ts) */
+    _lock: Number,
+  },
+  collectionOptions("departments.scores"),
+);
+scores.index({"game_id":1,"partner_score_id":1}, {"name":"scores_game_id_partner_score_id_10130f","unique":true});
+scores.index({"game_id":1,"week":1,"score":1}, {"name":"scores_game_id_week_score_2931ea"});
+scores.index({"game_id":1,"day":1,"score":1}, {"name":"scores_game_id_day_score_b17cbe"});
+scores.index({"game_id":1,"score":1}, {"name":"scores_game_id_score_a923ec"});
+scores.index({"game_id":1,"customer_id":1,"played_at":1}, {"name":"scores_game_id_customer_id_played_at_cbafcd"});
+scores.index({"customer_id":1}, {"name":"scores_customer_id_dc4488"});
+
+/** Prize weeks whose winners were worked out: done once every winner has a code */
+const prize_weeks = new Schema(
+  {
+    _id: { type: String, required: true }, // id
+    game_id: { type: String, required: true },
+    week: { type: String, required: true, match: DATE },
+    state: { type: String, required: true, enum: ["awarding","done"] },
+    winners: { type: Number, required: true, validate: integer },
+    updated_at: { type: Date, required: true },
+    /** lock-by-write counter (kernel/mongo/table.ts) */
+    _lock: Number,
+  },
+  collectionOptions("departments.prize_weeks"),
+);
+prize_weeks.index({"game_id":1,"week":1}, {"name":"prize_weeks_game_id_week_b8ab29","unique":true});
+
+/** One coupon per game, week and winner (promotions.issueCode, key play:<game>:<week>:<customer>) */
+const prize_awards = new Schema(
+  {
+    _id: { type: String, required: true }, // id
+    game_id: { type: String, required: true },
+    week: { type: String, required: true, match: DATE },
+    customer_id: { type: String, required: true },
+    name: { type: String, required: true },
+    rank: { type: Number, required: true, validate: integer },
+    score: { type: Number, required: true, validate: integer },
+    reward: { type: String, required: true },
+    campaign_id: { type: String, required: true },
+    code: { type: String, default: null },
+    code_id: { type: String, default: null },
+    state: { type: String, required: true, enum: ["issued","failed"] },
+    error: { type: String, default: null },
+    created_at: { type: Date, required: true },
+    updated_at: { type: Date, required: true },
+    /** lock-by-write counter (kernel/mongo/table.ts) */
+    _lock: Number,
+  },
+  collectionOptions("departments.prize_awards"),
+);
+prize_awards.index({"game_id":1,"week":1,"customer_id":1}, {"name":"prize_awards_game_id_week_customer_id_2474fa","unique":true});
+prize_awards.index({"game_id":1,"week":1,"rank":1}, {"name":"prize_awards_game_id_week_rank_64d5fe"});
+prize_awards.index({"state":1,"week":1}, {"name":"prize_awards_state_week_f3cccf"});
 
 /** One row (id farm): machine types and the picked machines with their attachments */
 const farm_setup = new Schema(
@@ -266,5 +443,14 @@ export const schemas = {
   inquiries: inquiries,
   games: games,
   rankings: rankings,
+  blog_saves: blog_saves,
+  blog_follows: blog_follows,
+  blog_reply_likes: blog_reply_likes,
+  reviews: reviews,
+  players: players,
+  game_keys: game_keys,
+  scores: scores,
+  prize_weeks: prize_weeks,
+  prize_awards: prize_awards,
   farm_setup: farm_setup,
 };

@@ -6,7 +6,7 @@
  * (kernel/mongo/schema.ts); repositories reach them through ctx.mongo.table(name).
  */
 import { Schema } from 'mongoose';
-import { collectionOptions, integer } from '../../kernel/mongo/schemas.js';
+import { collectionOptions, DATE, integer } from '../../kernel/mongo/schemas.js';
 
 const categories = new Schema(
   {
@@ -41,6 +41,7 @@ const providers = new Schema(
     since: { type: Number, default: null, validate: integer },
     contacts: { type: Schema.Types.Mixed },
     location: { type: Schema.Types.Mixed, default: null },
+    point: { type: Schema.Types.Mixed, default: null }, // the address geocoded when there is no pin
     hours: { type: Schema.Types.Mixed },
     staff: { type: Schema.Types.Mixed },
     reply_time: { type: String, default: null },
@@ -87,6 +88,8 @@ const services = new Schema(
     price_table: { type: Schema.Types.Mixed },
     price_table_title: { type: String, default: null },
     terms: { type: Schema.Types.Mixed },
+    full_terms: { type: String, default: null },
+    covered_by_warranty: { type: Boolean, required: true },
     steps: { type: Schema.Types.Mixed },
     slot_minutes: { type: Number, default: null, validate: integer },
     duration_minutes: { type: Number, default: null, validate: integer },
@@ -118,6 +121,8 @@ const requests = new Schema(
     slot_start: { type: Date, default: null },
     slot_end: { type: Date, default: null },
     staff_id: { type: String, default: null },
+    device_id: { type: String, default: null },
+    device: { type: Schema.Types.Mixed, default: null }, // RequestDevice at the time of the request
     contact: { type: Schema.Types.Mixed },
     details: { type: Schema.Types.Mixed },
     status: { type: String, required: true },
@@ -137,6 +142,7 @@ requests.index({"customer_id":1,"created_at":1}, {"name":"requests_customer_id_c
 requests.index({"area":1,"status":1,"created_at":1}, {"name":"requests_area_status_created_at_a4980d"});
 requests.index({"provider_id":1,"slot_start":1}, {"name":"requests_provider_id_slot_start_ffd067"});
 requests.index({"service_id":1,"slot_start":1}, {"name":"requests_service_id_slot_start_5e4339"});
+requests.index({"device_id":1}, {"name":"requests_device_id_220b2b"});
 
 const reviews = new Schema(
   {
@@ -158,6 +164,52 @@ const reviews = new Schema(
 reviews.index({"request_id":1}, {"name":"reviews_request_id_6de998","unique":true});
 reviews.index({"service_id":1,"status":1,"created_at":1}, {"name":"reviews_service_id_status_created_at_729598"});
 
+/** Providers customers saved (customers-module id) */
+const saved_providers = new Schema(
+  {
+    _id: { type: String, required: true }, // id
+    customer_id: { type: String, required: true },
+    provider_id: { type: String, required: true },
+    created_at: { type: Date, required: true },
+    /** lock-by-write counter (kernel/mongo/table.ts) */
+    _lock: Number,
+  },
+  collectionOptions("services.saved_providers"),
+);
+saved_providers.index({"customer_id":1,"provider_id":1}, {"name":"saved_providers_customer_id_provider_id_1e15e6","unique":true});
+saved_providers.index({"customer_id":1,"created_at":1}, {"name":"saved_providers_customer_id_created_at_a89138"});
+saved_providers.index({"provider_id":1}, {"name":"saved_providers_provider_id_ee7ba5"});
+
+/** Phones customers registered for post-sale cover (customers-module id) */
+const devices = new Schema(
+  {
+    _id: { type: String, required: true }, // id
+    customer_id: { type: String, required: true },
+    brand: { type: String, required: true },
+    model: { type: String, required: true },
+    storage: { type: String, default: null },
+    imei: { type: String, required: true }, // 15 digits
+    imei_last4: { type: String, required: true },
+    purchase_date: { type: String, required: true, match: DATE },
+    order_ref: { type: String, default: null },
+    status: { type: String, required: true, enum: ["pending","verified","rejected"] },
+    covered_until: { type: String, default: null, match: DATE },
+    reject_reason: { type: String, default: null },
+    staff_note: { type: String, default: null },
+    verified_at: { type: Date, default: null },
+    verified_by: { type: String, default: null },
+    history: { type: Schema.Types.Mixed },
+    created_at: { type: Date, required: true },
+    updated_at: { type: Date, required: true },
+    /** lock-by-write counter (kernel/mongo/table.ts) */
+    _lock: Number,
+  },
+  collectionOptions("services.devices"),
+);
+devices.index({"customer_id":1,"created_at":1}, {"name":"devices_customer_id_created_at_a89138"});
+devices.index({"status":1,"created_at":1}, {"name":"devices_status_created_at_de0a8c"});
+devices.index({"imei":1}, {"name":"devices_imei_df586c"});
+
 /** Table name → schema */
 export const schemas = {
   categories: categories,
@@ -165,4 +217,6 @@ export const schemas = {
   services: services,
   requests: requests,
   reviews: reviews,
+  saved_providers: saved_providers,
+  devices: devices,
 };

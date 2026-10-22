@@ -39,6 +39,11 @@ const restaurants = new Schema(
     photo_ids: { type: Schema.Types.Mixed },
     address: { type: String, default: null },
     city: { type: String, default: null },
+    region: { type: String, default: null },
+    postal_code: { type: String, default: null },
+    lat: { type: Schema.Types.Decimal128, default: null }, // WGS84 latitude
+    lng: { type: Schema.Types.Decimal128, default: null }, // WGS84 longitude
+    point_source: { type: String, default: null, enum: ["geocoded","staff",null] },
     phone: { type: String, default: null },
     hours: { type: Schema.Types.Mixed },
     time_zone: { type: String, required: true },
@@ -168,6 +173,22 @@ orders.index({"status":1,"created_at":1}, {"name":"orders_status_created_at_de0a
 orders.index({"restaurant_id":1,"status":1,"created_at":1}, {"name":"orders_restaurant_id_status_created_at_1d53a1"});
 orders.index({"intent_id":1}, {"name":"orders_intent_id_050910"});
 
+/** A customer's saved restaurants (one row per customer and restaurant) */
+const saved_restaurants = new Schema(
+  {
+    _id: { type: String, required: true }, // id
+    customer_id: { type: String, required: true },
+    restaurant_id: { type: String, required: true },
+    created_at: { type: Date, required: true },
+    /** lock-by-write counter (kernel/mongo/table.ts) */
+    _lock: Number,
+  },
+  collectionOptions("food.saved_restaurants"),
+);
+saved_restaurants.index({"customer_id":1,"restaurant_id":1}, {"name":"saved_restaurants_customer_id_restaurant_id_be5a98","unique":true});
+saved_restaurants.index({"customer_id":1,"created_at":1}, {"name":"saved_restaurants_customer_id_created_at_a89138"});
+saved_restaurants.index({"restaurant_id":1}, {"name":"saved_restaurants_restaurant_id_a3b595"});
+
 const reviews = new Schema(
   {
     _id: { type: String, required: true }, // id
@@ -197,5 +218,6 @@ export const schemas = {
   items: items,
   baskets: baskets,
   orders: orders,
+  saved_restaurants: saved_restaurants,
   reviews: reviews,
 };
