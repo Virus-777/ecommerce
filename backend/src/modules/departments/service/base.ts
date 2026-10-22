@@ -1,12 +1,13 @@
 /**
  * Shared plumbing of the departments service: context, time, audit, optional data, media usages, slugs and small
- * validation helpers. The areas build on it (base → phones → blogs → companies → play → service).
+ * validation helpers. The areas build on it (base → phones → farm → blogs → companies → play → service).
  */
 import type { Principal } from '../../../kernel/auth/index.js';
 import { AppError, isAppError } from '../../../kernel/errors/index.js';
 import type { ModuleContext } from '../../../kernel/module-system/index.js';
 import type * as audit from '../../../spec/audit.js';
 import type * as common from '../../../spec/common.js';
+import type * as search from '../../../spec/search.js';
 import { isValidSlug, replyAuthorName, slugOf } from '../domain/rules.js';
 import type { DepartmentsRepository, SlugTable } from '../repository.js';
 
@@ -96,6 +97,15 @@ export class DepartmentsBase {
     return replyAuthorName(c?.displayName);
   }
 
+  /** Product cards in the order of `ids` (search keeps only products it still shows) */
+  protected async cardsFor(ids: string[], postalCode?: string): Promise<search.ProductCard[]> {
+    if (!ids.length) return [];
+    const searchApi = this.ctx.tryUse('search');
+    const cards = await this.soft('search.getProductCards', searchApi && (() => searchApi.getProductCards(ids, postalCode ? { postalCode } : undefined)), [] as search.ProductCard[]);
+    const byId = new Map(cards.map((c) => [c.productId, c]));
+    return ids.map((id) => byId.get(id)).filter((c): c is search.ProductCard => Boolean(c));
+  }
+
   /* ---------------------------------------------------------------- slugs */
 
   /** The slug a record is saved under: given or made from its name; SLUG_TAKEN when another record has it */
@@ -109,7 +119,7 @@ export class DepartmentsBase {
   /* ---------------------------------------------------------------- media */
 
   /** MediaRefs by asset id (refs from media; missing files are left out) */
-  protected async refsMap(ids: (string | null | undefined)[], size: 'large' | 'thumb' = 'large'): Promise<Map<string, common.MediaRef>> {
+  protected async refsMap(ids: (string | null | undefined)[], size: 'thumb' | 'medium' | 'large' | 'zoom' = 'large'): Promise<Map<string, common.MediaRef>> {
     const list = unique(ids.filter((i): i is string => Boolean(i)));
     if (!list.length) return new Map();
     const refs = await this.soft('media.refs', () => this.media.refs(list, size), [] as common.MediaRef[]);

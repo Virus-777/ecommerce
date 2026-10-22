@@ -12,4 +12,12 @@ export const replyLikeCounts: MongoMigration = {
   },
 };
 
-export const mongoMigrations: readonly MongoMigration[] = [replyLikeCounts];
+/** Phone advertisement images (2026-10-23): phones added before them have none */
+export const phoneAdImages: MongoMigration = {
+  id: '2026-10-23-departments-phone-ad-images',
+  async up(db) {
+    await db.collection('departments.phones').updateMany({ ad_images: { $exists: false } }, { $set: { ad_images: [] } });
+  },
+};
+
+export const mongoMigrations: readonly MongoMigration[] = [replyLikeCounts, phoneAdImages];

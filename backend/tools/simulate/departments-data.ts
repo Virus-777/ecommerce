@@ -1,10 +1,14 @@
 /**
  * Sample content for the app's department pages (departments module): blog topics, authors and posts, industries
- * and companies around Portland, Play center games with ranking tables, and the Phone tab picks. Written through the
- * Admin Center API, and only what is missing (a topic, author, post, industry, company or game with the same slug
- * is kept as it is), so it is safe to run again. Used by the simulator (flows/departments.ts) and by
+ * and companies around Portland, Play center games with ranking tables, and the Phone tab's phones (phones-data.ts,
+ * with generated photos, when an uploader is given). Written through the Admin Center API, and only what is missing
+ * (a topic, author, post, industry, company, game or phone with the same slug is kept as it is), so it is safe to
+ * run again. Used by the simulator (flows/departments.ts) and by
  * tools/seed-departments.ts against a running server. The texts are samples.
  */
+
+import { seedPhones } from './phones-data.js';
+import type { Uploader } from './software-data.js';
 
 /** One Admin Center call: method, path under /api, body; answers the parsed body */
 export type AdminCall = (method: 'GET' | 'POST' | 'PATCH' | 'PUT', path: string, body?: unknown) => Promise<any>;
@@ -151,9 +155,9 @@ const FARM_HIGHLIGHTS = [['25 hp · 4WD', 'Front loader ready'], ['Grain and cor
 
 const slug = (s: string) => s.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 
-/** Writes what is missing; answers what it added */
-export async function seedDepartments(admin: AdminCall, store: StoreCall): Promise<Record<string, number>> {
-  const added = { topics: 0, authors: 0, posts: 0, industries: 0, companies: 0, games: 0, rankings: 0, phones: 0, farmMachines: 0 };
+/** Writes what is missing; answers what it added (phones need `upload` for their photos: left out without it) */
+export async function seedDepartments(admin: AdminCall, store: StoreCall, upload?: Uploader): Promise<Record<string, number>> {
+  const added = { topics: 0, authors: 0, posts: 0, industries: 0, companies: 0, games: 0, rankings: 0, phones: 0, phoneAds: 0, farmMachines: 0 };
 
   // blogs
   const topics = (await admin('GET', '/admin/departments/blogs/topics')) as { id: string; slug: string }[];
@@ -223,23 +227,11 @@ export async function seedDepartments(admin: AdminCall, store: StoreCall): Promi
     }
   }
 
-  // phones: the products of the Phones category (else Electronics), when nothing is picked yet
-  const picks = (await admin('GET', '/admin/departments/phones')) as { productIds: string[] };
-  if (!picks.productIds.length) {
-    const tree = (await admin('GET', '/admin/catalog/categories')) as { name: string; slug: string; children?: unknown[] }[];
-    const flat: { name: string; slug: string }[] = [];
-    const walk = (list: { name: string; slug: string; children?: unknown[] }[]) => list.forEach((c) => (flat.push(c), walk((c.children ?? []) as never)));
-    walk(tree);
-    const category = flat.find((c) => /^phones?$/i.test(c.name)) ?? flat.find((c) => /electronics/i.test(c.name));
-    if (category) {
-      // search results carry the card under product (ads in the list are placed rows too)
-      const res = (await store(`/store/search/products?category=${encodeURIComponent(category.slug)}&limit=24`)) as { items: { product?: { productId?: string } }[] };
-      const ids = [...new Set(res.items.map((p) => p.product?.productId).filter((id): id is string => Boolean(id)))].slice(0, 24);
-      if (ids.length) {
-        await admin('PUT', '/admin/departments/phones', { productIds: ids });
-        added.phones = ids.length;
-      }
-    }
+  // phones: standalone phones with generated photos and advertisement images (phones-data.ts)
+  if (upload) {
+    const phones = await seedPhones(admin, upload);
+    added.phones = phones.added;
+    added.phoneAds = phones.ads;
   }
   // farm machines: products found by farm words (else a few garden or outdoor products as placeholders), when none are picked yet
   const farm = (await admin('GET', '/admin/departments/farm')) as { machines: unknown[] };

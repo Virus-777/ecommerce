@@ -42,7 +42,7 @@
     },
     {
       "name": "Store API · Departments",
-      "description": "The app's department pages opened from the home Departments rail: the Phones picks, Blogs (topics, staff authors, posts, reactions, replies and reports), the Companies directory (industries, company pages, inquiries) and the Play center (games and ranking tables). Staff manage all of it in Admin › Departments."
+      "description": "The app's department pages opened from the home Departments rail: the Phones (standalone phones staff add), Blogs (topics, staff authors, posts, reactions, replies and reports), the Companies directory (industries, company pages, inquiries) and the Play center (games and ranking tables). Staff manage all of it in Admin › Departments."
     },
     {
       "name": "Store API · Farm orders",
@@ -270,7 +270,7 @@
     },
     {
       "name": "Admin API · Departments",
-      "description": "The app's department pages opened from the home Departments rail: the Phones picks, Blogs (topics, staff authors, posts, reactions, replies and reports), the Companies directory (industries, company pages, inquiries) and the Play center (games and ranking tables). Staff manage all of it in Admin › Departments."
+      "description": "The app's department pages opened from the home Departments rail: the Phones (standalone phones staff add), Blogs (topics, staff authors, posts, reactions, replies and reports), the Companies directory (industries, company pages, inquiries) and the Play center (games and ranking tables). Staff manage all of it in Admin › Departments."
     },
     {
       "name": "Admin API · Farm orders",
@@ -414,7 +414,7 @@
     },
     {
       "name": "Webhooks · Departments",
-      "description": "The app's department pages opened from the home Departments rail: the Phones picks, Blogs (topics, staff authors, posts, reactions, replies and reports), the Companies directory (industries, company pages, inquiries) and the Play center (games and ranking tables). Staff manage all of it in Admin › Departments."
+      "description": "The app's department pages opened from the home Departments rail: the Phones (standalone phones staff add), Blogs (topics, staff authors, posts, reactions, replies and reports), the Companies directory (industries, company pages, inquiries) and the Play center (games and ranking tables). Staff manage all of it in Admin › Departments."
     },
     {
       "name": "Webhooks · Finance",
@@ -34867,24 +34867,11 @@
         "tags": [
           "Store API · Departments"
         ],
-        "summary": "The Phone tab: picked phones as product cards, in order",
+        "summary": "The Phone tab: published phones as cards, in staff order",
         "description": "**Screens:** store/phones\n\n**Launch phase:** 2",
         "security": [
           {
             "bearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "postalCode",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
           }
         ],
         "responses": {
@@ -34934,6 +34921,90 @@
         "x-auth": "visitor",
         "x-screens": [
           "store/phones"
+        ],
+        "x-phase": 2
+      }
+    },
+    "/api/store/departments/phones/{slug}": {
+      "get": {
+        "operationId": "departments.getPhone",
+        "tags": [
+          "Store API · Departments"
+        ],
+        "summary": "A phone page: Detail and Advertisements tabs",
+        "description": "**Screens:** store/phone\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/departments.Phone"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "departments",
+        "x-area": "store",
+        "x-auth": "visitor",
+        "x-screens": [
+          "store/phone"
         ],
         "x-phase": 2
       }
@@ -38066,11 +38137,11 @@
     },
     "/api/admin/departments/phones": {
       "get": {
-        "operationId": "departments.getPhonesAdmin",
+        "operationId": "departments.listPhonesAdmin",
         "tags": [
           "Admin API · Departments"
         ],
-        "summary": "The Phone tab picks",
+        "summary": "Every phone in staff order",
         "description": "**Permission:** `departments.view`\n\n**Screens:** admin/departments-phones\n\n**Launch phase:** 2",
         "security": [
           {
@@ -38128,12 +38199,98 @@
         ],
         "x-phase": 2
       },
-      "put": {
-        "operationId": "departments.setPhones",
+      "post": {
+        "operationId": "departments.createPhone",
         "tags": [
           "Admin API · Departments"
         ],
-        "summary": "Replace the Phone tab picks",
+        "summary": "Add a phone",
+        "description": "**Permission:** `departments.phones.manage`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/departments-phone\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/departments.PhoneInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/departments.PhoneAdmin"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SLUG_TAKEN: Another record already uses this slug.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "departments",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "departments.phones.manage",
+        "x-screens": [
+          "admin/departments-phone"
+        ],
+        "x-audited": true,
+        "x-phase": 2
+      }
+    },
+    "/api/admin/departments/phones/order": {
+      "put": {
+        "operationId": "departments.reorderPhones",
+        "tags": [
+          "Admin API · Departments"
+        ],
+        "summary": "Change the order of the Phone tab",
         "description": "**Permission:** `departments.phones.manage`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/departments-phones\n\n**Launch phase:** 2",
         "security": [
           {
@@ -38145,7 +38302,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/departments.PhonesInput"
+                "$ref": "#/components/schemas/departments.PhonesOrderInput"
               }
             }
           }
@@ -38198,6 +38355,275 @@
         "x-permission": "departments.phones.manage",
         "x-screens": [
           "admin/departments-phones"
+        ],
+        "x-audited": true,
+        "x-phase": 2
+      }
+    },
+    "/api/admin/departments/phones/{id}": {
+      "get": {
+        "operationId": "departments.getPhoneAdmin",
+        "tags": [
+          "Admin API · Departments"
+        ],
+        "summary": "A phone for editing",
+        "description": "**Permission:** `departments.view`\n\n**Screens:** admin/departments-phone\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/departments.PhoneAdmin"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "departments",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "departments.view",
+        "x-screens": [
+          "admin/departments-phone"
+        ],
+        "x-phase": 2
+      },
+      "patch": {
+        "operationId": "departments.updatePhone",
+        "tags": [
+          "Admin API · Departments"
+        ],
+        "summary": "Edit, hide or show a phone",
+        "description": "The body is the whole phone (like CompanyInput): photos, storage, colors and spec groups are replaced.\n\n**Permission:** `departments.phones.manage`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/departments-phone\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/departments.PhoneInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/departments.PhoneAdmin"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SLUG_TAKEN: Another record already uses this slug.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "departments",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "departments.phones.manage",
+        "x-screens": [
+          "admin/departments-phone"
+        ],
+        "x-audited": true,
+        "x-phase": 2
+      },
+      "delete": {
+        "operationId": "departments.deletePhone",
+        "tags": [
+          "Admin API · Departments"
+        ],
+        "summary": "Delete a phone and release its photos",
+        "description": "**Permission:** `departments.phones.manage`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/departments-phone\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success, no content"
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "departments",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "departments.phones.manage",
+        "x-screens": [
+          "admin/departments-phone"
         ],
         "x-audited": true,
         "x-phase": 2
@@ -197013,66 +197439,578 @@
           "effects"
         ]
       },
-      "departments.PhonesPage": {
+      "departments.PhoneStorage": {
         "type": "object",
         "properties": {
-          "products": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/search.ProductCard"
-            },
-            "description": "The picked phones in order; ones the store no longer shows are left out. The app builds the brand chips from brandName"
+          "size": {
+            "type": "string",
+            "description": "e.g. 256 GB"
+          },
+          "price": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "was": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Shown crossed out with Save $200 when above price"
           }
         },
         "required": [
-          "products"
+          "size",
+          "price"
+        ]
+      },
+      "departments.PhoneColor": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Full name for the title line, e.g. Titanium Gray"
+          },
+          "short": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Under the swatch, e.g. Gray; null means name"
+          },
+          "hex": {
+            "type": "string",
+            "description": "Swatch color #RRGGBB"
+          }
+        },
+        "required": [
+          "name",
+          "hex"
+        ]
+      },
+      "departments.PhonePhoto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Media asset id"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Large rendition (1280 px wide at most, the photo's own ratio): the Photos tab"
+          },
+          "zoomUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Zoom rendition (2048 px wide at most): the full-screen viewer"
+          },
+          "thumbUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri",
+            "description": "Thumb rendition: gallery strip and admin grid"
+          },
+          "width": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "height": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "alt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Staff description, read by screen readers"
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "zoomUrl"
+        ]
+      },
+      "departments.PhoneSpecRow": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "e.g. Refresh rate"
+          },
+          "value": {
+            "type": "string",
+            "description": "e.g. 1–120 Hz"
+          }
+        },
+        "required": [
+          "name",
+          "value"
+        ]
+      },
+      "departments.PhoneSpecGroup": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "e.g. Display"
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/departments.PhoneSpecRow"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "rows"
+        ]
+      },
+      "departments.PhoneCard": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "brand": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "meta": {
+            "type": "string",
+            "description": "First storage and first color, e.g. 256 GB · Titanium Gray"
+          },
+          "price": {
+            "$ref": "#/components/schemas/Money",
+            "description": "The first storage's price"
+          },
+          "was": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dealPercent": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Whole percent off the was price (the −15% badge); null without a deal"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MediaRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The cover photo (first), medium rendition"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "brand",
+          "name",
+          "meta",
+          "price"
+        ]
+      },
+      "departments.PhonesPage": {
+        "type": "object",
+        "properties": {
+          "phones": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/departments.PhoneCard"
+            },
+            "description": "Published phones in staff order"
+          },
+          "brands": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Brands of those phones, in first-seen order: the brand chips"
+          }
+        },
+        "required": [
+          "phones",
+          "brands"
+        ]
+      },
+      "departments.Phone": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "brand": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "overview": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Plain text; blank lines separate paragraphs"
+          },
+          "storage": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/departments.PhoneStorage"
+            },
+            "description": "At least one; the first is selected when the page opens"
+          },
+          "colors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/departments.PhoneColor"
+            },
+            "description": "May be empty; the first is selected when the page opens"
+          },
+          "photos": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/departments.PhonePhoto"
+            },
+            "description": "Preview photos: the Detail tab gallery, in staff order; the first is the cover"
+          },
+          "adImages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/departments.PhonePhoto"
+            },
+            "description": "Advertisement images for the Advertisements tab (not the gallery photos), full size in staff order; empty: the tab is not shown"
+          },
+          "specGroups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/departments.PhoneSpecGroup"
+            }
+          },
+          "showServices": {
+            "type": "boolean",
+            "description": "Show the free OS install and post-sale card"
+          },
+          "searchTerm": {
+            "type": "string",
+            "description": "What Find in store searches for (staff term, else the name)"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "brand",
+          "name",
+          "storage",
+          "colors",
+          "photos",
+          "adImages",
+          "specGroups",
+          "showServices",
+          "searchTerm",
+          "updatedAt"
+        ]
+      },
+      "departments.PhoneAdmin": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "brand": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "overview": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "storage": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/departments.PhoneStorage"
+            }
+          },
+          "colors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/departments.PhoneColor"
+            }
+          },
+          "photos": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/departments.PhonePhoto"
+            }
+          },
+          "adImages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/departments.PhonePhoto"
+            }
+          },
+          "specGroups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/departments.PhoneSpecGroup"
+            }
+          },
+          "showServices": {
+            "type": "boolean"
+          },
+          "searchTerm": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Null: Find in store searches for the name"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "published",
+              "hidden"
+            ]
+          },
+          "position": {
+            "type": "integer",
+            "description": "1-based place on the Phone tab"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedBy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Actor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "brand",
+          "name",
+          "storage",
+          "colors",
+          "photos",
+          "adImages",
+          "specGroups",
+          "showServices",
+          "status",
+          "position",
+          "createdAt",
+          "updatedAt"
         ]
       },
       "departments.PhonesAdmin": {
         "type": "object",
         "properties": {
-          "productIds": {
+          "items": {
             "type": "array",
             "items": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/departments.PhoneAdmin"
             },
-            "description": "Every picked product in order, unavailable ones included"
+            "description": "Every phone in staff order, hidden ones included"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "departments.PhonePhotoInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "content_image upload, at least 1080 px wide"
           },
-          "products": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/search.ProductCard"
-            },
-            "description": "Cards of the picks the store still shows"
+          "alt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "departments.PhoneInput": {
+        "type": "object",
+        "properties": {
+          "brand": {
+            "type": "string",
+            "description": "At most 40 characters"
           },
-          "updatedAt": {
+          "name": {
+            "type": "string",
+            "description": "At most 80 characters"
+          },
+          "slug": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "overview": {
             "type": [
               "string",
               "null"
             ],
-            "format": "date-time"
+            "description": "At most 1,000 characters"
+          },
+          "storage": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/departments.PhoneStorage"
+            },
+            "description": "1–8 sizes in order, each with a price above zero; was, when given, above price; one currency (the market's)"
+          },
+          "colors": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/departments.PhoneColor"
+            },
+            "description": "Up to 12, in order"
+          },
+          "photos": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/departments.PhonePhotoInput"
+            },
+            "description": "1–20 preview photos in order (the Detail tab gallery); the first is the cover"
+          },
+          "adImages": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/departments.PhonePhotoInput"
+            },
+            "description": "Up to 20 advertisement images in order (the Advertisements tab), content_image uploads at least 1080 px wide, none of them also a preview photo"
+          },
+          "specGroups": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/departments.PhoneSpecGroup"
+            },
+            "description": "Up to 20 groups of up to 30 rows; rows with an empty name or value are left out, then empty groups"
+          },
+          "showServices": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "searchTerm": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "At most 80 characters"
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "published",
+              "hidden"
+            ]
+          },
+          "position": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "1-based; new phones go last when not given"
           }
         },
         "required": [
-          "productIds",
-          "products"
+          "brand",
+          "name",
+          "storage",
+          "photos"
         ]
       },
-      "departments.PhonesInput": {
+      "departments.PhonesOrderInput": {
         "type": "object",
         "properties": {
-          "productIds": {
+          "ids": {
             "type": "array",
             "items": {
               "type": "string",
               "format": "uuid"
             },
-            "description": "1–100 products in order"
+            "description": "Every phone id, in the new order"
           }
         },
         "required": [
-          "productIds"
+          "ids"
         ]
       },
       "departments.BlogTopic": {

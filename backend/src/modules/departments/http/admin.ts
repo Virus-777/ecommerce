@@ -4,7 +4,7 @@ import type { DepartmentsService } from '../service.js';
 
 /**
  * Admin API: /api/admin/departments/…  (docs/api/modules/departments.md)
- * Admin › Departments: the Phone tab picks, Blogs, Companies and the Play center. Writes are audited.
+ * Admin › Departments: the Phone tab's phones, Blogs, Companies and the Play center. Writes are audited.
  */
 export const adminRoutes = (service: DepartmentsService) =>
   routes(endpoints, 'admin', {
@@ -12,10 +12,18 @@ export const adminRoutes = (service: DepartmentsService) =>
     getFarmAdmin: async () => service.getFarmAdmin(),
     /** PUT /farm: Replace the farm machine types and picks */
     setFarm: async ({ body, actor, requestId }) => service.setFarm(body, { actor, requestId }),
-    /** GET /phones: The Phone tab picks */
-    getPhonesAdmin: async () => service.getPhonesAdmin(),
-    /** PUT /phones: Replace the Phone tab picks */
-    setPhones: async ({ body, actor, requestId }) => service.setPhones(body, { actor, requestId }),
+    /** GET /phones: Every phone in staff order */
+    listPhonesAdmin: async () => service.listPhonesAdmin(),
+    /** POST /phones: Add a phone */
+    createPhone: async ({ body, actor, requestId }) => service.createPhone(body, { actor, requestId }),
+    /** PUT /phones/order: Change the order of the Phone tab */
+    reorderPhones: async ({ body, actor, requestId }) => service.reorderPhones(body, { actor, requestId }),
+    /** GET /phones/{id}: A phone for editing */
+    getPhoneAdmin: async ({ params }) => service.getPhoneAdmin(params.id),
+    /** PATCH /phones/{id}: Edit, hide or show a phone */
+    updatePhone: async ({ params, body, actor, requestId }) => service.updatePhone(params.id, body, { actor, requestId }),
+    /** DELETE /phones/{id}: Delete a phone and release its photos */
+    deletePhone: async ({ params, actor, requestId }) => service.deletePhone(params.id, { actor, requestId }),
     /** GET /blogs/topics: Every blog topic */
     listBlogTopicsAdmin: async () => service.listBlogTopicsAdmin(),
     /** POST /blogs/topics: Add a topic */

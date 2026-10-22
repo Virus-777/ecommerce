@@ -33,8 +33,10 @@ export const storeRoutes = (service: DepartmentsService) =>
     getFarm: async ({ query }) => service.getFarm(query),
     /** GET /farm/machines/{productId}: A picked machine with its attachments */
     getFarmMachine: async ({ params }) => service.getFarmMachine(params.productId),
-    /** GET /phones: The Phone tab: picked phones as product cards, in order */
-    getPhones: async ({ query }) => service.getPhones(query),
+    /** GET /phones: The Phone tab: published phones as cards, in staff order */
+    getPhones: async () => service.getPhones(),
+    /** GET /phones/{slug}: A phone page: Detail and Photos tabs */
+    getPhone: async ({ params }) => service.getPhone(params.slug),
     /** GET /blogs/topics: Visible blog topics in order */
     listBlogTopics: async () => service.listBlogTopics(),
     /** GET /blogs/posts: Published posts, newest first */

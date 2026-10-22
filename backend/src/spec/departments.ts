@@ -6,45 +6,326 @@ import { defineEndpoints, defineModuleSpec } from '../kernel/spec/define.js';
 import * as common from './common.js';
 import * as search from './search.js';
 
-/** Departments: The app's department pages opened from the home Departments rail: the Phones picks, Blogs (topics, staff authors, posts, reactions, replies and reports), the Companies directory (industries, company pages, inquiries) and the Play center (games and ranking tables). Staff manage all of it in Admin › Departments. */
+/** Departments: The app's department pages opened from the home Departments rail: the Phones (standalone phones staff add), Blogs (topics, staff authors, posts, reactions, replies and reports), the Companies directory (industries, company pages, inquiries) and the Play center (games and ranking tables). Staff manage all of it in Admin › Departments. */
 
 /* ------------------------------------------------------------------ types */
 
+export interface PhoneStorage {
+  /** e.g. 256 GB */
+  size: string;
+  price: common.Money;
+  /** Shown crossed out with Save $200 when above price */
+  was?: common.Money | null;
+}
+
+export const PhoneStorage: z.ZodType<PhoneStorage> = z.object({
+  size: z.string().describe("e.g. 256 GB"),
+  get price() {
+    return common.Money;
+  },
+  get was() {
+    return common.Money.nullish();
+  },
+}).register(common.apiTypes, { id: "departments.PhoneStorage" });
+
+export interface PhoneColor {
+  /** Full name for the title line, e.g. Titanium Gray */
+  name: string;
+  /** Under the swatch, e.g. Gray; null means name */
+  short?: string | null;
+  /** Swatch color #RRGGBB */
+  hex: string;
+}
+
+export const PhoneColor: z.ZodType<PhoneColor> = z.object({
+  name: z.string().describe("Full name for the title line, e.g. Titanium Gray"),
+  short: z.string().describe("Under the swatch, e.g. Gray; null means name").nullish(),
+  hex: z.string().describe("Swatch color #RRGGBB"),
+}).register(common.apiTypes, { id: "departments.PhoneColor" });
+
+export interface PhonePhoto {
+  /** Media asset id */
+  id: string;
+  /** Large rendition (1280 px wide at most, the photo's own ratio): the Photos tab */
+  url: string;
+  /** Zoom rendition (2048 px wide at most): the full-screen viewer */
+  zoomUrl: string;
+  /** Thumb rendition: gallery strip and admin grid */
+  thumbUrl?: string | null;
+  width?: number | null;
+  height?: number | null;
+  /** Staff description, read by screen readers */
+  alt?: string | null;
+}
+
+export const PhonePhoto: z.ZodType<PhonePhoto> = z.object({
+  id: z.uuid().describe("Media asset id"),
+  url: z.url().describe("Large rendition (1280 px wide at most, the photo's own ratio): the Photos tab"),
+  zoomUrl: z.url().describe("Zoom rendition (2048 px wide at most): the full-screen viewer"),
+  thumbUrl: z.url().describe("Thumb rendition: gallery strip and admin grid").nullish(),
+  width: z.number().int().nullish(),
+  height: z.number().int().nullish(),
+  alt: z.string().describe("Staff description, read by screen readers").nullish(),
+}).register(common.apiTypes, { id: "departments.PhonePhoto" });
+
+export interface PhoneSpecRow {
+  /** e.g. Refresh rate */
+  name: string;
+  /** e.g. 1–120 Hz */
+  value: string;
+}
+
+export const PhoneSpecRow: z.ZodType<PhoneSpecRow> = z.object({
+  name: z.string().describe("e.g. Refresh rate"),
+  value: z.string().describe("e.g. 1–120 Hz"),
+}).register(common.apiTypes, { id: "departments.PhoneSpecRow" });
+
+export interface PhoneSpecGroup {
+  /** e.g. Display */
+  name: string;
+  rows: PhoneSpecRow[];
+}
+
+export const PhoneSpecGroup: z.ZodType<PhoneSpecGroup> = z.object({
+  name: z.string().describe("e.g. Display"),
+  get rows() {
+    return z.array(PhoneSpecRow);
+  },
+}).register(common.apiTypes, { id: "departments.PhoneSpecGroup" });
+
+export interface PhoneCard {
+  id: string;
+  slug: string;
+  brand: string;
+  name: string;
+  /** First storage and first color, e.g. 256 GB · Titanium Gray */
+  meta: string;
+  /** The first storage's price */
+  price: common.Money;
+  was?: common.Money | null;
+  /** Whole percent off the was price (the −15% badge); null without a deal */
+  dealPercent?: number | null;
+  /** The cover photo (first), medium rendition */
+  image?: common.MediaRef | null;
+}
+
+export const PhoneCard: z.ZodType<PhoneCard> = z.object({
+  id: z.uuid(),
+  slug: z.string(),
+  brand: z.string(),
+  name: z.string(),
+  meta: z.string().describe("First storage and first color, e.g. 256 GB · Titanium Gray"),
+  get price() {
+    return common.Money;
+  },
+  get was() {
+    return common.Money.nullish();
+  },
+  dealPercent: z.number().int().describe("Whole percent off the was price (the −15% badge); null without a deal").nullish(),
+  get image() {
+    return common.MediaRef.nullish();
+  },
+}).register(common.apiTypes, { id: "departments.PhoneCard" });
+
 export interface PhonesPage {
-  /** The picked phones in order; ones the store no longer shows are left out. The app builds the brand chips from brandName */
-  products: search.ProductCard[];
+  /** Published phones in staff order */
+  phones: PhoneCard[];
+  /** Brands of those phones, in first-seen order: the brand chips */
+  brands: string[];
 }
 
 export const PhonesPage: z.ZodType<PhonesPage> = z.object({
-  get products() {
-    return z.array(search.ProductCard);
+  get phones() {
+    return z.array(PhoneCard);
   },
+  brands: z.array(z.string()).describe("Brands of those phones, in first-seen order: the brand chips"),
 }).register(common.apiTypes, { id: "departments.PhonesPage" });
 
+export interface Phone {
+  id: string;
+  slug: string;
+  brand: string;
+  name: string;
+  /** Plain text; blank lines separate paragraphs */
+  overview?: string | null;
+  /** At least one; the first is selected when the page opens */
+  storage: PhoneStorage[];
+  /** May be empty; the first is selected when the page opens */
+  colors: PhoneColor[];
+  /** Preview photos: the Detail tab gallery, in staff order; the first is the cover */
+  photos: PhonePhoto[];
+  /** Advertisement images for the Advertisements tab (not the gallery photos), full size in staff order; empty: the tab is not shown */
+  adImages: PhonePhoto[];
+  specGroups: PhoneSpecGroup[];
+  /** Show the free OS install and post-sale card */
+  showServices: boolean;
+  /** What Find in store searches for (staff term, else the name) */
+  searchTerm: string;
+  updatedAt: string;
+}
+
+export const Phone: z.ZodType<Phone> = z.object({
+  id: z.uuid(),
+  slug: z.string(),
+  brand: z.string(),
+  name: z.string(),
+  overview: z.string().describe("Plain text; blank lines separate paragraphs").nullish(),
+  get storage() {
+    return z.array(PhoneStorage);
+  },
+  get colors() {
+    return z.array(PhoneColor);
+  },
+  get photos() {
+    return z.array(PhonePhoto);
+  },
+  get adImages() {
+    return z.array(PhonePhoto);
+  },
+  get specGroups() {
+    return z.array(PhoneSpecGroup);
+  },
+  showServices: z.boolean().describe("Show the free OS install and post-sale card"),
+  searchTerm: z.string().describe("What Find in store searches for (staff term, else the name)"),
+  updatedAt: z.iso.datetime({ offset: true }),
+}).register(common.apiTypes, { id: "departments.Phone" });
+
+export interface PhoneAdmin {
+  id: string;
+  slug: string;
+  brand: string;
+  name: string;
+  overview?: string | null;
+  storage: PhoneStorage[];
+  colors: PhoneColor[];
+  photos: PhonePhoto[];
+  adImages: PhonePhoto[];
+  specGroups: PhoneSpecGroup[];
+  showServices: boolean;
+  /** Null: Find in store searches for the name */
+  searchTerm?: string | null;
+  status: "published" | "hidden";
+  /** 1-based place on the Phone tab */
+  position: number;
+  createdAt: string;
+  updatedAt: string;
+  updatedBy?: common.Actor | null;
+}
+
+export const PhoneAdmin: z.ZodType<PhoneAdmin> = z.object({
+  id: z.uuid(),
+  slug: z.string(),
+  brand: z.string(),
+  name: z.string(),
+  overview: z.string().nullish(),
+  get storage() {
+    return z.array(PhoneStorage);
+  },
+  get colors() {
+    return z.array(PhoneColor);
+  },
+  get photos() {
+    return z.array(PhonePhoto);
+  },
+  get adImages() {
+    return z.array(PhonePhoto);
+  },
+  get specGroups() {
+    return z.array(PhoneSpecGroup);
+  },
+  showServices: z.boolean(),
+  searchTerm: z.string().describe("Null: Find in store searches for the name").nullish(),
+  status: z.enum(["published", "hidden"]),
+  position: z.number().int().describe("1-based place on the Phone tab"),
+  createdAt: z.iso.datetime({ offset: true }),
+  updatedAt: z.iso.datetime({ offset: true }),
+  get updatedBy() {
+    return common.Actor.nullish();
+  },
+}).register(common.apiTypes, { id: "departments.PhoneAdmin" });
+
 export interface PhonesAdmin {
-  /** Every picked product in order, unavailable ones included */
-  productIds: string[];
-  /** Cards of the picks the store still shows */
-  products: search.ProductCard[];
-  updatedAt?: string | null;
+  /** Every phone in staff order, hidden ones included */
+  items: PhoneAdmin[];
 }
 
 export const PhonesAdmin: z.ZodType<PhonesAdmin> = z.object({
-  productIds: z.array(z.uuid()).describe("Every picked product in order, unavailable ones included"),
-  get products() {
-    return z.array(search.ProductCard);
+  get items() {
+    return z.array(PhoneAdmin);
   },
-  updatedAt: z.iso.datetime({ offset: true }).nullish(),
 }).register(common.apiTypes, { id: "departments.PhonesAdmin" });
 
-export interface PhonesInput {
-  /** 1–100 products in order */
-  productIds: string[];
+export interface PhonePhotoInput {
+  /** content_image upload, at least 1080 px wide */
+  id: string;
+  alt?: string | null;
 }
 
-export const PhonesInput: z.ZodType<PhonesInput> = z.object({
-  productIds: z.array(z.uuid()).describe("1–100 products in order"),
-}).register(common.apiTypes, { id: "departments.PhonesInput" });
+export const PhonePhotoInput: z.ZodType<PhonePhotoInput> = z.object({
+  id: z.uuid().describe("content_image upload, at least 1080 px wide"),
+  alt: z.string().nullish(),
+}).register(common.apiTypes, { id: "departments.PhonePhotoInput" });
+
+export interface PhoneInput {
+  /** At most 40 characters */
+  brand: string;
+  /** At most 80 characters */
+  name: string;
+  slug?: string | null;
+  /** At most 1,000 characters */
+  overview?: string | null;
+  /** 1–8 sizes in order, each with a price above zero; was, when given, above price; one currency (the market's) */
+  storage: PhoneStorage[];
+  /** Up to 12, in order */
+  colors?: PhoneColor[] | null;
+  /** 1–20 preview photos in order (the Detail tab gallery); the first is the cover */
+  photos: PhonePhotoInput[];
+  /** Up to 20 advertisement images in order (the Advertisements tab), content_image uploads at least 1080 px wide, none of them also a preview photo */
+  adImages?: PhonePhotoInput[] | null;
+  /** Up to 20 groups of up to 30 rows; rows with an empty name or value are left out, then empty groups */
+  specGroups?: PhoneSpecGroup[] | null;
+  showServices?: boolean | null;
+  /** At most 80 characters */
+  searchTerm?: string | null;
+  status?: "published" | "hidden" | null;
+  /** 1-based; new phones go last when not given */
+  position?: number | null;
+}
+
+export const PhoneInput: z.ZodType<PhoneInput> = z.object({
+  brand: z.string().describe("At most 40 characters"),
+  name: z.string().describe("At most 80 characters"),
+  slug: z.string().nullish(),
+  overview: z.string().describe("At most 1,000 characters").nullish(),
+  get storage() {
+    return z.array(PhoneStorage);
+  },
+  get colors() {
+    return z.array(PhoneColor).nullish();
+  },
+  get photos() {
+    return z.array(PhonePhotoInput);
+  },
+  get adImages() {
+    return z.array(PhonePhotoInput).nullish();
+  },
+  get specGroups() {
+    return z.array(PhoneSpecGroup).nullish();
+  },
+  showServices: z.boolean().nullish(),
+  searchTerm: z.string().describe("At most 80 characters").nullish(),
+  status: z.enum(["published", "hidden"]).nullish(),
+  position: z.number().int().describe("1-based; new phones go last when not given").nullish(),
+}).register(common.apiTypes, { id: "departments.PhoneInput" });
+
+export interface PhonesOrderInput {
+  /** Every phone id, in the new order */
+  ids: string[];
+}
+
+export const PhonesOrderInput: z.ZodType<PhonesOrderInput> = z.object({
+  ids: z.array(z.uuid()).describe("Every phone id, in the new order"),
+}).register(common.apiTypes, { id: "departments.PhonesOrderInput" });
 
 export interface BlogTopic {
   id: string;
@@ -1670,12 +1951,37 @@ export interface DepartmentsPublicApi {
 
 /** Rows of this module's spec tables, as repositories read them from its collections (`departments.<table>`, ctx.mongo.table(name)). */
 export interface DepartmentsDb {
-  /** One row (id phones): the products of the Phone tab in order */
+  /** Before standalone phones (2026-10-23): one row (id phones) with the picked product ids. The departments.import-phone-picks job turns them into phones once and then empties product_ids */
   phone_picks: {
     id: string;
     product_ids: Json;
     updated_by: string | null;
     updated_at: Date;
+  };
+  /** The phones of the Phone tab, kept by staff (standalone: not catalog products, no ordering) */
+  phones: {
+    id: string;
+    slug: string;
+    brand: string;
+    name: string;
+    overview: string | null;
+    /** PhoneStorage[]: size, price and was in minor units, currency */
+    storage: Json;
+    /** PhoneColor[] */
+    colors: Json;
+    /** { id, alt }[]: preview photos */
+    photos: Json;
+    /** { id, alt }[]: advertisement images */
+    ad_images: Json;
+    /** PhoneSpecGroup[] */
+    spec_groups: Json;
+    show_services: boolean;
+    search_term: string | null;
+    status: 'published' | 'hidden';
+    position: number;
+    created_at: Date;
+    updated_at: Date;
+    updated_by: string | null;
   };
   blog_topics: {
     id: string;
@@ -1932,14 +2238,27 @@ export const endpoints = defineEndpoints({
     path: "/phones",
     auth: "visitor",
     scope: "public",
-    summary: "The Phone tab: picked phones as product cards, in order",
-    query: () =>
-      z.object({
-        postalCode: z.string().optional(),
-      }),
+    summary: "The Phone tab: published phones as cards, in staff order",
     response: () => PhonesPage,
     status: 200,
     screens: ["store/phones"],
+    phase: 2,
+  },
+  getPhone: {
+    area: "store",
+    method: "GET",
+    path: "/phones/{slug}",
+    auth: "visitor",
+    scope: "public",
+    summary: "A phone page: Detail and Advertisements tabs",
+    params: () =>
+      z.object({
+        slug: z.string(),
+      }),
+    response: () => Phone,
+    status: 200,
+    errors: ["NOT_FOUND"],
+    screens: ["store/phone"],
     phase: 2,
   },
   getFarm: {
@@ -2452,32 +2771,106 @@ export const endpoints = defineEndpoints({
     screens: ["store/play","store/play-game"],
     phase: 2,
   },
-  getPhonesAdmin: {
+  listPhonesAdmin: {
     area: "admin",
     method: "GET",
     path: "/phones",
     auth: "staff",
     permission: "departments.view",
     scope: "staff",
-    summary: "The Phone tab picks",
+    summary: "Every phone in staff order",
     response: () => PhonesAdmin,
     status: 200,
     screens: ["admin/departments-phones"],
     phase: 2,
   },
-  setPhones: {
+  createPhone: {
     area: "admin",
-    method: "PUT",
+    method: "POST",
     path: "/phones",
     auth: "staff",
     permission: "departments.phones.manage",
     scope: "staff",
-    summary: "Replace the Phone tab picks",
-    body: () => PhonesInput,
+    summary: "Add a phone",
+    body: () => PhoneInput,
+    response: () => PhoneAdmin,
+    status: 201,
+    errors: ["SLUG_TAKEN"],
+    audited: true,
+    screens: ["admin/departments-phone"],
+    phase: 2,
+  },
+  reorderPhones: {
+    area: "admin",
+    method: "PUT",
+    path: "/phones/order",
+    auth: "staff",
+    permission: "departments.phones.manage",
+    scope: "staff",
+    summary: "Change the order of the Phone tab",
+    body: () => PhonesOrderInput,
     response: () => PhonesAdmin,
     status: 200,
     audited: true,
     screens: ["admin/departments-phones"],
+    phase: 2,
+  },
+  getPhoneAdmin: {
+    area: "admin",
+    method: "GET",
+    path: "/phones/{id}",
+    auth: "staff",
+    permission: "departments.view",
+    scope: "staff",
+    summary: "A phone for editing",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    response: () => PhoneAdmin,
+    status: 200,
+    errors: ["NOT_FOUND"],
+    screens: ["admin/departments-phone"],
+    phase: 2,
+  },
+  updatePhone: {
+    area: "admin",
+    method: "PATCH",
+    path: "/phones/{id}",
+    auth: "staff",
+    permission: "departments.phones.manage",
+    scope: "staff",
+    summary: "Edit, hide or show a phone",
+    desc: "The body is the whole phone (like CompanyInput): photos, storage, colors and spec groups are replaced.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => PhoneInput,
+    response: () => PhoneAdmin,
+    status: 200,
+    errors: ["NOT_FOUND","SLUG_TAKEN"],
+    audited: true,
+    screens: ["admin/departments-phone"],
+    phase: 2,
+  },
+  deletePhone: {
+    area: "admin",
+    method: "DELETE",
+    path: "/phones/{id}",
+    auth: "staff",
+    permission: "departments.phones.manage",
+    scope: "staff",
+    summary: "Delete a phone and release its photos",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    response: null,
+    status: 204,
+    errors: ["NOT_FOUND"],
+    audited: true,
+    screens: ["admin/departments-phone"],
     phase: 2,
   },
   getFarmAdmin: {
@@ -3318,9 +3711,9 @@ export const spec = defineModuleSpec({
   group: "Growth",
   phase: 2,
   chapters: [],
-  summary: "The app's department pages opened from the home Departments rail: the Phones picks, Blogs (topics, staff authors, posts, reactions, replies and reports), the Companies directory (industries, company pages, inquiries) and the Play center (games and ranking tables). Staff manage all of it in Admin › Departments.",
+  summary: "The app's department pages opened from the home Departments rail: the Phones (standalone phones staff add), Blogs (topics, staff authors, posts, reactions, replies and reports), the Companies directory (industries, company pages, inquiries) and the Play center (games and ranking tables). Staff manage all of it in Admin › Departments.",
   dependsOn: ["media"],
-  optionalDeps: ["search","customers","audit","promotions"],
+  optionalDeps: ["search","catalog","customers","audit","promotions"],
   publicApi: ["getFarmMachine","exportCustomerData"],
   permissions: [
     {
@@ -3331,7 +3724,7 @@ export const spec = defineModuleSpec({
     {
       "key": "departments.phones.manage",
       "audience": "staff",
-      "desc": "Pick the phones of the Phone tab"
+      "desc": "Add, edit, order and delete the phones of the Phone tab"
     },
     {
       "key": "departments.farm.manage",
@@ -3374,6 +3767,10 @@ export const spec = defineModuleSpec({
     consumes: {},
   },
   jobs: {
+    "departments.import-phone-picks": {
+      "schedule": "on boot",
+      "does": "Once: turns the products picked for the Phone tab before standalone phones (phone_picks, id phones) into phones, in the same order: brand and title, description as overview, storage sizes from the product variants' storage or capacity option (else one Standard row) with the price of its search card, color options (a grey swatch when the color name is unknown), the product images as photos (attached as content_block usages) and its specs as one Specifications group; then empties product_ids so it never runs again. A phone whose slug already exists counts as imported. Products catalog cannot read or search shows no price for are skipped and logged; while catalog or search is off the picks wait for a later start."
+    },
     "departments.award-prize-weeks": {
       "schedule": "hourly",
       "does": "For every game with prize tiers linked to coupon campaigns, works out the winners of each prize week that ended at least scoreMaxAgeMinutes ago (the last 4 weeks), issues each winner's coupon with promotions.issueCode (key play:<game>:<week>:<customer>, so a retry gives the same code) and publishes departments.play.prize_awarded. Winners whose code could not be issued are tried again next hour."
@@ -3491,6 +3888,149 @@ export const spec = defineModuleSpec({
         }
       },
       "indexes": [],
+      "unenforced": []
+    },
+    "phones": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "slug",
+        "brand",
+        "name",
+        "overview",
+        "storage",
+        "colors",
+        "photos",
+        "ad_images",
+        "spec_groups",
+        "show_services",
+        "search_term",
+        "status",
+        "position",
+        "created_at",
+        "updated_at",
+        "updated_by"
+      ],
+      "nullable": [
+        "overview",
+        "search_term",
+        "updated_by"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "slug",
+            "brand",
+            "name",
+            "storage",
+            "colors",
+            "photos",
+            "ad_images",
+            "spec_groups",
+            "show_services",
+            "status",
+            "position",
+            "created_at",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "slug": {
+              "bsonType": "string"
+            },
+            "brand": {
+              "bsonType": "string"
+            },
+            "name": {
+              "bsonType": "string"
+            },
+            "overview": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "storage": {},
+            "colors": {},
+            "photos": {},
+            "ad_images": {},
+            "spec_groups": {},
+            "show_services": {
+              "bsonType": "bool"
+            },
+            "search_term": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "bsonType": "string",
+              "enum": [
+                "published",
+                "hidden"
+              ]
+            },
+            "position": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "updated_at": {
+              "bsonType": "date"
+            },
+            "updated_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "phones_slug_549e08",
+          "key": {
+            "slug": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "phones_status_position_e7715e",
+          "key": {
+            "status": 1,
+            "position": 1
+          }
+        }
+      ],
       "unenforced": []
     },
     "blog_topics": {

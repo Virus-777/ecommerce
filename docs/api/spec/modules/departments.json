@@ -4,9 +4,9 @@
   "group": "Growth",
   "phase": 2,
   "chapters": [],
-  "summary": "The app's department pages opened from the home Departments rail: the Phones picks, Blogs (topics, staff authors, posts, reactions, replies and reports), the Companies directory (industries, company pages, inquiries) and the Play center (games and ranking tables). Staff manage all of it in Admin › Departments.",
+  "summary": "The app's department pages opened from the home Departments rail: the Phones (standalone phones staff add), Blogs (topics, staff authors, posts, reactions, replies and reports), the Companies directory (industries, company pages, inquiries) and the Play center (games and ranking tables). Staff manage all of it in Admin › Departments.",
   "owns": [
-    "Phones: the phones staff pick one by one for the Phone tab, in order",
+    "Phones: standalone phones staff add for the Phone tab (brand, name, overview, storage sizes with prices, colors, preview photos, full-size advertisement images, a grouped spec sheet), in order. No ordering: the page links to a store search",
     "Farm machines: machine types and the machines staff pick (catalog products, bought through cart and checkout) with their attachments",
     "Blogs: topics, author profiles, posts (sanitized rich text, cover, publish state), likes and dislikes, customer replies, reports and their review",
     "Companies: industries, company pages (logo, photos, description, contacts, map location, verified mark) and customer inquiries",
@@ -16,7 +16,7 @@
     "Play center scores: player IDs, per-game server keys for game partners, posted scores, rankings computed from them, prize weeks and the coupons won (promotions.issueCode)"
   ],
   "notOwns": [
-    "Product cards, prices and stock of the Phone tab: search, offers and inventory (search.getProductCards)",
+    "Buying a phone: the Phone tab only shows information; Find in store opens the store search",
     "The Departments rail itself (titles, icons, destinations): content (homepage section kind departments)",
     "The carousel ads at the top of Companies and Play center: advertising (placements companies_top, play_top)",
     "Files: media (uploads with purpose content_image)"
@@ -26,6 +26,7 @@
   ],
   "optionalDeps": [
     "search",
+    "catalog",
     "customers",
     "audit",
     "promotions"
@@ -45,27 +46,228 @@
     }
   ],
   "types": {
-    "PhonesPage": {
-      "products": {
-        "type": "search.ProductCard[]",
-        "desc": "The picked phones in order; ones the store no longer shows are left out. The app builds the brand chips from brandName"
+    "PhoneStorage": {
+      "size": {
+        "type": "string",
+        "desc": "e.g. 256 GB"
+      },
+      "price": "Money",
+      "was": {
+        "type": "Money?",
+        "desc": "Shown crossed out with Save $200 when above price"
       }
     },
-    "PhonesAdmin": {
-      "productIds": {
-        "type": "uuid[]",
-        "desc": "Every picked product in order, unavailable ones included"
+    "PhoneColor": {
+      "name": {
+        "type": "string",
+        "desc": "Full name for the title line, e.g. Titanium Gray"
       },
-      "products": {
-        "type": "search.ProductCard[]",
-        "desc": "Cards of the picks the store still shows"
+      "short": {
+        "type": "string?",
+        "desc": "Under the swatch, e.g. Gray; null means name"
       },
-      "updatedAt": "datetime?"
+      "hex": {
+        "type": "string",
+        "desc": "Swatch color #RRGGBB"
+      }
     },
-    "PhonesInput": {
-      "productIds": {
+    "PhonePhoto": {
+      "id": {
+        "type": "uuid",
+        "desc": "Media asset id"
+      },
+      "url": {
+        "type": "url",
+        "desc": "Large rendition (1280 px wide at most, the photo's own ratio): the Photos tab"
+      },
+      "zoomUrl": {
+        "type": "url",
+        "desc": "Zoom rendition (2048 px wide at most): the full-screen viewer"
+      },
+      "thumbUrl": {
+        "type": "url?",
+        "desc": "Thumb rendition: gallery strip and admin grid"
+      },
+      "width": "int?",
+      "height": "int?",
+      "alt": {
+        "type": "string?",
+        "desc": "Staff description, read by screen readers"
+      }
+    },
+    "PhoneSpecRow": {
+      "name": {
+        "type": "string",
+        "desc": "e.g. Refresh rate"
+      },
+      "value": {
+        "type": "string",
+        "desc": "e.g. 1–120 Hz"
+      }
+    },
+    "PhoneSpecGroup": {
+      "name": {
+        "type": "string",
+        "desc": "e.g. Display"
+      },
+      "rows": "PhoneSpecRow[]"
+    },
+    "PhoneCard": {
+      "id": "uuid",
+      "slug": "string",
+      "brand": "string",
+      "name": "string",
+      "meta": {
+        "type": "string",
+        "desc": "First storage and first color, e.g. 256 GB · Titanium Gray"
+      },
+      "price": {
+        "type": "Money",
+        "desc": "The first storage's price"
+      },
+      "was": "Money?",
+      "dealPercent": {
+        "type": "int?",
+        "desc": "Whole percent off the was price (the −15% badge); null without a deal"
+      },
+      "image": {
+        "type": "MediaRef?",
+        "desc": "The cover photo (first), medium rendition"
+      }
+    },
+    "PhonesPage": {
+      "phones": {
+        "type": "PhoneCard[]",
+        "desc": "Published phones in staff order"
+      },
+      "brands": {
+        "type": "string[]",
+        "desc": "Brands of those phones, in first-seen order: the brand chips"
+      }
+    },
+    "Phone": {
+      "id": "uuid",
+      "slug": "string",
+      "brand": "string",
+      "name": "string",
+      "overview": {
+        "type": "text?",
+        "desc": "Plain text; blank lines separate paragraphs"
+      },
+      "storage": {
+        "type": "PhoneStorage[]",
+        "desc": "At least one; the first is selected when the page opens"
+      },
+      "colors": {
+        "type": "PhoneColor[]",
+        "desc": "May be empty; the first is selected when the page opens"
+      },
+      "photos": {
+        "type": "PhonePhoto[]",
+        "desc": "Preview photos: the Detail tab gallery, in staff order; the first is the cover"
+      },
+      "adImages": {
+        "type": "PhonePhoto[]",
+        "desc": "Advertisement images for the Advertisements tab (not the gallery photos), full size in staff order; empty: the tab is not shown"
+      },
+      "specGroups": "PhoneSpecGroup[]",
+      "showServices": {
+        "type": "bool",
+        "desc": "Show the free OS install and post-sale card"
+      },
+      "searchTerm": {
+        "type": "string",
+        "desc": "What Find in store searches for (staff term, else the name)"
+      },
+      "updatedAt": "datetime"
+    },
+    "PhoneAdmin": {
+      "id": "uuid",
+      "slug": "string",
+      "brand": "string",
+      "name": "string",
+      "overview": "text?",
+      "storage": "PhoneStorage[]",
+      "colors": "PhoneColor[]",
+      "photos": "PhonePhoto[]",
+      "adImages": "PhonePhoto[]",
+      "specGroups": "PhoneSpecGroup[]",
+      "showServices": "bool",
+      "searchTerm": {
+        "type": "string?",
+        "desc": "Null: Find in store searches for the name"
+      },
+      "status": "enum(published|hidden)",
+      "position": {
+        "type": "int",
+        "desc": "1-based place on the Phone tab"
+      },
+      "createdAt": "datetime",
+      "updatedAt": "datetime",
+      "updatedBy": "Actor?"
+    },
+    "PhonesAdmin": {
+      "items": {
+        "type": "PhoneAdmin[]",
+        "desc": "Every phone in staff order, hidden ones included"
+      }
+    },
+    "PhonePhotoInput": {
+      "id": {
+        "type": "uuid",
+        "desc": "content_image upload, at least 1080 px wide"
+      },
+      "alt": "string?"
+    },
+    "PhoneInput": {
+      "brand": {
+        "type": "string",
+        "desc": "At most 40 characters"
+      },
+      "name": {
+        "type": "string",
+        "desc": "At most 80 characters"
+      },
+      "slug": "string?",
+      "overview": {
+        "type": "text?",
+        "desc": "At most 1,000 characters"
+      },
+      "storage": {
+        "type": "PhoneStorage[]",
+        "desc": "1–8 sizes in order, each with a price above zero; was, when given, above price; one currency (the market's)"
+      },
+      "colors": {
+        "type": "PhoneColor[]?",
+        "desc": "Up to 12, in order"
+      },
+      "photos": {
+        "type": "PhonePhotoInput[]",
+        "desc": "1–20 preview photos in order (the Detail tab gallery); the first is the cover"
+      },
+      "adImages": {
+        "type": "PhonePhotoInput[]?",
+        "desc": "Up to 20 advertisement images in order (the Advertisements tab), content_image uploads at least 1080 px wide, none of them also a preview photo"
+      },
+      "specGroups": {
+        "type": "PhoneSpecGroup[]?",
+        "desc": "Up to 20 groups of up to 30 rows; rows with an empty name or value are left out, then empty groups"
+      },
+      "showServices": "bool?",
+      "searchTerm": {
+        "type": "string?",
+        "desc": "At most 80 characters"
+      },
+      "status": "enum(published|hidden)?",
+      "position": {
+        "type": "int?",
+        "desc": "1-based; new phones go last when not given"
+      }
+    },
+    "PhonesOrderInput": {
+      "ids": {
         "type": "uuid[]",
-        "desc": "1–100 products in order"
+        "desc": "Every phone id, in the new order"
       }
     },
     "BlogTopic": {
@@ -1000,13 +1202,39 @@
   "tables": [
     {
       "name": "phone_picks",
-      "desc": "One row (id phones): the products of the Phone tab in order",
+      "desc": "Before standalone phones (2026-10-23): one row (id phones) with the picked product ids. The departments.import-phone-picks job turns them into phones once and then empties product_ids",
       "columns": {
         "id": "text pk",
         "product_ids": "jsonb",
         "updated_by": "text?",
         "updated_at": "timestamptz"
       }
+    },
+    {
+      "name": "phones",
+      "desc": "The phones of the Phone tab, kept by staff (standalone: not catalog products, no ordering)",
+      "columns": {
+        "id": "uuid pk",
+        "slug": "text unique",
+        "brand": "text",
+        "name": "text",
+        "overview": "text?",
+        "storage": "jsonb (PhoneStorage[]: size, price and was in minor units, currency)",
+        "colors": "jsonb (PhoneColor[])",
+        "photos": "jsonb ({ id, alt }[]: preview photos)",
+        "ad_images": "jsonb ({ id, alt }[]: advertisement images)",
+        "spec_groups": "jsonb (PhoneSpecGroup[])",
+        "show_services": "bool",
+        "search_term": "text?",
+        "status": "text (published|hidden)",
+        "position": "int",
+        "created_at": "timestamptz",
+        "updated_at": "timestamptz",
+        "updated_by": "text?"
+      },
+      "indexes": [
+        "(status, position)"
+      ]
     },
     {
       "name": "blog_topics",
@@ -1386,14 +1614,29 @@
       "area": "store",
       "method": "GET",
       "path": "/phones",
-      "summary": "The Phone tab: picked phones as product cards, in order",
+      "summary": "The Phone tab: published phones as cards, in staff order",
       "auth": "visitor",
-      "query": {
-        "postalCode": "string?"
-      },
       "response": "PhonesPage",
       "screens": [
         "store/phones"
+      ]
+    },
+    {
+      "id": "getPhone",
+      "area": "store",
+      "method": "GET",
+      "path": "/phones/{slug}",
+      "summary": "A phone page: Detail and Advertisements tabs",
+      "auth": "visitor",
+      "params": {
+        "slug": "string"
+      },
+      "response": "Phone",
+      "errors": [
+        "NOT_FOUND"
+      ],
+      "screens": [
+        "store/phone"
       ]
     },
     {
@@ -1962,11 +2205,11 @@
       ]
     },
     {
-      "id": "getPhonesAdmin",
+      "id": "listPhonesAdmin",
       "area": "admin",
       "method": "GET",
       "path": "/phones",
-      "summary": "The Phone tab picks",
+      "summary": "Every phone in staff order",
       "auth": "staff",
       "permission": "departments.view",
       "response": "PhonesAdmin",
@@ -1975,18 +2218,100 @@
       ]
     },
     {
-      "id": "setPhones",
+      "id": "createPhone",
       "area": "admin",
-      "method": "PUT",
+      "method": "POST",
       "path": "/phones",
-      "summary": "Replace the Phone tab picks",
+      "summary": "Add a phone",
       "auth": "staff",
       "permission": "departments.phones.manage",
-      "body": "PhonesInput",
+      "body": "PhoneInput",
+      "response": "PhoneAdmin",
+      "status": 201,
+      "errors": [
+        "SLUG_TAKEN"
+      ],
+      "audited": true,
+      "screens": [
+        "admin/departments-phone"
+      ]
+    },
+    {
+      "id": "reorderPhones",
+      "area": "admin",
+      "method": "PUT",
+      "path": "/phones/order",
+      "summary": "Change the order of the Phone tab",
+      "auth": "staff",
+      "permission": "departments.phones.manage",
+      "body": "PhonesOrderInput",
       "response": "PhonesAdmin",
       "audited": true,
       "screens": [
         "admin/departments-phones"
+      ]
+    },
+    {
+      "id": "getPhoneAdmin",
+      "area": "admin",
+      "method": "GET",
+      "path": "/phones/{id}",
+      "summary": "A phone for editing",
+      "auth": "staff",
+      "permission": "departments.view",
+      "params": {
+        "id": "uuid"
+      },
+      "response": "PhoneAdmin",
+      "errors": [
+        "NOT_FOUND"
+      ],
+      "screens": [
+        "admin/departments-phone"
+      ]
+    },
+    {
+      "id": "updatePhone",
+      "area": "admin",
+      "method": "PATCH",
+      "path": "/phones/{id}",
+      "summary": "Edit, hide or show a phone",
+      "desc": "The body is the whole phone (like CompanyInput): photos, storage, colors and spec groups are replaced.",
+      "auth": "staff",
+      "permission": "departments.phones.manage",
+      "params": {
+        "id": "uuid"
+      },
+      "body": "PhoneInput",
+      "response": "PhoneAdmin",
+      "errors": [
+        "NOT_FOUND",
+        "SLUG_TAKEN"
+      ],
+      "audited": true,
+      "screens": [
+        "admin/departments-phone"
+      ]
+    },
+    {
+      "id": "deletePhone",
+      "area": "admin",
+      "method": "DELETE",
+      "path": "/phones/{id}",
+      "summary": "Delete a phone and release its photos",
+      "auth": "staff",
+      "permission": "departments.phones.manage",
+      "params": {
+        "id": "uuid"
+      },
+      "response": null,
+      "status": 204,
+      "errors": [
+        "NOT_FOUND"
+      ],
+      "audited": true,
+      "screens": [
+        "admin/departments-phone"
       ]
     },
     {
@@ -2926,6 +3251,11 @@
   },
   "jobs": [
     {
+      "name": "departments.import-phone-picks",
+      "schedule": "on boot",
+      "does": "Once: turns the products picked for the Phone tab before standalone phones (phone_picks, id phones) into phones, in the same order: brand and title, description as overview, storage sizes from the product variants' storage or capacity option (else one Standard row) with the price of its search card, color options (a grey swatch when the color name is unknown), the product images as photos (attached as content_block usages) and its specs as one Specifications group; then empties product_ids so it never runs again. A phone whose slug already exists counts as imported. Products catalog cannot read or search shows no price for are skipped and logged; while catalog or search is off the picks wait for a later start."
+    },
+    {
       "name": "departments.award-prize-weeks",
       "schedule": "hourly",
       "does": "For every game with prize tiers linked to coupon campaigns, works out the winners of each prize week that ended at least scoreMaxAgeMinutes ago (the last 4 weeks), issues each winner's coupon with promotions.issueCode (key play:<game>:<week>:<customer>, so a retry gives the same code) and publishes departments.play.prize_awarded. Winners whose code could not be issued are tried again next hour."
@@ -2940,7 +3270,7 @@
     {
       "key": "departments.phones.manage",
       "audience": "staff",
-      "desc": "Pick the phones of the Phone tab"
+      "desc": "Add, edit, order and delete the phones of the Phone tab"
     },
     {
       "key": "departments.farm.manage",
@@ -3034,6 +3364,7 @@
     }
   },
   "notes": [
+    "Phones are standalone records (2026-10-23 decision): staff add them in Admin › Departments › Phones with prices, options, a spec sheet, preview photos and advertisement images; there is no ordering. The app page has Detail and Advertisements tabs (2026-10-23: the second tab shows its own advertisement images, not the gallery photos) and a Find in store button that opens the store search for searchTerm.",
     "Department pages exist only in the app for now (2026-10-21 decision): the web store has no pages for these endpoints yet.",
     "Blog posts are written by staff under author profiles; customers react, reply and report (2026-10-21 decision). Replies are shown at once and hidden by staff when needed.",
     "Play center is list-only at this phase (2026-10-21 decision): games and the ranking tables staff keep. Game.playable is false: games are not played inside the app.",

@@ -8,7 +8,7 @@
 import { Schema } from 'mongoose';
 import { collectionOptions, DATE, integer } from '../../kernel/mongo/schemas.js';
 
-/** One row (id phones): the products of the Phone tab in order */
+/** Before standalone phones (2026-10-23): one row (id phones) with the picked product ids. The departments.import-phone-picks job turns them into phones once and then empties product_ids */
 const phone_picks = new Schema(
   {
     _id: { type: String, required: true }, // id
@@ -20,6 +20,34 @@ const phone_picks = new Schema(
   },
   collectionOptions("departments.phone_picks"),
 );
+
+/** The phones of the Phone tab, kept by staff (standalone: not catalog products, no ordering) */
+const phones = new Schema(
+  {
+    _id: { type: String, required: true }, // id
+    slug: { type: String, required: true },
+    brand: { type: String, required: true },
+    name: { type: String, required: true },
+    overview: { type: String, default: null },
+    storage: { type: Schema.Types.Mixed }, // PhoneStorage[]: size, price and was in minor units, currency
+    colors: { type: Schema.Types.Mixed }, // PhoneColor[]
+    photos: { type: Schema.Types.Mixed }, // { id, alt }[]: preview photos
+    ad_images: { type: Schema.Types.Mixed }, // { id, alt }[]: advertisement images
+    spec_groups: { type: Schema.Types.Mixed }, // PhoneSpecGroup[]
+    show_services: { type: Boolean, required: true },
+    search_term: { type: String, default: null },
+    status: { type: String, required: true, enum: ["published","hidden"] },
+    position: { type: Number, required: true, validate: integer },
+    created_at: { type: Date, required: true },
+    updated_at: { type: Date, required: true },
+    updated_by: { type: String, default: null },
+    /** lock-by-write counter (kernel/mongo/table.ts) */
+    _lock: Number,
+  },
+  collectionOptions("departments.phones"),
+);
+phones.index({"slug":1}, {"name":"phones_slug_549e08","unique":true});
+phones.index({"status":1,"position":1}, {"name":"phones_status_position_e7715e"});
 
 const blog_topics = new Schema(
   {
@@ -432,6 +460,7 @@ const farm_setup = new Schema(
 /** Table name → schema */
 export const schemas = {
   phone_picks: phone_picks,
+  phones: phones,
   blog_topics: blog_topics,
   blog_authors: blog_authors,
   blog_posts: blog_posts,

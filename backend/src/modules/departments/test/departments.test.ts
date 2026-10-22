@@ -11,30 +11,6 @@ afterAll(async () => {
 
 const body = (words: number) => `<h2>Why it matters</h2><p>${Array.from({ length: words }, (_, i) => `word${i}`).join(' ')}</p><script>alert(1)</script><a href="javascript:x">bad</a>`;
 
-describe('phones', () => {
-  it('keeps the picks in order and shows the cards search still shows', async () => {
-    const a = k.card({ title: 'Pixel 9' });
-    const b = k.card({ title: 'Galaxy S25', brandName: 'Samsung' });
-    k.cards.set(a.productId, a).set(b.productId, b);
-    const gone = newId();
-    expect((await k.admin('PUT', '/phones', { productIds: [] })).status).toBe(400);
-    expect((await k.admin('PUT', '/phones', { productIds: [a.productId, a.productId] })).status).toBe(400);
-    const set = await k.admin('PUT', '/phones', { productIds: [b.productId, gone, a.productId] });
-    expect(set.status).toBe(200);
-    expect(set.body.productIds).toEqual([b.productId, gone, a.productId]);
-    expect(set.body.products.map((p: any) => p.title)).toEqual(['Galaxy S25', 'Pixel 9']);
-    expect(k.audits.some((e) => e.action === 'departments.phones.set')).toBe(true);
-    const page = await k.store('GET', '/phones');
-    expect(page.body.products.map((p: any) => p.title)).toEqual(['Galaxy S25', 'Pixel 9']);
-  });
-
-  it('needs departments.phones.manage to change the picks', async () => {
-    const res = await k.admin('PUT', '/phones', { productIds: [newId()] }, k.staff(['departments.view']));
-    expect(res.status).toBe(403);
-    expect((await k.admin('GET', '/phones', undefined, k.staff(['departments.view']))).status).toBe(200);
-  });
-});
-
 describe('farm machines', () => {
   it('keeps machine types and picks with attachments, and shows the store what search still shows', async () => {
     const tractor = k.card({ title: 'Kubota L2502' });

@@ -2,13 +2,13 @@
 
 # Departments (`departments`)
 
-The app's department pages opened from the home Departments rail: the Phones picks, Blogs (topics, staff authors, posts, reactions, replies and reports), the Companies directory (industries, company pages, inquiries) and the Play center (games and ranking tables). Staff manage all of it in Admin › Departments.
+The app's department pages opened from the home Departments rail: the Phones (standalone phones staff add), Blogs (topics, staff authors, posts, reactions, replies and reports), the Companies directory (industries, company pages, inquiries) and the Play center (games and ranking tables). Staff manage all of it in Admin › Departments.
 
 - **Group:** Growth · **Launch phase:** 2 · **Plan chapters:** -
-- **Depends on:** [media](../media/README.md) · **Optional:** [search](../search/README.md), [customers](../customers/README.md), [audit](../audit/README.md), [promotions](../promotions/README.md)
+- **Depends on:** [media](../media/README.md) · **Optional:** [search](../search/README.md), [catalog](../catalog/README.md), [customers](../customers/README.md), [audit](../audit/README.md), [promotions](../promotions/README.md)
 
 ## Owns
-- Phones: the phones staff pick one by one for the Phone tab, in order
+- Phones: standalone phones staff add for the Phone tab (brand, name, overview, storage sizes with prices, colors, preview photos, full-size advertisement images, a grouped spec sheet), in order. No ordering: the page links to a store search
 - Farm machines: machine types and the machines staff pick (catalog products, bought through cart and checkout) with their attachments
 - Blogs: topics, author profiles, posts (sanitized rich text, cover, publish state), likes and dislikes, customer replies, reports and their review
 - Companies: industries, company pages (logo, photos, description, contacts, map location, verified mark) and customer inquiries
@@ -18,7 +18,7 @@ The app's department pages opened from the home Departments rail: the Phones pic
 - Play center scores: player IDs, per-game server keys for game partners, posted scores, rankings computed from them, prize weeks and the coupons won (promotions.issueCode)
 
 **Not here:**
-- Product cards, prices and stock of the Phone tab: search, offers and inventory (search.getProductCards)
+- Buying a phone: the Phone tab only shows information; Find in store opens the store search
 - The Departments rail itself (titles, icons, destinations): content (homepage section kind departments)
 - The carousel ads at the top of Companies and Play center: advertising (placements companies_top, play_top)
 - Files: media (uploads with purpose content_image)
@@ -27,7 +27,8 @@ The app's department pages opened from the home Departments rail: the Phones pic
 
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
-| GET | `/api/store/departments/phones` | The Phone tab: picked phones as product cards, in order | visitor | `PhonesPage` |
+| GET | `/api/store/departments/phones` | The Phone tab: published phones as cards, in staff order | visitor | `PhonesPage` |
+| GET | `/api/store/departments/phones/{slug}` | A phone page: Detail and Advertisements tabs | visitor | `Phone` |
 | GET | `/api/store/departments/farm` | Farm machines: types and picked machines | visitor | `FarmPage` |
 | GET | `/api/store/departments/farm/machines/{productId}` | A picked machine with its attachments | visitor | `FarmMachine` |
 | GET | `/api/store/departments/blogs/topics` | Visible blog topics in order | visitor | `BlogTopic[]` |
@@ -62,8 +63,12 @@ The app's department pages opened from the home Departments rail: the Phones pic
 
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
-| GET | `/api/admin/departments/phones` | The Phone tab picks | staff<br>`departments.view` | `PhonesAdmin` |
-| PUT | `/api/admin/departments/phones` | Replace the Phone tab picks _(audited)_ | staff<br>`departments.phones.manage` | `PhonesInput` → `PhonesAdmin` |
+| GET | `/api/admin/departments/phones` | Every phone in staff order | staff<br>`departments.view` | `PhonesAdmin` |
+| POST | `/api/admin/departments/phones` | Add a phone _(audited)_ | staff<br>`departments.phones.manage` | `PhoneInput` → `PhoneAdmin` |
+| PUT | `/api/admin/departments/phones/order` | Change the order of the Phone tab _(audited)_ | staff<br>`departments.phones.manage` | `PhonesOrderInput` → `PhonesAdmin` |
+| GET | `/api/admin/departments/phones/{id}` | A phone for editing | staff<br>`departments.view` | `PhoneAdmin` |
+| PATCH | `/api/admin/departments/phones/{id}` | Edit, hide or show a phone _(audited)_ | staff<br>`departments.phones.manage` | `PhoneInput` → `PhoneAdmin` |
+| DELETE | `/api/admin/departments/phones/{id}` | Delete a phone and release its photos _(audited)_ | staff<br>`departments.phones.manage` | 204 No content |
 | GET | `/api/admin/departments/farm` | Farm machine types and picks | staff<br>`departments.view` | `FarmAdmin` |
 | PUT | `/api/admin/departments/farm` | Replace the farm machine types and picks _(audited)_ | staff<br>`departments.farm.manage` | `FarmInput` → `FarmAdmin` |
 | GET | `/api/admin/departments/blogs/topics` | Every blog topic | staff<br>`departments.view` | `BlogTopic[]` |
@@ -117,25 +122,145 @@ The app's department pages opened from the home Departments rail: the Phones pic
 
 ## Types
 
+### PhoneStorage
+
+| Field | Type |
+|---|---|
+| size | `string` e.g. 256 GB |
+| price | `Money` |
+| was | `Money?` Shown crossed out with Save $200 when above price |
+
+### PhoneColor
+
+| Field | Type |
+|---|---|
+| name | `string` Full name for the title line, e.g. Titanium Gray |
+| short | `string?` Under the swatch, e.g. Gray; null means name |
+| hex | `string` Swatch color #RRGGBB |
+
+### PhonePhoto
+
+| Field | Type |
+|---|---|
+| id | `uuid` Media asset id |
+| url | `url` Large rendition (1280 px wide at most, the photo's own ratio): the Photos tab |
+| zoomUrl | `url` Zoom rendition (2048 px wide at most): the full-screen viewer |
+| thumbUrl | `url?` Thumb rendition: gallery strip and admin grid |
+| width | `int?` |
+| height | `int?` |
+| alt | `string?` Staff description, read by screen readers |
+
+### PhoneSpecRow
+
+| Field | Type |
+|---|---|
+| name | `string` e.g. Refresh rate |
+| value | `string` e.g. 1–120 Hz |
+
+### PhoneSpecGroup
+
+| Field | Type |
+|---|---|
+| name | `string` e.g. Display |
+| rows | `PhoneSpecRow[]` |
+
+### PhoneCard
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| slug | `string` |
+| brand | `string` |
+| name | `string` |
+| meta | `string` First storage and first color, e.g. 256 GB · Titanium Gray |
+| price | `Money` The first storage's price |
+| was | `Money?` |
+| dealPercent | `int?` Whole percent off the was price (the −15% badge); null without a deal |
+| image | `MediaRef?` The cover photo (first), medium rendition |
+
 ### PhonesPage
 
 | Field | Type |
 |---|---|
-| products | `search.ProductCard[]` The picked phones in order; ones the store no longer shows are left out. The app builds the brand chips from brandName |
+| phones | `PhoneCard[]` Published phones in staff order |
+| brands | `string[]` Brands of those phones, in first-seen order: the brand chips |
+
+### Phone
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| slug | `string` |
+| brand | `string` |
+| name | `string` |
+| overview | `text?` Plain text; blank lines separate paragraphs |
+| storage | `PhoneStorage[]` At least one; the first is selected when the page opens |
+| colors | `PhoneColor[]` May be empty; the first is selected when the page opens |
+| photos | `PhonePhoto[]` Preview photos: the Detail tab gallery, in staff order; the first is the cover |
+| adImages | `PhonePhoto[]` Advertisement images for the Advertisements tab (not the gallery photos), full size in staff order; empty: the tab is not shown |
+| specGroups | `PhoneSpecGroup[]` |
+| showServices | `bool` Show the free OS install and post-sale card |
+| searchTerm | `string` What Find in store searches for (staff term, else the name) |
+| updatedAt | `datetime` |
+
+### PhoneAdmin
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| slug | `string` |
+| brand | `string` |
+| name | `string` |
+| overview | `text?` |
+| storage | `PhoneStorage[]` |
+| colors | `PhoneColor[]` |
+| photos | `PhonePhoto[]` |
+| adImages | `PhonePhoto[]` |
+| specGroups | `PhoneSpecGroup[]` |
+| showServices | `bool` |
+| searchTerm | `string?` Null: Find in store searches for the name |
+| status | `enum(published|hidden)` |
+| position | `int` 1-based place on the Phone tab |
+| createdAt | `datetime` |
+| updatedAt | `datetime` |
+| updatedBy | `Actor?` |
 
 ### PhonesAdmin
 
 | Field | Type |
 |---|---|
-| productIds | `uuid[]` Every picked product in order, unavailable ones included |
-| products | `search.ProductCard[]` Cards of the picks the store still shows |
-| updatedAt | `datetime?` |
+| items | `PhoneAdmin[]` Every phone in staff order, hidden ones included |
 
-### PhonesInput
+### PhonePhotoInput
 
 | Field | Type |
 |---|---|
-| productIds | `uuid[]` 1–100 products in order |
+| id | `uuid` content_image upload, at least 1080 px wide |
+| alt | `string?` |
+
+### PhoneInput
+
+| Field | Type |
+|---|---|
+| brand | `string` At most 40 characters |
+| name | `string` At most 80 characters |
+| slug | `string?` |
+| overview | `text?` At most 1,000 characters |
+| storage | `PhoneStorage[]` 1–8 sizes in order, each with a price above zero; was, when given, above price; one currency (the market's) |
+| colors | `PhoneColor[]?` Up to 12, in order |
+| photos | `PhonePhotoInput[]` 1–20 preview photos in order (the Detail tab gallery); the first is the cover |
+| adImages | `PhonePhotoInput[]?` Up to 20 advertisement images in order (the Advertisements tab), content_image uploads at least 1080 px wide, none of them also a preview photo |
+| specGroups | `PhoneSpecGroup[]?` Up to 20 groups of up to 30 rows; rows with an empty name or value are left out, then empty groups |
+| showServices | `bool?` |
+| searchTerm | `string?` At most 80 characters |
+| status | `enum(published|hidden)?` |
+| position | `int?` 1-based; new phones go last when not given |
+
+### PhonesOrderInput
+
+| Field | Type |
+|---|---|
+| ids | `uuid[]` Every phone id, in the new order |
 
 ### BlogTopic
 
@@ -932,7 +1057,7 @@ The app's department pages opened from the home Departments rail: the Phones pic
 
 ## Data (schema `departments`)
 
-**phone_picks**: One row (id phones): the products of the Phone tab in order
+**phone_picks**: Before standalone phones (2026-10-23): one row (id phones) with the picked product ids. The departments.import-phone-picks job turns them into phones once and then empties product_ids
 
 | Column | Type |
 |---|---|
@@ -940,6 +1065,30 @@ The app's department pages opened from the home Departments rail: the Phones pic
 | product_ids | jsonb |
 | updated_by | text? |
 | updated_at | timestamptz |
+
+**phones**: The phones of the Phone tab, kept by staff (standalone: not catalog products, no ordering)
+
+| Column | Type |
+|---|---|
+| id | uuid pk |
+| slug | text unique |
+| brand | text |
+| name | text |
+| overview | text? |
+| storage | jsonb (PhoneStorage[]: size, price and was in minor units, currency) |
+| colors | jsonb (PhoneColor[]) |
+| photos | jsonb ({ id, alt }[]: preview photos) |
+| ad_images | jsonb ({ id, alt }[]: advertisement images) |
+| spec_groups | jsonb (PhoneSpecGroup[]) |
+| show_services | bool |
+| search_term | text? |
+| status | text (published|hidden) |
+| position | int |
+| created_at | timestamptz |
+| updated_at | timestamptz |
+| updated_by | text? |
+
+Indexes: `(status, position)`
 
 **blog_topics**
 
@@ -1283,7 +1432,7 @@ Indexes: `unique (game_id, week, customer_id)`, `(game_id, week, rank)`, `(state
 | Key | Who | Allows |
 |---|---|---|
 | `departments.view` | staff | See the department pages' content in Admin › Departments |
-| `departments.phones.manage` | staff | Pick the phones of the Phone tab |
+| `departments.phones.manage` | staff | Add, edit, order and delete the phones of the Phone tab |
 | `departments.farm.manage` | staff | Farm machine types, picked machines and their attachments |
 | `departments.blogs.manage` | staff | Blog topics, authors and posts; hide replies and decide reports |
 | `departments.companies.manage` | staff | Industries and company pages; handle inquiries |
@@ -1310,6 +1459,7 @@ Indexes: `unique (game_id, week, customer_id)`, `(game_id, week, rank)`, `(state
 
 | Job | Schedule | Does |
 |---|---|---|
+| `departments.import-phone-picks` | on boot | Once: turns the products picked for the Phone tab before standalone phones (phone_picks, id phones) into phones, in the same order: brand and title, description as overview, storage sizes from the product variants' storage or capacity option (else one Standard row) with the price of its search card, color options (a grey swatch when the color name is unknown), the product images as photos (attached as content_block usages) and its specs as one Specifications group; then empties product_ids so it never runs again. A phone whose slug already exists counts as imported. Products catalog cannot read or search shows no price for are skipped and logged; while catalog or search is off the picks wait for a later start. |
 | `departments.award-prize-weeks` | hourly | For every game with prize tiers linked to coupon campaigns, works out the winners of each prize week that ended at least scoreMaxAgeMinutes ago (the last 4 weeks), issues each winner's coupon with promotions.issueCode (key play:<game>:<week>:<customer>, so a retry gives the same code) and publishes departments.play.prize_awarded. Winners whose code could not be issued are tried again next hour. |
 
 ## Settings
@@ -1320,6 +1470,7 @@ Indexes: `unique (game_id, week, customer_id)`, `(game_id, week, rank)`, `(state
 | scoreMaxAgeMinutes | `60` | duration, minutes, 5–1440 | How old a posted score may be; a prize week is settled this long after it ends, so no late score can change it |
 
 ## Notes
+- Phones are standalone records (2026-10-23 decision): staff add them in Admin › Departments › Phones with prices, options, a spec sheet, preview photos and advertisement images; there is no ordering. The app page has Detail and Advertisements tabs (2026-10-23: the second tab shows its own advertisement images, not the gallery photos) and a Find in store button that opens the store search for searchTerm.
 - Department pages exist only in the app for now (2026-10-21 decision): the web store has no pages for these endpoints yet.
 - Blog posts are written by staff under author profiles; customers react, reply and report (2026-10-21 decision). Replies are shown at once and hidden by staff when needed.
 - Play center is list-only at this phase (2026-10-21 decision): games and the ranking tables staff keep. Game.playable is false: games are not played inside the app.

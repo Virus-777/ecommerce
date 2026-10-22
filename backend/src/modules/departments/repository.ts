@@ -1,12 +1,12 @@
 import { contains, type ModuleStore } from '../../kernel/mongo/index.js';
 import type { Page, PageRequest } from '../../kernel/lib/pagination.js';
-import type { AuthorRow, CompanyRow, FarmSetupRow, FollowRow, GameKeyRow, GameRow, IndustryRow, InquiryRow, PhonePicksRow, PlayerRow, PostRow, PrizeAwardRow, PrizeWeekRow, RankingRow, ReactionRow, ReplyLikeRow, ReplyRow, ReportRow, ReviewRow, SaveRow, ScoreRow, TopicRow } from './ports.js';
+import type { AuthorRow, CompanyRow, FarmSetupRow, FollowRow, GameKeyRow, GameRow, IndustryRow, InquiryRow, PhonePicksRow, PhoneRow, PlayerRow, PostRow, PrizeAwardRow, PrizeWeekRow, RankingRow, ReactionRow, ReplyLikeRow, ReplyRow, ReportRow, ReviewRow, SaveRow, ScoreRow, TopicRow } from './ports.js';
 
 export type Lock = { forUpdate?: boolean };
-export type SlugTable = 'topics' | 'authors' | 'posts' | 'industries' | 'companies' | 'games';
+export type SlugTable = 'phones' | 'topics' | 'authors' | 'posts' | 'industries' | 'companies' | 'games';
 
 /**
- * The departments module's collections (departments.<table>, docs/04-mongodb-migration.md): the Phone tab picks, blog
+ * The departments module's collections (departments.<table>, docs/04-mongodb-migration.md): the Phone tab's phones, blog
  * topics, authors, posts, reactions, replies and reports, industries, companies, inquiries, games and rankings.
  */
 export class DepartmentsRepository {
@@ -15,6 +15,7 @@ export class DepartmentsRepository {
   constructor(private readonly store: ModuleStore) {
     this.#t = {
       picks: store.table<PhonePicksRow>('phone_picks'),
+      phones: store.table<PhoneRow>('phones'),
       farm: store.table<FarmSetupRow>('farm_setup'),
       topics: store.table<TopicRow>('blog_topics'),
       authors: store.table<AuthorRow>('blog_authors'),
@@ -46,9 +47,48 @@ export class DepartmentsRepository {
 
   /* ---------------------------------------------------------------- phones */
 
+  /** Every phone in staff order (`publishedOnly`: what the store shows) */
+  listPhones(o: { publishedOnly?: boolean } = {}): Promise<PhoneRow[]> {
+    return this.#t.phones.find(o.publishedOnly ? { status: 'published' } : {}, { sort: { position: 1, created_at: 1 } });
+  }
+  getPhone(id: string): Promise<PhoneRow | undefined> {
+    return this.#t.phones.get(id);
+  }
+  phoneBySlug(slug: string): Promise<PhoneRow | undefined> {
+    return this.#t.phones.findOne({ slug });
+  }
+  insertPhone(row: PhoneRow): Promise<PhoneRow> {
+    return this.#t.phones.insert(row);
+  }
+  /** Inserts unless a phone already has the slug (or the id): undefined then */
+  insertPhoneIfAbsent(row: PhoneRow): Promise<PhoneRow | undefined> {
+    return this.#t.phones.insertIfAbsent(row);
+  }
+  updatePhone(id: string, patch: Partial<PhoneRow>): Promise<PhoneRow | undefined> {
+    return this.#t.phones.update(id, patch);
+  }
+  deletePhone(id: string): Promise<boolean> {
+    return this.#t.phones.delete(id);
+  }
+  /** The next position at the end of the list */
+  async nextPhonePosition(): Promise<number> {
+    const [last] = await this.#t.phones.find({}, { sort: { position: -1 }, limit: 1 });
+    return (last?.position ?? 0) + 1;
+  }
+  /** Moves the phones at `from` or later one place down (room at `from`), leaving out `exceptId` */
+  async shiftPhones(from: number, exceptId?: string): Promise<void> {
+    await this.#t.phones.updateMany({ position: { $gte: from }, ...(exceptId ? { id: { $ne: exceptId } } : {}) }, { $inc: { position: 1 } });
+  }
+  /** Gives the phones positions 1, 2, 3… in the order of `ids` */
+  async setPhonePositions(ids: string[]): Promise<void> {
+    for (const [i, id] of ids.entries()) await this.#t.phones.update(id, { position: i + 1 });
+  }
+
+  /** Before standalone phones: the picked product ids (departments.import-phone-picks) */
   getPicks(): Promise<PhonePicksRow | undefined> {
     return this.#t.picks.get('phones');
   }
+  /** Picks as they were kept before standalone phones; [] once imported */
   savePicks(productIds: string[], by: string, at: Date): Promise<PhonePicksRow> {
     return this.#t.picks.upsert({ id: 'phones', product_ids: productIds, updated_by: by, updated_at: at });
   }

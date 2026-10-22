@@ -1,7 +1,7 @@
 /**
  * Seeds the sample department pages content (tools/simulate/departments-data.ts) into a running server through the
  * Admin Center API, the way a Content Manager would: blog topics, authors and posts, industries and companies, Play
- * center games and ranking tables, and the Phone tab picks. Only what is missing is added.
+ * center games and ranking tables, and the Phone tab's phones (with generated photos). Only what is missing is added.
  *
  *   SEED_EMAIL=<staff email> SEED_PASSWORD=<password> npx tsx tools/seed-departments.ts [http://localhost:4000]
  *
@@ -55,7 +55,7 @@ const reviewerToken = process.env.SEED_REVIEWER_EMAIL && process.env.SEED_REVIEW
 const visitor = await appSession('store');
 
 const admin = (method: 'GET' | 'POST' | 'PATCH' | 'PUT', path: string, body?: unknown) => request(method, `/api${path}`, body, staff);
-const added = await seedDepartments(admin, (path) => request('GET', `/api${path}`, undefined, visitor));
+const added = await seedDepartments(admin, (path) => request('GET', `/api${path}`, undefined, visitor), apiUploader(base, staff));
 console.log('Department pages content added:', added);
 console.log('Services, providers and categories added:', await seedServices(admin));
 console.log('Softwares categories, apps, files and packs added:', await seedSoftware(admin, apiUploader(base, staff)));

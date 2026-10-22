@@ -1,7 +1,7 @@
 /**
  * Farm machines: the machine types staff keep and the machines they pick (catalog products, bought through cart and
  * checkout; renting is left out of v1) with their attachments, in one farm_setup row (id farm). The cards come from
- * search like the Phone tab's; machines and attachments the store no longer shows are left out.
+ * search (cardsFor); machines and attachments the store no longer shows are left out.
  */
 import { newId } from '../../../kernel/lib/ids.js';
 import { slugify } from '../../../kernel/lib/text.js';

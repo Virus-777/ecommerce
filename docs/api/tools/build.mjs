@@ -69,6 +69,7 @@ const REACT_SCREENS = [
   ['account/statistics', 'store', 'My account', 'Statistics'],
   // department pages of the app (Departments rail), designed on the Marketly Departments canvas
   ['store/phones', 'store', 'Departments', 'Phones'],
+  ['store/phone', 'store', 'Departments', 'Phone'],
   ['store/blogs', 'store', 'Departments', 'Blogs'],
   ['store/blog-post', 'store', 'Departments', 'Blog post'],
   ['store/blog-author', 'store', 'Departments', 'Blog author'],
@@ -77,6 +78,7 @@ const REACT_SCREENS = [
   ['store/play', 'store', 'Departments', 'Play center'],
   ['store/play-game', 'store', 'Departments', 'Play center game'],
   ['admin/departments-phones', 'admin', 'Departments', 'Phones'],
+  ['admin/departments-phone', 'admin', 'Departments', 'Add or edit a phone'],
   ['admin/departments-blogs', 'admin', 'Departments', 'Blogs'],
   ['admin/departments-companies', 'admin', 'Departments', 'Companies'],
   ['admin/departments-play', 'admin', 'Departments', 'Play center'],
