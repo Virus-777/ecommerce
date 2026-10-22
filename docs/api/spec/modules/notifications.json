@@ -2675,6 +2675,18 @@
         "does": "Customer: their service request or booking was confirmed, started, completed, declined or cancelled"
       },
       {
+        "name": "food.order.status_changed",
+        "does": "Customer: their food order was accepted, is on the way, was delivered, declined or cancelled, or its payment failed (in-app, topic customer.food.order)"
+      },
+      {
+        "name": "software.purchase.paid",
+        "does": "Customer: a software purchase is paid and ready to download (in-app, topic customer.software.purchase)"
+      },
+      {
+        "name": "rewards.reward.redeemed",
+        "does": "Customer: the coupon they got for Daily rewards points is ready, with its code (in-app, topic customer.rewards.coupon)"
+      },
+      {
         "name": "access.approval.requested",
         "does": "Staff: waiting approval to eligible approvers (nominated reviewer first), action required with due date"
       },

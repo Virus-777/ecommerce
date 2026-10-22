@@ -11,12 +11,12 @@ import { AppError } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { format } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
-import type { Allocation, AuthorizeInput, AuthorizeResult, PaymentDetail, PaymentStatusView, Tender } from '../../../spec/payments.js';
+import type { Allocation, AuthorizeInput, AuthorizeResult, MethodSelection, PaymentDetail, PaymentStatusView, PurchaseAuthorizeInput, PurchasePaymentStatus, Tender } from '../../../spec/payments.js';
 import { paymentIntentMachine } from '../domain/state-machines.js';
 import { ACCEPTED, DAY, ENDED, HOUR, MINUTE, PENDING, checkBackoffMs, declineOf, is, isExpired, methodLabel, type IntentStatus } from '../domain/rules.js';
 import { ProviderError, type AllocationRec, type CaptureRec, type CardDetails, type IntentRec, type ProviderCapture, type ProviderPayment, type StoredMethod } from '../ports.js';
 import type { PaymentsRepository } from '../repository.js';
-import { Batch, SYSTEM, illegal, invalid, notFound, type By, type Cfg, type Core, type Lookup, type OrderInfo } from './core.js';
+import { Batch, SYSTEM, checkoutSessionOf, illegal, invalid, isPurchase, notFound, purchaseOf, type By, type Cfg, type Core, type Lookup, type OrderInfo } from './core.js';
 import { CANCELLED_KEY, EXCESS_KEY, itemKey, type Credit } from './credit.js';
 import type { Views } from './views.js';
 
@@ -70,10 +70,8 @@ export class Intents {
     if (credit > 0 && !input.creditHoldId) throw invalid([{ path: 'creditHoldId', message: 'Store credit needs a wallet hold' }]);
     const cardAmount = amount.amount - credit;
 
-    const { card, source, savedMethodId } = await this.resolveMethod(input, cfg, cardAmount > 0);
-    const snapshot: StoredMethod = card
-      ? { kind: card.kind, brand: card.brand, last4: card.last4, expMonth: card.expMonth, expYear: card.expYear, wallet: card.wallet ?? null, label: methodLabel(card), savedMethodId }
-      : { kind: 'store_credit', label: 'Marketly store credit', savedMethodId: null };
+    const { card, source, savedMethodId } = await this.resolveMethod(input.method, input.customerId ?? null, cfg, cardAmount > 0);
+    const snapshot = this.snapshotOf(card, savedMethodId);
     const tenders: Tender[] = [
       ...(cardAmount > 0 ? [{ kind: (card?.kind ?? 'card') as Tender['kind'], amount: this.m(cardAmount, amount.currency) }] : []),
       ...(credit > 0 ? [{ kind: 'store_credit' as const, amount: this.m(credit, amount.currency), creditHoldId: input.creditHoldId ?? null }] : []),
@@ -83,6 +81,10 @@ export class Intents {
     const row: IntentRec = {
       id,
       ref: randomRef(),
+      purpose: 'checkout',
+      purchase_module: null,
+      purchase_ref_id: null,
+      purchase_ref: null,
       checkout_session_id: input.checkoutSessionId,
       attempt_no: input.attemptNo,
       order_id: null,
@@ -126,7 +128,93 @@ export class Intents {
       const after = await this.applyPayment(id, { status: 'authorized', authorizedAmount: 0 }, { by: { actor: SYSTEM }, cfg });
       return this.resultOf(after);
     }
+    return this.authorizeCard(id, this.m(cardAmount, amount.currency), source, input, cfg);
+  }
 
+  /**
+   * A purchase intent (software purchases, food orders; spec note "Purchase intents"): no checkout session and no
+   * order, one live intent per (module, refId), and the same key answers the first result. The card is authorized like
+   * a checkout payment (same adapter, same accepted / failed / pending_check / requires_action handling, method
+   * snapshot and save-for-later); outcomes are published as payments.purchase.*.
+   */
+  async authorizePurchase(input: PurchaseAuthorizeInput, idempotencyKey: string): Promise<AuthorizeResult> {
+    if (!idempotencyKey?.trim()) throw invalid([{ path: 'idempotencyKey', message: 'An idempotency key is required' }]);
+    const known = (await this.repo.find('intents', { idempotency_key: idempotencyKey }))[0];
+    if (known) return this.resultOf(known);
+    const live = async () => (await this.repo.find('intents', { purchase_module: input.module, purchase_ref_id: input.refId, status: LIVE }))[0];
+    const active = await live();
+    if (active) return this.resultOf(active); // one live intent per purchase: a double submit never authorizes twice
+
+    const amount = input.amount;
+    if (!Number.isSafeInteger(amount.amount) || amount.amount <= 0) throw invalid([{ path: 'amount', message: 'The amount must be more than zero' }]);
+    if (!input.customerId) throw invalid([{ path: 'customerId', message: 'A purchase needs a customer' }]);
+    const cfg = await this.core.cfg();
+    const { card, source, savedMethodId } = await this.resolveMethod(input.method, input.customerId, cfg, true);
+    const earlier = await this.repo.find('intents', { purchase_module: input.module, purchase_ref_id: input.refId });
+    const now = this.core.now();
+    const id = newId();
+    const row: IntentRec = {
+      id,
+      ref: randomRef(),
+      purpose: 'purchase',
+      purchase_module: input.module,
+      purchase_ref_id: input.refId,
+      purchase_ref: input.ref,
+      checkout_session_id: null,
+      attempt_no: earlier.length + 1,
+      order_id: null,
+      customer_id: input.customerId,
+      guest_email: null,
+      amount: amount.amount,
+      currency: amount.currency,
+      tenders: [{ kind: (card?.kind ?? 'card') as Tender['kind'], amount: this.m(amount.amount, amount.currency) }],
+      method: this.snapshotOf(card, savedMethodId),
+      provider: this.core.provider.code,
+      provider_ref: null,
+      status: paymentIntentMachine.next('created', 'submit'),
+      decline: null,
+      authorized_amount: 0,
+      captured_amount: 0,
+      refunded_amount: 0,
+      authorized_at: null,
+      captured_at: null,
+      authorization_expires_at: null,
+      last_checked_at: null,
+      next_check_at: null,
+      check_attempts: 0,
+      orphan: false,
+      next_action: null,
+      idempotency_key: idempotencyKey,
+      created_at: now,
+      updated_at: now,
+    };
+    for (let attempt = 0; ; attempt++) {
+      const inserted = await this.repo.insertIfAbsent('intents', row);
+      if (inserted) break;
+      // the same key or another live intent of the purchase won a race
+      const winner = (await this.repo.find('intents', { idempotency_key: idempotencyKey }))[0] ?? (await live());
+      if (winner) return this.resultOf(winner);
+      if (attempt >= 2) throw new AppError('CONFLICT', 'Another payment for this purchase is being processed');
+      row.ref = randomRef(); // PAY- reference collision: draw another
+    }
+    return this.authorizeCard(id, amount, source, { customerId: input.customerId, method: input.method, description: input.description, returnUrl: input.returnUrl }, cfg);
+  }
+
+  /** The method snapshot kept on the intent */
+  private snapshotOf(card: CardDetails | null, savedMethodId: string | null): StoredMethod {
+    return card
+      ? { kind: card.kind, brand: card.brand, last4: card.last4, expMonth: card.expMonth, expYear: card.expYear, wallet: card.wallet ?? null, label: methodLabel(card), savedMethodId }
+      : { kind: 'store_credit', label: 'Marketly store credit', savedMethodId: null };
+  }
+
+  /** Asks the provider to authorize the card part of a new intent and applies the answer (checkout and purchase intents alike) */
+  private async authorizeCard(
+    id: string,
+    cardAmount: common.Money,
+    source: { token?: string | null; methodId?: string | null },
+    input: { customerId?: string | null; method: MethodSelection; description: string; returnUrl: string },
+    cfg: Cfg,
+  ): Promise<AuthorizeResult> {
     let result: ProviderPayment;
     try {
       result = await this.core.call(
@@ -134,7 +222,7 @@ export class Intents {
         { intentId: id },
         () =>
           this.core.provider.authorize({
-            amount: this.m(cardAmount, amount.currency),
+            amount: cardAmount,
             source,
             idempotencyKey: `${id}:authorize`,
             description: input.description,
@@ -164,15 +252,14 @@ export class Intents {
   /** Set by the service: saved methods keep a card the customer asked to save at checkout */
   saveForLater: (customerId: string, token: string, label: string | null, billing: common.Address | null) => Promise<unknown> = async () => undefined;
 
-  private async resolveMethod(input: AuthorizeInput, cfg: Cfg, needsCard: boolean): Promise<{ card: CardDetails | null; source: { token?: string | null; methodId?: string | null }; savedMethodId: string | null }> {
+  private async resolveMethod(sel: MethodSelection, customerId: string | null, cfg: Cfg, needsCard: boolean): Promise<{ card: CardDetails | null; source: { token?: string | null; methodId?: string | null }; savedMethodId: string | null }> {
     if (!needsCard) return { card: null, source: {}, savedMethodId: null };
-    const sel = input.method;
     let card: CardDetails | null;
     let source: { token?: string | null; methodId?: string | null };
     let savedMethodId: string | null = null;
     if (sel.kind === 'saved_card') {
       const m = sel.savedMethodId ? await this.repo.get('saved_methods', sel.savedMethodId) : undefined;
-      if (!m || m.removed_at || !input.customerId || m.customer_id !== input.customerId) throw this.core.error('PAYMENT_METHOD_INVALID', 'This saved card cannot be used. Choose another card.');
+      if (!m || m.removed_at || !customerId || m.customer_id !== customerId) throw this.core.error('PAYMENT_METHOD_INVALID', 'This saved card cannot be used. Choose another card.');
       if (isExpired(m.exp_month, m.exp_year, this.core.today())) throw this.core.error('PAYMENT_METHOD_EXPIRED');
       card = { kind: m.kind as CardDetails['kind'], brand: m.brand, last4: m.last4, expMonth: m.exp_month, expYear: m.exp_year };
       source = { methodId: m.provider_method_id };
@@ -237,8 +324,15 @@ export class Intents {
             next_check_at: null,
             next_action: null,
           });
-          batch.push('payments.payment.authorized', { intentId: i.id, checkoutSessionId: i.checkout_session_id, orderId: i.order_id, amount: this.m(authorized, i.currency), methodLabel: i.method.label, at: now.toISOString() });
-          if ((status as IntentStatus) === 'captured') {
+          if (isPurchase(i)) batch.push('payments.purchase.authorized', { ...purchaseOf(i), amount: this.m(authorized, i.currency), methodLabel: i.method.label, at: now.toISOString() });
+          else batch.push('payments.payment.authorized', { intentId: i.id, checkoutSessionId: checkoutSessionOf(i), orderId: i.order_id, amount: this.m(authorized, i.currency), methodLabel: i.method.label, at: now.toISOString() });
+          if ((status as IntentStatus) === 'captured' && isPurchase(i)) {
+            // the provider captured on its own: one whole-payment capture, reported like capturePurchase
+            const captured = p.capturedAmount || authorized;
+            const capture = await tx.insertIfAbsent('captures', { id: newId(), intent_id: i.id, group_id: null, amount: captured, credit_amount: 0, status: 'succeeded', provider_ref: p.providerRef ?? i.provider_ref, idempotency_key: `${i.id}:capture:provider`, at: now });
+            Object.assign(patch, { captured_amount: captured, captured_at: now });
+            if (capture) batch.push('payments.purchase.captured', { ...purchaseOf(i), amount: this.m(captured, i.currency), providerRef: capture.provider_ref, capturedAt: now.toISOString() });
+          } else if ((status as IntentStatus) === 'captured') {
             // the provider captured on its own (confirm_captured): record it as one whole-payment capture
             const captured = p.capturedAmount || authorized;
             // a whole-payment capture: all the store credit still used goes with it (an order's only)
@@ -270,14 +364,15 @@ export class Intents {
           patch.decline = declineOf(d.code, d.category, i.method.label);
           patch.next_check_at = null;
           patch.next_action = null;
-          batch.push('payments.payment.failed', { intentId: i.id, checkoutSessionId: i.checkout_session_id, orderId: i.order_id, orderRef: i.order_id ? orderRef : null, ...who, declineCategory: d.category, afterPendingCheck: wasPending, at: now.toISOString() });
+          if (isPurchase(i)) batch.push('payments.purchase.failed', { ...purchaseOf(i), declineCategory: d.category, afterPendingCheck: wasPending, at: now.toISOString() });
+          else batch.push('payments.payment.failed', { intentId: i.id, checkoutSessionId: checkoutSessionOf(i), orderId: i.order_id, orderRef: i.order_id ? orderRef : null, ...who, declineCategory: d.category, afterPendingCheck: wasPending, at: now.toISOString() });
           releaseHold = i.tenders.find((t) => t.creditHoldId)?.creditHoldId ?? null;
           break;
         }
         case 'voided':
           if (status === 'authorized') {
             step('void');
-            batch.push('payments.payment.voided', { intentId: i.id, checkoutSessionId: i.checkout_session_id, orderId: i.order_id, reason: 'Released at the payment provider' });
+            this.pushVoided(batch, i, 'Released at the payment provider');
           }
           break;
       }
@@ -287,6 +382,12 @@ export class Intents {
     this.core.flush(batch, o.by);
     if (releaseHold) await this.core.soft('wallet', 'releaseHold', (w) => w.releaseHold(releaseHold!));
     return after;
+  }
+
+  /** payments.payment.voided for a checkout payment, payments.purchase.voided for a purchase */
+  private pushVoided(batch: Batch, i: IntentRec, reason: string) {
+    if (isPurchase(i)) batch.push('payments.purchase.voided', { intentId: i.id, module: i.purchase_module as 'software' | 'food', refId: i.purchase_ref_id!, reason });
+    else batch.push('payments.payment.voided', { intentId: i.id, checkoutSessionId: checkoutSessionOf(i), orderId: i.order_id, reason });
   }
 
   private cardAmount(i: IntentRec): number {
@@ -306,7 +407,8 @@ export class Intents {
       if (status !== 'authorizing') return i;
       status = paymentIntentMachine.next('authorizing', 'timeout') as IntentStatus;
       const now = this.core.now();
-      batch.push('payments.payment.pending_check', { intentId: i.id, checkoutSessionId: i.checkout_session_id, orderId: i.order_id, ...who, amount: this.m(i.amount, i.currency), since: now.toISOString() });
+      // purchase intents have no pending event: their module shows pending_payment until authorized or failed
+      if (!isPurchase(i)) batch.push('payments.payment.pending_check', { intentId: i.id, checkoutSessionId: checkoutSessionOf(i), orderId: i.order_id, ...who, amount: this.m(i.amount, i.currency), since: now.toISOString() });
       return tx.update('intents', i.id, { status, next_check_at: new Date(now.getTime() + checkBackoffMs(0)), check_attempts: 0, updated_at: now, next_action: null });
     });
     this.core.flush(batch, by);
@@ -394,17 +496,56 @@ export class Intents {
     return this.views.statusView(i, this.core.lookup());
   }
 
+  /** A checkout payment; NOT_FOUND for a purchase intent (Admin › Payments lists checkout payments only) */
+  async checkoutIntent(intentId: string): Promise<IntentRec> {
+    const i = await this.get(intentId);
+    if (isPurchase(i)) throw notFound();
+    return i;
+  }
+
+  /** A purchase intent; NOT_FOUND for a checkout payment */
+  async purchaseIntent(intentId: string): Promise<IntentRec> {
+    const i = await this.get(intentId);
+    if (!isPurchase(i)) throw notFound();
+    return i;
+  }
+
+  /** Customer-facing state of a purchase intent; refresh asks the provider about a pending one first (no rate limit: the owning module calls it) */
+  async getPurchaseStatus(intentId: string, refresh = false): Promise<PurchasePaymentStatus> {
+    let i = await this.purchaseIntent(intentId);
+    if (refresh && (is(PENDING, i.status) || i.status === 'authorized')) i = await this.sync(intentId, { actor: SYSTEM });
+    return this.views.purchaseStatus(i);
+  }
+
+  /**
+   * Captures the whole authorized amount of a purchase intent (payments.purchase.captured once). Each attempt has its
+   * own key (intent + purchase + attempt): one in flight or done answers with it; after a failed attempt the next
+   * call sends a new one. ILLEGAL_TRANSITION unless the intent is an authorized purchase (captured already: done).
+   */
+  async capturePurchase(intentId: string, by: By): Promise<void> {
+    const i = await this.purchaseIntent(intentId);
+    if (i.status === 'captured') return;
+    if (i.status !== 'authorized') paymentIntentMachine.next(i.status as never, 'capture'); // ILLEGAL_TRANSITION
+    const base = `${intentId}:capture:purchase`;
+    const attempts = (await this.repo.find('captures', { intent_id: intentId })).filter((c) => c.idempotency_key.startsWith(base));
+    const key = attempts.find((c) => c.status !== 'failed')?.idempotency_key ?? `${base}:${attempts.length + 1}`;
+    const capture = await this.capture(intentId, { key, final: true, by, strict: true });
+    if (!capture || capture.status === 'failed') throw this.core.error('PROVIDER_UNAVAILABLE', 'The payment could not be taken. Nothing was charged; try again in a few minutes.');
+    if (capture.status !== 'succeeded') throw this.core.error('PROVIDER_UNAVAILABLE', 'The payment provider did not confirm the payment yet. We will check it; do not pay again.');
+  }
+
   /**
    * Development only (G60, POST /api/dev/payments/intents/{id}/settle, DEV_TOKENS on): answers a payment the
    * development processor is holding (tok_pending) and checks it at once, as the status-check job would.
    */
-  async devSettle(intentId: string, outcome: 'authorized' | 'declined', by: By): Promise<PaymentStatusView> {
+  async devSettle(intentId: string, outcome: 'authorized' | 'declined', by: By): Promise<PaymentStatusView | PurchasePaymentStatus> {
     const i = await this.get(intentId);
     if (i.status !== 'pending_check') throw illegal('Only a payment being checked can be settled', { machine: 'Payment intent', from: i.status, event: 'settle' });
     const settled = await this.core.provider.devSettle?.({ providerRef: i.provider_ref, idempotencyKey: `${i.id}:authorize` }, outcome);
     if (!settled) throw new AppError('VALIDATION_FAILED', 'Only a development payment held with tok_pending can be settled', { issues: [{ path: 'id', message: 'Not a held development payment' }] });
     await this.sync(intentId, by);
-    return this.views.statusView((await this.repo.get('intents', intentId))!, this.core.lookup());
+    const after = (await this.repo.get('intents', intentId))!;
+    return isPurchase(after) ? this.views.purchaseStatus(after) : this.views.statusView(after, this.core.lookup());
   }
 
   /**
@@ -429,6 +570,7 @@ export class Intents {
     await this.repo.transaction(async (tx) => {
       const i = await tx.get('intents', intentId, { forUpdate: true });
       if (!i) throw notFound();
+      if (isPurchase(i)) throw new AppError('CONFLICT', 'This payment is not a checkout payment');
       if (i.order_id && i.order_id !== orderId) throw new AppError('CONFLICT', 'This payment belongs to another order', { orderId: i.order_id });
       if (i.order_id !== orderId || i.orphan) await tx.update('intents', i.id, { order_id: orderId, orphan: false, updated_at: this.core.now() });
       await this.replaceAllocations(tx, i, allocations);
@@ -462,7 +604,7 @@ export class Intents {
     if (accepted) return accepted;
     if (fallbackIntentId) {
       const i = await this.repo.get('intents', fallbackIntentId);
-      if (i && !i.order_id) {
+      if (i && !i.order_id && !isPurchase(i)) {
         await this.linkOrder(i.id, orderId, []);
         return this.repo.get('intents', i.id);
       }
@@ -477,7 +619,7 @@ export class Intents {
     const order = await lookup.order(orderId);
     if (!order?.paymentIntentId) return undefined;
     const i = await this.repo.get('intents', order.paymentIntentId);
-    if (!i) return undefined;
+    if (!i || isPurchase(i)) return undefined;
     await this.linkOrder(i.id, orderId, this.allocationsOfOrder(order).map((a) => ({ ...a, amount: { ...a.amount, currency: i.currency } })));
     return this.repo.get('intents', i.id);
   }
@@ -678,6 +820,7 @@ export class Intents {
       }
       await tx.update('intents', i.id, { captured_amount: captured, captured_at: now, status, updated_at: now });
       if (i.order_id) batch.push('payments.payment.captured', await this.capturedPayload(tx, i, updated, c.group_id, who));
+      else if (isPurchase(i)) batch.push('payments.purchase.captured', { ...purchaseOf(i), amount: this.m(c.amount, i.currency), providerRef: updated.provider_ref, capturedAt: now.toISOString() });
       return updated;
     });
     this.core.flush(batch, o.by);
@@ -748,7 +891,7 @@ export class Intents {
     const after = await this.repo.transaction(async (tx) => {
       const x = (await tx.get('intents', intentId, { forUpdate: true }))!;
       if (x.status !== 'authorized') return x;
-      batch.push('payments.payment.voided', { intentId: x.id, checkoutSessionId: x.checkout_session_id, orderId: x.order_id, reason });
+      this.pushVoided(batch, x, reason);
       return tx.update('intents', x.id, { status: paymentIntentMachine.next('authorized', 'void'), updated_at: this.core.now() });
     });
     this.core.flush(batch, by);
@@ -770,7 +913,7 @@ export class Intents {
     const after = await this.repo.transaction(async (tx) => {
       const x = (await tx.get('intents', i.id, { forUpdate: true }))!;
       if (x.status !== 'partially_captured') return x;
-      batch.push('payments.payment.voided', { intentId: x.id, checkoutSessionId: x.checkout_session_id, orderId: x.order_id, reason });
+      this.pushVoided(batch, x, reason);
       return tx.update('intents', x.id, { status: paymentIntentMachine.next('partially_captured', 'close_remainder'), updated_at: this.core.now() });
     });
     this.core.flush(batch, by);
@@ -782,6 +925,7 @@ export class Intents {
   async onOrderPlaced(e: { orderId: string; paymentIntentId: string; groups: { groupId: string; ownerType: 'official' | 'seller'; sellerId?: string | null; total: common.Money }[] }) {
     const i = await this.repo.get('intents', e.paymentIntentId);
     if (!i) return this.core.ctx.log.info({ intentId: e.paymentIntentId, orderId: e.orderId }, 'payments: placed order names an unknown payment');
+    if (isPurchase(i)) return this.core.ctx.log.warn({ intentId: i.id, orderId: e.orderId }, 'payments: placed order names a purchase payment');
     if (i.order_id && i.order_id !== e.orderId) return this.core.ctx.log.warn({ intentId: i.id, orderId: e.orderId }, 'payments: payment already linked to another order');
     await this.linkOrder(
       i.id,
@@ -919,11 +1063,12 @@ export class Intents {
       try {
         const after = await this.sync(i.id, { actor: SYSTEM });
         if (after.status === 'pending_check') await this.keepCreditHold(after);
-        if (after.status === 'pending_check' && !after.orphan && now.getTime() - after.created_at.getTime() > cfg.uncertainMaxHours * HOUR) {
+        // purchase intents are never orphans (no order is expected); their module keeps showing pending_payment
+        if (after.status === 'pending_check' && !after.orphan && !isPurchase(after) && now.getTime() - after.created_at.getTime() > cfg.uncertainMaxHours * HOUR) {
           await this.repo.update('intents', after.id, { orphan: true, updated_at: now });
           // what may have moved on the card (never the intent amount with its store credit), and the credit held for it
           const credit = this.credit.tender(after)?.amount.amount ?? 0;
-          this.core.publish('payments.payment.orphaned', { intentId: after.id, checkoutSessionId: after.checkout_session_id, amount: this.m(after.authorized_amount || this.credit.card(after), after.currency), creditAmount: credit > 0 ? this.m(credit, after.currency) : null, captured: false, action: 'needs_review' });
+          this.core.publish('payments.payment.orphaned', { intentId: after.id, checkoutSessionId: checkoutSessionOf(after), amount: this.m(after.authorized_amount || this.credit.card(after), after.currency), creditAmount: credit > 0 ? this.m(credit, after.currency) : null, captured: false, action: 'needs_review' });
         }
       } catch (err) {
         this.core.ctx.log.warn({ err, intentId: i.id }, 'payments: status check failed');
@@ -958,10 +1103,11 @@ export class Intents {
   async detectOrphans(): Promise<void> {
     const cfg = await this.core.cfg();
     const before = new Date(this.core.now().getTime() - cfg.orphanGraceMinutes * MINUTE);
-    const candidates = await this.repo.find('intents', { status: [...ACCEPTED], order_id: null, orphan: false, created_at: { op: '<', value: before } }, { orderBy: [['created_at', 'asc']], limit: 50 });
+    // checkout payments only: a purchase intent (no checkout session) never has an order
+    const candidates = await this.repo.find('intents', { status: [...ACCEPTED], order_id: null, orphan: false, checkout_session_id: { op: 'is not', value: null }, created_at: { op: '<', value: before } }, { orderBy: [['created_at', 'asc']], limit: 50 });
     for (const i of candidates) {
       try {
-        const session = await this.core.soft('checkout', 'getSessionForOrder', (c) => c.getSessionForOrder(i.checkout_session_id));
+        const session = await this.core.soft('checkout', 'getSessionForOrder', (c) => c.getSessionForOrder(checkoutSessionOf(i)));
         if (session?.orderId) {
           const order = await this.core.lookup().order(session.orderId);
           await this.linkOrder(i.id, session.orderId, order ? this.allocationsOfOrder(order).map((a) => ({ ...a, amount: { ...a.amount, currency: i.currency } })) : []);
@@ -997,7 +1143,7 @@ export class Intents {
       this.core.ctx.log.warn({ err, intentId: i.id }, 'payments: orphan payment needs review');
       action = 'needs_review';
     }
-    this.core.publish('payments.payment.orphaned', { intentId: i.id, checkoutSessionId: i.checkout_session_id, amount: this.m(moved, i.currency), creditAmount: credit > 0 ? this.m(credit, i.currency) : null, captured, action }, by);
+    this.core.publish('payments.payment.orphaned', { intentId: i.id, checkoutSessionId: checkoutSessionOf(i), amount: this.m(moved, i.currency), creditAmount: credit > 0 ? this.m(credit, i.currency) : null, captured, action }, by);
     return action;
   }
 
@@ -1085,7 +1231,7 @@ export class Intents {
    */
   async adminCapture(intentId: string, body: { amount?: common.Money | null; groupId?: string | null; reason: string; reauthToken?: string | null }, by: By & { idempotencyKey: string }, o: { approvedBy?: string | null } = {}): Promise<PaymentDetail> {
     if (!body.reason?.trim()) throw invalid([{ path: 'reason', message: 'Give a reason' }]);
-    const before = await this.get(intentId);
+    const before = await this.checkoutIntent(intentId);
     if (body.amount && body.amount.currency !== before.currency) throw invalid([{ path: 'amount.currency', message: `Use ${before.currency}` }]);
     if (body.groupId) {
       const allocations = await this.repo.find('allocations', { intent_id: intentId, group_id: body.groupId });
@@ -1116,7 +1262,7 @@ export class Intents {
 
   async adminVoid(intentId: string, reason: string, by: By, o: { reauthToken?: string | null; approvedBy?: string | null } = {}): Promise<PaymentDetail> {
     if (!reason?.trim()) throw invalid([{ path: 'reason', message: 'Give a reason' }]);
-    const before = await this.get(intentId);
+    const before = await this.checkoutIntent(intentId);
     if (before.status !== 'voided') paymentIntentMachine.next(before.status as never, 'void'); // only authorizations
     if (before.status === 'voided') return this.detail(before); // already voided: nothing to weigh
     // the money the marketplace gives up: authorized and not captured
@@ -1136,14 +1282,14 @@ export class Intents {
 
   async resolveOrphan(intentId: string, body: { action: 'refund' | 'link_to_order'; orderId?: string | null; reason: string; reauthToken?: string | null }, by: By, o: { approvedBy?: string | null } = {}): Promise<PaymentDetail> {
     if (!body.reason?.trim()) throw invalid([{ path: 'reason', message: 'Give a reason' }]);
-    const before = await this.get(intentId);
+    const before = await this.checkoutIntent(intentId);
     if (!before.orphan && before.order_id) throw illegal('This payment already belongs to an order');
     if (!is(ACCEPTED, before.status) && before.status !== 'pending_check') throw illegal('Only money that was authorized or captured can be resolved', { from: before.status });
     if (body.action === 'link_to_order') {
       // no money moves: no limit
       if (!body.orderId) throw invalid([{ path: 'orderId', message: 'Choose the order this checkout created' }]);
       const order = await this.core.lookup().order(body.orderId);
-      const session = await this.core.soft('checkout', 'getSessionForOrder', (c) => c.getSessionForOrder(before.checkout_session_id));
+      const session = await this.core.soft('checkout', 'getSessionForOrder', (c) => c.getSessionForOrder(checkoutSessionOf(before)));
       const madeBySession = order && (order.paymentIntentId === before.id || session?.orderId === order.id);
       if (!order || !madeBySession) throw invalid([{ path: 'orderId', message: "This checkout did not create that order. Refund the payment instead." }]);
       await this.linkOrder(before.id, order.id, this.allocationsOfOrder(order).map((a) => ({ ...a, amount: { ...a.amount, currency: before.currency } })));

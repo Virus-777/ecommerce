@@ -120,6 +120,18 @@ const L = (kind: string, id: string, screen: string, label?: string, ref?: strin
 /** How a request status reads in a notice: Your request SR-… was confirmed */
 const REQUEST_STATUS: Record<string, string> = { confirmed: 'confirmed', in_progress: 'started', completed: 'completed', declined: 'declined', cancelled: 'cancelled' };
 
+/** "Out of stock." → "Out of stock": a note inside a sentence */
+const clause = (note: string | null | undefined) => note?.trim().replace(/[.\s]+$/, '') || null;
+/** A food order notice by status: the headline and what happens next (statuses the customer caused themselves send nothing) */
+const FOOD_NOTICE: Record<string, (p: { ref: string; restaurantName: string; note?: string | null }) => { headline: string; next: string }> = {
+  accepted: (p) => ({ headline: `${p.restaurantName} accepted your order ${p.ref}`, next: "We'll let you know when it's on the way." }),
+  on_the_way: (p) => ({ headline: `Your order ${p.ref} is on the way`, next: `${p.restaurantName} sent it out for delivery.` }),
+  delivered: (p) => ({ headline: `Your order ${p.ref} was delivered`, next: `Enjoy your meal! You can rate ${p.restaurantName} from the order.` }),
+  declined: (p) => ({ headline: `Your order ${p.ref} was declined`, next: `${p.restaurantName} couldn't take it${clause(p.note) ? `: ${clause(p.note)}` : ''}. You won't be charged.` }),
+  cancelled: (p) => ({ headline: `Your order ${p.ref} was cancelled`, next: `${clause(p.note) ? `${clause(p.note)}. ` : ''}You won't be charged for it.` }),
+  payment_failed: (p) => ({ headline: `The payment for your order ${p.ref} didn't go through`, next: 'Open the order to try again with another card.' }),
+};
+
 const orderLink = (orderId: string, ref?: string | null) => L('order', orderId, 'account/order', 'View order', ref);
 const returnLink = (returnId: string, ref?: string | null, label = 'View return') => L('return', returnId, 'account/return', label, ref);
 const caseLink = (caseId: string, ref?: string | null) => L('case', caseId, 'help/case', 'View case', ref);
@@ -1317,6 +1329,47 @@ export const ROUTES: Routes = {
               dedupe: `service-request:${p.requestId}:${p.status}`,
             },
           ],
+  },
+
+  /* ---------------------------------------------------------------- food, software and Daily rewards (department pages) */
+  // these modules keep customers by their customers-module id (the store principal's customerId), unlike services
+  'food.order.status_changed': {
+    sends: (p) => {
+      const notice = FOOD_NOTICE[p.status];
+      if (!notice) return []; // placed, payment pending, preparing: nothing to tell
+      return [
+        {
+          topic: 'customer.food.order',
+          to: [customer(p.customerId)],
+          link: L('food_order', p.orderId, 'store/food-order', 'View order', p.ref),
+          context: { food: notice(p) },
+          dedupe: `food-order:${p.orderId}:${p.status}`,
+        },
+      ];
+    },
+  },
+  'software.purchase.paid': {
+    sends: (p, f) => [
+      {
+        topic: 'customer.software.purchase',
+        to: [customer(p.customerId)],
+        // the payload has no app slug: the purchase screen lists the apps with their downloads
+        link: L('software_purchase', p.purchaseId, 'store/software-purchase', 'Download', p.ref),
+        context: { software: { title: p.title, amount: f.money(p.amount) } },
+        dedupe: `software-purchase:${p.purchaseId}`,
+      },
+    ],
+  },
+  'rewards.reward.redeemed': {
+    sends: (p) => [
+      {
+        topic: 'customer.rewards.coupon',
+        to: [customer(p.customerId)],
+        link: L('reward', p.redemptionId, 'account/coupons', 'View my coupons', p.code),
+        context: { reward: { title: p.title, code: p.code, cost: p.cost.toLocaleString('en-US') } },
+        dedupe: `reward-redemption:${p.redemptionId}`,
+      },
+    ],
   },
 
   /* ---------------------------------------------------------------- access */

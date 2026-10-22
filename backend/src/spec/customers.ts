@@ -1729,7 +1729,7 @@ export const spec = defineModuleSpec({
   chapters: [3,4,6,7,17,18,19],
   summary: "The customer side of an account: profile, saved addresses, marketing consent, recently viewed products, the Account tab overview, guest order access, data export and account closure, and the staff view of customer accounts with notes and recorded account actions. Credentials, sessions and verification belong to identity.",
   dependsOn: ["identity"],
-  optionalDeps: ["orders","returns","support","messaging","wallet","reviews","wishlist","payments","catalog","offers","trust","reports","notifications","access","audit","media","workqueues"],
+  optionalDeps: ["orders","returns","support","messaging","wallet","reviews","wishlist","payments","catalog","offers","trust","reports","notifications","access","audit","media","workqueues","software","food","rewards"],
   publicApi: ["getCustomer","getCustomerByUserId","getAddressForOrder","rememberCheckoutAddress","canPlaceOrders","canWriteReviews","canGuestOrder","canSendMessages","getMarketingConsent","validateAddress","listRecentlyViewed","listRecentlyViewedItems","searchCustomers","exportRows"],
   permissions: [
     {

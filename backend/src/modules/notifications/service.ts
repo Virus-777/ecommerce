@@ -596,6 +596,21 @@ export class NotificationsService implements NotificationsPublicApi {
     await this.consumers.handle('services.request.status_changed', event, eventId);
   }
 
+  /** food.order.status_changed: Customer: their food order was accepted, is on the way, was delivered, declined or cancelled, or its payment failed */
+  async onOrderStatusChangedFromFood(event: EventPayload<'food.order.status_changed'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('food.order.status_changed', event, eventId);
+  }
+
+  /** software.purchase.paid: Customer: a software purchase is paid and ready to download */
+  async onPurchasePaidFromSoftware(event: EventPayload<'software.purchase.paid'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('software.purchase.paid', event, eventId);
+  }
+
+  /** rewards.reward.redeemed: Customer: the coupon they got for Daily rewards points is ready */
+  async onRewardRedeemedFromRewards(event: EventPayload<'rewards.reward.redeemed'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('rewards.reward.redeemed', event, eventId);
+  }
+
   /** access.approval.requested: Staff: waiting approval to eligible approvers (nominated reviewer first), action required with due date */
   async onApprovalRequestedFromAccess(event: EventPayload<'access.approval.requested'>, eventId?: string): Promise<void> {
     await this.consumers.handle('access.approval.requested', event, eventId);

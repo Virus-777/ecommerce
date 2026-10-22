@@ -15,7 +15,7 @@ import { AccessService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '2.0.3',
+  version: '2.0.4',
   schemas,
   mongoMigrations,
   register(ctx) {

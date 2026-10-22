@@ -72,6 +72,14 @@ export const DEPARTMENTS_MANAGE = ['departments.phones.manage', 'departments.blo
  */
 export const SERVICES_MANAGE = 'services.manage';
 export const SERVICES_REQUESTS = ['services.view', 'services.requests.manage'] as const;
+/**
+ * Softwares, Food delivery and Daily rewards (software, food and rewards modules, 2026-10-23): the Content Manager runs
+ * them (software.*, food.*, rewards.*), the Marketing Manager keeps their catalogues and rewards (the manage keys), and
+ * support reads them and handles food orders. Installs seeded before them get the keys from access migration
+ * 2026-10-23-phase3-keys.
+ */
+export const PHASE3_MANAGE = ['software.manage', 'food.manage', 'rewards.manage'] as const;
+export const PHASE3_SUPPORT = ['software.view', 'food.view', 'rewards.view', 'food.orders.manage'] as const;
 
 export const SYSTEM_ROLES: SeedRole[] = [
   {
@@ -227,7 +235,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Customers and support',
     description: 'Support cases, customer accounts and messaging.',
     escalationRoleKey: BUSINESS_OWNER,
-    permissions: ['support.*', 'customers.*', '!customers.accounts.export', 'messaging.*', ...SERVICES_REQUESTS, 'orders.orders.view', 'orders.customers.view-contact', 'returns.requests.view', 'wallet.credit.view', 'wallet.goodwill.grant', OWNER_DECIDES, STAFF_UPLOADS, ...QUEUES],
+    permissions: ['support.*', 'customers.*', '!customers.accounts.export', 'messaging.*', ...SERVICES_REQUESTS, ...PHASE3_SUPPORT, 'orders.orders.view', 'orders.customers.view-contact', 'returns.requests.view', 'wallet.credit.view', 'wallet.goodwill.grant', OWNER_DECIDES, STAFF_UPLOADS, ...QUEUES],
     limits: {
       'support.remedies.approve': upTo(500),
       'wallet.goodwill.grant': upTo(50),
@@ -274,7 +282,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Marketing and content',
     description: 'Promotions, homepage and marketing broadcasts.',
     escalationRoleKey: BUSINESS_OWNER,
-    permissions: ['promotions.*', 'content.homepage.manage', NEWS_MANAGE, ...DEPARTMENTS_MANAGE, SERVICES_MANAGE, 'reports.customers-marketing.view', 'notifications.broadcasts.manage', 'advertising.campaigns.review', MARKETING_OFFERS_VIEW, STAFF_UPLOADS, ...QUEUES],
+    permissions: ['promotions.*', 'content.homepage.manage', NEWS_MANAGE, ...DEPARTMENTS_MANAGE, SERVICES_MANAGE, ...PHASE3_MANAGE, 'reports.customers-marketing.view', 'notifications.broadcasts.manage', 'advertising.campaigns.review', MARKETING_OFFERS_VIEW, STAFF_UPLOADS, ...QUEUES],
     limits: { 'promotions.budgets.approve': upTo(5_000) },
   },
   {
@@ -294,7 +302,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Marketing and content',
     description: 'Pages, help center and policies (policies approved by the Business Owner).',
     escalationRoleKey: BUSINESS_OWNER,
-    permissions: ['content.*', 'departments.*', 'services.*', 'media.assets.manage', STAFF_UPLOADS, 'advertising.campaigns.review', ...QUEUES],
+    permissions: ['content.*', 'departments.*', 'services.*', 'software.*', 'food.*', 'rewards.*', 'media.assets.manage', STAFF_UPLOADS, 'advertising.campaigns.review', ...QUEUES],
     limits: { 'content.policies.approve': RECOMMEND, 'content.policies.short-notice': RECOMMEND },
   },
   {
@@ -364,7 +372,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Customers and support',
     description: 'Support cases, customer notes and conversations.',
     escalationRoleKey: 'customer_support_manager',
-    permissions: ['support.cases.view', 'support.cases.handle', ...SERVICES_REQUESTS, 'customers.accounts.view', 'customers.notes.write', 'messaging.conversations.read', 'messaging.conversations.participate', 'orders.orders.view', 'wallet.credit.view', 'wallet.goodwill.grant', STAFF_UPLOADS, ...QUEUES],
+    permissions: ['support.cases.view', 'support.cases.handle', ...SERVICES_REQUESTS, ...PHASE3_SUPPORT, 'customers.accounts.view', 'customers.notes.write', 'messaging.conversations.read', 'messaging.conversations.participate', 'orders.orders.view', 'wallet.credit.view', 'wallet.goodwill.grant', STAFF_UPLOADS, ...QUEUES],
     limits: { 'support.remedies.approve': upTo(50), 'wallet.goodwill.grant': upTo(50) },
   },
 ];
@@ -378,6 +386,9 @@ export const VIEW_COMPANIONS: Readonly<Record<string, string>> = {
   'content.view': 'content.',
   'departments.view': 'departments.',
   'services.view': 'services.',
+  'software.view': 'software.',
+  'food.view': 'food.',
+  'rewards.view': 'rewards.',
   'offers.official.view': 'offers.official.',
   'sellers.applications.view': 'sellers.applications.',
   'returns.inspections.view': 'returns.inspections.',

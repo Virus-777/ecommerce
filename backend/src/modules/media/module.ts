@@ -25,7 +25,7 @@ import { schemas } from './schema.js';
  */
 export default defineModule({
   spec,
-  version: '2.1.0',
+  version: '2.2.0',
   schemas,
   register(ctx) {
     // Storage (MEDIA_STORAGE): the server's disk (local, production) or memory (tests). Both take uploads

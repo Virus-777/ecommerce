@@ -46,6 +46,9 @@ export const enabledModules: string[] = [
   'departments',
   'promotions',
   'services',
+  'software',
+  'food',
+  'rewards',
 
   // Later phases (off at launch)
   // 'wallet',              // phase 3: store credit and gift cards

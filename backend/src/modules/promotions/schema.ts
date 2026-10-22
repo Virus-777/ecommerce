@@ -191,6 +191,7 @@ const coupon_codes = new Schema(
     max_redemptions: { type: Number, default: null, validate: integer },
     redemptions: { type: Number, required: true, validate: integer },
     assigned_customer_id: { type: String, default: null },
+    issue_key: { type: String, default: null }, // issueCode idempotency key
     active: { type: Boolean, required: true },
     created_at: { type: Date, required: true },
     /** lock-by-write counter (kernel/mongo/table.ts) */
@@ -201,6 +202,7 @@ const coupon_codes = new Schema(
 coupon_codes.index({"code":1}, {"name":"coupon_codes_code_082f1b","unique":true,"partialFilterExpression":{"active":true},"collation":{"locale":"en","strength":2}});
 coupon_codes.index({"campaign_id":1,"created_at":1}, {"name":"coupon_codes_campaign_id_created_at_2c6ef6"});
 coupon_codes.index({"assigned_customer_id":1}, {"name":"coupon_codes_assigned_customer_id_8df310"});
+coupon_codes.index({"issue_key":1}, {"name":"coupon_codes_issue_key_9a007e","unique":true,"partialFilterExpression":{"issue_key":{"$gte":""}}});
 
 /** Coupons a customer clipped; applied automatically at checkout */
 const coupon_clips = new Schema(

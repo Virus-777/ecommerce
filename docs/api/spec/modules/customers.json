@@ -25,7 +25,7 @@
     "Abuse reports about customers: trust (shown read-only in the admin detail)"
   ],
   "dependsOn": ["identity"],
-  "optionalDeps": ["orders", "returns", "support", "messaging", "wallet", "reviews", "wishlist", "payments", "catalog", "offers", "trust", "reports", "notifications", "access", "audit", "media", "workqueues"],
+  "optionalDeps": ["orders", "returns", "support", "messaging", "wallet", "reviews", "wishlist", "payments", "catalog", "offers", "trust", "reports", "notifications", "access", "audit", "media", "workqueues", "software", "food", "rewards"],
   "publicApi": [
     { "name": "getCustomer", "signature": "(customerId: uuid) => CustomerSnapshot | null", "desc": "Name, email, phone, account status and what the customer may do now", "usedBy": ["orders", "support", "messaging", "trust", "checkout", "reviews", "graphql"] },
     { "name": "getCustomerByUserId", "signature": "(userId: uuid) => CustomerSnapshot | null", "desc": "Resolve the customer for an identity session", "usedBy": ["checkout", "cart", "wishlist", "graphql"] },

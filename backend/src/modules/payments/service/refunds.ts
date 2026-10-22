@@ -22,7 +22,7 @@ import { ACCEPTED, is, isExpired, methodLabel, refundBackoffMs, retryableRefundF
 import { ProviderError, type IntentRec, type ProviderRefund, type RefundDestination, type RefundItemRec, type RefundLogRec, type RefundRec } from '../ports.js';
 import type { PaymentsRepository } from '../repository.js';
 import type { Scope } from '../../../kernel/auth/scope.js';
-import { Batch, SYSTEM, illegal, invalid, notFound, type By, type Cfg, type Core, type Lookup, type OrderInfo } from './core.js';
+import { Batch, SYSTEM, checkoutSessionOf, illegal, invalid, notFound, type By, type Cfg, type Core, type Lookup, type OrderInfo } from './core.js';
 import { refundKey, type Credit } from './credit.js';
 import type { Intents } from './intents.js';
 import type { Views } from './views.js';
@@ -274,7 +274,7 @@ export class Refunds {
       id: newId(),
       ref: o.ref,
       order_id: o.orderId,
-      checkout_session_id: o.intent.checkout_session_id,
+      checkout_session_id: checkoutSessionOf(o.intent),
       intent_id: o.intent.id,
       origin: o.origin,
       origin_id: o.originId,

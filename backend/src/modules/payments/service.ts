@@ -13,6 +13,8 @@ import type {
   PaymentRow,
   PaymentsPublicApi,
   PaymentStatusView,
+  PurchaseAuthorizeInput,
+  PurchasePaymentStatus,
   Refund,
   RefundableSummary,
   RefundView,
@@ -21,7 +23,7 @@ import type {
 } from '../../spec/payments.js';
 import { ACCEPTED, customerState, is } from './domain/rules.js';
 import type { IntentRec } from './ports.js';
-import { Core, MANUAL_ACTION, SYSTEM, notFound, type By, type PaymentsServiceDeps } from './service/core.js';
+import { Core, MANUAL_ACTION, SYSTEM, checkoutSessionOf, isPurchase, notFound, type By, type PaymentsServiceDeps } from './service/core.js';
 import { Credit } from './service/credit.js';
 import { Disputes } from './service/disputes.js';
 import { Intents } from './service/intents.js';
@@ -86,6 +88,18 @@ export class PaymentsService implements PaymentsPublicApi {
     await this.intents.void(intentId, reason, { actor: SYSTEM });
   }
 
+  authorizePurchase(input: PurchaseAuthorizeInput, idempotencyKey: string): Promise<AuthorizeResult> {
+    return this.intents.authorizePurchase(input, idempotencyKey);
+  }
+
+  capturePurchase(intentId: string): Promise<void> {
+    return this.intents.capturePurchase(intentId, { actor: SYSTEM });
+  }
+
+  getPurchaseStatus(intentId: string, refresh?: boolean): Promise<PurchasePaymentStatus> {
+    return this.intents.getPurchaseStatus(intentId, refresh ?? false);
+  }
+
   remainingRefundable(orderId: string, orderItemIds?: string[]): Promise<RefundableSummary> {
     return this.refunds.remainingRefundable(orderId, orderItemIds);
   }
@@ -134,7 +148,8 @@ export class PaymentsService implements PaymentsPublicApi {
     const money = (amount: number, currency: string) => ({ amount, currency });
     const [methods, intents] = await Promise.all([
       repo.find('saved_methods', { customer_id: input.customerId }, { orderBy: [['created_at', 'asc']] }),
-      repo.find('intents', { customer_id: input.customerId }, { orderBy: [['created_at', 'asc']] }),
+      // checkout payments: purchases (software, food) are in their own module's export
+      repo.find('intents', { customer_id: input.customerId, checkout_session_id: { op: 'is not', value: null } }, { orderBy: [['created_at', 'asc']] }),
     ]);
     const refunds = intents.length ? await repo.find('refunds', { intent_id: intents.map((i) => i.id) }, { orderBy: [['created_at', 'asc']] }) : [];
     const lookup = this.core.lookup();
@@ -202,11 +217,12 @@ export class PaymentsService implements PaymentsPublicApi {
   /** The intent if the shopper owns its checkout: the customer, or the guest session (checkout or order access) */
   async ownIntent(intentId: string, scope: Scope, customerId: string | null): Promise<IntentRec> {
     const i = await this.core.repo.get('intents', intentId);
-    if (!i) throw notFound();
+    // a purchase's payment is shown by its module (software, food)
+    if (!i || isPurchase(i)) throw notFound();
     if (scope.kind === 'customer' && customerId && i.customer_id === customerId) return i;
     if (scope.kind === 'visitor' && !i.customer_id) {
       const guestSessionId = scope.visitorSessionId;
-      const session = await this.core.soft('checkout', 'getSessionView', (c) => c.getSessionView({ guestSessionId }, i.checkout_session_id));
+      const session = await this.core.soft('checkout', 'getSessionView', (c) => c.getSessionView({ guestSessionId }, checkoutSessionOf(i)));
       if (session) return i;
       const order = await this.core.lookup().order(i.order_id);
       const visible = order ? await this.core.ctx.use('orders').getOrderForViewer({ guestSessionId }, order.ref).catch(() => null) : null;
@@ -237,11 +253,11 @@ export class PaymentsService implements PaymentsPublicApi {
   }
 
   async paymentAdmin(intentId: string): Promise<PaymentDetail> {
-    return this.intents.detail(await this.intents.get(intentId));
+    return this.intents.detail(await this.intents.checkoutIntent(intentId));
   }
 
   async checkPayment(intentId: string, by: By): Promise<PaymentDetail> {
-    const i = await this.intents.get(intentId);
+    const i = await this.intents.checkoutIntent(intentId);
     const after = is(ACCEPTED, i.status) || i.status === 'pending_check' || i.status === 'requires_action' || i.status === 'authorizing' ? await this.intents.reconcile(i.id, by) : i;
     return this.intents.detail(after);
   }
@@ -251,7 +267,7 @@ export class PaymentsService implements PaymentsPublicApi {
     const main = await this.intents.intentOfOrder(orderId, (await lookup.order(orderId))?.paymentIntentId);
     if (!main) throw notFound('Payment for this order');
     const [sessionAttempts, linked] = await Promise.all([
-      this.core.repo.find('intents', { checkout_session_id: main.checkout_session_id }, { orderBy: [['created_at', 'asc']] }),
+      this.core.repo.find('intents', { checkout_session_id: checkoutSessionOf(main) }, { orderBy: [['created_at', 'asc']] }),
       this.core.repo.find('intents', { order_id: orderId }),
     ]);
     const seen = new Set(sessionAttempts.map((s) => s.id));
@@ -292,6 +308,7 @@ export class PaymentsService implements PaymentsPublicApi {
   async attemptsOf(intentId: string): Promise<IntentRec[]> {
     const i = await this.core.repo.get('intents', intentId);
     if (!i) return [];
+    if (!i.checkout_session_id) return [i];
     return this.core.repo.find('intents', { checkout_session_id: i.checkout_session_id }, { orderBy: [['created_at', 'asc']] });
   }
 

@@ -80,6 +80,24 @@ export const invalid = (issues: { path: string; message: string }[], message = '
 export const notFound = (what = 'Payment') => new AppError('NOT_FOUND', `${what} not found`);
 export const illegal = illegalTransition;
 
+/**
+ * Purchase intents (software purchases, food orders; spec note "Purchase intents") have no checkout session and no
+ * order: the orphan sweep, captures on order events, allocations, refunds, the admin payment list and the
+ * payments.payment.* events skip them. Rows written before purposes existed are checkout intents.
+ */
+export const isPurchase = (i: { purpose?: string | null }) => i.purpose === 'purchase';
+
+/** Who a purchase intent's events are about */
+export function purchaseOf(i: { id: string; purchase_module: string | null; purchase_ref_id: string | null; customer_id: string | null }) {
+  return { intentId: i.id, module: i.purchase_module as 'software' | 'food', refId: i.purchase_ref_id!, customerId: i.customer_id! };
+}
+
+/** The checkout session of a checkout intent (every checkout intent has one; a purchase intent here is a bug) */
+export function checkoutSessionOf(i: { id: string; checkout_session_id: string | null }): string {
+  if (!i.checkout_session_id) throw new Error(`payments: intent ${i.id} is not a checkout payment`);
+  return i.checkout_session_id;
+}
+
 /** What payments needs from an order (orders.getOrder), flattened */
 export interface OrderInfo {
   id: string;

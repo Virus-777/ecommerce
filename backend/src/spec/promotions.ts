@@ -1509,6 +1509,23 @@ export const DealsPage: z.ZodType<DealsPage> = z.object({
   rules: z.array(z.string()).describe("e.g. Coupons can't be combined with flash sale prices unless the coupon says so. One coupon per seller per order."),
 }).register(common.apiTypes, { id: "promotions.DealsPage" });
 
+export interface IssuedCoupon {
+  codeId: string;
+  code: string;
+  campaignId: string;
+  /** The coupon's customer-facing title, e.g. $5 off orders over $50 */
+  title: string;
+  endsAt?: string | null;
+}
+
+export const IssuedCoupon: z.ZodType<IssuedCoupon> = z.object({
+  codeId: z.uuid(),
+  code: z.string(),
+  campaignId: z.uuid(),
+  title: z.string().describe("The coupon's customer-facing title, e.g. $5 off orders over $50"),
+  endsAt: z.iso.datetime({ offset: true }).nullish(),
+}).register(common.apiTypes, { id: "promotions.IssuedCoupon" });
+
 export interface AccountCoupons {
   available: CouponCard[];
   usedOrExpired: CouponCard[];
@@ -2101,6 +2118,8 @@ export interface PromotionsPublicApi {
   getFlashSale(campaignId: string): Promise<FlashSaleBlock | null>;
   /** Clippable coupons that cover each product, with the customer's clipped state (the coupons part of GET /products/{productId}). Batched per request. Used by: graphql. */
   couponsForProduct(productIds: string[], ctx: { customerId?: string }): Promise<Record<string, CouponCard[]>>;
+  /** Give one customer their own single-use code of a coupon campaign (a Daily rewards redemption, 2026-10-22). The campaign must be a coupon campaign that is scheduled or running (CAMPAIGN_NOT_ACTIVE otherwise); the code is unique, max_redemptions 1, assigned to the customer, and shows in their coupons. The same key returns the same code. Used by: rewards. */
+  issueCode(campaignId: string, customerId: string, idempotencyKey: string): Promise<IssuedCoupon>;
   /** My coupons: available and clipped, used and expired, with the rules line (GET /coupons). Used by: graphql. */
   couponsForCustomer(customerId: string): Promise<AccountCoupons>;
   /** Live seller-funded promotions for the storefront (automatic or by code), soonest ending first. Same eligibility and period rules as priceOffers; platform campaigns are not included. Used by: sellers, graphql. */
@@ -2239,6 +2258,8 @@ export interface PromotionsDb {
     max_redemptions: number | null;
     redemptions: number;
     assigned_customer_id: string | null;
+    /** issueCode idempotency key */
+    issue_key: string | null;
     active: boolean;
     created_at: Date;
   };
@@ -3458,7 +3479,7 @@ export const spec = defineModuleSpec({
   summary: "Discounts and sales campaigns: markdowns, percentage and fixed coupons, minimum-spend and free-shipping offers, flash sales, seller discounts and platform campaigns with seller consent. Owns eligibility, stacking, budgets and caps, the funding owner of every discount, coupon clipping and redemption, the Deals page data and campaign results.",
   dependsOn: ["catalog","offers"],
   optionalDeps: ["sellers","inventory","orders","customers","access","notifications","reports","advertising","audit","content","finance","reviews","search","settings"],
-  publicApi: ["priceOffers","evaluateCart","reserveRedemption","commitRedemption","releaseRedemption","fundingSplitFor","refundShare","getPublicCampaign","isCampaignActive","liveDeals","referencePrice","getDealsPage","listClearance","getFlashSale","couponsForProduct","couponsForCustomer","activeSellerPromotions","exportRows"],
+  publicApi: ["priceOffers","evaluateCart","reserveRedemption","commitRedemption","releaseRedemption","fundingSplitFor","refundShare","getPublicCampaign","isCampaignActive","liveDeals","referencePrice","getDealsPage","listClearance","getFlashSale","couponsForProduct","issueCode","couponsForCustomer","activeSellerPromotions","exportRows"],
   permissions: [
     {
       "key": "promotions.campaigns.view",
@@ -3848,6 +3869,10 @@ export const spec = defineModuleSpec({
     }
   },
   errorCodes: {
+    "CAMPAIGN_NOT_ACTIVE": {
+      "status": 409,
+      "meaning": "The coupon campaign is not scheduled or running, or is not a coupon campaign."
+    },
     "COUPON_NOT_FOUND": {
       "status": 404,
       "meaning": "No active campaign has this code."
@@ -4926,12 +4951,14 @@ export const spec = defineModuleSpec({
         "max_redemptions",
         "redemptions",
         "assigned_customer_id",
+        "issue_key",
         "active",
         "created_at"
       ],
       "nullable": [
         "max_redemptions",
-        "assigned_customer_id"
+        "assigned_customer_id",
+        "issue_key"
       ],
       "decimal": [],
       "binary": [],
@@ -4996,6 +5023,12 @@ export const spec = defineModuleSpec({
                 "null"
               ]
             },
+            "issue_key": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
             "active": {
               "bsonType": "bool"
             },
@@ -5032,6 +5065,18 @@ export const spec = defineModuleSpec({
           "name": "coupon_codes_assigned_customer_id_8df310",
           "key": {
             "assigned_customer_id": 1
+          }
+        },
+        {
+          "name": "coupon_codes_issue_key_9a007e",
+          "key": {
+            "issue_key": 1
+          },
+          "unique": true,
+          "partial": {
+            "issue_key": {
+              "$gte": ""
+            }
           }
         }
       ],

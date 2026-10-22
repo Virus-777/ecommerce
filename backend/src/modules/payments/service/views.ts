@@ -3,7 +3,7 @@
  * Dispute and SavedPaymentMethod. Lookups in other modules go through a Lookup (memoized per operation).
  */
 import type * as common from '../../../spec/common.js';
-import type { Capture, Dispute, MethodSnapshot, PaymentDetail, PaymentRow, PaymentStatusView, ProviderCall, Refund, RefundItem, RefundView, SavedPaymentMethod, WebhookLog } from '../../../spec/payments.js';
+import type { Capture, Dispute, MethodSnapshot, PaymentDetail, PaymentRow, PaymentStatusView, ProviderCall, PurchasePaymentStatus, Refund, RefundItem, RefundView, SavedPaymentMethod, WebhookLog } from '../../../spec/payments.js';
 import {
   ACCEPTED,
   DISPUTE_STATUS_LABEL,
@@ -25,7 +25,7 @@ import {
   type RefundStatus,
 } from '../domain/rules.js';
 import type { DisputeRec, IntentRec, RefundItemRec, RefundLogRec, RefundRec, SavedMethodRec } from '../ports.js';
-import type { Cfg, Core, Lookup } from './core.js';
+import { checkoutSessionOf, type Cfg, type Core, type Lookup } from './core.js';
 
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
 
@@ -62,7 +62,7 @@ export class Views {
           ref: i.ref,
           orderId: i.order_id,
           orderRef: order?.ref ?? null,
-          checkoutSessionId: i.checkout_session_id,
+          checkoutSessionId: checkoutSessionOf(i),
           customerName: await lookup.customerName(i),
           amount: this.m(i.amount, i.currency),
           methodLabel: i.method.label,
@@ -90,7 +90,7 @@ export class Views {
     return {
       id: i.id,
       ref: i.ref,
-      checkoutSessionId: i.checkout_session_id,
+      checkoutSessionId: checkoutSessionOf(i),
       attemptNo: i.attempt_no,
       orderId: i.order_id,
       orderRef: order?.ref ?? null,
@@ -134,7 +134,7 @@ export class Views {
     const order = await lookup.order(i.order_id);
     const base = {
       intentId: i.id,
-      checkoutSessionId: i.checkout_session_id,
+      checkoutSessionId: checkoutSessionOf(i),
       methodLabel: label,
       amount,
       orderId: i.order_id,
@@ -184,6 +184,29 @@ export class Views {
       holdNote: `Your bank may show a temporary hold for ${fmt(amount)}. Placing the order again could create a second hold.`,
       nextAction: null,
     };
+  }
+
+  /** Customer-facing state of a purchase intent (software purchases, food orders) */
+  purchaseStatus(i: IntentRec): PurchasePaymentStatus {
+    const amount = this.m(i.amount, i.currency);
+    const label = i.method.label;
+    const base = { intentId: i.id, module: i.purchase_module as PurchasePaymentStatus['module'], refId: i.purchase_ref_id!, methodLabel: label, amount, decline: null, nextAction: null, retryAllowed: false };
+    switch (i.status) {
+      case 'captured':
+      case 'partially_captured':
+        return { ...base, state: 'captured', title: 'Payment received', message: `${fmt(amount)} was charged to ${label}.` };
+      case 'authorized':
+        return { ...base, state: 'accepted', title: 'Payment accepted', message: `${label} was accepted for ${fmt(amount)}.` };
+      case 'voided':
+        return { ...base, state: 'voided', title: 'Payment released', message: `Nothing was charged to ${label}. Your bank releases the hold.` };
+      case 'requires_action':
+        return { ...base, state: 'requires_action', title: 'Confirm with your bank', message: `Your bank needs you to confirm this payment with ${label}. Nothing is charged until you do.`, nextAction: i.next_action ?? null };
+      case 'failed':
+      case 'expired':
+        return { ...base, state: 'failed', title: 'Payment not accepted', message: i.decline?.message ?? `${label} was not charged.`, decline: i.decline, retryAllowed: true };
+      default:
+        return { ...base, state: 'pending', title: "We're checking your payment", message: "We're confirming your payment with your bank. Don't pay again." };
+    }
   }
 
   /* ---------------------------------------------------------------- refunds */

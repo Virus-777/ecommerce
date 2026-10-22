@@ -25,7 +25,7 @@ export const MediaOwner: z.ZodType<MediaOwner> = z.object({
 
 export interface UploadRequest {
   /** Decides allowed types, size limit, visibility and retention */
-  purpose: "product_image" | "product_video" | "brand_logo" | "store_logo" | "store_banner" | "offer_photo" | "ad_creative" | "ad_video" | "content_image" | "verification_document" | "return_evidence" | "case_evidence" | "review_photo" | "message_attachment" | "inspection_photo" | "bulk_file" | "other_document";
+  purpose: "product_image" | "product_video" | "brand_logo" | "store_logo" | "store_banner" | "offer_photo" | "ad_creative" | "ad_video" | "content_image" | "verification_document" | "return_evidence" | "case_evidence" | "review_photo" | "message_attachment" | "inspection_photo" | "bulk_file" | "other_document" | "software_package";
   fileName: string;
   /** image/jpeg, image/png, image/webp, image/heic, video/mp4, application/pdf, text/csv… */
   contentType: string;
@@ -36,7 +36,7 @@ export interface UploadRequest {
 }
 
 export const UploadRequest: z.ZodType<UploadRequest> = z.object({
-  purpose: z.enum(["product_image", "product_video", "brand_logo", "store_logo", "store_banner", "offer_photo", "ad_creative", "ad_video", "content_image", "verification_document", "return_evidence", "case_evidence", "review_photo", "message_attachment", "inspection_photo", "bulk_file", "other_document"]).describe("Decides allowed types, size limit, visibility and retention"),
+  purpose: z.enum(["product_image", "product_video", "brand_logo", "store_logo", "store_banner", "offer_photo", "ad_creative", "ad_video", "content_image", "verification_document", "return_evidence", "case_evidence", "review_photo", "message_attachment", "inspection_photo", "bulk_file", "other_document", "software_package"]).describe("Decides allowed types, size limit, visibility and retention"),
   fileName: z.string(),
   contentType: z.string().describe("image/jpeg, image/png, image/webp, image/heic, video/mp4, application/pdf, text/csv…"),
   sizeBytes: z.number().int(),
@@ -91,7 +91,7 @@ export const Rendition: z.ZodType<Rendition> = z.object({
 
 export interface MediaAsset {
   id: string;
-  kind: "image" | "video" | "document" | "spreadsheet";
+  kind: "image" | "video" | "document" | "spreadsheet" | "software";
   purpose: string;
   status: "pending_upload" | "processing" | "ready" | "rejected" | "removed" | "deleted" | "expired";
   fileName: string;
@@ -128,7 +128,7 @@ export interface MediaAsset {
 
 export const MediaAsset: z.ZodType<MediaAsset> = z.object({
   id: z.uuid(),
-  kind: z.enum(["image", "video", "document", "spreadsheet"]),
+  kind: z.enum(["image", "video", "document", "spreadsheet", "software"]),
   purpose: z.string(),
   status: z.enum(["pending_upload", "processing", "ready", "rejected", "removed", "deleted", "expired"]),
   fileName: z.string(),
@@ -165,14 +165,14 @@ export const MediaAsset: z.ZodType<MediaAsset> = z.object({
 export interface UsageInput {
   module: string;
   /** Evidence kinds: verification_document, return_evidence, case_evidence, order_evidence, inspection_photo, correction_evidence, trust_evidence, dispute_evidence, supplier_document. The upload purposes each kind accepts are listed in the notes. */
-  kind: "product_image" | "product_video" | "variant_image" | "offer_photo" | "brand_logo" | "brand_banner" | "category_image" | "store_logo" | "store_banner" | "ad_creative" | "content_block" | "help_article" | "verification_document" | "return_evidence" | "case_evidence" | "order_evidence" | "inspection_photo" | "correction_evidence" | "trust_evidence" | "dispute_evidence" | "supplier_document" | "review_photo" | "message_attachment" | "bulk_file" | "generated";
+  kind: "product_image" | "product_video" | "variant_image" | "offer_photo" | "brand_logo" | "brand_banner" | "category_image" | "store_logo" | "store_banner" | "ad_creative" | "content_block" | "help_article" | "verification_document" | "return_evidence" | "case_evidence" | "order_evidence" | "inspection_photo" | "correction_evidence" | "trust_evidence" | "dispute_evidence" | "supplier_document" | "review_photo" | "message_attachment" | "bulk_file" | "software_file" | "generated";
   refId: string;
   refLabel?: string | null;
 }
 
 export const UsageInput: z.ZodType<UsageInput> = z.object({
   module: z.string(),
-  kind: z.enum(["product_image", "product_video", "variant_image", "offer_photo", "brand_logo", "brand_banner", "category_image", "store_logo", "store_banner", "ad_creative", "content_block", "help_article", "verification_document", "return_evidence", "case_evidence", "order_evidence", "inspection_photo", "correction_evidence", "trust_evidence", "dispute_evidence", "supplier_document", "review_photo", "message_attachment", "bulk_file", "generated"]).describe("Evidence kinds: verification_document, return_evidence, case_evidence, order_evidence, inspection_photo, correction_evidence, trust_evidence, dispute_evidence, supplier_document. The upload purposes each kind accepts are listed in the notes."),
+  kind: z.enum(["product_image", "product_video", "variant_image", "offer_photo", "brand_logo", "brand_banner", "category_image", "store_logo", "store_banner", "ad_creative", "content_block", "help_article", "verification_document", "return_evidence", "case_evidence", "order_evidence", "inspection_photo", "correction_evidence", "trust_evidence", "dispute_evidence", "supplier_document", "review_photo", "message_attachment", "bulk_file", "software_file", "generated"]).describe("Evidence kinds: verification_document, return_evidence, case_evidence, order_evidence, inspection_photo, correction_evidence, trust_evidence, dispute_evidence, supplier_document. The upload purposes each kind accepts are listed in the notes."),
   refId: z.string(),
   refLabel: z.string().nullish(),
 }).register(common.apiTypes, { id: "media.UsageInput" });
@@ -573,7 +573,7 @@ export interface MediaPublicApi {
   checkImage(assetId: string, rules: ImageRules): Promise<ImageCheckResult>;
   /** Store a file produced by the platform (private). gift_card_codes files (a wallet gift card batch's codes) are sensitive: download links need the owning module's check and are recorded with a reason; they expire after ttlHours like every generated file. Used by: audit, offers, customers, finance, reports, warehouse, shipping, inventory, wallet. */
   storeGeneratedFile(input: { owner: MediaOwner, fileName: string, contentType: string, body: ReadableStream, ttlHours?: number, purpose: 'export' | 'statement' | 'report' | 'correction_report' | 'data_export' | 'label' | 'gift_card_codes' }): Promise<MediaAsset>;
-  /** Signed link for a private file after the caller's module checked access; recorded for sensitive purposes Used by: customers, finance, reports, audit, sellers, returns, support. */
+  /** Signed link for a private file after the caller's module checked access; recorded for sensitive purposes Used by: customers, finance, reports, audit, sellers, returns, support, software. */
   signedDownload(assetId: string, principal: identity.Principal, reason?: string): Promise<DownloadLink>;
   /** Takedown on behalf of a moderation decision (trust, reviews, catalog) Used by: trust, reviews, catalog, advertising. */
   remove(assetId: string, input: { reason: string, by: common.Actor }): Promise<void>;
@@ -882,7 +882,7 @@ export const endpoints = defineEndpoints({
     query: () =>
       z.object({
         purpose: z.string().optional(),
-        kind: z.enum(["image", "video", "document", "spreadsheet"]).optional(),
+        kind: z.enum(["image", "video", "document", "spreadsheet", "software"]).optional(),
         status: z.enum(["processing", "ready", "rejected", "removed"]).optional(),
         inUse: z.stringbool().optional(),
         q: z.string().describe("File name, title or alt text").optional(),
@@ -1072,7 +1072,7 @@ export const endpoints = defineEndpoints({
         ownerKind: z.enum(["seller", "staff", "customer", "guest", "platform"]).optional(),
         ownerId: z.string().optional(),
         purpose: z.string().optional(),
-        kind: z.enum(["image", "video", "document", "spreadsheet"]).optional(),
+        kind: z.enum(["image", "video", "document", "spreadsheet", "software"]).optional(),
         status: z.enum(["pending_upload", "processing", "ready", "rejected", "removed", "deleted", "expired"]).optional(),
         inUse: z.stringbool().optional(),
         failedChecks: z.stringbool().optional(),
@@ -1496,6 +1496,23 @@ export const spec = defineModuleSpec({
           "types": [
             "csv",
             "xlsx"
+          ]
+        },
+        "software_package": {
+          "maxMB": 4096,
+          "types": [
+            "zip",
+            "7z",
+            "apk",
+            "exe",
+            "msi",
+            "dmg",
+            "pkg",
+            "ipa",
+            "appimage",
+            "deb",
+            "db",
+            "sqlite"
           ]
         }
       },

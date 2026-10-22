@@ -1050,6 +1050,9 @@ Indexes: `(sent_at desc)`
 | `trust.report.created` | trust | Staff: new risk report to Trust and Risk Manager |
 | `wishlist.alert.triggered` | wishlist | Customer: price drop or back in stock (promotional, consent required) |
 | `services.request.status_changed` | services | Customer: their service request or booking was confirmed, started, completed, declined or cancelled |
+| `food.order.status_changed` | food | Customer: their food order was accepted, is on the way, was delivered, declined or cancelled, or its payment failed (in-app, topic customer.food.order) |
+| `software.purchase.paid` | software | Customer: a software purchase is paid and ready to download (in-app, topic customer.software.purchase) |
+| `rewards.reward.redeemed` | rewards | Customer: the coupon they got for Daily rewards points is ready, with its code (in-app, topic customer.rewards.coupon) |
 | `access.approval.requested` | access | Staff: waiting approval to eligible approvers (nominated reviewer first), action required with due date |
 | `access.approval.partially_approved` | access | Staff: second approval needed, to remaining eligible approvers |
 | `access.approval.returned` | access | Staff: request sent back to the requester with the comment |

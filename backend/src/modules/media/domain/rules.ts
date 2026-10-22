@@ -7,8 +7,12 @@ import type { UploadRequest, UsageInput } from '../../../spec/media.js';
 export type Purpose = UploadRequest['purpose'];
 export type GeneratedPurpose = 'export' | 'statement' | 'report' | 'correction_report' | 'data_export' | 'label' | 'gift_card_codes';
 export type UsageKind = UsageInput['kind'];
-export type AssetKind = 'image' | 'video' | 'document' | 'spreadsheet';
-export type FileType = 'jpeg' | 'png' | 'webp' | 'heic' | 'gif' | 'mp4' | 'mov' | 'pdf' | 'csv' | 'xlsx';
+export type AssetKind = 'image' | 'video' | 'document' | 'spreadsheet' | 'software';
+/** App packages and databases of the Softwares department (purpose software_package) */
+export type SoftwareType = 'zip' | '7z' | 'apk' | 'exe' | 'msi' | 'dmg' | 'pkg' | 'ipa' | 'appimage' | 'deb' | 'db' | 'sqlite';
+export type FileType = 'jpeg' | 'png' | 'webp' | 'heic' | 'gif' | 'mp4' | 'mov' | 'pdf' | 'csv' | 'xlsx' | SoftwareType;
+export const SOFTWARE_TYPES: readonly SoftwareType[] = ['zip', '7z', 'apk', 'exe', 'msi', 'dmg', 'pkg', 'ipa', 'appimage', 'deb', 'db', 'sqlite'];
+export const isSoftwareType = (t: string): t is SoftwareType => (SOFTWARE_TYPES as readonly string[]).includes(t);
 
 export const GENERATED_PURPOSES: readonly GeneratedPurpose[] = ['export', 'statement', 'report', 'correction_report', 'data_export', 'label', 'gift_card_codes'];
 /** Generated files whose download links are recorded with a reason (the owning module checks access first) */
@@ -43,7 +47,7 @@ const SELLER_PURPOSES: readonly Purpose[] = [
   'bulk_file',
   'other_document',
 ];
-/** Staff: everything except customers' review photos */
+/** Staff: everything except customers' review photos; software packages are staff-only */
 const STAFF_PURPOSES: readonly Purpose[] = [
   'product_image',
   'product_video',
@@ -61,6 +65,7 @@ const STAFF_PURPOSES: readonly Purpose[] = [
   'inspection_photo',
   'bulk_file',
   'other_document',
+  'software_package',
 ];
 
 export type Uploader = 'customer' | 'guest' | 'seller' | 'staff';
@@ -105,6 +110,27 @@ const CONTENT_TYPES: Record<string, FileType> = {
   'text/csv': 'csv',
   'application/csv': 'csv',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+  // software packages (purpose software_package); browsers often send octet-stream, then the extension decides
+  'application/zip': 'zip',
+  'application/x-zip-compressed': 'zip',
+  'application/x-7z-compressed': '7z',
+  'application/vnd.android.package-archive': 'apk',
+  'application/x-msdownload': 'exe',
+  'application/x-msdos-program': 'exe',
+  'application/vnd.microsoft.portable-executable': 'exe',
+  'application/x-dosexec': 'exe',
+  'application/x-msi': 'msi',
+  'application/x-ms-installer': 'msi',
+  'application/x-apple-diskimage': 'dmg',
+  'application/vnd.apple.installer+xml': 'pkg',
+  'application/x-newton-compatible-pkg': 'pkg',
+  'application/x-ios-app': 'ipa',
+  'application/vnd.appimage': 'appimage',
+  'application/x-iso9660-appimage': 'appimage',
+  'application/vnd.debian.binary-package': 'deb',
+  'application/x-debian-package': 'deb',
+  'application/vnd.sqlite3': 'sqlite',
+  'application/x-sqlite3': 'sqlite',
 };
 
 const EXTENSIONS: Record<string, FileType> = {
@@ -120,6 +146,19 @@ const EXTENSIONS: Record<string, FileType> = {
   pdf: 'pdf',
   csv: 'csv',
   xlsx: 'xlsx',
+  zip: 'zip',
+  '7z': '7z',
+  apk: 'apk',
+  exe: 'exe',
+  msi: 'msi',
+  dmg: 'dmg',
+  pkg: 'pkg',
+  ipa: 'ipa',
+  appimage: 'appimage',
+  deb: 'deb',
+  db: 'db',
+  sqlite: 'sqlite',
+  sqlite3: 'sqlite',
 };
 
 export const MIME_OF: Record<FileType, string> = {
@@ -133,6 +172,18 @@ export const MIME_OF: Record<FileType, string> = {
   pdf: 'application/pdf',
   csv: 'text/csv',
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  zip: 'application/zip',
+  '7z': 'application/x-7z-compressed',
+  apk: 'application/vnd.android.package-archive',
+  exe: 'application/vnd.microsoft.portable-executable',
+  msi: 'application/x-msi',
+  dmg: 'application/x-apple-diskimage',
+  pkg: 'application/octet-stream',
+  ipa: 'application/octet-stream',
+  appimage: 'application/vnd.appimage',
+  deb: 'application/vnd.debian.binary-package',
+  db: 'application/octet-stream',
+  sqlite: 'application/vnd.sqlite3',
 };
 
 /** The file type a declared content type stands for; generic types (octet-stream) fall back to the file extension. */
@@ -163,6 +214,8 @@ export function kindOf(type: FileType): AssetKind {
       return 'spreadsheet';
     case 'pdf':
       return 'document';
+    default:
+      return 'software';
   }
 }
 
@@ -194,6 +247,8 @@ function fallbackLimit(purpose: Purpose, configured: Record<string, PurposeLimit
       return { maxMB: 25, types: ['csv', 'xlsx'] };
     case 'return_evidence':
       return { maxMB: 25, types: [...IMAGE_TYPES, 'mp4'] };
+    case 'software_package':
+      return { maxMB: 4096, types: [...SOFTWARE_TYPES] };
     default:
       return { maxMB: 20, types: IMAGE_TYPES };
   }
@@ -247,6 +302,7 @@ export const USAGE_PURPOSES: Record<UsageKind, readonly string[]> = {
   review_photo: ['review_photo'],
   message_attachment: ['message_attachment'],
   bulk_file: ['bulk_file'],
+  software_file: ['software_package'],
   generated: GENERATED_PURPOSES,
 };
 
@@ -288,6 +344,7 @@ export const KIND_NOUN: Record<UsageKind, [string, string]> = {
   review_photo: ['review', 'reviews'],
   message_attachment: ['message', 'messages'],
   bulk_file: ['bulk update', 'bulk updates'],
+  software_file: ['app', 'apps'],
   generated: ['record', 'records'],
 };
 

@@ -129,7 +129,7 @@ export async function moveContent(core: Core, tx: ReviewsRepository, fx: Effects
       const visible = target === 'published';
       const row = await tx.update('product_reviews', c.row.id, { status: target, visible, ...(visible && !c.row.published_at ? { published_at: now } : {}) });
       await core.touchProduct(tx, fx, row.product_id);
-      if (visible) fx.emit('reviews.review.published', { reviewId: row.id, productId: row.product_id, sellerId: row.seller_id, rating: row.rating, verified: row.verified });
+      if (visible) fx.emit('reviews.review.published', { reviewId: row.id, productId: row.product_id, sellerId: row.seller_id, customerId: row.customer_id, rating: row.rating, verified: row.verified });
       if (target === 'removed' || target === 'deleted') {
         if (from !== 'draft')
           fx.emit('reviews.review.removed', { reviewId: row.id, productId: row.product_id, sellerId: row.seller_id, customerId: row.customer_id, byModeration: change.byModeration, reasonCode: change.reasonCode ?? null, trustEnforcementId: change.trustEnforcementId ?? null });

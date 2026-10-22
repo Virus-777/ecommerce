@@ -3,8 +3,8 @@
 The customer side of an account: profile, saved addresses, marketing consent, recently viewed products, the Account tab overview, guest order access, data export and account closure, and the staff view of customer accounts with notes and recorded account actions. Credentials, sessions and verification belong to identity.
 
 - **Group:** Participants · **Launch phase:** 1 · **Plan chapters:** 3, 4, 6, 7, 17, 18, 19
-- **Depends on:** [identity](identity.md) · **Optional:** [orders](orders.md), [returns](returns.md), [support](support.md), [messaging](messaging.md), [wallet](wallet.md), [reviews](reviews.md), [wishlist](wishlist.md), [payments](payments.md), [catalog](catalog.md), [offers](offers.md), [trust](trust.md), [reports](reports.md), [notifications](notifications.md), [access](access.md), [audit](audit.md), [media](media.md), [workqueues](workqueues.md)
-- **Required by:** [checkout](checkout.md), [wallet](wallet.md), [wishlist](wishlist.md)
+- **Depends on:** [identity](identity.md) · **Optional:** [orders](orders.md), [returns](returns.md), [support](support.md), [messaging](messaging.md), [wallet](wallet.md), [reviews](reviews.md), [wishlist](wishlist.md), [payments](payments.md), [catalog](catalog.md), [offers](offers.md), [trust](trust.md), [reports](reports.md), [notifications](notifications.md), [access](access.md), [audit](audit.md), [media](media.md), [workqueues](workqueues.md), [software](software.md), [food](food.md), [rewards](rewards.md)
+- **Required by:** [checkout](checkout.md), [food](food.md), [wallet](wallet.md), [wishlist](wishlist.md)
 
 ## Owns
 - Customer profile (name, phone, member since) linked one-to-one to an identity user

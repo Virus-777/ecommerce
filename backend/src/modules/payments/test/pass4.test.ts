@@ -50,7 +50,7 @@ describe('columns', () => {
 
   it('an orphan payment refund has no order: order_id null, the checkout session kept and shown as orderId', async () => {
     const cap = await h.service.authorize(authorizeInput({ amount: 7007 }), newId());
-    const cs = (await repo().get('intents', cap.intentId))!.checkout_session_id;
+    const cs = (await repo().get('intents', cap.intentId))!.checkout_session_id!;
     h.sessions.set(cs, { orderId: null, status: 'expired', customerId: null });
     h.clock.advance(31_000);
     await h.run('payments.check-uncertain');

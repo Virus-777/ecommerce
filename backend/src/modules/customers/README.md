@@ -5,8 +5,8 @@
 The customer side of an account: profile, saved addresses, marketing consent, recently viewed products, the Account tab overview, guest order access, data export and account closure, and the staff view of customer accounts with notes and recorded account actions. Credentials, sessions and verification belong to identity.
 
 - **Group:** Participants · **Launch phase:** 1 · **Plan chapters:** 3, 4, 6, 7, 17, 18, 19
-- **Depends on:** [identity](../identity/README.md) · **Optional:** [orders](../orders/README.md), [returns](../returns/README.md), [support](../support/README.md), [messaging](../messaging/README.md), [wallet](../wallet/README.md), [reviews](../reviews/README.md), [wishlist](../wishlist/README.md), [payments](../payments/README.md), [catalog](../catalog/README.md), [offers](../offers/README.md), [trust](../trust/README.md), [reports](../reports/README.md), [notifications](../notifications/README.md), [access](../access/README.md), [audit](../audit/README.md), [media](../media/README.md), [workqueues](../workqueues/README.md)
-- **Required by:** [checkout](../checkout/README.md), [wallet](../wallet/README.md), [wishlist](../wishlist/README.md)
+- **Depends on:** [identity](../identity/README.md) · **Optional:** [orders](../orders/README.md), [returns](../returns/README.md), [support](../support/README.md), [messaging](../messaging/README.md), [wallet](../wallet/README.md), [reviews](../reviews/README.md), [wishlist](../wishlist/README.md), [payments](../payments/README.md), [catalog](../catalog/README.md), [offers](../offers/README.md), [trust](../trust/README.md), [reports](../reports/README.md), [notifications](../notifications/README.md), [access](../access/README.md), [audit](../audit/README.md), [media](../media/README.md), [workqueues](../workqueues/README.md), [software](../software/README.md), [food](../food/README.md), [rewards](../rewards/README.md)
+- **Required by:** [checkout](../checkout/README.md), [food](../food/README.md), [wallet](../wallet/README.md), [wishlist](../wishlist/README.md)
 
 ## Owns
 - Customer profile (name, phone, member since) linked one-to-one to an identity user

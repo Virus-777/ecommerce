@@ -126,6 +126,8 @@ export interface ScanResult {
 
 export interface MalwareScanner {
   scan(input: { fileName: string; contentType: string; body: Uint8Array }): Promise<ScanResult>;
+  /** Scans a file read as a stream, never held in memory (software packages up to 4 GB) */
+  scanStream(input: { fileName: string; contentType: string; body: AsyncIterable<Uint8Array> }): Promise<ScanResult>;
 }
 
 /* ------------------------------------------------------------------ processing */
@@ -133,7 +135,7 @@ export interface MalwareScanner {
 export interface ProbeResult {
   /** Detected from the bytes (type sniffing), e.g. jpeg, png, mp4, pdf */
   format: string;
-  kind: 'image' | 'video' | 'document' | 'spreadsheet';
+  kind: 'image' | 'video' | 'document' | 'spreadsheet' | 'software';
   width?: number | null;
   height?: number | null;
   hasAlpha?: boolean;

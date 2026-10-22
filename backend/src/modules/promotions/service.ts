@@ -2,7 +2,7 @@ import { AppError } from '../../kernel/errors/index.js';
 import type { EventPayload } from '../../kernel/events/index.js';
 import type * as common from '../../spec/common.js';
 import type * as identity from '../../spec/identity.js';
-import type { AccountCoupons, CartEvaluation, CartEvaluationInput, CouponCard, DealProduct, DealsPage, FlashSaleBlock, FundingSplit, OfferPromotion, PromoBanner, PromotionsPublicApi, PublicCampaign, Redemption, RedemptionReservation, RefundShare } from '../../spec/promotions.js';
+import type { AccountCoupons, CartEvaluation, CartEvaluationInput, CouponCard, DealProduct, DealsPage, FlashSaleBlock, FundingSplit, IssuedCoupon, OfferPromotion, PromoBanner, PromotionsPublicApi, PublicCampaign, Redemption, RedemptionReservation, RefundShare } from '../../spec/promotions.js';
 import { CampaignsPart } from './service/campaigns.js';
 import { CheckoutPart } from './service/checkout.js';
 import { Core, type PromotionsServiceDeps } from './service/core.js';
@@ -97,6 +97,10 @@ export class PromotionsService implements PromotionsPublicApi {
 
   couponsForProduct(productIds: string[], ctx: { customerId?: string }): Promise<Record<string, CouponCard[]>> {
     return this.storefront.couponsForProduct(productIds, ctx);
+  }
+
+  issueCode(campaignId: string, customerId: string, idempotencyKey: string): Promise<IssuedCoupon> {
+    return this.campaigns.issueCode(campaignId, customerId, idempotencyKey);
   }
 
   couponsForCustomer(customerId: string): Promise<AccountCoupons> {
