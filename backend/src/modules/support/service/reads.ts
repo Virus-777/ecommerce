@@ -443,16 +443,33 @@ export class Reads {
    * A store viewer with neither a customer id nor a guest session sees none.
    */
   async listForOrder(orderId: string, viewer: { area: Area; customerId?: string; guestSessionId?: string; sellerId?: string }): Promise<Agg[]> {
-    if (!isUuid(orderId)) return [];
-    if (viewer.area === 'store' && !viewer.customerId && !viewer.guestSessionId) return [];
-    const rows = await this.core.repo.find('cases', { order_id: orderId }, { orderBy: [['opened_at', 'desc']] });
+    return (await this.listForOrders([orderId], viewer))[orderId] ?? [];
+  }
+
+  /**
+   * listForOrder for several orders at once (docs/10 Appendix D): one read of the cases and one aggregate load
+   * for the whole set. The 180-day cut-off and the per-case visibility check are unchanged.
+   */
+  async listForOrders(orderIds: readonly string[], viewer: { area: Area; customerId?: string; guestSessionId?: string; sellerId?: string }): Promise<Record<string, Agg[]>> {
+    const out: Record<string, Agg[]> = {};
+    for (const id of orderIds) out[id] = [];
+    if (viewer.area === 'store' && !viewer.customerId && !viewer.guestSessionId) return out;
+    if (viewer.area === 'seller' && !viewer.sellerId) return out;
+    const ids = [...new Set(orderIds)].filter(isUuid);
+    if (!ids.length) return out;
+    const rows = await this.core.repo.find('cases', { order_id: ids }, { orderBy: [['opened_at', 'desc']] });
     const recent = new Date(this.core.now().getTime() - 180 * DAY);
     const v = viewer.area === 'admin' ? { area: 'admin' as const } : viewer.area === 'seller' ? { area: 'seller' as const, sellerId: viewer.sellerId ?? '' } : { area: 'store' as const, customerId: viewer.customerId ?? null, guestSessionId: viewer.customerId ? null : (viewer.guestSessionId ?? null) };
-    const candidates = viewer.area === 'seller' && !viewer.sellerId ? [] : rows.filter((c) => !(c.status === 'closed' && c.closed_at && c.closed_at < recent));
+    const candidates = rows.filter((c) => !(c.status === 'closed' && c.closed_at && c.closed_at < recent));
     const seen = await Promise.all(candidates.map((c) => this.core.canSee(c, v)));
     const visible: CaseRec[] = candidates.filter((_, n) => seen[n]);
+    if (!visible.length) return out;
     const aggs = await this.core.loadMany(visible.map((c) => c.id));
-    return visible.map((c) => aggs.get(c.id)!).filter(Boolean);
+    for (const c of visible) {
+      const agg = aggs.get(c.id);
+      if (c.order_id && agg) (out[c.order_id] ??= []).push(agg);
+    }
+    return out;
   }
 
   /**

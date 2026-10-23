@@ -1,4 +1,4 @@
-import { gqlActor, gqlDeadline, gqlEnum, type GraphQLContext, type ModuleResolvers, pageInput } from '../../../kernel/graphql/index.js';
+import { createBatchLoader, gqlActor, gqlDeadline, gqlEnum, type GraphQLContext, type ModuleResolvers, pageInput } from '../../../kernel/graphql/index.js';
 import type * as common from '../../../spec/common.js';
 import type { EffectiveTerms, RefundBreakdown, RefundRequest, ReturnCase, ReturnDetail } from '../../../spec/returns.js';
 import { OPEN_STATUSES } from '../domain/rules.js';
@@ -147,6 +147,7 @@ export function gqlReturn(d: ReturnDetail, c?: ReturnCase | null) {
 const fromCase = (c: ReturnCase) => gqlReturn(c.detail, c);
 
 export const resolvers = (service: ReturnsService): ModuleResolvers => {
+  const load = createBatchLoader();
   /** The store viewer: customer id or guest session */
   const shopper = async (ctx: GraphQLContext) => {
     const p = ctx.principal;
@@ -165,17 +166,27 @@ export const resolvers = (service: ReturnsService): ModuleResolvers => {
 
   return {
     Order: {
+      // one read per page of orders, not per order: the loader key carries the viewer, so two areas never share
       returns: async (order: { id: string }, _args, ctx: GraphQLContext) => {
-        if (ctx.area === 'admin') return (await service.listForOrder(order.id, { area: 'admin' })).map(fromCase);
+        if (ctx.area === 'admin') {
+          const list = await load(ctx, 'returns:admin', order.id, async (ids) => new Map(Object.entries(await service.reads.listForOrders(ids, { area: 'admin' }))));
+          return (list ?? []).map(fromCase);
+        }
         if (ctx.area === 'seller') {
           const sellerId = sellerOf(ctx);
-          return sellerId ? (await service.listForOrder(order.id, { area: 'seller', sellerId })).map(fromCase) : [];
+          if (!sellerId) return [];
+          const list = await load(ctx, `returns:seller:${sellerId}`, order.id, async (ids) => new Map(Object.entries(await service.reads.listForOrders(ids, { area: 'seller', sellerId }))));
+          return (list ?? []).map(fromCase);
         }
         const who = await shopper(ctx);
-        const list = await service.reads.listForOrder(order.id, { area: 'store', customerId: who.customerId ?? undefined, guestSessionId: who.guestSessionId ?? undefined });
-        return list.map((c) => gqlReturn(c.detail));
+        const viewer = { area: 'store' as const, customerId: who.customerId ?? undefined, guestSessionId: who.guestSessionId ?? undefined };
+        const list = await load(ctx, `returns:store:${who.customerId ?? who.guestSessionId ?? ''}`, order.id, async (ids) => new Map(Object.entries(await service.reads.listForOrders(ids, viewer))));
+        return (list ?? []).map((c) => gqlReturn(c.detail));
       },
-      refundRequests: async (order: { id: string }) => (await service.listRefundRequestsForOrder(order.id)).map(refundRequest),
+      refundRequests: async (order: { id: string }, _args: unknown, ctx: GraphQLContext) => {
+        const list = await load(ctx, 'refundRequests', order.id, async (ids) => new Map(Object.entries(await service.listRefundRequestsForOrders(ids))));
+        return (list ?? []).map(refundRequest);
+      },
     },
     OrderItem: {
       returnEligibility: async (item: { id: string; state?: string | null; quantity: number; deliveredAt?: string | null; returnWindowEndsAt?: string | null; returnTerms?: { windowDays?: number } | null }) => {

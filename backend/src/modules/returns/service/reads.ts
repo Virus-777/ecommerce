@@ -385,6 +385,22 @@ export class Reads {
     return this.views.refundRequests(rows);
   }
 
+  /** refundsWhere({ orderId }) for several orders at once: one read and one view pass (docs/10 Appendix D) */
+  async refundsForOrders(orderIds: readonly string[]): Promise<Record<string, RefundRequest[]>> {
+    const out: Record<string, RefundRequest[]> = {};
+    for (const id of orderIds) out[id] = [];
+    const ids = [...new Set(orderIds)].filter(isUuid);
+    if (!ids.length) return out;
+    const rows = await this.core.repo.find('refund_requests', { order_id: ids }, { orderBy: [['created_at', 'desc']] });
+    if (!rows.length) return out;
+    const views = await this.views.refundRequests(rows);
+    for (const [n, row] of rows.entries()) {
+      const view = views[n];
+      if (row.order_id && view) (out[row.order_id] ??= []).push(view);
+    }
+    return out;
+  }
+
   /* ---------------------------------------------------------------- order views */
 
   async returnStateForItems(orderItemIds: string[]) {
@@ -463,13 +479,33 @@ export class Reads {
 
   /** Returns on one order for a viewer, newest first */
   async listForOrder(orderId: string, viewer: { area: 'store' | 'seller' | 'admin'; customerId?: string; guestSessionId?: string; sellerId?: string }): Promise<ReturnCase[]> {
-    if (!isUuid(orderId)) return [];
-    const rows = await this.core.repo.find('returns', { order_id: orderId }, { orderBy: [['requested_at', 'desc']] });
+    return (await this.listForOrders([orderId], viewer))[orderId] ?? [];
+  }
+
+  /**
+   * listForOrder for several orders at once (docs/10 Appendix D): one read of the returns, one aggregate load
+   * and one view pass for the whole set. The visibility check still runs per return, as it must.
+   */
+  async listForOrders(
+    orderIds: readonly string[],
+    viewer: { area: 'store' | 'seller' | 'admin'; customerId?: string; guestSessionId?: string; sellerId?: string },
+  ): Promise<Record<string, ReturnCase[]>> {
+    const out: Record<string, ReturnCase[]> = {};
+    for (const id of orderIds) out[id] = [];
+    const ids = [...new Set(orderIds)].filter(isUuid);
+    if (!ids.length) return out;
+    const rows = await this.core.repo.find('returns', { order_id: ids }, { orderBy: [['requested_at', 'desc']] });
+    if (!rows.length) return out;
     const aggs = await this.core.loadMany(rows.map((r) => r.id));
     const v: Visibility = viewer.area === 'admin' ? { area: 'admin' } : viewer.area === 'seller' ? { area: 'seller', sellerId: viewer.sellerId ?? '' } : { area: 'store', customerId: viewer.customerId ?? null, guestSessionId: viewer.guestSessionId ?? null };
     const seen = await Promise.all(rows.map((r) => this.core.canSee(r, v)));
-    const visible = rows.filter((_, n) => seen[n]).map((r) => aggs.get(r.id)!);
-    return Promise.all(visible.map((agg) => (viewer.area === 'store' ? this.storeCase(agg) : this.views.returnCase(agg, viewer.area))));
+    const visible = rows.filter((_, n) => seen[n]);
+    const views = await Promise.all(visible.map((r) => (viewer.area === 'store' ? this.storeCase(aggs.get(r.id)!) : this.views.returnCase(aggs.get(r.id)!, viewer.area))));
+    for (const [n, row] of visible.entries()) {
+      const view = views[n];
+      if (row.order_id && view) (out[row.order_id] ??= []).push(view);
+    }
+    return out;
   }
 
   /** The customer's view in the ReturnCase shape: the detail only, seller and staff fields left empty */

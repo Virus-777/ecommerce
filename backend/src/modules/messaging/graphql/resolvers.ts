@@ -120,10 +120,13 @@ export const resolvers = (service: MessagingService): ModuleResolvers => {
       },
     },
     Order: {
+      // one read per page of orders, not per order; the key carries the viewer so two viewers never share
       conversations: async (root: { id?: string | null }, _args: unknown, ctx: GraphQLContext) => {
         const v = await viewerOf(ctx);
         if (!v || !root?.id || !isUuid(root.id)) return [];
-        return (await service.viewsForOrder(v, root.id)).map((x) => conversation(v, x));
+        const who = v.kind === 'customer' ? (v.customerId ?? v.guestSessionId ?? '') : v.kind === 'seller' ? v.sellerId : v.accountId;
+        const list = await load(ctx, `orderConversations:${v.kind}:${who}`, root.id, async (ids) => new Map(Object.entries(await service.viewsForOrders(v, ids))));
+        return (list ?? []).map((x) => conversation(v, x));
       },
     },
     Return: {

@@ -1,4 +1,4 @@
-import { gqlActor, gqlDeadline, gqlEnum, type GraphQLContext, type ModuleResolvers, pageInput } from '../../../kernel/graphql/index.js';
+import { createBatchLoader, gqlActor, gqlDeadline, gqlEnum, type GraphQLContext, type ModuleResolvers, pageInput } from '../../../kernel/graphql/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
 import type * as common from '../../../spec/common.js';
 import type { AdminCaseDetail, CaseView, DecisionInput } from '../../../spec/support.js';
@@ -82,6 +82,7 @@ export function gqlCase(v: CaseView, extra: { updatedAt: string; area: 'store' |
 }
 
 export const resolvers = (service: SupportService): ModuleResolvers => {
+  const load = createBatchLoader();
   /** The store viewer: customer id or guest session */
   const shopper = async (ctx: GraphQLContext) => {
     const p = ctx.principal;
@@ -118,14 +119,22 @@ export const resolvers = (service: SupportService): ModuleResolvers => {
 
   return {
     Order: {
+      // one read per page of orders, not per order: the loader key carries the viewer, so two areas never share
       cases: async (order: { id: string }, _args, ctx: GraphQLContext) => {
-        if (ctx.area === 'admin') return cases(await service.reads.listForOrder(order.id, { area: 'admin' }), 'admin');
+        if (ctx.area === 'admin') {
+          const list = await load(ctx, 'cases:admin', order.id, async (ids) => new Map(Object.entries(await service.reads.listForOrders(ids, { area: 'admin' }))));
+          return cases(list ?? [], 'admin');
+        }
         if (ctx.area === 'seller') {
           const sellerId = sellerOf(ctx);
-          return sellerId ? cases(await service.reads.listForOrder(order.id, { area: 'seller', sellerId }), 'seller') : [];
+          if (!sellerId) return [];
+          const list = await load(ctx, `cases:seller:${sellerId}`, order.id, async (ids) => new Map(Object.entries(await service.reads.listForOrders(ids, { area: 'seller', sellerId }))));
+          return cases(list ?? [], 'seller');
         }
         const who = await shopper(ctx);
-        return cases(await service.reads.listForOrder(order.id, { area: 'store', ...(who.customerId ? { customerId: who.customerId } : who.guestSessionId ? { guestSessionId: who.guestSessionId } : {}) }), 'store');
+        const viewer = { area: 'store' as const, ...(who.customerId ? { customerId: who.customerId } : who.guestSessionId ? { guestSessionId: who.guestSessionId } : {}) };
+        const list = await load(ctx, `cases:store:${who.customerId ?? who.guestSessionId ?? ''}`, order.id, async (ids) => new Map(Object.entries(await service.reads.listForOrders(ids, viewer))));
+        return cases(list ?? [], 'store');
       },
     },
     Return: {

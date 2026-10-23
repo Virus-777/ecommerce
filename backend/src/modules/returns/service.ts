@@ -142,6 +142,11 @@ export class ReturnsService implements ReturnsPublicApi {
     return this.reads.refundsWhere({ orderId });
   }
 
+  /** listRefundRequestsForOrder for several orders at once (docs/10 Appendix D) */
+  listRefundRequestsForOrders(orderIds: string[]): Promise<Record<string, RefundRequest[]>> {
+    return this.reads.refundsForOrders(orderIds);
+  }
+
   listRefundRequestsForCase(caseId: string): Promise<RefundRequest[]> {
     return this.reads.refundsWhere({ caseId });
   }

@@ -237,8 +237,43 @@ export class Exceptions {
   }
 
   async forOrder(orderId: string, sellerId?: string): Promise<DeliveryException[]> {
-    const rows = await this.repo.find('exceptions', { order_id: orderId, ...(sellerId ? { owner_type: 'seller', seller_id: sellerId } : {}) }, { orderBy: [['opened_at', 'desc']] });
-    return this.views.exceptions(rows);
+    return (await this.forOrders([orderId], sellerId))[orderId] ?? [];
+  }
+
+  /**
+   * forOrder for several orders at once: one read and one view pass for the whole set (docs/10 Appendix D).
+   * Both Order.deliveryExceptions (admin, across sellers) and OrderGroup.deliveryExceptions (the seller's own)
+   * resolve through this, so a page of orders or an order's groups cost one read rather than one each.
+   */
+  async forOrders(orderIds: readonly string[], sellerId?: string): Promise<Record<string, DeliveryException[]>> {
+    const out: Record<string, DeliveryException[]> = {};
+    for (const id of orderIds) out[id] = [];
+    const ids = [...new Set(orderIds)];
+    if (!ids.length) return out;
+    const rows = await this.repo.find('exceptions', { order_id: ids, ...(sellerId ? { owner_type: 'seller', seller_id: sellerId } : {}) }, { orderBy: [['opened_at', 'desc']] });
+    if (!rows.length) return out;
+    const views = await this.views.exceptions(rows);
+    for (const [n, row] of rows.entries()) {
+      const view = views[n];
+      if (row.order_id && view) (out[row.order_id] ??= []).push(view);
+    }
+    return out;
+  }
+
+  /** The seller's own open and recent exceptions on several order groups at once (docs/10 Appendix D) */
+  async forGroups(groupIds: readonly string[], sellerId: string | undefined): Promise<Record<string, DeliveryException[]>> {
+    const out: Record<string, DeliveryException[]> = {};
+    for (const id of groupIds) out[id] = [];
+    const ids = [...new Set(groupIds)];
+    if (!ids.length) return out;
+    const rows = await this.repo.find('exceptions', { group_id: ids, owner_type: 'seller', seller_id: sellerId }, { orderBy: [['opened_at', 'desc']] });
+    if (!rows.length) return out;
+    const views = await this.views.exceptions(rows);
+    for (const [n, row] of rows.entries()) {
+      const view = views[n];
+      if (row.group_id && view) (out[row.group_id] ??= []).push(view);
+    }
+    return out;
   }
 
   async counts(): Promise<ExceptionCounts> {

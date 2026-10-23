@@ -205,12 +205,15 @@ export const resolvers = (service: ShippingService): ModuleResolvers => {
       },
       deliveryExceptions: async (root: { id: string }, _args: unknown, ctx: GraphQLContext) => {
         const sellerId = sellerIdOf(ctx);
-        const rows = await service.core.repo.find('exceptions', { group_id: root.id, owner_type: 'seller', seller_id: sellerId }, { orderBy: [['opened_at', 'desc']] });
-        return (await service.views.exceptions(rows)).map(exception);
+        const list = await load(ctx, `groupExceptions:${sellerId ?? ''}`, root.id, async (ids) => new Map(Object.entries(await service.listExceptionsForGroups(ids, sellerId))));
+        return (list ?? []).map(exception);
       },
     },
     Order: {
-      deliveryExceptions: async (root: { id: string }) => (await service.listExceptionsForOrder(root.id)).map(exception),
+      deliveryExceptions: async (root: { id: string }, _args: unknown, ctx: GraphQLContext) => {
+        const list = await load(ctx, 'orderExceptions', root.id, async (ids) => new Map(Object.entries(await service.listExceptionsForOrders(ids))));
+        return (list ?? []).map(exception);
+      },
     },
     Offer: {
       deliveryEstimate: async (root: { id: string; sellerId?: string | null; price?: common.Money | null }, args: { postalCode?: string | null }, ctx: GraphQLContext) => {

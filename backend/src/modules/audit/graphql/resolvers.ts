@@ -1,4 +1,4 @@
-import { gqlActor, gqlEnum, type GraphQLContext, type ModuleResolvers, pageInput } from '../../../kernel/graphql/index.js';
+import { createBatchLoader, gqlActor, gqlEnum, type GraphQLContext, type ModuleResolvers, pageInput } from '../../../kernel/graphql/index.js';
 import type { Page, PageInput, TimelineEvent } from '../../../spec/common.js';
 import type { AuditEntry, AuditFilters } from '../../../spec/audit.js';
 import type { AuditService } from '../service.js';
@@ -38,37 +38,19 @@ interface TrailArgs {
 
 /**
  * Batches the auditTrail field of a list (e.g. the orders of a page) into one trailOf call per
- * request, target type and arguments.
+ * request, target type and arguments. This used to be a batcher of its own here; it is the kernel's
+ * since 2026-10-24 (docs/10 §16.2, Appendix D), which adds a per-request result cache and a chunk cap.
+ * The key carries the target type and the arguments, so two lists asking with different paging do not share.
  */
-interface Batch {
-  ids: Set<string>;
-  started: boolean;
-  result: Promise<Map<string, Page<AuditEntry>>>;
-}
-
 function trailLoader(service: AuditService) {
-  const perRequest = new WeakMap<object, Map<string, Batch>>();
+  const load = createBatchLoader();
   return (targetType: string) =>
     async (root: { id?: string }, args: TrailArgs, ctx: GraphQLContext) => {
       const id = root?.id;
       if (!id) return { items: [], nextCursor: null };
       const opts = { includeRelated: args.includeRelated ?? true, category: down(args.category), page: pageInput(args.paging) };
       const key = `${targetType}|${JSON.stringify(opts)}`;
-      let batches = perRequest.get(ctx);
-      if (!batches) perRequest.set(ctx, (batches = new Map()));
-      let batch = batches.get(key);
-      if (!batch || batch.started) {
-        const b = { ids: new Set<string>(), started: false } as Batch;
-        // collect every sibling resolved in this tick, then ask once
-        b.result = new Promise((resolve) => setImmediate(resolve)).then(() => {
-          b.started = true;
-          return service.trailOf(targetType, [...b.ids], opts);
-        });
-        batches.set(key, b);
-        batch = b;
-      }
-      batch.ids.add(id);
-      const page = (await batch.result).get(id) ?? { items: [], nextCursor: null };
+      const page = (await load<Page<AuditEntry>>(ctx, key, id, (ids) => service.trailOf(targetType, ids, opts))) ?? { items: [], nextCursor: null };
       return pageOut(page);
     };
 }

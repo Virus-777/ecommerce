@@ -157,6 +157,16 @@ export class ShippingService implements ShippingPublicApi {
     return this.exceptions.forOrder(orderId, sellerId);
   }
 
+  /** listExceptionsForOrder for several orders at once (docs/10 Appendix D) */
+  listExceptionsForOrders(orderIds: string[], sellerId?: string): Promise<Record<string, DeliveryException[]>> {
+    return this.exceptions.forOrders(orderIds, sellerId);
+  }
+
+  /** The seller's own exceptions on several order groups at once (docs/10 Appendix D) */
+  listExceptionsForGroups(groupIds: string[], sellerId: string | undefined): Promise<Record<string, DeliveryException[]>> {
+    return this.exceptions.forGroups(groupIds, sellerId);
+  }
+
   listExceptions(filter: { kind?: string; status?: string; sellerType?: string; ownerStaffId?: string; customerNotNotified?: boolean; q?: string }, page: common.PageInput): Promise<common.Page<DeliveryException>> {
     return this.exceptions.listAdmin(filter, toPage(page));
   }

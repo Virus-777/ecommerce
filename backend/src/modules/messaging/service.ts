@@ -916,8 +916,27 @@ export class MessagingService implements MessagingPublicApi {
   }
 
   async viewsForOrder(v: Viewer, orderId: string): Promise<ConversationView[]> {
-    const rows = await this.repo.find('conversations', { order_id: orderId }, { orderBy: [['last_message_at', 'desc']] });
-    return this.views(v, await this.visibleOf(v, rows));
+    return (await this.viewsForOrders(v, [orderId]))[orderId] ?? [];
+  }
+
+  /**
+   * viewsForOrder for several orders at once (docs/10 Appendix D): one read of the conversations and one
+   * visibility and view pass for the whole set, so a page of orders costs one read rather than one each.
+   */
+  async viewsForOrders(v: Viewer, orderIds: readonly string[]): Promise<Record<string, ConversationView[]>> {
+    const out: Record<string, ConversationView[]> = {};
+    for (const id of orderIds) out[id] = [];
+    const ids = [...new Set(orderIds)];
+    if (!ids.length) return out;
+    const rows = await this.repo.find('conversations', { order_id: ids }, { orderBy: [['last_message_at', 'desc']] });
+    if (!rows.length) return out;
+    const visible = await this.visibleOf(v, rows);
+    const views = await this.views(v, visible);
+    for (const [n, row] of visible.entries()) {
+      const view = views[n];
+      if (row.order_id && view) (out[row.order_id] ??= []).push(view);
+    }
+    return out;
   }
 
   /** The conversation linked to a return, case or item, batched (Return.conversation) */
