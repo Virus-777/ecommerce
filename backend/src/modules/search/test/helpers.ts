@@ -221,6 +221,17 @@ export class World {
           const { purchasable: _p, ...rest } = p;
           return rest as catalog.Product;
         },
+        /** The batch read the GraphQL resolvers use for a page of cards (docs/10 Appendix D); unknown ids are left out */
+        getProducts: async (ids: string[]) => {
+          const out: { product: catalog.Product; purchasable: boolean }[] = [];
+          for (const id of ids) {
+            const p = w.products.get(id);
+            if (!p) continue;
+            const { purchasable, ...rest } = p;
+            out.push({ product: rest as catalog.Product, purchasable: Boolean(purchasable) });
+          }
+          return out;
+        },
         isPurchasable: async (id: string) => Boolean(w.products.get(id)?.purchasable),
         listCategories: async () => w.tree(),
         getCategoryBySlug: async (slug: string) => {
@@ -274,6 +285,15 @@ export class World {
         getOffer: async (id: string) => {
           const o = w.offers.get(id);
           return o ? w.offerOut(o) : null;
+        },
+        /** The batch read the GraphQL resolvers use for a page of cards (docs/10 Appendix D) */
+        getOffers: async (ids: string[]) => {
+          const out: Record<string, unknown> = {};
+          for (const id of ids) {
+            const o = w.offers.get(id);
+            out[id] = o ? w.offerOut(o) : null;
+          }
+          return out;
         },
       },
       inventory: {

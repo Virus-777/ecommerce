@@ -1238,10 +1238,19 @@ Re-run on 2026-10-23 over the six Departments modules. They are mostly written i
 
 ## Appendix D: GraphQL fields to batch (done in Y0)
 
+**Priority 1 is done** (2026-10-24, branch `build/mysql-migration`; full suite 9,763 tests green). Two things to carry into the rest of the appendix:
+
+- **The APIs it says to add mostly exist already.** `catalog.getProducts(ids)` and `offers.getOffers(ids)` were both in the spec and both implemented; the resolvers were simply still calling the single-id versions. Check the module before writing a new public API — this is the third appendix in this plan found to be out of date.
+- **`createBatchLoader` needed a per-call chunk size, not just the §16.2 cap.** `catalog.getProducts` refuses more than 200 ids, so the flat 500 would have failed on a large page with VALIDATION_FAILED. `load(ctx, key, id, fetch, chunk)` now takes the callee's own limit, and the cap is `min(chunk, 500)`. Every batch API this appendix touches needs its limit read, not assumed.
+
+Also done in the kernel: the per-request result cache (which remembers ids that came back missing, so they are not asked for twice), and `src/kernel/graphql/batch-loader.test.ts` covering collection, the cache, cached misses, per-request isolation, chunk splitting, key isolation and that a failed batch stays retryable.
+
+One harness note for the modules still to do: a module that stubs its dependencies in tests (search stubs catalog, offers and inventory in `test/helpers.ts`) needs the batch method added to the stub too, or the field silently answers empty.
+
 | Priority | Field(s) | Today | Batch API to add |
 |---|---|---|---|
-| 1 | Search cards: `SearchResults.items`, `Product.related`, suggestions, `emptyGuidance.popular` (search resolvers:94-110) | `catalog.getProduct` + `offers.getOffer` per card; the category tree re-read per card | `catalog.getProducts(ids)`, `offers.getOffers(ids)`, per-request category tree |
-| 1 | `Product.bestSellerRank`, `Product.related`, `Seller.categories` (search:191-208) | batch-capable APIs called with `[root.id]` | route through the batch loader |
+| 1 — **done** | Search cards: `SearchResults.items`, `Product.related`, suggestions, `emptyGuidance.popular` | `catalog.getProduct` + `offers.getOffer` per card; the category tree re-read per card | Both batch APIs already existed; the resolvers now use them through the loader, and the category tree is read once per request. Every mapper in `search/graphql/resolvers.ts` takes the request context for this |
+| 1 — **done** | `Product.bestSellerRank`, `Product.related`, `Seller.categories` | batch-capable APIs called with `[root.id]` | routed through the batch loader (`rankOf`, `relatedOf`, `sellerCategoriesOf`) |
 | 2 | `Order.payment`, `refunds`, `refundable`, `paymentDisputes`, `Payment.attempts` (payments:19,126-144) | per order | `payments.forOrders(ids)` |
 | 2 | `Order.returns`, `refundRequests` (returns:168-178); `Order.cases` (support:121); `deliveryExceptions` (shipping:206,213); `conversations` (messaging:123); `auditTrail` (audit:99) | per order | `…ForOrders(ids)` in each module |
 | 3 | `OrderItem.returnEligibility` (returns:181), `discountFunding` (promotions:99) | per item | `returns.eligibilityForItems(ids)`, `promotions.fundingForItems(ids)` |
@@ -1250,7 +1259,7 @@ Re-run on 2026-10-23 over the six Departments modules. They are mostly written i
 | — | Loops dressed as batches: `Offer.product`/`variant` (offers:69-77), `Seller.balance` (finance:70), promotions campaign (:29), wishlist lists (:92) | sequential per id | real `IN (…)` reads |
 | — | `Product.offers`, `offer`, `featuredDecision`, `SellerCollection.offers`, `Offer.priceContext/priceHistory/statusLog/priceChanges`, `earningsPreview`; `Customer.*` admin fields; `Return.case`, `Return.conversation` | per parent | batch where the parent is a list in a persisted query; leave single-parent fields |
 
-Kernel: `createBatchLoader` gets a per-request result cache and 500-id chunks (§16.2).
+Kernel — **done**: `createBatchLoader` has the per-request result cache and chunking, with a per-call chunk size for APIs whose own limit is lower (§16.2).
 
 ## Appendix E: Column names that are MySQL reserved words
 

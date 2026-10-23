@@ -1,5 +1,5 @@
 import { AppError, isAppError } from '../../../kernel/errors/index.js';
-import { gqlEnum, type GraphQLContext, type ModuleResolvers, pageInput, pairs } from '../../../kernel/graphql/index.js';
+import { createBatchLoader, gqlEnum, type GraphQLContext, type ModuleResolvers, pageInput, pairs } from '../../../kernel/graphql/index.js';
 import type * as catalog from '../../../spec/catalog.js';
 import type { PageInput } from '../../../spec/common.js';
 import type { CategoryCrumb, SearchContext } from '../../../spec/search.js';
@@ -7,6 +7,9 @@ import type { ConditionGroup, SearchFilters, SearchMatch, SearchResultSet, SortK
 import type { SearchService } from '../service.js';
 
 const down = <T extends string>(s: string | null | undefined): T | undefined => (s ? (s.toLowerCase() as T) : undefined);
+
+/** catalog.getProducts answers VALIDATION_FAILED above this many ids, so the loader splits on it */
+const CATALOG_BATCH = 200;
 
 interface FilterInput {
   categoryIds?: string[] | null;
@@ -55,18 +58,29 @@ export function filtersIn(f: FilterInput | null | undefined): SearchFilters {
   return out;
 }
 
+/**
+ * Every mapper takes the request's GraphQL context, because the reads behind them are batched per request
+ * (docs/10 §16.1–16.2, Appendix D priority 1). A page of search results used to cost one `catalog.getProduct`,
+ * one `offers.getOffer` and one whole category tree **per card**; it now costs one batched read of each for the
+ * page, and a second field wanting the same record is answered from the loader's per-request cache.
+ */
 export function graphqlMappers(service: SearchService) {
   const catalogApi = () => service.catalogApi();
+  const load = createBatchLoader();
 
-  const categoryOut = (c: catalog.Category): Record<string, unknown> => ({
+  /** The category tree, read once per request however many cards ask for a category */
+  const categoryTree = async (ctx: GraphQLContext): Promise<catalog.Category[]> =>
+    (await load<catalog.Category[]>(ctx, 'category-tree', 'all', async () => new Map([['all', await catalogApi().listCategories({ includeHidden: true })]]))) ?? [];
+
+  const categoryOut = (ctx: GraphQLContext, c: catalog.Category): Record<string, unknown> => ({
     ...c,
     offerCount: null,
-    children: c.children.map(categoryOut),
+    children: c.children.map((child) => categoryOut(ctx, child)),
     filters: async () => ((await catalogApi().getCategoryBySlug(c.slug))?.filters ?? []).filter((a) => a.filterable).map((a) => ({ name: a.name, kind: a.kind, unit: a.unit ?? null, options: a.options })),
     attributes: [],
   });
 
-  const categoryById = async (id: string | null | undefined) => {
+  const categoryById = async (ctx: GraphQLContext, id: string | null | undefined) => {
     if (!id) return null;
     const find = (list: catalog.Category[]): catalog.Category | null => {
       for (const c of list) {
@@ -76,34 +90,56 @@ export function graphqlMappers(service: SearchService) {
       }
       return null;
     };
-    const c = find(await catalogApi().listCategories({ includeHidden: true }));
-    return c ? categoryOut(c) : null;
+    const c = find(await categoryTree(ctx));
+    return c ? categoryOut(ctx, c) : null;
   };
 
-  const crumbOut = (c: CategoryCrumb | null | undefined) => (c ? () => categoryById(c.id) : null);
+  const crumbOut = (ctx: GraphQLContext, c: CategoryCrumb | null | undefined) => (c ? () => categoryById(ctx, c.id) : null);
 
   /** A catalog product as the Product type (catalog's fields; other modules add theirs by id) */
-  const productOut = (p: catalog.Product, match?: SearchMatch): Record<string, unknown> => ({
+  const productOut = (ctx: GraphQLContext, p: catalog.Product, match?: SearchMatch): Record<string, unknown> => ({
     ...p,
-    category: () => categoryById(p.categoryId),
+    category: () => categoryById(ctx, p.categoryId),
     specs: pairs(p.specs),
     variants: p.variants.map((v) => ({ ...v, options: pairs(v.options) })),
     __searchMatch: match ?? null,
   });
 
-  const productsOut = async (items: { productId: string; match?: SearchMatch }[]) => {
-    const found = await Promise.all(items.map(async (it) => ({ it, p: await catalogApi().getProduct(it.productId).catch(() => null) })));
-    return found.filter((x) => x.p).map((x) => productOut(x.p!, x.it.match));
+  /** One `catalog.getProducts` for the whole page; unknown ids are left out, as the per-card read did */
+  const productsOut = async (ctx: GraphQLContext, items: { productId: string; match?: SearchMatch }[]) => {
+    const found = await Promise.all(
+      items.map(async (it) => ({
+        it,
+        p:
+          (await load<catalog.Product>(
+            ctx,
+            'product',
+            it.productId,
+            async (ids) => {
+              const records = await catalogApi().getProducts(ids);
+              return new Map(records.map((r) => [r.product.id, r.product]));
+            },
+            CATALOG_BATCH, // catalog.getProducts refuses more than 200 at a time
+          )) ?? null,
+      })),
+    );
+    return found.filter((x) => x.p).map((x) => productOut(ctx, x.p!, x.it.match));
   };
 
-  const matchOut = (m: SearchMatch | null | undefined) =>
+  const matchOut = (ctx: GraphQLContext, m: SearchMatch | null | undefined) =>
     m
       ? {
           ...m,
           offer: async () => {
             if (!m.offerId) return null;
             try {
-              return await service.offersApi().getOffer(m.offerId);
+              const offer = await load(ctx, 'offer', m.offerId, async (ids) => {
+                const byId = await service.offersApi().getOffers(ids);
+                const out = new Map<string, NonNullable<(typeof byId)[string]>>();
+                for (const [id, o] of Object.entries(byId)) if (o) out.set(id, o);
+                return out;
+              });
+              return offer ?? null;
             } catch (err) {
               if (isAppError(err)) return null;
               throw err;
@@ -112,24 +148,24 @@ export function graphqlMappers(service: SearchService) {
         }
       : null;
 
-  const contextOut = (c: SearchContext) => ({
+  const contextOut = (ctx: GraphQLContext, c: SearchContext) => ({
     ...c,
     facets: c.facets.map((f) => ({ ...f, group: gqlEnum(f.group), kind: gqlEnum(f.kind) })),
     sorts: c.sorts.map((s) => ({ ...s, key: gqlEnum(s.key) })),
     category: c.category
       ? {
           ...c.category,
-          category: () => categoryById(c.category!.category.id),
-          breadcrumb: async () => (await Promise.all(c.category!.breadcrumb.map((b) => categoryById(b.id)))).filter(Boolean),
+          category: () => categoryById(ctx, c.category!.category.id),
+          breadcrumb: async () => (await Promise.all(c.category!.breadcrumb.map((b) => categoryById(ctx, b.id)))).filter(Boolean),
         }
       : null,
-    emptyGuidance: c.emptyGuidance ? { ...c.emptyGuidance, popular: () => productsOut(c.emptyGuidance!.popular.map((p) => ({ productId: p.productId }))) } : null,
+    emptyGuidance: c.emptyGuidance ? { ...c.emptyGuidance, popular: () => productsOut(ctx, c.emptyGuidance!.popular.map((p) => ({ productId: p.productId }))) } : null,
   });
 
   /** SearchResults: the context, the organic items as Product (with searchMatch) and sponsored placeholders */
-  const resultsOut = (r: SearchResultSet) => ({
-    ...contextOut(r.context),
-    items: () => productsOut(r.items),
+  const resultsOut = (ctx: GraphQLContext, r: SearchResultSet) => ({
+    ...contextOut(ctx, r.context),
+    items: () => productsOut(ctx, r.items),
     nextCursor: r.page.nextCursor,
     page: r.page.page ?? null,
     totalPages: r.page.totalPages ?? null,
@@ -137,7 +173,22 @@ export function graphqlMappers(service: SearchService) {
     sponsoredSlots: r.sponsoredSlots.map((s) => ({ ...s, kind: gqlEnum(s.kind) })),
   });
 
-  return { categoryOut, categoryById, crumbOut, productOut, productsOut, matchOut, resultsOut };
+  /** Fields that take one id but whose service API takes many: batched, so a list of parents makes one call */
+  const rankOf = (ctx: GraphQLContext, productId: string) =>
+    load(ctx, 'best-seller-rank', productId, async (ids) => {
+      const byId = await service.bestSellerRanks(ids);
+      const out = new Map<string, NonNullable<(typeof byId)[string]>>();
+      for (const [id, r] of Object.entries(byId)) if (r) out.set(id, r);
+      return out;
+    });
+
+  const relatedOf = (ctx: GraphQLContext, productId: string, limit: number) =>
+    load<string[]>(ctx, `related:${limit}`, productId, async (ids) => new Map(Object.entries(await service.similarProducts(ids, limit))));
+
+  const sellerCategoriesOf = (ctx: GraphQLContext, sellerId: string) =>
+    load(ctx, 'seller-categories', sellerId, async (ids) => new Map(Object.entries(await service.sellerCategoryCounts(ids))));
+
+  return { categoryOut, categoryById, crumbOut, productOut, productsOut, matchOut, resultsOut, rankOf, relatedOf, sellerCategoriesOf };
 }
 
 const queryOf = (args: ResultArgs & { query?: string; exact?: boolean | null }) => ({
@@ -168,46 +219,46 @@ export const resolvers = (service: SearchService): ModuleResolvers => {
     Query: {
       search: async (_root, args: ResultArgs & { query: string; exact?: boolean | null }, ctx: GraphQLContext) => {
         const session = await service.sessionFor(ctx.principal);
-        return m.resultsOut(await service.runSearch(queryOf(args), pageInput(args.paging), session));
+        return m.resultsOut(ctx, await service.runSearch(queryOf(args), pageInput(args.paging), session));
       },
-      categoryProducts: async (_root, args: ResultArgs & { slug: string }) => {
+      categoryProducts: async (_root, args: ResultArgs & { slug: string }, ctx: GraphQLContext) => {
         const r = await service.listCategoryProducts(args.slug, queryOf(args), pageInput(args.paging));
         if (!r) throw new AppError('NOT_FOUND', 'Category not found');
-        return m.resultsOut(r);
+        return m.resultsOut(ctx, r);
       },
       searchSuggestions: async (_root, args: { prefix: string }, ctx: GraphQLContext) => {
         const session = await service.sessionFor(ctx.principal);
         const s = await service.getSuggestions(args.prefix, { ...(session.customerId ? { customerId: session.customerId } : {}), ...(session.guestSessionId ? { guestSessionId: session.guestSessionId } : {}) });
         return {
           ...s,
-          queries: s.queries.map((q) => ({ ...q, categoryScope: m.crumbOut(q.categoryScope) })),
-          categories: s.categories.map((q) => ({ ...q, categoryScope: m.crumbOut(q.categoryScope) })),
+          queries: s.queries.map((q) => ({ ...q, categoryScope: m.crumbOut(ctx, q.categoryScope) })),
+          categories: s.categories.map((q) => ({ ...q, categoryScope: m.crumbOut(ctx, q.categoryScope) })),
           brands: s.brands.map((b) => ({ brand: { id: b.brandId, name: b.name, slug: b.slug, logo: b.logo ?? null, banner: null, description: null, productCount: b.productCount }, productCount: b.productCount })),
-          products: () => m.productsOut(s.products.map((p) => ({ productId: p.productId }))),
+          products: () => m.productsOut(ctx, s.products.map((p) => ({ productId: p.productId }))),
         };
       },
     },
     Product: {
-      bestSellerRank: async (root: { id?: string }) => {
+      bestSellerRank: async (root: { id?: string }, _args: unknown, ctx: GraphQLContext) => {
         if (!root?.id) return null;
-        const r = (await service.bestSellerRanks([root.id]))[root.id];
-        return r ? { ...r, category: () => m.categoryById(r.categoryId) } : null;
+        const r = await m.rankOf(ctx, root.id);
+        return r ? { ...r, category: () => m.categoryById(ctx, r.categoryId) } : null;
       },
-      searchMatch: (root: { __searchMatch?: SearchMatch | null }) => m.matchOut(root?.__searchMatch),
-      related: async (root: { id?: string }, args: { limit?: number | null }) => {
+      searchMatch: (root: { __searchMatch?: SearchMatch | null }, _args: unknown, ctx: GraphQLContext) => m.matchOut(ctx, root?.__searchMatch),
+      related: async (root: { id?: string }, args: { limit?: number | null }, ctx: GraphQLContext) => {
         if (!root?.id) return [];
-        const ids = (await service.similarProducts([root.id], args.limit ?? 10))[root.id] ?? [];
-        return m.productsOut(ids.map((productId) => ({ productId })));
+        const ids = (await m.relatedOf(ctx, root.id, args.limit ?? 10)) ?? [];
+        return m.productsOut(ctx, ids.map((productId) => ({ productId })));
       },
     },
     Seller: {
-      products: async (root: { id?: string }, args: ResultArgs) => {
+      products: async (root: { id?: string }, args: ResultArgs, ctx: GraphQLContext) => {
         if (!root?.id) throw new AppError('NOT_FOUND', 'Seller not found');
-        return m.resultsOut(await service.listSellerProducts(root.id, queryOf(args), pageInput(args.paging)));
+        return m.resultsOut(ctx, await service.listSellerProducts(root.id, queryOf(args), pageInput(args.paging)));
       },
-      categories: async (root: { id?: string }) => {
+      categories: async (root: { id?: string }, _args: unknown, ctx: GraphQLContext) => {
         if (!root?.id) return [];
-        return ((await service.sellerCategoryCounts([root.id]))[root.id] ?? []).map((c) => ({ id: c.categoryId, name: c.name, slug: c.slug, count: c.count, comingSoon: c.comingSoon }));
+        return ((await m.sellerCategoriesOf(ctx, root.id)) ?? []).map((c) => ({ id: c.categoryId, name: c.name, slug: c.slug, count: c.count, comingSoon: c.comingSoon }));
       },
     },
   };
