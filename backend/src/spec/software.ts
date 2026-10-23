@@ -1452,10 +1452,10 @@ export const endpoints = defineEndpoints({
     screens: ["store/software-app"],
     phase: 2,
   },
-  getFreeApp: {
+  claimFreeApp: {
     area: "store",
     method: "POST",
-    path: "/apps/{slug}/get",
+    path: "/apps/{slug}/entitlements",
     auth: "customer",
     scope: "own-customer",
     summary: "Own a free app",

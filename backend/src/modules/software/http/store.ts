@@ -39,7 +39,7 @@ export const storeRoutes = (service: SoftwareService) =>
     /** POST /apps/{slug}/reviews: Rate an app you own, or change your rating */
     reviewApp: async ({ params, body, scope, principal }) => service.reviewApp(customerOf(scope, principal), params.slug, body),
     /** POST /apps/{slug}/get: Own a free app */
-    getFreeApp: async ({ params, scope, principal }) => service.getFreeApp(customerOf(scope, principal), params.slug),
+    claimFreeApp: async ({ params, scope, principal }) => service.claimFreeApp(customerOf(scope, principal), params.slug),
     /** POST /apps/{slug}/downloads: A signed link to download an app's package or a database (any signed-in customer) */
     createDownload: async ({ params, body, scope, principal }) => service.createDownload(customerOf(scope, principal), params.slug, body ?? {}, principal!),
     /** GET /payment-options: Saved cards and a new-card session for buying an app or a pack */

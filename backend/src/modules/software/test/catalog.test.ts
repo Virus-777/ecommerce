@@ -107,7 +107,7 @@ describe('apps', () => {
     const a = await k.makeApp();
     const b = await k.makeApp();
     const customer = k.customer(newId());
-    expect((await k.store('POST', `/apps/${b.slug}/get`, undefined, customer)).status).toBe(200);
+    expect((await k.store('POST', `/apps/${b.slug}/entitlements`, undefined, customer)).status).toBe(200);
     expect((await k.admin('DELETE', `/apps/${b.id}`)).body.error.code).toBe('IN_USE');
     expect((await k.admin('DELETE', `/apps/${a.id}`)).status).toBe(204);
     expect((await k.admin('GET', `/apps/${a.id}`)).status).toBe(404);
@@ -173,14 +173,14 @@ describe('reviews', () => {
     k.names.set(dana, 'Dana Ross');
     const owner = k.customer(dana);
     expect((await k.store('POST', `/apps/${a.slug}/reviews`, { stars: 5 }, owner)).body.error.code).toBe('NOT_OWNED');
-    await k.store('POST', `/apps/${a.slug}/get`, undefined, owner);
+    await k.store('POST', `/apps/${a.slug}/entitlements`, undefined, owner);
     expect((await k.store('GET', `/apps/${a.slug}`, undefined, owner)).body).toMatchObject({ owned: true, canReview: true, myReview: null });
     const r = await k.store('POST', `/apps/${a.slug}/reviews`, { stars: 5, text: 'RAW import is quick.' }, owner);
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     expect(r.body).toMatchObject({ name: 'Dana R.', stars: 5, mine: true });
     expect((await k.store('POST', `/apps/${a.slug}/reviews`, { stars: 3, text: 'Changed my mind.' }, owner)).body).toMatchObject({ id: r.body.id, stars: 3 });
     const other = newId();
-    await k.store('POST', `/apps/${a.slug}/get`, undefined, k.customer(other));
+    await k.store('POST', `/apps/${a.slug}/entitlements`, undefined, k.customer(other));
     await k.store('POST', `/apps/${a.slug}/reviews`, { stars: 5 }, k.customer(other));
     let detail = (await k.store('GET', `/apps/${a.slug}`, undefined, owner)).body;
     expect(detail.ratings).toEqual({ average: 4, count: 2, stars: [1, 0, 1, 0, 0] });
@@ -199,7 +199,7 @@ describe('reviews', () => {
     expect(k.audits.filter((x) => x.action === 'software.review.hide')).toHaveLength(1);
 
     const off = await k.makeApp({ allowReviews: false });
-    await k.store('POST', `/apps/${off.slug}/get`, undefined, owner);
+    await k.store('POST', `/apps/${off.slug}/entitlements`, undefined, owner);
     expect((await k.store('POST', `/apps/${off.slug}/reviews`, { stars: 4 }, owner)).body.error.code).toBe('REVIEWS_OFF');
   });
 });

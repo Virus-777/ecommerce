@@ -830,6 +830,7 @@ export const endpoints = defineEndpoints({
     response: () => CustomerPoints,
     status: 201,
     errors: ["NOT_FOUND","VALIDATION_FAILED"],
+    idempotent: true,
     audited: true,
     screens: ["admin/departments-rewards"],
     phase: 2,

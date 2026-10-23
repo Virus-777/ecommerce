@@ -44,7 +44,7 @@ The app's Daily rewards department: customers check in every day for points (a 7
 | GET | `/api/admin/rewards/redemptions` | Redemptions, newest first | staff<br>`rewards.view` | Page<RedemptionAdmin> |
 | GET | `/api/admin/rewards/customers/{customerId}` | A customer's points, streak and latest history | staff<br>`rewards.view` | `CustomerPoints` |
 | GET | `/api/admin/rewards/customers` | Customers with points, highest balance first | staff<br>`rewards.view` | Page<CustomerPoints> |
-| POST | `/api/admin/rewards/adjustments` | Add or remove a customer's points _(audited)_ | staff<br>`rewards.manage` | `AdjustmentInput` → `CustomerPoints` |
+| POST | `/api/admin/rewards/adjustments` | Add or remove a customer's points _(idempotent, audited)_ | staff<br>`rewards.manage` | `AdjustmentInput` → `CustomerPoints` |
 
 ## Types
 

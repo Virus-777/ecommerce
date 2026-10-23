@@ -72,7 +72,7 @@ describe('licence keys of paid apps', () => {
     expect(lib[0].licence.devicesLabel).toBe('Use on any number of devices');
 
     const free = await k.makeApp();
-    const got = await k.store('POST', `/apps/${free.slug}/get`, undefined, c.token);
+    const got = await k.store('POST', `/apps/${free.slug}/entitlements`, undefined, c.token);
     expect(got.body.licenceKey).toBeNull();
     expect((await k.store('GET', `/apps/${free.slug}`, undefined, c.token)).body).toMatchObject({ owned: true, licence: null, licenceDevices: null });
 
@@ -116,7 +116,7 @@ describe('licence keys of paid apps', () => {
     expect((await k.admin('POST', `/entitlements/${newId()}/reissue-licence`, { reason: 'x' })).status).toBe(404);
 
     const free = await k.makeApp();
-    await k.store('POST', `/apps/${free.slug}/get`, undefined, c.token);
+    await k.store('POST', `/apps/${free.slug}/entitlements`, undefined, c.token);
     const freeRow = (await k.admin('GET', `/entitlements?appId=${free.id}`)).body.items[0];
     expect(freeRow).toMatchObject({ free: true, licenceKey: null });
     expect((await k.admin('POST', `/entitlements/${freeRow.id}/reissue-licence`, { reason: 'Asked' })).body.error.code).toBe('NO_LICENCE');

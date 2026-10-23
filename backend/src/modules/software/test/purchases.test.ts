@@ -25,12 +25,12 @@ describe('free apps', () => {
     const free = await k.makeApp({ title: 'NoteFlow' });
     const paid = await k.makeApp({ free: false, price: usd(999) });
     const c = buyer();
-    const got = await k.store('POST', `/apps/${free.slug}/get`, undefined, c.token);
+    const got = await k.store('POST', `/apps/${free.slug}/entitlements`, undefined, c.token);
     expect(got.status, JSON.stringify(got.body)).toBe(200);
     expect(got.body).toMatchObject({ appId: free.id, slug: free.slug, title: 'NoteFlow', source: 'free' });
-    expect((await k.store('POST', `/apps/${free.slug}/get`, undefined, c.token)).body).toEqual(got.body);
+    expect((await k.store('POST', `/apps/${free.slug}/entitlements`, undefined, c.token)).body).toEqual(got.body);
     expect((await k.admin('GET', `/apps/${free.id}`)).body.owners).toBe(1);
-    expect((await k.store('POST', `/apps/${paid.slug}/get`, undefined, c.token)).body.error.code).toBe('NOT_FREE');
+    expect((await k.store('POST', `/apps/${paid.slug}/entitlements`, undefined, c.token)).body.error.code).toBe('NOT_FREE');
     expect((await k.store('GET', '/library', undefined, c.token)).body.items).toEqual([expect.objectContaining({ source: 'free', app: expect.objectContaining({ id: free.id, owned: true }) })]);
   });
 });
@@ -180,7 +180,7 @@ describe('downloads', () => {
   it('keeps a hidden app downloadable by its owners only', async () => {
     const a = await k.makeApp();
     const owner = buyer();
-    await k.store('POST', `/apps/${a.slug}/get`, undefined, owner.token);
+    await k.store('POST', `/apps/${a.slug}/entitlements`, undefined, owner.token);
     expect((await k.admin('PATCH', `/apps/${a.id}`, { title: a.title, company: a.company, categoryId: a.categoryId, brief: a.brief, description: a.description, free: true, platforms: a.platforms, status: 'hidden' })).status).toBe(200);
     expect((await k.store('POST', `/apps/${a.slug}/downloads`, {}, owner.token)).status).toBe(200);
     expect((await k.store('POST', `/apps/${a.slug}/downloads`, {}, buyer().token)).status).toBe(404);

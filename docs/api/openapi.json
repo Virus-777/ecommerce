@@ -54661,7 +54661,7 @@
           }
         },
         "responses": {
-          "200": {
+          "201": {
             "description": "Success",
             "content": {
               "application/json": {
@@ -127916,10 +127916,21 @@
           "Admin API · Daily rewards"
         ],
         "summary": "Add or remove a customer's points",
-        "description": "**Permission:** `rewards.manage`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/departments-rewards\n\n**Launch phase:** 2",
+        "description": "**Permission:** `rewards.manage`\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/departments-rewards\n\n**Launch phase:** 2",
         "security": [
           {
             "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Required on endpoints marked idempotent (orders, payments, refunds, payouts). Same key + same request returns the first result (with Idempotent-Replayed: true).",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -127991,6 +128002,7 @@
         "x-screens": [
           "admin/departments-rewards"
         ],
+        "x-idempotent": true,
         "x-audited": true,
         "x-phase": 2
       }
@@ -156197,9 +156209,9 @@
         "x-phase": 2
       }
     },
-    "/api/store/software/apps/{slug}/get": {
+    "/api/store/software/apps/{slug}/entitlements": {
       "post": {
-        "operationId": "software.getFreeApp",
+        "operationId": "software.claimFreeApp",
         "tags": [
           "Store API · Softwares"
         ],

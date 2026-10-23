@@ -144,7 +144,7 @@ describe('basket', () => {
     expect((await add({ itemId: pizza.id, quantity: 1, options: regular, note: 'x'.repeat(201) })).body.error.details.issues[0].path).toBe('note');
 
     const one = await add({ itemId: pizza.id, quantity: 1, options: [...regular, { groupId: 'extras', choiceIds: ['mozzarella'] }] });
-    expect(one.status, JSON.stringify(one.body)).toBe(200);
+    expect(one.status, JSON.stringify(one.body)).toBe(201);
     expect(one.body.lines[0]).toMatchObject({ name: 'Margherita pizza 12"', optionsLabel: '12" regular · Extra mozzarella', unitPrice: usd(1690), total: usd(1690), available: true });
     // below the $25 free-delivery line: $1.99 delivery
     expect(one.body).toMatchObject({ subtotal: usd(1690), deliveryFee: usd(199), total: usd(1889), minOrder: usd(1200), missingForMinimum: null, canOrder: true, problems: [] });

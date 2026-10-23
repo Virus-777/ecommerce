@@ -79,7 +79,7 @@ export class SoftwarePurchases extends SoftwareCatalog {
   /* ---------------------------------------------------------------- free apps */
 
   /** Owns a free app (source free); the same answer when already owned */
-  async getFreeApp(customerId: string, slug: string): Promise<Entitlement> {
+  async claimFreeApp(customerId: string, slug: string): Promise<Entitlement> {
     const a = await this.publishedApp(slug);
     if (!a.free) throw this.ctx.error('NOT_FREE', 'This app is paid; buy it instead.');
     const row = await this.repo.insertEntitlement({ id: newId(), customer_id: customerId, app_id: a.id, source: 'free', purchase_id: null, granted_by: null, licence_key: null, licence_issued_at: null, licence_reissues: null, created_at: this.now() });

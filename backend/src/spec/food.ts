@@ -1496,7 +1496,7 @@ export const endpoints = defineEndpoints({
     desc: "The same item with the same options and note adds to the existing line. An item from another restaurant answers OTHER_RESTAURANT (details.restaurantName) unless replace is true.",
     body: () => BasketLineInput,
     response: () => Basket,
-    status: 200,
+    status: 201,
     errors: ["NOT_FOUND","OTHER_RESTAURANT","OPTIONS_INVALID","ITEM_UNAVAILABLE","RESTAURANT_UNAVAILABLE"],
     screens: ["store/food-item","store/food-restaurant"],
     phase: 2,

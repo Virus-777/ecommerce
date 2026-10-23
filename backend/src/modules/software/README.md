@@ -32,7 +32,7 @@ The app's Softwares department: apps for phones and PCs that customers download.
 | GET | `/api/store/software/deals` | Packs and apps on sale | visitor | `SoftwareDeals` |
 | GET | `/api/store/software/apps/{slug}/reviews` | An app's reviews, newest first | visitor | Page<AppReview> |
 | POST | `/api/store/software/apps/{slug}/reviews` | Rate an app you own, or change your rating | customer | `ReviewInput` → `AppReview` |
-| POST | `/api/store/software/apps/{slug}/get` | Own a free app | customer | `Entitlement` |
+| POST | `/api/store/software/apps/{slug}/entitlements` | Own a free app | customer | `Entitlement` |
 | POST | `/api/store/software/apps/{slug}/downloads` | A signed link to download an app's package or a database | customer | `DownloadInput` → `media.DownloadLink` |
 | GET | `/api/store/software/payment-options` | Saved cards and a new-card session for buying an app or a pack | customer | `payments.PaymentOptions` |
 | POST | `/api/store/software/purchases` | Buy an app or a pack _(idempotent)_ | customer | `PurchaseInput` → `SoftwarePurchase` |
