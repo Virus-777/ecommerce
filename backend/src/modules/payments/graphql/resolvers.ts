@@ -1,4 +1,4 @@
-import { gqlActor, gqlDeadline, gqlEnum, type GraphQLContext, lazy, type ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { createBatchLoader, gqlActor, gqlDeadline, gqlEnum, type GraphQLContext, lazy, type ModuleResolvers } from '../../../kernel/graphql/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
 import type * as common from '../../../spec/common.js';
 import type { Decline, Dispute, MethodSnapshot, PaymentDetail, Refund, RefundView, SavedPaymentMethod } from '../../../spec/payments.js';
@@ -121,16 +121,30 @@ function dispute(d: Dispute) {
  * The parent Order was already resolved with the viewer's record scope by orders; Customer.paymentMethods
  * answers only for the signed-in customer's own record.
  */
-export const resolvers = (service: PaymentsService): ModuleResolvers => ({
+export const resolvers = (service: PaymentsService): ModuleResolvers => {
+  const load = createBatchLoader();
+  return {
   Order: {
-    payment: async (root: { id: string }) => {
+    payment: async (root: { id: string }, _args: unknown, ctx: GraphQLContext) => {
       if (!isUuid(root.id)) return null;
-      const p = await service.getPaymentForOrder(root.id);
+      const p = await load<PaymentDetail>(ctx, 'payment-for-order', root.id, async (ids) => {
+        const byOrder = await service.paymentsForOrders(ids);
+        const out = new Map<string, PaymentDetail>();
+        for (const [id, detail] of Object.entries(byOrder)) if (detail) out.set(id, detail);
+        return out;
+      });
       return p ? payment(service, p) : null;
     },
-    refunds: async (root: { id: string }) => (isUuid(root.id) ? (await service.refundsWithViews(root.id)).map(({ refund: r, view: v }) => refund(r, v)) : []),
+    refunds: async (root: { id: string }, _args: unknown, ctx: GraphQLContext) => {
+      if (!isUuid(root.id)) return [];
+      const list = await load(ctx, 'refunds-for-order', root.id, async (ids) => new Map(Object.entries(await service.refundsWithViewsForOrders(ids))));
+      return (list ?? []).map(({ refund: r, view: v }) => refund(r, v));
+    },
     refundable: async (root: { id: string }) => {
       if (!isUuid(root.id)) return null;
+      // Deliberately not batched (docs/10 Appendix D): remainingRefundable goes through intentOfOrder's fallback,
+      // which links an intent to an order — a write — and through caps(), which would need its own batching.
+      // No persisted list query selects this field; it belongs to the order detail screens.
       const s = await service.remainingRefundable(root.id).catch(() => null);
       if (!s) return null;
       return {
@@ -141,7 +155,11 @@ export const resolvers = (service: PaymentsService): ModuleResolvers => ({
         items: s.items.map((i) => ({ ...i, paid: i.paid ?? null, refunded: i.refunded ?? null, inFlight: i.inFlight ?? null, remaining: i.remaining ?? null, blockedReason: i.blockedReason ?? null })),
       };
     },
-    paymentDisputes: async (root: { id: string }) => (isUuid(root.id) ? (await service.listDisputesForOrder(root.id)).map(dispute) : []),
+    paymentDisputes: async (root: { id: string }, _args: unknown, ctx: GraphQLContext) => {
+      if (!isUuid(root.id)) return [];
+      const list = await load(ctx, 'disputes-for-order', root.id, async (ids) => new Map(Object.entries(await service.disputesForOrders(ids))));
+      return (list ?? []).map(dispute);
+    },
   },
   Customer: {
     paymentMethods: async (root: { id: string }, _args: unknown, ctx: GraphQLContext) => {
@@ -151,4 +169,5 @@ export const resolvers = (service: PaymentsService): ModuleResolvers => ({
       return (await service.listSavedMethods(own)).map(savedMethod);
     },
   },
-});
+  };
+};

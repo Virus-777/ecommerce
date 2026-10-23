@@ -121,12 +121,32 @@ export class PaymentsService implements PaymentsPublicApi {
     return i ? this.intents.detail(i) : null;
   }
 
+  /**
+   * getPaymentForOrder for several orders at once (docs/10 Appendix D): one read to find the payments, then one
+   * read per child table for all of them. Orders with no payment are answered null.
+   */
+  async paymentsForOrders(orderIds: string[]): Promise<Record<string, PaymentDetail | null>> {
+    const out: Record<string, PaymentDetail | null> = {};
+    for (const id of orderIds) out[id] = null;
+    const byOrder = await this.intents.intentsOfOrders(orderIds);
+    if (!byOrder.size) return out;
+    const orders = [...byOrder.keys()];
+    const details = await this.intents.details(orders.map((o) => byOrder.get(o)!));
+    for (const [n, orderId] of orders.entries()) out[orderId] = details[n] ?? null;
+    return out;
+  }
+
   listRefundsForOrder(orderId: string): Promise<Refund[]> {
     return this.refunds.listForOrder(orderId);
   }
 
   listDisputesForOrder(orderId: string): Promise<Dispute[]> {
     return this.disputes.listForOrder(orderId);
+  }
+
+  /** listDisputesForOrder for several orders at once (docs/10 Appendix D) */
+  disputesForOrders(orderIds: string[]): Promise<Record<string, Dispute[]>> {
+    return this.disputes.listForOrders(orderIds);
   }
 
   listSavedMethods(customerId: string): Promise<SavedPaymentMethod[]> {
@@ -297,11 +317,26 @@ export class PaymentsService implements PaymentsPublicApi {
 
   /** Refund executions of an order with the customer view next to each (GraphQL Refund has both) */
   async refundsWithViews(orderId: string): Promise<{ refund: Refund; view: RefundView }[]> {
-    const rows = await this.core.repo.find('refunds', { order_id: orderId }, { orderBy: [['created_at', 'desc']] });
+    return (await this.refundsWithViewsForOrders([orderId]))[orderId] ?? [];
+  }
+
+  /** refundsWithViews for several orders at once: one read and two view passes for the whole set (Appendix D) */
+  async refundsWithViewsForOrders(orderIds: readonly string[]): Promise<Record<string, { refund: Refund; view: RefundView }[]>> {
+    const out: Record<string, { refund: Refund; view: RefundView }[]> = {};
+    for (const id of orderIds) out[id] = [];
+    const ids = [...new Set(orderIds)];
+    if (!ids.length) return out;
+    const rows = await this.core.repo.find('refunds', { order_id: ids }, { orderBy: [['created_at', 'desc']] });
+    if (!rows.length) return out;
     const lookup = this.core.lookup();
     const cfg = await this.core.cfg();
     const [refunds, views] = await Promise.all([this.views.refunds(rows, lookup, cfg), this.views.refundViews(rows, lookup, cfg)]);
-    return refunds.map((refund, n) => ({ refund, view: views[n]! }));
+    for (const [n, row] of rows.entries()) {
+      const refund = refunds[n];
+      const view = views[n];
+      if (row.order_id && refund && view) (out[row.order_id] ??= []).push({ refund, view });
+    }
+    return out;
   }
 
   /** Every attempt of the checkout session of an intent, oldest first */

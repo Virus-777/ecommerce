@@ -165,6 +165,23 @@ export class Disputes {
     return Promise.all(rows.map((d) => this.views.dispute(d, lookup)));
   }
 
+  /** listForOrder for several orders at once: one read, and one shared lookup for the views (docs/10 Appendix D) */
+  async listForOrders(orderIds: readonly string[]): Promise<Record<string, Dispute[]>> {
+    const out: Record<string, Dispute[]> = {};
+    for (const id of orderIds) out[id] = [];
+    const ids = [...new Set(orderIds)];
+    if (!ids.length) return out;
+    const rows = await this.repo.find('disputes', { order_id: ids }, { orderBy: [['opened_at', 'desc']] });
+    if (!rows.length) return out;
+    const lookup = this.core.lookup();
+    const views = await Promise.all(rows.map((d) => this.views.dispute(d, lookup)));
+    for (const [n, row] of rows.entries()) {
+      const view = views[n];
+      if (row.order_id && view) (out[row.order_id] ??= []).push(view);
+    }
+    return out;
+  }
+
   async assign(disputeId: string, ownerStaffId: string, by: By): Promise<Dispute> {
     const before = await this.get(disputeId);
     const access = this.core.ctx.tryUse('access');

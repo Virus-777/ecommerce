@@ -233,7 +233,28 @@ export class PaymentsRepository {
 
   /** Provider events applied to the payment or to one of its refunds, oldest first */
   async webhooksFor(intentId: string): Promise<WebhookRec[]> {
-    const refundIds = await this.#tables.refunds.distinct('id', { intent_id: intentId });
-    return this.#tables.webhook_events.find({ $or: [{ intent_id: intentId }, { refund_id: { $in: refundIds } }] }, { sort: { received_at: 1 }, limit: 200 });
+    return (await this.webhooksForMany([intentId])).get(intentId) ?? [];
+  }
+
+  /**
+   * webhooksFor for several payments at once: two reads for the whole set instead of two per payment
+   * (docs/10 Appendix D). Events are grouped by the intent they belong to, directly or through its refund.
+   */
+  async webhooksForMany(intentIds: readonly string[]): Promise<Map<string, WebhookRec[]>> {
+    const out = new Map<string, WebhookRec[]>();
+    const ids = [...new Set(intentIds)];
+    if (!ids.length) return out;
+    const refunds = await this.#tables.refunds.find({ intent_id: { $in: ids } });
+    const intentOfRefund = new Map(refunds.map((r) => [r.id as string, r.intent_id as string]));
+    const events = await this.#tables.webhook_events.find(
+      { $or: [{ intent_id: { $in: ids } }, ...(intentOfRefund.size ? [{ refund_id: { $in: [...intentOfRefund.keys()] } }] : [])] },
+      { sort: { received_at: 1 }, limit: 200 * ids.length },
+    );
+    for (const id of ids) out.set(id, []);
+    for (const e of events) {
+      const intentId = e.intent_id ?? (e.refund_id ? intentOfRefund.get(e.refund_id) : undefined);
+      if (intentId) out.get(intentId)?.push(e);
+    }
+    return out;
   }
 }

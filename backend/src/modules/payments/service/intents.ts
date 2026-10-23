@@ -599,8 +599,7 @@ export class Intents {
 
   /** The order's payment: its linked intent that took money (latest first) */
   async intentOfOrder(orderId: string, fallbackIntentId?: string | null): Promise<IntentRec | undefined> {
-    const linked = await this.repo.find('intents', { order_id: orderId }, { orderBy: [['created_at', 'desc']] });
-    const accepted = linked.find((i) => is(ACCEPTED, i.status)) ?? linked.find((i) => i.status === 'pending_check') ?? linked[0];
+    const accepted = (await this.intentsOfOrders([orderId])).get(orderId);
     if (accepted) return accepted;
     if (fallbackIntentId) {
       const i = await this.repo.get('intents', fallbackIntentId);
@@ -610,6 +609,30 @@ export class Intents {
       }
     }
     return undefined;
+  }
+
+  /**
+   * intentOfOrder for several orders at once: one read for the whole set, with the same precedence (a payment
+   * that took money, else one waiting on a check, else the newest). Orders with no intent are left out.
+   * No fallback intent here: that path links an intent to an order, which is a write, and belongs to one order.
+   */
+  async intentsOfOrders(orderIds: readonly string[]): Promise<Map<string, IntentRec>> {
+    const out = new Map<string, IntentRec>();
+    const ids = [...new Set(orderIds)];
+    if (!ids.length) return out;
+    const rows = await this.repo.find('intents', { order_id: ids }, { orderBy: [['created_at', 'desc']] });
+    const linkedBy = new Map<string, IntentRec[]>();
+    for (const i of rows) {
+      if (!i.order_id) continue;
+      const list = linkedBy.get(i.order_id);
+      if (list) list.push(i);
+      else linkedBy.set(i.order_id, [i]);
+    }
+    for (const [orderId, linked] of linkedBy) {
+      const pick = linked.find((i) => is(ACCEPTED, i.status)) ?? linked.find((i) => i.status === 'pending_check') ?? linked[0];
+      if (pick) out.set(orderId, pick);
+    }
+    return out;
   }
 
   /** Links the order's intent from the order itself (placed and accepted events can arrive together) */
@@ -1223,6 +1246,11 @@ export class Intents {
 
   async detail(i: IntentRec): Promise<PaymentDetail> {
     return this.views.paymentDetail(i, this.core.lookup(), await this.core.cfg());
+  }
+
+  /** detail for several payments at once, sharing one lookup and one read per child table (docs/10 Appendix D) */
+  async details(intents: readonly IntentRec[]): Promise<PaymentDetail[]> {
+    return this.views.paymentDetails(intents, this.core.lookup(), await this.core.cfg());
   }
 
   /**

@@ -24,7 +24,7 @@ import {
   type DisputeStatus,
   type RefundStatus,
 } from '../domain/rules.js';
-import type { DisputeRec, IntentRec, RefundItemRec, RefundLogRec, RefundRec, SavedMethodRec } from '../ports.js';
+import type { AllocationRec, CallRec, CaptureRec, DisputeRec, IntentRec, RefundItemRec, RefundLogRec, RefundRec, SavedMethodRec, WebhookRec } from '../ports.js';
 import { checkoutSessionOf, type Cfg, type Core, type Lookup } from './core.js';
 
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
@@ -77,16 +77,63 @@ export class Views {
   }
 
   async paymentDetail(i: IntentRec, lookup: Lookup, cfg: Cfg): Promise<PaymentDetail> {
+    return (await this.paymentDetails([i], lookup, cfg))[0]!;
+  }
+
+  /**
+   * paymentDetail for several payments at once, answering in the order given. One read per child table for the
+   * whole set, instead of the seven reads per payment a page of orders used to cost (docs/10 Appendix D).
+   */
+  async paymentDetails(intents: readonly IntentRec[], lookup: Lookup, cfg: Cfg): Promise<PaymentDetail[]> {
+    if (!intents.length) return [];
     const repo = this.core.repo;
-    const [allocations, captures, refunds, disputes, calls, order] = await Promise.all([
-      repo.find('allocations', { intent_id: i.id }),
-      repo.find('captures', { intent_id: i.id }, { orderBy: [['at', 'asc']] }),
-      repo.find('refunds', { intent_id: i.id }, { orderBy: [['created_at', 'desc']] }),
-      repo.find('disputes', { intent_id: i.id }, { orderBy: [['opened_at', 'desc']] }),
-      repo.find('provider_calls', { intent_id: i.id }, { orderBy: [['at', 'asc']] }),
-      lookup.order(i.order_id),
+    const ids = intents.map((i) => i.id);
+    const group = <T extends { intent_id: string | null }>(rows: readonly T[]) => {
+      const m = new Map<string, T[]>();
+      for (const r of rows) {
+        if (!r.intent_id) continue;
+        const list = m.get(r.intent_id);
+        if (list) list.push(r);
+        else m.set(r.intent_id, [r]);
+      }
+      return m;
+    };
+    const [allocationRows, captureRows, refundRows, disputeRows, callRows, webhooksBy] = await Promise.all([
+      repo.find('allocations', { intent_id: ids }),
+      repo.find('captures', { intent_id: ids }, { orderBy: [['at', 'asc']] }),
+      repo.find('refunds', { intent_id: ids }, { orderBy: [['created_at', 'desc']] }),
+      repo.find('disputes', { intent_id: ids }, { orderBy: [['opened_at', 'desc']] }),
+      repo.find('provider_calls', { intent_id: ids }, { orderBy: [['at', 'asc']] }),
+      repo.webhooksForMany(ids),
     ]);
-    const webhooks = await repo.webhooksFor(i.id);
+    const allocationsBy = group(allocationRows);
+    const capturesBy = group(captureRows);
+    const refundsBy = group(refundRows);
+    const disputesBy = group(disputeRows);
+    const callsBy = group(callRows);
+    return Promise.all(
+      intents.map((i) =>
+        this.#detailOf(i, lookup, cfg, {
+          allocations: allocationsBy.get(i.id) ?? [],
+          captures: capturesBy.get(i.id) ?? [],
+          refunds: refundsBy.get(i.id) ?? [],
+          disputes: disputesBy.get(i.id) ?? [],
+          calls: callsBy.get(i.id) ?? [],
+          webhooks: webhooksBy.get(i.id) ?? [],
+        }),
+      ),
+    );
+  }
+
+  /** The PaymentDetail shape once the payment's child rows are in hand */
+  async #detailOf(
+    i: IntentRec,
+    lookup: Lookup,
+    cfg: Cfg,
+    rows: { allocations: AllocationRec[]; captures: CaptureRec[]; refunds: RefundRec[]; disputes: DisputeRec[]; calls: CallRec[]; webhooks: WebhookRec[] },
+  ): Promise<PaymentDetail> {
+    const { allocations, captures, refunds, disputes, calls, webhooks } = rows;
+    const order = await lookup.order(i.order_id);
     return {
       id: i.id,
       ref: i.ref,
