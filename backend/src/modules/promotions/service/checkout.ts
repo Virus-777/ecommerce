@@ -481,7 +481,10 @@ export class CheckoutPart extends Part {
         const reversed = red.reversed + amount;
         const state = amount > 0 ? this.core.step(redemptionMachine, red.state, reversed >= red.amount ? 'reverse' : 'partialReverse') : red.state;
         await tx.update('redemptions', red.id, { reversed, state });
-        await tx.updateWhere('redemption_lines', { redemption_id: red.id, line_id: line.line_id }, { reversed: line.reversed + amount });
+        // `line` was read before the redemption was locked, so its `reversed` may be stale: read it again here,
+        // under the lock, and add to that value (docs/10 §11.2 rule 1)
+        const current = await tx.findOne('redemption_lines', { redemption_id: red.id, line_id: line.line_id });
+        await tx.updateWhere('redemption_lines', { redemption_id: red.id, line_id: line.line_id }, { reversed: (current?.reversed ?? line.reversed) + amount });
         const full = reversed >= red.amount;
         const restoreUse = o.restoreUses && full;
         if (o.restoreBudget || restoreUse) await tx.subtractCampaignUsage(red.campaign_id, o.restoreBudget ? amount : 0, restoreUse ? 1 : 0);
@@ -578,7 +581,9 @@ export class CheckoutPart extends Part {
     await this.repo.transaction(async (tx) => {
       // natural key: one split per new order item, however often (or under whichever envelope) it is delivered
       if (!(await tx.claim(`item-split:${e.itemId}:${e.newItemId}`))) return;
-      const lines = await tx.find('redemption_lines', { order_item_id: e.itemId });
+      // forUpdate: every one of these columns is read and written back below. The claim above stops a second
+      // split of the same item, but a concurrent reverseItem on the same line would otherwise be lost
+      const lines = await tx.find('redemption_lines', { order_item_id: e.itemId }, { forUpdate: true });
       for (const l of lines) {
         if (l.quantity <= 0) continue;
         const before = e.quantity + e.remainingQuantity;

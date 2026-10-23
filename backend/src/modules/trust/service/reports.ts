@@ -178,7 +178,13 @@ export class Reports {
     return agg;
   }
 
-  /** Adds subjects and evidence to an existing report (de-duplicated signals, repeat reports) */
+  /**
+   * Adds subjects and evidence to an existing report (de-duplicated signals, repeat reports).
+   *
+   * **Call this only from `core.write`**, which locks the report row before it loads `agg`. `reporter_count` and
+   * `risk_factors` below are read from `agg` and written back, so the lock is what makes them safe; a caller that
+   * passes an `agg` read outside the lock would lose the other writer's change on InnoDB (docs/10 §11.2 rule 1).
+   */
   async extend(tx: TrustRepository, agg: Agg, o: { subjects?: TrustSubject[]; evidence?: EvidenceRec[]; label: string; actor: common.Actor; key?: string | null; signalScore?: number | null; countReporter?: boolean }) {
     const id = agg.report.id;
     if (o.countReporter) await tx.update('reports', id, { reporter_count: agg.report.reporter_count + 1 });

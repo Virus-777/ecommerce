@@ -501,8 +501,9 @@ export class InventoryRepository {
 
   /* ---------------------------------------------------------------- return outcomes */
 
-  returnOutcomesWhere(f: { returnId?: string; ids?: string[] }): Promise<Row<'return_outcomes'>[]> {
-    return this.#t.outcomes.find({ ...(f.returnId ? { return_id: f.returnId } : {}), ...(f.ids ? { id: oneOf(f.ids) } : {}) }, { sort: { inspected_at: 1 } });
+  /** With forUpdate the rows are locked in inspection order, for a caller that adds to `quantity` */
+  returnOutcomesWhere(f: { returnId?: string; ids?: string[] }, lock?: Lock): Promise<Row<'return_outcomes'>[]> {
+    return this.#t.outcomes.find({ ...(f.returnId ? { return_id: f.returnId } : {}), ...(f.ids ? { id: oneOf(f.ids) } : {}) }, { sort: { inspected_at: 1 }, forUpdate: lock?.forUpdate });
   }
 
   pageReturnOutcomes(f: { state?: string }, page: PageRequest): Promise<Page<Row<'return_outcomes'>>> {

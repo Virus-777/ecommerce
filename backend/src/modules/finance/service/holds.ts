@@ -407,7 +407,13 @@ export class HoldsPart extends Part {
       const owedNow = -a.available;
       const open = await this.repo.findOne('amounts_owed', { seller_id: a.seller_id, status: 'open' });
       if (open) {
-        if (open.remaining < owedNow) await this.repo.update('amounts_owed', open.id, { amount: open.amount + (owedNow - open.remaining), remaining: owedNow });
+        // `amount` and `remaining` are read and written back, and this job ran with no transaction at all. Lock the
+        // row and re-read it: a settlement may have changed or closed it since the read above (docs/10 §11.2 rule 1)
+        await this.repo.transaction(async (tx) => {
+          const cur = await tx.get('amounts_owed', open.id, { forUpdate: true });
+          if (!cur || cur.status !== 'open' || cur.remaining >= owedNow) return;
+          await tx.update('amounts_owed', cur.id, { amount: cur.amount + (owedNow - cur.remaining), remaining: owedNow });
+        });
         continue;
       }
       const causes = await this.repo.find('ledger_entries', { seller_id: a.seller_id, type: ['refund_after_payout', 'chargeback', 'adjustment', 'ad_charge', 'label_charge', 'refund'], amount: { op: '<', value: 0 }, at: { op: '>=', value: new Date(a.negative_since!.getTime() - 60 * DAY) } }, { orderBy: [['at', 'desc']], limit: 10 });

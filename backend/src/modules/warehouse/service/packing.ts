@@ -186,6 +186,9 @@ export class Packing {
     await this.repo.transaction(async (tx) => {
       const locked = await tx.get('packages', id, { forUpdate: true });
       if (locked?.status !== 'open') throw this.illegal(`The package is ${locked?.status}`, locked?.status ?? 'open', 'scan');
+      // `scanned` and `serial_numbers` are read and written back without a lock of their own: the package above is
+      // locked, and every writer of its items locks the package first, so the parent's lock covers the children
+      // (docs/10 §11.2 rule 1 and Appendix C)
       const it = (await tx.find('package_items', { package_id: id, order_item_id: target.order_item_id }))[0]!;
       if (it.scanned >= it.quantity) throw this.core.error('SCAN_MISMATCH', 'Every unit of this item is already scanned', { expected: it.quantity, scanned: code });
       await tx.updateWhere('package_items', { package_id: id, order_item_id: it.order_item_id }, { scanned: it.scanned + 1, serial_numbers: serial ? [...(it.serial_numbers ?? []), serial] : (it.serial_numbers ?? []) });

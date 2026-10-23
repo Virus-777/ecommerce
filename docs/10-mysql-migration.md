@@ -1205,7 +1205,16 @@ From the code census (2026-10-22). "Generated" means an indexed generated column
 
 Each fix makes the write safe without relying on MongoDB's write-conflict retry. Most become an atomic SQL update.
 
-**Progress (branch `build/mysql-migration`).** Fixed and tested: reviews (the `last` branch), finance ×2, checkout, departments ×2. Found already safe and struck from the list: payments — `check_attempts + 1` now reads its intent with `forUpdate` inside the transaction, so the census entry no longer applies. Still to do: inventory ×2, trust, promotions, purchasing, orders, finance holds, and the two document-only rows.
+**Worked through on 2026-10-23/24, branch `build/mysql-migration`; typecheck clean, 2,014 tests in the touched modules.** The census was right about there being a problem, and wrong about where it was often enough to be worth saying: of its 13 code rows, **6 needed a fix, 5 were already safe** (locked since the census, or locked by a wrapper the census did not follow), and **2 were correct by design**. One site the census missed turned up next to one it listed.
+
+| Outcome | Sites |
+|---|---|
+| **Fixed** | reviews/moderation (`last` branch); finance/ledger ×2; checkout/placement; departments/blogs ×2; inventory/returns; promotions/reverseItem; promotions/onItemSplit (**new**); purchasing/closePurchaseOrder; finance/holds |
+| **Already safe** — struck | payments/intents (reads with `forUpdate` at `intents.ts:299`); inventory `incoming_expectations` (all four sites already pass `{ forUpdate: true }`); trust/extend (every caller goes through `core.write`, which locks the report); orders/placement (`core.write` → `lockAndLoad` locks the order) |
+| **Correct by design** — documented | fulfillment-service/inbound; warehouse/packing: the parent is locked and every writer of the children locks the parent first |
+| **Open** | purchasing/receipts.ts:192 writes `qtyReceived`/`qtyDamaged` from values computed before the lock. It is partly protected by a `curPo.status` compare-and-set that raises CONFLICT, so a concurrent receipt that does not move the status could still race. Left alone deliberately: the fix means restructuring how `afterLines` is built, which is more than a lock. Y2 does it with the module |
+
+Two lessons for the phases after this one. **The detector of §11.2 rule 2 would have found none of the three worst cases**, because they never opened a transaction. **And an appendix of file:line entries decays**: five entries were already fixed and one site was missing, inside two days. Re-read the code, do not trust the list.
 
 Re-run on 2026-10-23 over the six Departments modules. They are mostly written in the locked style already — `rewards` reads its progress row with `forUpdate` before `count + 1`, and `departments.reactToBlogPost` locks the post before recomputing its counters — but two writers in `departments/service/blogs.ts` recount from the source rows and write the result **with no transaction at all**. They are the last two rows below. Note what they imply for §11.2 rule 2: the detector watches unlocked reads *inside* a transaction, so it will not catch a read-modify-write that never opens one. Those have to be found by reading the code, which is why this appendix is re-run whenever modules are added.
 

@@ -588,9 +588,10 @@ export class PurchasingRepository {
     await this.#t.lines.deleteMany({ purchase_order_id: purchaseOrderId });
   }
 
-  async linesOf(poIds: readonly string[]): Promise<PoLineRow[]> {
+  /** With forUpdate the lines are locked in id order, for a caller that adds to a quantity on them */
+  async linesOf(poIds: readonly string[], lock?: { forUpdate?: boolean }): Promise<PoLineRow[]> {
     if (!poIds.length) return [];
-    return (await this.#t.lines.find({ purchase_order_id: oneOf(poIds) }, { sort: { id: 1 } })).map(toLine);
+    return (await this.#t.lines.find({ purchase_order_id: oneOf(poIds) }, { sort: { id: 1 }, forUpdate: lock?.forUpdate })).map(toLine);
   }
 
   async updateLine(id: string, patch: Partial<Pick<PoLineRow, 'qtyReceived' | 'qtyDamaged' | 'qtyClosed' | 'expectedDate'>>): Promise<void> {

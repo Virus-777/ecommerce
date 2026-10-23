@@ -271,7 +271,10 @@ export class PurchaseOrders {
       const cur = await tx.getPurchaseOrder(id, { forUpdate: true });
       if (!cur) throw notFound('Purchase order');
       const status = purchaseOrderMachine.next(cur.status, 'closeShort');
-      for (const o of open) await tx.updateLine(o.line.id, { qtyClosed: o.line.qtyClosed + o.qty });
+      // `open` was built from lines read before the purchase order was locked, so their qtyClosed may be stale:
+      // read them again under the lock and add to the current value (docs/10 §11.2 rule 1)
+      const fresh = new Map((await tx.linesOf([id], { forUpdate: true })).map((l) => [l.id, l]));
+      for (const o of open) await tx.updateLine(o.line.id, { qtyClosed: (fresh.get(o.line.id)?.qtyClosed ?? o.line.qtyClosed) + o.qty });
       const updated = await tx.updatePurchaseOrder(id, { status, closedAt: this.core.now(), closeReason: reason });
       await tx.cancelPendingDeliveries(id, 'Purchase order closed short');
       await tx.addEvent(this.core.event(id, `Closed short · ${units(closedUnits)} will not arrive`, reason, by.actor));

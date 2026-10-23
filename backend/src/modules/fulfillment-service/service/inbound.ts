@@ -585,6 +585,8 @@ export class InboundPart extends Part {
       let activated: SkuRec[] = [];
       let enrollment: EnrollmentRec | null = null;
       if (decision === 'adjust_stock') {
+        // `received` is read and written back without a lock of its own: the inbound record above is locked, and
+        // every writer of its lines locks it first, so the parent's lock covers the children (docs/10 Appendix C)
         const lines = await tx.find('inbound_lines', { inbound_id: id });
         let units = 0;
         for (const [skuId, n] of o.found ?? []) {

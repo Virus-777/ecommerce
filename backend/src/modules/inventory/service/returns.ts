@@ -192,7 +192,8 @@ export class Returns {
       );
       if (row) return;
       // another item of the same return and stock item (one outcome per return and stock item): add its units
-      const same = (await st.tx.returnOutcomesWhere({ returnId: event.returnId })).find((o) => o.stock_item_id === item.id);
+      // forUpdate: `quantity` is read here and written back below, so the outcome rows are locked first
+      const same = (await st.tx.returnOutcomesWhere({ returnId: event.returnId }, { forUpdate: true })).find((o) => o.stock_item_id === item.id);
       if (same?.state === 'pending') await st.tx.update('return_outcomes', same.id, { quantity: same.quantity + quantity });
       else this.core.ctx.log.warn({ returnId: event.returnId, orderItemId: event.orderItemId, stockItemId: item.id }, 'inventory: the stock outcome of this return and item is already recorded; its units stay in Returned');
     });
