@@ -72,21 +72,23 @@ Rule for every list endpoint: no read may scan more than the page plus one row, 
 
 ## 3. Decisions
 
-Owner decisions of 2026-10-22: **D1, D2, D5 and D9 are decided** (marked **Decided**). D3, D4, D6, D7, D8, D10 and D11 are still recommendations; the plan is written with the recommended option, and the owner confirms them before Y1. D11 is new in the re-census of 2026-10-23: the first census was taken before the modules that hold map points existed.
+Owner decisions of 2026-10-22: **D1, D2, D5 and D9**. Owner decisions of 2026-10-23, at the start of Y0: **D4, D10 and D11** (D11 was new in the re-census; the first census was taken before the modules that hold map points existed). Still open, and confirmed before Y1 because none of them changes Y0: **D3, D6, D7 and D8**. The plan is written with the recommended option for those four.
+
+**D10 is the one that changes the shape of the plan.** Starting empty removes the data audit (§18.1), the ETL and its verification (§18.2–18.3) and the rehearsal phase (the old Y6), and turns the cutover into a switch of environment variables (§18.3). §18 is rewritten accordingly. The one thing it costs is listed there: the 107 real products live only in the running MongoDB dev database, so Y0 exports them to a seed file before anything else is done.
 
 | # | Decision | Choice | Alternative and trade-off |
 |---|---|---|---|
 | D1 | Server version | **Decided: MySQL 8.0 or later.** Supported range: **8.0 from 8.0.36** (never 8.0.29), **8.4 LTS**, and later releases. The code, the DDL and the configuration use only what every version in the range accepts (§20.1); the start-up check refuses an older server. Note: Oracle's support for 8.0 ended in April 2026, so a new server should get 8.4 LTS (supported until 2032), unless it must match another 8.0 environment. Ubuntu 22.04 and 24.04 still ship and patch their own `mysql-server-8.0` package. | — |
 | D2 | How ids are stored | **Decided: as readable text**, `CHAR(36) ascii_bin`. Readable in any SQL tool; GraphQL ids, cursors and logs stay exactly the same; no conversion code to get wrong | (not chosen) `BINARY(16)`: keys about 2× smaller, but every query must convert ids |
 | D3 | Query layer | **mysql2 + Kysely**: typed SQL, generated table types, `forUpdate()`, `skipLocked()`, `onDuplicateKeyUpdate()`. The codebase used Kysely before (PostgreSQL). | Raw mysql2 strings: fewer layers, no compiler help. Drizzle/Prisma: an ORM model on top of the spec, two sources of truth. |
-| D4 | Foreign keys | **On, inside each module** (ON DELETE RESTRICT; CASCADE only for pure child lists that the code already deletes with their parent). The spec can turn one off with `nofk` where the load test shows lock waits. | None: a little faster to write, but integrity rests on code alone (as on MongoDB). |
+| D4 | Foreign keys | **Decided (2026-10-23): on, inside each module** (ON DELETE RESTRICT; CASCADE only for pure child lists that the code already deletes with their parent). The spec can turn one off with `nofk` where the load test shows lock waits. | None: a little faster to write, but integrity rests on code alone (as on MongoDB). |
 | D5 | Search engine | **Decided: a MySQL engine** for development and for production up to about 100k products, passing the same engine contract tests and benchmark (§14). The OpenSearch code is kept | OpenSearch stays the fallback for a deployment that outgrows it: better fuzzy search, but an extra server and 2–4 GB of RAM |
 | D6 | Event inbox (`processed_events`) | **Purge keys older than 90 days.** Events are in-process with no redelivery, so a key older than any retry window can never be used again. | Keep forever, as today: the table grows by every event (11k rows in dev already). |
 | D7 | Backups | **mysqldump `--single-transaction`** in the existing ops.sh flow, plus binlogs kept 7 days for point-in-time recovery | Percona XtraBackup or MySQL Shell `util.dumpInstance`: faster above about 20 GB, but more tools to keep offline. |
 | D8 | Lock retries used up | After 5 attempts (deadlock or lock timeout), answer **503 `SERVICE_BUSY`** with `Retry-After: 1` | Today an exhausted MongoDB retry is a 500. |
 | D9 | Dev and test database | **Decided: portable `mysqld`**: the dev server and test setup start a private `mysqld` from an installed MySQL or an unzipped one, with its data in `.data/mysql`, as mongodb-memory-server does today. An installed service via `MYSQL_URL` also works. | Always require an installed service. |
-| D10 | Existing data | **Move it** with the ETL tool (§18): the dev database `marketly` (107 real products and the simulator data) and any server that is already running | Start empty: production has not gone live, so this is possible if no server holds real data. |
-| D11 | Geographic points | **Keep them as they are: `lat`/`lng` as `DECIMAL(9,6)`, distance computed in TypeScript** (`kernel/lib/geo.ts`), with the lists that sort by distance reading the whole table. It is what the code does today, it needs nothing from MySQL, and the catalogues are staff-kept and small. The repositories cap such a read and the module's tests assert the cap | Two ways out when a catalogue grows past a few thousand rows: (a) **a bounding box first** — indexes on `(lat)` and `(lng)`, `WHERE lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?` to narrow, then the exact distance in TypeScript; no new types, and it stays inside the §10.4 `Table` operations. (b) **`POINT NOT NULL SRID 4326` with a SPATIAL index** and `ST_Distance_Sphere`, which is what MySQL is built for, but adds a column type the generator, the ETL and the row types do not handle, for two tables. Recommended order: (a) when needed, (b) only if (a) is measured to be too slow |
+| D10 | Existing data | **Decided (2026-10-23): start empty.** Production has never gone live and no server holds real data, so a fresh install creates the schema and seeds from code, as M2 did. §18 is rewritten around this: no audit, no ETL, no rehearsal. **One carve-out:** the 107 real products (DummyJSON / Open Food Facts) exist only in the running MongoDB dev database — their import tool was removed on 2026-10-17 and only their images survive as local files — so Y0 exports them to a seed file in the repository before anything else (§18.1) | (not chosen) Move it with an ETL tool: keeps every row of the dev database and of any running server, at the cost of the audit tool, the ETL, its verification, a rehearsal phase and a maintenance window |
+| D11 | Geographic points | **Decided (2026-10-23): keep them as they are: `lat`/`lng` as `DECIMAL(9,6)`, distance computed in TypeScript** (`kernel/lib/geo.ts`), with the lists that sort by distance reading the whole table. It is what the code does today, it needs nothing from MySQL, and the catalogues are staff-kept and small. The repositories cap such a read and the module's tests assert the cap | Two ways out when a catalogue grows past a few thousand rows: (a) **a bounding box first** — indexes on `(lat)` and `(lng)`, `WHERE lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?` to narrow, then the exact distance in TypeScript; no new types, and it stays inside the §10.4 `Table` operations. (b) **`POINT NOT NULL SRID 4326` with a SPATIAL index** and `ST_Distance_Sphere`, which is what MySQL is built for, but adds a column type the generator, the ETL and the row types do not handle, for two tables. Recommended order: (a) when needed, (b) only if (a) is measured to be too slow |
 
 ---
 
@@ -109,7 +111,7 @@ Owner decisions of 2026-10-22: **D1, D2, D5 and D9 are decided** (marked **Decid
 |---|---|---|---|
 | `uuid` (1,302) | `CHAR(36) CHARACTER SET ascii COLLATE ascii_bin` | string | UUIDv7 ids are time-ordered, so new primary keys append to the end of the B-tree (no page splits, unlike random UUIDv4) |
 | `text` (2,071), indexed or enum (≈ 595) | `VARCHAR(n)`: enum columns `VARCHAR(32)` unless a value is longer; other indexed text `VARCHAR(255)` unless the spec says `varchar(n)` | string | The generator checks every index key fits InnoDB's 3,072-byte limit (utf8mb4 is 4 bytes per character) |
-| `text`, not indexed | `TEXT` (64 KB); the spec writes `mediumtext` for long bodies (content pages, help articles, news posts, templates, notes; the data audit in §18.1 lists every column with values over 16k characters) | string | Short values stay in the row page (InnoDB DYNAMIC format) |
+| `text`, not indexed | `TEXT` (64 KB); the spec writes `mediumtext` for long bodies (content pages, help articles, news posts, templates, notes; chosen from the spec, since D10 leaves no existing values to measure — §18.3 says what stands in for that measurement) | string | Short values stay in the row page (InnoDB DYNAMIC format) |
 | `char(n)` (8) | `CHAR(n) CHARACTER SET ascii` | string | Currency codes and similar |
 | `int` (433) | `INT` | number | Money stays in integer minor units |
 | `smallint` | `SMALLINT` | number | |
@@ -174,7 +176,7 @@ The generator checks that each functional unique key it writes is used by the re
 - **`ON DELETE CASCADE`** only where the spec marks a reference `→ table cascade`. Candidates are pure child lists that are never read without their parent: `*_lines`, `*_items` of drafts, `role_permissions`, `notice_recipients`. The code that deletes them explicitly stays (simple and visible); the cascade is a backstop.
 - **`nofk`** in the spec drops one foreign key. It is used only when the load test (§22) shows the parent row's shared lock causing waits. The likely candidates are append-only logs that point at very hot parents (`inventory_stock_movements → stock_items`, `orders_timeline → orders`). In those flows the parent is normally already locked by the same transaction, so a foreign key costs nothing there.
 - **An index on every foreign key column.** The generator reuses an existing index that starts with the column (as MySQL requires) and reports redundant ones; for example `offers stock_item_id` is covered by the unique key on it (an open item from docs/05).
-- **Orphans first.** MongoDB enforced none of the 329 references. The data audit (§18.1) lists orphans; they are fixed or removed before the foreign keys are created.
+- **No orphans to clear.** MongoDB enforced none of the 329 references, but D10 starts the MySQL database empty, so the foreign keys are created with the tables and have nothing to validate against. This is the one place where starting empty makes D4 easier; it also means the first rows ever written are the first test of each key.
 
 ### 6.3 Append-only tables
 
@@ -719,69 +721,56 @@ Depth 9, cost 1,500, page size 100 and a 10 s timeout per field stay. The 10 s t
   - a new foreign key, once the orphan check passes.
 - **Destructive or rewriting changes are never automatic.** These are dropping or renaming a column, changing a type, or narrowing a length. They need a hand-written data migration (`migrations: [{ id, up(db) }]`, recorded in `kernel_migrations`, as today). Dropping a table or index left out of the spec is reported, not done (as MongoDB's "never drops collections"), except extra indexes, which are dropped as `syncIndexes` does today.
 - **Large tables.** `INSTANT`/`INPLACE` changes run while the API runs. A change that needs a table copy on a table over 1M rows is refused at start-up and must be run by hand in a maintenance window (MAINTAINING.md gets the recipe).
-- The 28 existing MongoDB data migrations are **not ported**: they upgraded existing MongoDB installs. On MySQL the ETL (§18) moves data already upgraded, and a fresh install starts from the seeds in code (as M2 did). They were 14 at the first census and 28 on 2026-10-23, so they are being added at roughly seven a day while the Departments work lands. That does not change the rule, but it sets a condition for Y6 and Y7: every migration written before the cutover must already have run on the database the ETL reads, and the ETL verification (§18.3) is what proves it.
+- The 28 existing MongoDB data migrations are **not ported**: they upgraded existing MongoDB installs. On MySQL the ETL (§18) moves data already upgraded, and a fresh install starts from the seeds in code (as M2 did). They were 14 at the first census and 28 on 2026-10-23, so they are being added at roughly seven a day while the Departments work lands. Under D10 this stops mattering at the cutover: nothing reads the old database, so no migration has to have run against it. What does matter is that a change a migration made on MongoDB must also exist in the spec, or the MySQL schema will simply not have it. The generator freshness check (`npm run gen:check`) is what proves that, because a column that only a migration knows about never reaches `schema.ts`.
 
 ---
 
-## 18. Moving the data from MongoDB
+## 18. Starting empty (D10)
 
-### 18.1 Data audit (Y0, read-only tool `tools/mongo-audit.ts`)
+The owner decided on 2026-10-23 that the MySQL system **starts with no data**. Production has never gone live and no server holds real customer, order or money data, so there is nothing to preserve but the development catalogue. This removes the three largest pieces of the original plan — a read-only data audit over every collection, an ETL tool with per-table checksums, and two full rehearsals — and replaces them with a seed and a switch.
 
-It reads every collection and reports, per table, everything the MySQL schema would refuse or change:
+What is lost, and the one thing that is kept, is in §18.1. What a fresh install does is §18.2. The cutover is §18.3.
 
-- ids and uuid columns that are not 36-character UUIDs;
-- text longer than its planned VARCHAR/TEXT size;
-- integers outside INT range;
-- enum values not in the list;
-- numbers stored as the wrong BSON type;
-- dates stored as strings;
-- JSON documents over 1 MB;
-- **orphans** for each of the 329 references;
-- **duplicates** for each unique key as MySQL will read it (functional partial keys, `COALESCE` keys, `as_ci` collations: `ABC@x.com` vs `abc@x.com` become duplicates where the column turns case-insensitive);
-- fields present in documents but not in the spec.
+### 18.1 The one carve-out: the 107 real products (Y0, first task)
 
-The output is a report, plus the spec's `varchar(n)` choices. Data fixes are made on MongoDB, through the API where possible, before the move.
+The development database holds 107 real products built from DummyJSON and Open Food Facts (CC BY-SA, credited in the storefront). Their import tool was removed on 2026-10-17 and only their images survive, as local files under the media root. They exist nowhere else. Starting empty would lose them, and they cannot be re-imported on a server with no internet.
 
-### 18.2 ETL tool (`tools/mongo-to-mysql.ts`; Mongoose kept as a devDependency until Y6)
+So the first task of Y0 is a one-off exporter, `tools/export-catalog-seed.ts`, run **once**, against the MongoDB development database:
 
-1. Create the schema with `npm run migrate` on an empty database.
-2. Per table, in parallel by module (4 at a time):
-   - stream the collection in `_id` order;
-   - convert by the spec column list: `_id` → id; Decimal128 → string; Binary → Buffer; a missing nullable field → NULL; drop `_lock`; arrays → JSON or child rows (§8.1);
-   - insert 1,000 rows per statement with `FOREIGN_KEY_CHECKS=0` (unique checks stay on, so duplicates fail loudly).
-3. Counters: `kernel_counters` and `kernel_ref_counters` are copied; `AUTO_INCREMENT` is set above the highest value.
-4. Jobs: schedules and queued jobs are copied; finished history is not (it is 7 days of logs).
-5. Not copied but rebuilt: the search read model (`embedAllOffers`/`prepareRanking` become `rebuildAll` at first boot) and the facet caches.
-6. `ANALYZE TABLE` on everything.
+- it reads the catalog, offers and media rows of those products and writes `backend/src/modules/catalog/seed/real-products.json` (products, variants, attributes, offers and the media ids their images already have);
+- the file is committed, so the catalogue survives in the repository rather than in a database;
+- `npm run seed` (dev and demo only, never production) loads it through the public APIs, exactly as the departments and staff-ads seeders already do;
+- the images need nothing: they are already files, and their ids are in the export.
 
-### 18.3 Verification (the tool refuses to finish if any check fails)
+Everything else in the development database — simulator people, orders, money, the departments sample data — is regenerated by `npm run simulate` and the existing seeders, so none of it is exported.
 
-- **Row counts** equal for every table.
-- **Checksums**: a canonical hash of every row (spec columns, normalised types) computed on both sides, in primary-key order, compared per table.
-- **Foreign keys**: the orphan anti-joins return zero rows, then `FOREIGN_KEY_CHECKS=1` and the foreign keys are validated.
-- **Invariants** (the simulator's 20 database checks, ported):
-  - ledger sums = stored balances;
-  - stock levels = movements;
-  - coupon usage ≤ caps;
-  - no duplicate refs;
-  - every order has its items.
-- **Audit chain**: `audit.verify-chain` runs over the whole chain on MySQL and must pass. This catches any value that reads back differently: DECIMAL scale, DATETIME precision, JSON number forms (§25).
-- **API**: `npm run test:http --url` against a copy (never against a database you keep, per the M4 lesson) and the simulator against the migrated copy.
+### 18.2 A fresh install
 
-### 18.4 Cutover (a maintenance window; the server is staff-only)
+1. `npm run db-setup` creates the database, the users and the time-zone tables (§21.2).
+2. `npm run migrate` creates every table, view, trigger and routine from the spec (§17.3). Foreign keys are created with the tables: on an empty database there are no orphans to clear first, which is the one place where D10 makes D4 easier.
+3. The kernel seeds what it always seeds at first boot: settings defaults, permissions and roles, the Official Store, the departments and the staff ads.
+4. Development and demo only: `npm run seed` adds the real products of §18.1, and `npm run simulate` adds people, orders and money.
+5. `ANALYZE TABLE` on everything, then `marketly check`.
 
-1. A final MongoDB backup (mongodump), kept offline.
+There is no verification step comparing two databases, because there is nothing to compare against. What replaces it is the ordinary gate: `npm run check` (types, boundaries, API conformance, about 9,750 tests, the HTTP checks) and `npm run simulate`, whose 20 database invariants (ledger sums equal stored balances, stock levels equal movements, coupon usage within caps, no duplicate refs, every order has its items) now run against MySQL instead of MongoDB. The audit chain is verified by `audit.verify-chain` over data the MySQL system wrote itself.
+
+### 18.3 Cutover
+
+With no data to move, the cutover is no longer a maintenance window with a timed ETL:
+
+1. A final MongoDB backup (mongodump), kept offline, so the old system can be read if a number is ever questioned.
 2. Stop `marketly.service`.
-3. Run the ETL, then the verification.
-4. Switch `.env.production` (`MYSQL_URL`; remove `MONGODB_URI`).
-5. Start, then run `marketly check`.
-6. Staff smoke test: sign in, orders, a seller page, reports.
+3. Switch `.env.production`: add `MYSQL_URL`, remove `MONGODB_URI`.
+4. `npm run db-setup`, `npm run migrate`, start, then `marketly check`.
+5. Staff smoke test: sign in, place an order, a seller page, reports.
 
-Expected downtime: about 10 minutes per GB of data at the dev machine's ETL rate (measured in the rehearsal).
+Expected downtime: minutes, and bounded by `migrate` rather than by the size of the data.
 
-**Rollback.** MongoDB is left untouched and stopped (not removed) for 30 days. To roll back, switch the env back and start. Writes made after the cutover would be lost on rollback, so the decision window is the smoke test. Once the new system has taken real writes, go forward and fix rather than roll back.
+**Rollback** is the same switch in reverse, and it stays genuinely cheap for as long as MongoDB is kept: the old database is left untouched and stopped (not removed) for 30 days. The difference from an ETL cutover is that nothing has to be re-moved to go back. As before, once the new system has taken real writes, go forward and fix rather than roll back.
 
-**Rehearsal.** The whole cutover is run at least twice on a copy: restore the server's mongodump into a scratch MongoDB on the dev PC, then run ETL, verification and the simulator.
+**What is no longer needed:** `tools/mongo-audit.ts`, `tools/mongo-to-mysql.ts`, the per-table checksum compare, the orphan anti-joins, the counter and job copy, the `FOREIGN_KEY_CHECKS=0` bulk load, and the two rehearsals of Y6. Mongoose is no longer needed as a devDependency after Y4 either, because no tool reads MongoDB any more; it goes with the rest of the MongoDB code in Y4.
+
+**What this costs, written down plainly.** The ETL would have proved, row by row, that MySQL reads back exactly what MongoDB stored — DECIMAL scale, DATETIME precision, JSON number forms, collation duplicates (§25). Starting empty gives up that proof. Three things stand in its place: the contract suite compares every table, column, type, index, foreign key, check, view and trigger against the spec (§19); the concurrency and invariant tests run on the real server (§19, §22.3); and the `varchar(n)` sizes, which the audit would have measured from real values, are instead chosen from the spec and enforced by the generator, with `STRICT_TRANS_TABLES` (§20) turning any value that does not fit into an error rather than a silent truncation. The residual risk is that a size is chosen too small and is only found when a real value hits it; §17.3's additive migrations make widening a column an `ALGORITHM=INPLACE` change, so that is a cheap mistake to fix.
 
 ---
 
@@ -1018,14 +1007,13 @@ Each phase ends with `npm run check` green and a report. The next starts after a
 
 | Phase | Work | Done when |
 |---|---|---|
-| **Y0 Prepare on MongoDB** | The open decisions D3, D4, D6, D7, D8, D10, **D11** (D1, D2, D5, D9 are decided). Data audit tool and report (§18.1). Appendix C concurrency fixes, including the two `departments/service/blogs.ts` writers found on 2026-10-23. Appendix D GraphQL batching fixes + batch-loader cache and cap. Spec additions: `varchar(n)` sizes from the audit, `appendOnly`, `views`, `cascade`/`nofk`, `collation: ci`. FORMAT.md updated. **Re-run the census** (§0) and Appendices A, B, C and E, and keep re-running them whenever modules are added: the 2026-10-22 census went stale within two hours. | Check green on MongoDB; audit report reviewed; census current; no behaviour change |
+| **Y0 Prepare on MongoDB** (started 2026-10-23, branch `build/mysql-migration`) | 1. The catalogue exporter of §18.1, run once while MongoDB still holds the 107 real products — **before anything else**. 2. Appendix C concurrency fixes, including the two `departments/service/blogs.ts` writers found on 2026-10-23. 3. Appendix D GraphQL batching fixes + batch-loader cache and cap. 4. Spec additions: `varchar(n)` sizes (chosen from the spec, §18.3), `appendOnly`, `views`, `cascade`/`nofk` (D4), `collation: ci`; FORMAT.md updated. 5. Re-run the census (§0) and Appendices A, B, C and E, and keep re-running them whenever modules are added: the 2026-10-22 census went stale within two hours. D4, D10 and D11 were decided at the start of this phase; D3, D6, D7 and D8 are confirmed before Y1. | Check green on MongoDB; `real-products.json` committed and `npm run seed` reproduces the catalogue; census current; no behaviour change |
 | **Y1 Foundations** | `kernel/mysql/*`: pool, transactions with retry, `Table`, `Where`, locks, claim, counters, migrate, kernel tables. Jobs on MySQL (`SKIP LOCKED`); rate limits; idempotency; webhook log; refs; purge job. Generator → DDL, Kysely types, views, triggers. Portable `mysqld`; test harness; contract suite; read-modify-write detector. During the transition a module chooses `store: 'mongo' \| 'mysql'` (as M1 did). The kernel's own tables and jobs move to MySQL first; each module's inbox claims go to the store of that module's data, so a claim always commits with its effects. Pilots: **settings, access**. | Kernel tests and the two pilots pass on MySQL **8.0 and 8.4** (§20.1); BUILDING-MODULES.md gets the MySQL section |
 | **Y2 Modules in tranches** | 37 modules in seven tranches (tables in brackets). A: identity, audit, media, notifications, backups [45] · B: customers, catalog, inventory, sellers, purchasing, workqueues [91] · C: offers, promotions, cart, orders, content [56] · D: payments, shipping, checkout, messaging, reviews, finance, returns [100] · E: support, trust, advertising, reports, warehouse [71] · F: wishlist, wallet, fulfillment-service [26] · **G (new): departments, services, software, food, rewards, farm [54]**. Per module: repository rewrite, views, summary columns, tests reading tables. | Each module's tests, contract and `test:http` pass on MySQL with the detector on |
 | **Y3 Search, reports, statistics, SQL speed-ups** | MySQL search engine (§14) + benchmark; reports market-day columns; finance ledger `day`; statistics queries; `EXPLAIN` review of every list; the §9.5 candidates (set-based statements, stored procedures, summary triggers), each with a parity test and a before/after measurement | Engine contract green; bench targets met; financial statistics equal to MongoDB on the same seeded data; each kept §9.5 item shows its gain, the rest stay in TypeScript |
-| **Y4 Remove MongoDB** | Delete `kernel/mongo`, Mongoose (kept only as a devDependency of the ETL tool until Y6), mongodb-memory-server, the Mongo engine, Mongo env vars. Update docs 02, MAINTAINING, README, FORMAT, `.env.example`, BUILDING-MODULES, docs/08, the deploy scripts (`install.sh`, `db-setup`, `backup.sh`, `restore.sh`, `ops.sh`, `check.sh`, the `marketly` command) | Check green with MySQL only |
+| **Y4 Remove MongoDB** | Delete `kernel/mongo`, Mongoose (nothing reads MongoDB any more under D10, so it goes here rather than being kept for an ETL), mongodb-memory-server, the Mongo engine, Mongo env vars. Update docs 02, MAINTAINING, README, FORMAT, `.env.example`, BUILDING-MODULES, docs/08, the deploy scripts (`install.sh`, `db-setup`, `backup.sh`, `restore.sh`, `ops.sh`, `check.sh`, the `marketly` command) | Check green with MySQL only |
 | **Y5 Volume and concurrency** | Seeder, load tool, scenarios and invariants (§22); tuning; the decisions on `nofk`, cached counts and audit batching | Targets met, invariants hold, deadlock retries under 2% |
-| **Y6 Data move rehearsal** | ETL + verification tool (§18.2–18.3); two full rehearsals on a copy of the server's backup and on the dev database `marketly` | Verification passes twice; timing known |
-| **Y7 Cutover** | §18.4 on the server; the old MongoDB is kept stopped for 30 days, then removed with Mongoose | Server on MySQL; `marketly check` green; first nightly backup restored as a test |
+| **Y6 Cutover** (was Y7; the old Y6 rehearsal is removed by D10) | §18.3 on the server: final mongodump kept offline, stop, switch `.env.production`, `db-setup`, `migrate`, start, `marketly check`, staff smoke test. The old MongoDB is kept stopped for 30 days, then removed | Server on MySQL; `marketly check` green; first nightly backup restored as a test |
 
 Rough size: Y1 is the pattern-setting phase (like M1). Y2 is similar to M2: about 15,500 lines of repositories, done in parallel. The search engine is the largest single piece.
 
@@ -1040,13 +1028,13 @@ Rough size: Y1 is the pattern-setting phase (like M1). Y2 is similar to M2: abou
 | **Lost updates**: unlocked read-modify-write was safe on MongoDB (write conflicts), and is not on InnoDB | Rule 11.2.1, the Appendix C fixes first, the detector in tests and the simulator, the concurrency integration tests |
 | **Lock waits and deadlocks on hot rows** | sorted lock order, short transactions, atomic guarded updates, a 10 s timeout with retry, Y5 measurements, `nofk` where foreign keys add waits |
 | **Search slower than the tuned MongoDB engine** (facets especially) | child tables + per-request id set + facet cache; benchmark gate; OpenSearch fallback (D5) |
-| **Behaviour drift from collations** (MySQL's default ignores case and accents) | `utf8mb4_0900_bin` default, `as_ci` only where `lower()` was used; the data audit finds duplicates the new rules would create |
-| **Values that read back differently** (DECIMAL scale, `TIME` seconds, JSON key order, `CHAR` trailing spaces, booleans as 0/1) | conversion in one place (`Table` type cast), §25 list, audit chain verification and checksum compare in the ETL |
+| **Behaviour drift from collations** (MySQL's default ignores case and accents) | `utf8mb4_0900_bin` default, `as_ci` only where `lower()` was used. Under D10 there is no existing data to find duplicates in, so the unique keys themselves are the check: the first insert that collides fails loudly instead of being found by an audit |
+| **Values that read back differently** (DECIMAL scale, `TIME` seconds, JSON key order, `CHAR` trailing spaces, booleans as 0/1) | conversion in one place (`Table` type cast), §25 list, and the audit chain verified over data MySQL wrote itself. D10 removes the ETL checksum that would have compared the two databases row by row; §18.3 says what stands in its place and what residual risk is accepted |
 | **Large `ALTER TABLE` later** | INSTANT/INPLACE-only automatic migrations; refusal + manual recipe for table copies over 1M rows |
 | **MySQL 8.0 end of life** (April 2026) | D1 supports 8.0 or later: the code avoids everything later versions deprecate (§20.1), tests run on 8.0 and 8.4, and Ubuntu still patches its 8.0 package. A new server should start on 8.4 LTS; an existing 8.0 server upgrades in place |
 | **Logic in SQL is harder to debug and test** (§9.5) | only where measured faster; one module per routine; parity tests; SQL bodies in `src/modules/<m>/sql/` next to their caller, commented; errors keep the spec's codes |
 | **Offline maintenance** | one database, plain SQL views to inspect data, `docs/api/db/*.sql` to read, `ops_v_*` views, backups with point-in-time recovery, MAINTAINING.md recipes (deadlock log, slow log, `EXPLAIN`, adding an index, a manual ALTER) |
-| **The backend keeps growing while the migration runs** (six modules and 54 tables arrived within hours of the first census; 14 data migrations in two days) | this is the normal state of the project, not an accident. Three defences: the census in §0 and Appendices A, B, C and E are re-run at the start of every phase, not once; new modules are written to the §11.2 rules on MongoDB from the start, so they arrive migration-ready; and a module added after its tranche has passed joins the next one rather than reopening it. Y7's cutover is the only point where a late module is a real problem, so the freeze starts at Y6 |
+| **The backend keeps growing while the migration runs** (six modules and 54 tables arrived within hours of the first census; 14 data migrations in two days) | this is the normal state of the project, not an accident. Three defences: the census in §0 and Appendices A, B, C and E are re-run at the start of every phase, not once; new modules are written to the §11.2 rules on MongoDB from the start, so they arrive migration-ready; and a module added after its tranche has passed joins the next one rather than reopening it. the cutover is the only point where a late module is a real problem, so the module freeze starts when Y5 ends |
 | **Test-suite speed** | template clone per worker, truncating only touched tables, a test server without fsync. Goal: the suite within 10 minutes (8.5 today, 9,757 tests in 396 files) |
 
 ---
@@ -1062,7 +1050,7 @@ Rough size: Y1 is the pattern-setting phase (like M1). Y2 is similar to M2: abou
 | Duplicate key in a transaction | aborts the transaction | fails the statement only | `insertIfAbsent` = INSERT + catch; claim = INSERT + catch |
 | `updateMany` return | matched count | affected (changed) rows | `CLIENT_FOUND_ROWS` gives matched rows |
 | Dates | ms precision | DATETIME(0) by default | `DATETIME(3)`, UTC session |
-| numeric | Decimal128 keeps its digits (`"12.5"`) | DECIMAL pads the scale (`"12.50"`) | the 20 numeric columns are rates and quantities that the services format themselves. The ETL checksum normalises; the audit chain hashes only canonical JSON of what it wrote, verified in §18.3. Any column where text equality matters is listed by the audit and kept as `VARCHAR` |
+| numeric | Decimal128 keeps its digits (`"12.5"`) | DECIMAL pads the scale (`"12.50"`) | the 24 numeric columns are rates, quantities and the four map points, all of which the services format themselves (`Number()`, `.toFixed(6)`). The audit chain hashes only canonical JSON of what it wrote. With D10 there is no old value to compare against, so any column where text equality matters is kept as `VARCHAR` by the spec rather than found by an audit |
 | JSON objects | key order as written | keys reordered, duplicates dropped | nothing compares serialised JSON except the audit chain, which canonicalises (sorted keys) before hashing; tests compare parsed objects |
 | JSON numbers | int32/int64/double | INT/UINT/DOUBLE | the same JS values |
 | booleans | true/false | 1/0 | `TINYINT(1)` type cast |
@@ -1282,7 +1270,7 @@ Checked and **not** reserved, so they need no quoting (listed because they are n
 | Area | Files |
 |---|---|
 | Kernel | `src/kernel/mongo/*` → `src/kernel/mysql/*` (§10.1); `kernel/jobs/mongo.ts` → `mysql.ts`; `kernel/auth/rate-limit.ts`, `kernel/auth/chain.ts` (webhook log), `kernel/http/idempotency.ts`, `kernel/lib/refs.ts`, `kernel/graphql/helpers.ts` (batch loader cache/cap), `kernel/config` (env vars), `app.ts` (connect, purge job) |
-| Generator | `tools/lib/mongo.ts`, `tools/lib/mongoose.ts` → `tools/lib/mysql.ts`; `tools/lib/tables.ts` (notation); `tools/generate.ts`; `tools/migrate.ts`; `tools/db-setup.ts`; new `tools/mongo-audit.ts`, `tools/mongo-to-mysql.ts`, `tools/seed-volume.ts`, `tools/load.ts`; `tools/simulate*` (DB checks in SQL); `tools/check-boundaries.ts` |
+| Generator | `tools/lib/mongo.ts`, `tools/lib/mongoose.ts` → `tools/lib/mysql.ts`; `tools/lib/tables.ts` (notation); `tools/generate.ts`; `tools/migrate.ts`; `tools/db-setup.ts`; new `tools/export-catalog-seed.ts` (Y0, one-off, §18.1), `tools/seed-volume.ts`, `tools/load.ts`; `tools/simulate*` (DB checks in SQL); `tools/check-boundaries.ts` |
 | Modules (40) | `repository.ts` (rewrite), `sql/*.sql` (stored procedures and triggers where §9.5 keeps them), `schema.ts` (generated), `module.ts` (store wiring), `migrations.ts` (emptied), tests that read tables; search: `mysql-engine.ts` replaces `mongo-engine.ts`, `cards.ts` → TS function |
 | Spec | `docs/api/spec/modules/*.json` (sizes, views, FK options, appendOnly, collation, JSON-path indexes, new summary columns and child tables), `FORMAT.md`, new generated `docs/api/db/*.sql` |
 | Tests | `src/testing/global-setup.ts`, `src/testing/mongo.ts` → `mysql.ts`, `module-suite.ts`, new `src/integration/concurrency.test.ts` |
