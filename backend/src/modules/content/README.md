@@ -1245,7 +1245,7 @@ Indexes: `unique (article_id, visitor_key)`
 | version | text |
 | state | text |
 | title | text |
-| body | text |
+| body | mediumtext |
 | tables | jsonb? |
 | effective_at | timestamptz? |
 | change_summary | text? |

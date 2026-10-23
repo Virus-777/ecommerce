@@ -1121,7 +1121,7 @@ Indexes: `(status, position)`
 | slug | text unique |
 | title | text |
 | summary | text? |
-| body | text |
+| body | mediumtext |
 | cover | jsonb? |
 | topic_id | uuid? → blog_topics |
 | author_id | uuid → blog_authors |
