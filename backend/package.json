@@ -39,6 +39,7 @@
     "prod:db-setup": "node --env-file-if-exists=.env.production dist/tools/db-setup.js"
   },
   "dependencies": {
+    "@fastify/compress": "^9.2.2",
     "@fastify/swagger": "^9.9.1",
     "@fastify/swagger-ui": "^6.1.1",
     "@opensearch-project/opensearch": "^3.9.0",

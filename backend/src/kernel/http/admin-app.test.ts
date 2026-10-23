@@ -6,6 +6,7 @@ import type { FastifyInstance } from 'fastify';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { gunzipSync } from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { loadConfig } from '../config/index.js';
 import { AppError } from '../errors/index.js';
@@ -14,6 +15,8 @@ import { createServer } from './server.js';
 
 const INDEX = '<!doctype html><title>Admin Center</title>';
 const SCRIPT = 'console.log("admin")';
+/** Big enough to be worth gzipping, like a real build file */
+const BUNDLE = `export const app = () => { console.log("admin"); };`.repeat(40);
 
 describe('Admin Center files', () => {
   // <tmp>/secret.txt next to <tmp>/admin: what a traversal would try to read
@@ -22,6 +25,7 @@ describe('Admin Center files', () => {
   mkdirSync(join(dir, 'assets'), { recursive: true });
   writeFileSync(join(dir, 'index.html'), INDEX);
   writeFileSync(join(dir, 'assets', 'index-B4x9.js'), SCRIPT);
+  writeFileSync(join(dir, 'assets', 'bundle-C7k2.js'), BUNDLE);
   writeFileSync(join(dir, 'favicon.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>');
   writeFileSync(join(tmp, 'secret.txt'), 'not for the web');
 
@@ -53,6 +57,28 @@ describe('Admin Center files', () => {
     }
     expect(ADMIN_APP_CSP).toContain("default-src 'self'");
     expect(ADMIN_APP_CSP).toContain("frame-ancestors 'none'");
+  });
+
+  it('gzips a file worth compressing for a browser that accepts it', async () => {
+    const res = await app.inject({ url: '/assets/bundle-C7k2.js', headers: { 'accept-encoding': 'gzip' } });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-encoding']).toBe('gzip');
+    expect(res.headers.vary).toBe('accept-encoding');
+    expect(res.headers['content-length']).toBeUndefined();
+    expect(gunzipSync(res.rawPayload).toString()).toBe(BUNDLE);
+    // asked for no encoding, or too small to be worth one: the file itself, with its length
+    for (const [url, headers] of [
+      ['/assets/bundle-C7k2.js', { 'accept-encoding': 'gzip;q=0' }],
+      ['/assets/index-B4x9.js', { 'accept-encoding': 'gzip' }],
+    ] as const) {
+      const plain = await app.inject({ url, headers });
+      expect(plain.headers['content-encoding'], url).toBeUndefined();
+      expect(plain.headers['content-length'], url).toBe(String(plain.rawPayload.length));
+    }
+    // a HEAD states what the stored file measures
+    const head = await app.inject({ method: 'HEAD', url: '/assets/bundle-C7k2.js', headers: { 'accept-encoding': 'gzip' } });
+    expect(head.headers['content-encoding']).toBeUndefined();
+    expect(head.headers['content-length']).toBe(String(BUNDLE.length));
   });
 
   it('serves the hashed build files for a year, and other files revalidated', async () => {

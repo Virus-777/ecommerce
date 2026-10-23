@@ -7,6 +7,8 @@
  *   - headers a browser app must read cross-origin are exposed (WWW-Authenticate, X-Request-Id,
  *     Idempotent-Replayed, Retry-After);
  *   - every API response: Cache-Control private, no-store (every request carries a token), nosniff, no referrer;
+ *     a /api/public endpoint may answer with its own Cache-Control, since that area answers the same facts to
+ *     everyone (settings' app-config, kept by its configVersion);
  *   - 401 for a bad token carries WWW-Authenticate, the only signal that a refresh can help.
  */
 import type { FastifyInstance } from 'fastify';
@@ -65,6 +67,9 @@ export const apiResponseHeaders = (config: Config): Record<string, string> => ({
   ...(config.env === 'production' ? { 'strict-transport-security': 'max-age=31536000; includeSubDomains' } : {}),
 });
 
+/** The area whose answers are the same for every caller, so its endpoints may set their own Cache-Control */
+const PUBLIC_AREA = /^\/api\/public\//;
+
 function areaOf(url: string): AppArea | undefined {
   const m = /^\/(?:api|graphql)\/(store|seller|admin|public)\b/.exec(url);
   return m?.[1] as AppArea | undefined;
@@ -109,7 +114,14 @@ export function installSecurity(app: FastifyInstance, config: Config) {
   });
 
   app.addHook('onSend', async (request, reply, payload) => {
-    if (/^\/(api|graphql|webhooks)\//.test(request.url)) reply.headers(apiResponseHeaders(config));
+    if (/^\/(api|graphql|webhooks)\//.test(request.url)) {
+      const headers = apiResponseHeaders(config);
+      // A /api/public endpoint may answer with a Cache-Control of its own (settings' app-config is built to be kept
+      // by its configVersion): that area answers facts about the marketplace, the same for every caller, so a client
+      // may keep them. Every other answer is about the caller who asked for it and is never stored.
+      if (PUBLIC_AREA.test(request.url) && reply.hasHeader('cache-control')) delete headers['cache-control'];
+      reply.headers(headers);
+    }
     // only the middleware's UNAUTHORIZED is about the token; business 401s (INVALID_CREDENTIALS …) are not,
     // nor is a bad file link (no Bearer token can help: the app asks for a new link)
     if (reply.statusCode === 401 && !request.url.startsWith(FILES_PREFIX) && typeof payload === 'string' && payload.includes('"code":"UNAUTHORIZED"')) {

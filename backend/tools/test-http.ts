@@ -165,7 +165,10 @@ const record = (operation: string, check: string, failure: string | null | undef
 function headerProblems(r: Res, url: string): string | null {
   // event streams add no-transform (proxies must not compress or hold back events)
   const cache = r.headers.get('cache-control');
-  if (/^\/(api|graphql|webhooks)\//.test(url) && cache !== 'private, no-store' && cache !== 'private, no-store, no-transform') return `cache-control is ${cache}`;
+  // /api/public answers the same facts to everyone, so an endpoint there may say its answer can be kept
+  // (settings' app-config: private, max-age=<appConfigCacheSeconds>, revalidated by its ETag)
+  const keepable = /^\/api\/public\//.test(url) && /^private, max-age=\d+$/.test(cache ?? '');
+  if (/^\/(api|graphql|webhooks)\//.test(url) && !keepable && cache !== 'private, no-store' && cache !== 'private, no-store, no-transform') return `cache-control is ${cache}`;
   if (r.status === 401 && code(r) === 'UNAUTHORIZED' && !r.headers.get('www-authenticate')) return '401 without WWW-Authenticate';
   return null;
 }

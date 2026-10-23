@@ -572,7 +572,7 @@ idx.push(
   '| `ACCOUNT_LOCKED` | `lockedUntil` (null = until staff unlock), `cause` |',
 );
 idx.push('', '## Headers', '', '| Header | Use |', '|---|---|', ...Object.entries(common.headers).map(([h, d]) => `| \`${h}\` | ${d} |`));
-idx.push('', 'Response headers: `X-Request-Id` (always), `Retry-After` (429), `Idempotent-Replayed: true` (a replayed idempotent request), `WWW-Authenticate` (401 `UNAUTHORIZED`: `Bearer error="invalid_token"` for a bad token, plain `Bearer` otherwise). Browsers can read all four across origins.');
+idx.push('', 'Response headers: `X-Request-Id` (always), `Retry-After` (429), `Idempotent-Replayed: true` (a replayed idempotent request), `WWW-Authenticate` (401 `UNAUTHORIZED`: `Bearer error="invalid_token"` for a bad token, plain `Bearer` otherwise). Browsers can read all four across origins. An answer that was compressed also carries `Content-Encoding` and `Vary: Accept-Encoding`.');
 const refreshGrace = byName.get('identity')?.settings?.find((s) => s.key === 'refreshReuseGraceSeconds')?.default;
 const pageLimit = common.pagination.query.limit.desc.replace(/^Items per batch, /, '');
 idx.push(
@@ -586,7 +586,8 @@ idx.push(
   '- Success uses the status the endpoint declares (200, 201, 202). An endpoint without a response body answers 204, or 202 where it says so, with an empty body.',
   '- Trailing slashes are ignored: `/api/store/cart/` is `/api/store/cart`.',
   '- `Accept-Language` is ignored; texts are en-US.',
-  '- Every `/api`, `/graphql` and `/webhooks` response is `Cache-Control: private, no-store`.',
+  '- Every `/api`, `/graphql` and `/webhooks` response is `Cache-Control: private, no-store`, except `/api/public` endpoints that say otherwise: `GET /api/public/settings/app-config` answers `private, max-age=<appConfigCacheSeconds>` with the configVersion as its `ETag`, so keep it and revalidate with `If-None-Match` (304) instead of asking again on every start.',
+  '- Text and JSON answers over 1 KB are compressed when the request offers `gzip`, `br` or `zstd` (`Content-Encoding`, `Vary: Accept-Encoding`); HTTP clients decode them for you. What `/files` serves is sent as it is stored.',
   '',
   '### Paging',
   '',

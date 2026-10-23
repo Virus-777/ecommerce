@@ -10,13 +10,14 @@ export const publicRoutes = (service: SettingsService) =>
   routes(endpoints, 'public', {
     /**
      * GET /app-config: Configuration for the website and Android app.
-     * ETag = configVersion; a matching If-None-Match answers 304. (The kernel sends Cache-Control:
-     * private, no-store on every API response, so max-age appConfigCacheSeconds is not sent: spec gap.)
+     * Kept by the client for appConfigCacheSeconds, then revalidated: the ETag is the configVersion, and a
+     * matching If-None-Match answers 304. (The kernel leaves a /api/public endpoint's own Cache-Control alone;
+     * every other API answer is private, no-store.)
      */
     getAppConfig: async ({ query, request, reply }) => {
-      const { config } = await service.appConfig(query);
+      const { config, maxAgeSeconds } = await service.appConfig(query);
       const etag = `"${config.configVersion}"`;
-      reply.header('etag', etag);
+      reply.header('etag', etag).header('cache-control', `private, max-age=${maxAgeSeconds}`);
       const match = request.headers['if-none-match'];
       if (match && match.split(',').some((t) => t.trim().replace(/^W\//, '') === etag)) {
         await reply.code(304).send();

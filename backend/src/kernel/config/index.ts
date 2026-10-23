@@ -94,6 +94,10 @@ const schema = z.object({
   RATE_LIMITS: flag,
   /** Where rate-limit windows are counted: mongo (shared by every instance) or memory (per process). Default mongo with MONGODB_URI */
   RATE_LIMIT_STORE: z.enum(['memory', 'mongo']).optional(),
+  /** gzip or brotli for the text and JSON answers over COMPRESSION_THRESHOLD bytes; off where a proxy in front already compresses */
+  COMPRESSION: flag,
+  /** Answers below this many bytes go out as they are: the encoding costs more than the few bytes it would save */
+  COMPRESSION_THRESHOLD: z.coerce.number().int().min(0).default(1024),
   /** Proxies in front of the server: a hop count, "true", or comma-separated addresses/CIDRs */
   TRUST_PROXY: z.string().optional(),
   /** Allowed browser origins per app (comma-separated) */
@@ -152,6 +156,8 @@ export interface Config {
   devSigning: { file: string; jwk?: Jwk };
   rateLimits: boolean;
   rateLimitStore: 'memory' | 'mongo';
+  /** gzip/brotli on the way out, with the smallest answer worth encoding (COMPRESSION_THRESHOLD); null = every answer goes out as it is */
+  compression: { threshold: number } | null;
   trustProxy: boolean | number | string[];
   cors: { store: string[]; seller: string[]; admin: string[] };
   docsEnabled: boolean;
@@ -231,6 +237,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     devSigning: { file: e.DEV_SIGNING_KEY_FILE },
     rateLimits: e.RATE_LIMITS ?? true,
     rateLimitStore: e.RATE_LIMIT_STORE ?? (e.MONGODB_URI ? 'mongo' : 'memory'),
+    compression: (e.COMPRESSION ?? true) ? { threshold: e.COMPRESSION_THRESHOLD } : null,
     trustProxy: parseTrustProxy(e.TRUST_PROXY),
     cors: { store: e.CORS_STORE_ORIGINS, seller: e.CORS_SELLER_ORIGINS, admin: e.CORS_ADMIN_ORIGINS },
     docsEnabled: e.DOCS_ENABLED ?? e.NODE_ENV === 'development',

@@ -249,6 +249,7 @@
     "Authorization": "Bearer <token> on every request: visitor token before sign-in, access token after (customer, seller member or staff)",
     "Idempotency-Key": "Required on endpoints marked idempotent (orders, payments, refunds, payouts). Same key + same request returns the first result (with Idempotent-Replayed: true).",
     "Accept-Language": "Ignored: every response is en-US (the only locale at launch)",
+    "Accept-Encoding": "Optional. gzip, br or zstd: answers of text or JSON over 1 KB come back encoded (Content-Encoding, Vary: Accept-Encoding), and HTTP clients decode them for you. Files served from /files are sent as they are stored",
     "X-Request-Id": "Optional. A value of 1–100 letters, digits, _ or - becomes the request id; otherwise the server makes one. Every response carries it; include it when reporting problems",
     "X-App-Proof": "Bootstrap only: turnstile:<token> (website bot challenge) or play:<token> (Android Play Integrity); dev in development and tests",
     "X-Client": "web, android/<versionCode> or android/<versionName>+<versionCode> (e.g. android/1.4.2+142): analytics and the minimum-version check (426) only, never trusted for authorization",

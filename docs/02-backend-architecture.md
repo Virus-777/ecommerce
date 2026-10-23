@@ -8,6 +8,7 @@ Status: **design**. This document defines the backend's structure; the API desig
 |---|---|---|
 | Runtime | Node.js 22+ (tested on 26), TypeScript (strict), ES modules | Types across 30+ modules keep refactors safe |
 | HTTP | **Fastify 5** | Lightweight, fast, plugin-per-module fits removable modules, schema-first |
+| Answers on the wire | **@fastify/compress**: gzip, brotli or zstd for text and JSON over 1 KB (`COMPRESSION`) | This API's JSON compresses about five times over, and every client already asks for it |
 | Validation + API docs | **Zod 4** via `fastify-type-provider-zod`, OpenAPI at `/docs` | One schema drives validation, types and docs |
 | Complex screen reads | **GraphQL** via **Mercurius** (Fastify plugin), read-only, three schemas (store, seller, admin) composed from module fragments | One round trip for screens that combine many modules; writes stay on REST |
 | Database | **MongoDB 6.0** replica set through **Mongoose 8** (one generated schema per collection; [04-mongodb-migration.md](04-mongodb-migration.md)) | One database for data, jobs, rate limits and idempotency keys; transactions need a replica set |

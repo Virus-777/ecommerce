@@ -48,8 +48,11 @@ describe('app-config', () => {
       maintenance: { active: false },
     });
     expect(res.headers.etag).toBe(`"${cfg.configVersion}"`);
+    // the one API answer a client may keep: the same facts for everyone, revalidated by the ETag
+    expect(res.headers['cache-control']).toMatch(/^private, max-age=\d+$/);
     const cached = await appConfig('', { 'if-none-match': `"${cfg.configVersion}"` });
     expect(cached.statusCode).toBe(304);
+    expect(cached.headers['cache-control']).toMatch(/^private, max-age=\d+$/);
   });
 
   it('changes configVersion with a value, asks old apps to update and shows a maintenance notice', async () => {

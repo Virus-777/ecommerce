@@ -7,6 +7,9 @@
  * A missing file under /assets/ is a 404 instead: hashed file names change with each build, and HTML in place of a
  * script would only hide the mistake.
  *
+ * The pages, scripts and styles go out gzipped when the browser accepts it and they are worth it (`COMPRESSION`,
+ * `COMPRESSION_THRESHOLD`, the same settings the API's answers use); images and fonts are sent as they are stored.
+ *
  * These are static web files, not API endpoints: they carry no token (rule "every endpoint needs a token",
  * docs/03-auth-middleware.md, covers /api and /graphql, which still check one). This hook answers before the auth
  * middleware runs, and everything it does not answer goes on to the middleware as before.
@@ -14,7 +17,8 @@
 import { createReadStream, existsSync, type Stats } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { extname, join, resolve, sep } from 'node:path';
-import type { FastifyInstance, FastifyReply } from 'fastify';
+import { createGzip } from 'node:zlib';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Config } from '../config/index.js';
 
 /** Paths of the API and the server itself: never answered from the Admin Center folder */
@@ -37,6 +41,18 @@ const CONTENT_TYPES: Record<string, string> = {
   '.woff2': 'font/woff2',
   '.txt': 'text/plain; charset=utf-8',
 };
+
+/** The types worth compressing: pages, scripts, styles, icons and the manifest (images and fonts are compressed already) */
+const TEXTUAL = /^(?:text\/|application\/(?:json|manifest\+json)|image\/svg\+xml)/;
+
+/** Whether the client takes gzip: named (or `*`) in Accept-Encoding without `q=0` */
+const acceptsGzip = (header: string | undefined) =>
+  (header ?? '').split(',').some((part) => {
+    const [name, ...params] = part.trim().split(';');
+    if (name?.toLowerCase() !== 'gzip' && name !== '*') return false;
+    const q = params.map((p) => p.trim()).find((p) => p.startsWith('q='));
+    return !q || Number(q.slice(2)) > 0;
+  });
 
 /**
  * For a Vite app on its own origin: scripts, styles, fonts and API calls from this server only; inline styles (React
@@ -88,18 +104,32 @@ export function installAdminApp(app: FastifyInstance, config: Config) {
   // a wrong folder is a configuration mistake: stop at startup rather than answer every page with an error
   if (!existsSync(indexFile)) throw new Error(`ADMIN_APP_DIR ${root} has no index.html: point it at the built Admin Center (admin-center/dist)`);
 
-  const send = (request: { method: string }, reply: FastifyReply, file: string, stats: Stats, cache: string) => {
+  const send = (request: FastifyRequest, reply: FastifyReply, file: string, stats: Stats, cache: string) => {
+    const type = CONTENT_TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream';
+    // the pages, scripts and styles gzip to about a quarter; images and fonts are compressed already. The API's
+    // answers are compressed by a plugin (http/compression.ts), which these files never reach: they are answered
+    // before routing, and a HEAD only states what the stored file measures
+    const gzip =
+      config.compression !== null &&
+      stats.size >= config.compression.threshold &&
+      request.method === 'GET' &&
+      TEXTUAL.test(type) &&
+      acceptsGzip(request.headers['accept-encoding']);
     reply
-      .header('content-type', CONTENT_TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream')
-      .header('content-length', String(stats.size))
+      .header('content-type', type)
       .header('cache-control', cache)
       .header('x-content-type-options', 'nosniff')
       .header('referrer-policy', 'no-referrer')
       .header('content-security-policy', ADMIN_APP_CSP)
       .header('x-frame-options', 'DENY');
+    // a cache in front must keep the encodings apart; sent as stored, the length is known
+    if (gzip) reply.header('content-encoding', 'gzip').header('vary', 'accept-encoding');
+    else reply.header('content-length', String(stats.size));
     if (config.env === 'production' && config.tls) reply.header('strict-transport-security', 'max-age=31536000');
     // HEAD: the same headers, no body
-    return reply.code(200).send(request.method === 'HEAD' ? undefined : createReadStream(file));
+    if (request.method === 'HEAD') return reply.code(200).send();
+    const body = createReadStream(file);
+    return reply.code(200).send(gzip ? body.pipe(createGzip()) : body);
   };
 
   app.addHook('onRequest', async (request, reply) => {

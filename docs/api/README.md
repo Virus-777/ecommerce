@@ -186,12 +186,13 @@ GraphQL answers `{ data, errors }` with `errors[].extensions.code` instead of th
 | `Authorization` | Bearer <token> on every request: visitor token before sign-in, access token after (customer, seller member or staff) |
 | `Idempotency-Key` | Required on endpoints marked idempotent (orders, payments, refunds, payouts). Same key + same request returns the first result (with Idempotent-Replayed: true). |
 | `Accept-Language` | Ignored: every response is en-US (the only locale at launch) |
+| `Accept-Encoding` | Optional. gzip, br or zstd: answers of text or JSON over 1 KB come back encoded (Content-Encoding, Vary: Accept-Encoding), and HTTP clients decode them for you. Files served from /files are sent as they are stored |
 | `X-Request-Id` | Optional. A value of 1–100 letters, digits, _ or - becomes the request id; otherwise the server makes one. Every response carries it; include it when reporting problems |
 | `X-App-Proof` | Bootstrap only: turnstile:<token> (website bot challenge) or play:<token> (Android Play Integrity); dev in development and tests |
 | `X-Client` | web, android/<versionCode> or android/<versionName>+<versionCode> (e.g. android/1.4.2+142): analytics and the minimum-version check (426) only, never trusted for authorization |
 | `X-Requested-With` | Any value. Required with the website's refresh cookie on refresh and sign-out, together with an allowed Origin (else 403) |
 
-Response headers: `X-Request-Id` (always), `Retry-After` (429), `Idempotent-Replayed: true` (a replayed idempotent request), `WWW-Authenticate` (401 `UNAUTHORIZED`: `Bearer error="invalid_token"` for a bad token, plain `Bearer` otherwise). Browsers can read all four across origins.
+Response headers: `X-Request-Id` (always), `Retry-After` (429), `Idempotent-Replayed: true` (a replayed idempotent request), `WWW-Authenticate` (401 `UNAUTHORIZED`: `Bearer error="invalid_token"` for a bad token, plain `Bearer` otherwise). Browsers can read all four across origins. An answer that was compressed also carries `Content-Encoding` and `Vary: Accept-Encoding`.
 
 ## Client rules
 
@@ -202,7 +203,8 @@ The full design is [../03-auth-middleware.md](../03-auth-middleware.md); these a
 - Success uses the status the endpoint declares (200, 201, 202). An endpoint without a response body answers 204, or 202 where it says so, with an empty body.
 - Trailing slashes are ignored: `/api/store/cart/` is `/api/store/cart`.
 - `Accept-Language` is ignored; texts are en-US.
-- Every `/api`, `/graphql` and `/webhooks` response is `Cache-Control: private, no-store`.
+- Every `/api`, `/graphql` and `/webhooks` response is `Cache-Control: private, no-store`, except `/api/public` endpoints that say otherwise: `GET /api/public/settings/app-config` answers `private, max-age=<appConfigCacheSeconds>` with the configVersion as its `ETag`, so keep it and revalidate with `If-None-Match` (304) instead of asking again on every start.
+- Text and JSON answers over 1 KB are compressed when the request offers `gzip`, `br` or `zstd` (`Content-Encoding`, `Vary: Accept-Encoding`); HTTP clients decode them for you. What `/files` serves is sent as it is stored.
 
 ### Paging
 

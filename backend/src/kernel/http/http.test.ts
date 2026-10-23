@@ -66,7 +66,11 @@ const item = (id: string) => ({ id, name: 'Trail runner', price: { amount: 18900
 const sets = [
   routes(endpoints, 'store', {
     security: async () => ({ ok: true }),
-    getItem: async ({ params }) => item(params.id),
+    // a store endpoint that asks for its answer to be kept: the kernel overrides it (every answer is about one caller)
+    getItem: async ({ params, reply }) => {
+      reply.header('cache-control', 'private, max-age=60');
+      return item(params.id);
+    },
     listItems: async ({ page }) => ({ items: [item(newId())], nextCursor: null, ...(page.mode === 'page' ? { page: page.page, totalPages: 1, total: 1 } : {}) }),
     placeOrder: async ({ body, scope }) => ({ orderId: `MK-${++placed}`, n: body.quantity, scope: scope.kind }),
     upload: async ({ body, request }) => {
@@ -81,7 +85,11 @@ const sets = [
     later: notImplemented,
   }),
   routes(endpoints, 'public', {
-    publicInfo: async () => ({ ok: true }),
+    // the public area answers the same facts to everyone, so an endpoint there may say its answer can be kept
+    publicInfo: async ({ reply }) => {
+      reply.header('cache-control', 'private, max-age=60');
+      return { ok: true };
+    },
     start: async () => ({ ok: true }),
     sendCode: async () => undefined,
     refresh: async ({ request }) => ({ sessionId: request.auth!.refreshSession!.sessionId }),
@@ -497,6 +505,15 @@ describe('browsers (CORS) and response headers', () => {
     expect(get.statusCode).toBe(200);
     expect(get.headers['access-control-allow-origin']).toBe(SELLER_ORIGIN);
     expect((await preflight('/api/store/demo/orders', SELLER_ORIGIN)).headers['access-control-allow-origin']).toBeUndefined();
+  });
+
+  it('keeps a public endpoint’s own Cache-Control and forces no-store everywhere else', async () => {
+    const pub = await app.inject({ url: '/api/public/demo/info', headers: auth(callers.visitor()) });
+    expect(pub.statusCode).toBe(200);
+    expect(pub.headers['cache-control']).toBe('private, max-age=60');
+    const store = await app.inject({ url: `/api/store/demo/items/${newId()}`, headers: auth(callers.visitor()) });
+    expect(store.statusCode).toBe(200);
+    expect(store.headers['cache-control']).toBe('private, no-store');
   });
 
   it('exposes the headers apps read across origins', async () => {

@@ -34,6 +34,9 @@ export function registerFileRoutes(app: FastifyInstance, routes: readonly Module
     method: ['GET', 'HEAD'],
     url: '/files/*',
     exposeHeadRoute: false,
+    // sent as they are stored: these files are images, packages and archives (compressed already), and the answer
+    // carries a Content-Length and serves ranges, both of which an encoding would take away (http/compression.ts)
+    compress: false,
     config: { auth: 'file-link' },
     schema: { hide: true },
     async handler(request, reply) {

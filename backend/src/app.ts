@@ -16,6 +16,7 @@ import { loadConfig, type Config } from './kernel/config/index.js';
 import { registerErrorCodes } from './kernel/errors/index.js';
 import { EventBus } from './kernel/events/index.js';
 import { registerGraphQL, unusablePersistedQueries } from './kernel/graphql/index.js';
+import { installCompression } from './kernel/http/compression.js';
 import { registerDevRoutes } from './kernel/http/dev-routes.js';
 import { registerFileRoutes } from './kernel/http/files.js';
 import { mongoIdempotencyStore } from './kernel/http/idempotency.js';
@@ -109,6 +110,9 @@ export function withStubs(api: object | undefined, stub: object): object {
 export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance> {
   const config = loadConfig(opts.env ?? process.env, opts.config);
   const app = createServer(config);
+  // the same answers in fewer bytes (kernel/http/compression.ts); installed before the routes below, which is
+  // how the plugin reaches them
+  await installCompression(app, config);
 
   // independent startup work runs in parallel: the database connection and the module imports
   const [mongo, defs] = await Promise.all([
