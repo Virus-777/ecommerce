@@ -192,7 +192,8 @@ export class ModerationPart {
           ...(hide ? { visibility: 'hidden' } : {}),
         });
       } else {
-        const last = (await tx.find('moderation_items', { content_type: c.type, content_id: c.row.id, status: 'decided' }, { orderBy: [['decided_at', 'desc']], limit: 1 }))[0];
+        // forUpdate: report_count is read here and written back below, so the row is locked first
+        const last = (await tx.find('moderation_items', { content_type: c.type, content_id: c.row.id, status: 'decided' }, { orderBy: [['decided_at', 'desc']], limit: 1, forUpdate: true }))[0];
         const recent = last?.decided_at && last.decided_at >= addDays(now, -cooldownDays);
         if (last && recent && ((last.reasons as string[]) ?? []).includes(input.reason)) {
           // same complaint about content we decided recently: attach without reopening

@@ -1205,12 +1205,14 @@ From the code census (2026-10-22). "Generated" means an indexed generated column
 
 Each fix makes the write safe without relying on MongoDB's write-conflict retry. Most become an atomic SQL update.
 
+**Progress (branch `build/mysql-migration`).** Fixed and tested: reviews (the `last` branch), finance ×2, checkout, departments ×2. Found already safe and struck from the list: payments — `check_attempts + 1` now reads its intent with `forUpdate` inside the transaction, so the census entry no longer applies. Still to do: inventory ×2, trust, promotions, purchasing, orders, finance holds, and the two document-only rows.
+
 Re-run on 2026-10-23 over the six Departments modules. They are mostly written in the locked style already — `rewards` reads its progress row with `forUpdate` before `count + 1`, and `departments.reactToBlogPost` locks the post before recomputing its counters — but two writers in `departments/service/blogs.ts` recount from the source rows and write the result **with no transaction at all**. They are the last two rows below. Note what they imply for §11.2 rule 2: the detector watches unlocked reads *inside* a transaction, so it will not catch a read-modify-write that never opens one. Those have to be found by reading the code, which is why this appendix is re-run whenever modules are added.
 
 | Place | Today | Fix |
 |---|---|---|
-| reviews/service/moderation.ts:195→199 | `report_count: last.report_count + 1` after an unlocked find | `forUpdate`, or an atomic `$inc` (→ `SET report_count = report_count + 1`) |
-| finance/service/ledger.ts:311→321, 513→523 | `refunded_fee + feeBack` after an unlocked `fee_charges` read | `forUpdate` on the fee charge |
+| reviews/service/moderation.ts:195→199 — **done** | `report_count: last.report_count + 1` after an unlocked find | `forUpdate: true` on the `last` read. The `item` branch above it was already locked |
+| finance/service/ledger.ts:311→321, 513→523 — **done** | `refunded_fee + feeBack` after an unlocked `fee_charges` read | `forUpdate: true` on both `fee_charges` reads. Not an atomic `$inc`: the new `status` depends on the resulting total |
 | inventory/service/returns.ts:196 | `return_outcomes.quantity + n` | atomic increment |
 | inventory/service/items.ts:240; receiving.ts:90,148,261 | `incoming_expectations.quantity_open ±` under the item lock only | atomic increment (or lock the expectation row in the documented order) |
 | trust/service/reports.ts:184 | `reporter_count + 1` from an unlocked aggregate | lock the report row first (and document it) |
@@ -1218,11 +1220,11 @@ Re-run on 2026-10-23 over the six Departments modules. They are mostly written i
 | purchasing/service/purchase-orders.ts:265→274 | lines read outside the transaction, then `qtyClosed + qty` | read inside, after the PO lock |
 | orders/service/placement.ts:430→435 | `captured_total + amount` from an aggregate in `core.write` | confirm that `core.write` locks the order; else an atomic add |
 | finance/service/holds.ts:407→410 | job recomputes `amounts_owed` with no transaction | a transaction + `forUpdate` |
-| payments/service/intents.ts:305 (was :359) | `check_attempts + 1` with no transaction | atomic increment |
-| checkout/service/placement.ts:346 | `attempt_count + 1` with no transaction | atomic increment |
+| ~~payments/service/intents.ts:305~~ (was :359) | **already safe**: the intent is read with `forUpdate` inside the transaction (`intents.ts:299`), so the census entry is out of date | none |
+| checkout/service/placement.ts:346 — **done** | `attempt_count + 1` with no transaction | new `repo.bumpAttempt(id)`: `$inc` returning the row after, so the attempt number is the caller's own |
 | fulfillment-service/service/inbound.ts:594; warehouse/service/packing.ts:191 | child rows rewritten under the parent's lock | keep; document "parent lock covers children" (the detector allows it when the parent is locked) |
-| departments/service/blogs.ts:346-356 (added 2026-10-23) | `likeBlogReply`: inserts or deletes the like row, then `countReplyLikes`, then writes `like_count`. No transaction, so two likes on the same reply can interleave and the later count be overwritten by the earlier one | wrap in a transaction and lock the reply row first (`getReply(id, { forUpdate: true })`), or drop the stored count and read it from `blog_reply_likes` (the table is small and already indexed by reply) |
-| departments/service/blogs.ts:364-366 (added 2026-10-23) | `recountReplies`: `countVisibleReplies` then writes `reply_count`, no transaction | same fix, locking the post row; `reactToBlogPost` two functions above is the pattern to copy |
+| departments/service/blogs.ts:346-356 — **done** (added 2026-10-23) | `likeBlogReply`: inserts or deletes the like row, then `countReplyLikes`, then writes `like_count`. No transaction, so two likes on the same reply can interleave and the later count be overwritten by the earlier one | wrap in a transaction and lock the reply row first (`getReply(id, { forUpdate: true })`), or drop the stored count and read it from `blog_reply_likes` (the table is small and already indexed by reply) |
+| departments/service/blogs.ts:364-366 — **done** (added 2026-10-23) | `recountReplies`: `countVisibleReplies` then writes `reply_count`, no transaction | same fix, locking the post row; `reactToBlogPost` two functions above is the pattern to copy |
 | finance/service/ledger.ts:323, 525 | lot re-read, already locked at 296 | none (safe) |
 
 ## Appendix D: GraphQL fields to batch (done in Y0)

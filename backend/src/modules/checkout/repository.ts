@@ -45,6 +45,15 @@ export class CheckoutRepository {
     return orThrow(await this.#t.sessions.update(id, patch), `checkout: session ${id}`);
   }
 
+  /**
+   * One more authorization attempt, and the session after it. An atomic increment rather than reading
+   * `attempt_count` and writing `+ 1`, so the attempt number belongs to this caller even without a lock
+   * (BUILDING-MODULES.md: a value written back is locked first, or the write is made atomic).
+   */
+  async bumpAttempt(id: string): Promise<SessionRow> {
+    return orThrow(await this.#t.sessions.update(id, { $inc: { attempt_count: 1 } }), `checkout: session ${id}`);
+  }
+
   findSessionByOrder(orderId: string): Promise<SessionRow | undefined> {
     return this.#t.sessions.findOne({ order_id: orderId });
   }

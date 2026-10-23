@@ -342,16 +342,24 @@ export class DepartmentsBlogs extends DepartmentsFarm {
     return { ...res, items: res.items.map((r) => this.replyOut(r, accountId, liked.has(r.id))) };
   }
 
-  /** Likes a visible reply of a published post, or takes the like back; the count is recounted from the likes */
+  /**
+   * Likes a visible reply of a published post, or takes the like back; the count is recounted from the likes.
+   * The like and the recount are one transaction with the reply locked: `like_count` is read and written back, so
+   * without the lock two likes on the same reply interleave and one count overwrites the other (BUILDING-MODULES.md
+   * "a value you write back is a value you lock first").
+   */
   async likeBlogReply(replyId: string, customerId: string, liked: boolean): Promise<BlogReplyLikeResult> {
     const r = await this.repo.getReply(replyId);
     if (!r || r.status !== 'visible') throw notFound('Reply');
     await this.publishedPost(await this.repo.getPost(r.post_id));
-    if (liked) await this.repo.insertReplyLike({ id: newId(), reply_id: r.id, post_id: r.post_id, customer_id: customerId, at: this.now() });
-    else await this.repo.deleteReplyLike(r.id, customerId);
-    const likeCount = await this.repo.countReplyLikes(r.id);
-    await this.repo.updateReply(r.id, { like_count: likeCount });
-    return { liked, likeCount };
+    return this.repo.transaction(async (tx) => {
+      await tx.getReply(r.id, { forUpdate: true });
+      if (liked) await tx.insertReplyLike({ id: newId(), reply_id: r.id, post_id: r.post_id, customer_id: customerId, at: this.now() });
+      else await tx.deleteReplyLike(r.id, customerId);
+      const likeCount = await tx.countReplyLikes(r.id);
+      await tx.updateReply(r.id, { like_count: likeCount });
+      return { liked, likeCount };
+    });
   }
 
   /** The signed name of a reply: the customer's first name and last initial (customers), else Customer */
@@ -361,8 +369,15 @@ export class DepartmentsBlogs extends DepartmentsFarm {
     return replyAuthorName(c?.displayName);
   }
 
+  /**
+   * `reply_count` from the replies themselves, under the post's lock so that two recounts cannot overwrite each
+   * other. Counting from the source is idempotent, so the last recount to take the lock writes the right number.
+   */
   private async recountReplies(postId: string) {
-    await this.repo.updatePost(postId, { reply_count: await this.repo.countVisibleReplies(postId) });
+    await this.repo.transaction(async (tx) => {
+      await tx.getPost(postId, { forUpdate: true });
+      await tx.updatePost(postId, { reply_count: await tx.countVisibleReplies(postId) });
+    });
   }
 
   async replyToBlogPost(postId: string, customerId: string, body: { text: string; parentId?: string | null }): Promise<BlogReply> {

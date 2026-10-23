@@ -343,7 +343,7 @@ export class Placement {
       }
 
       // 5. authorize (one attempt number per try; the same key returns the first result)
-      session = await this.core.repo.updateSession(id, { attempt_count: session.attempt_count + 1 });
+      session = await this.core.repo.bumpAttempt(id);
       const attemptNo = session.attempt_count;
       const account = this.core.account(session);
       try {
