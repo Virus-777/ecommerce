@@ -2254,7 +2254,7 @@ export interface PromotionsDb {
   coupon_codes: {
     id: string;
     campaign_id: string;
-    /** case-insensitive: unique by upper(code) among active codes; a code frees up when its campaign ends or is cancelled */
+    /** unique by code among active codes, compared without case; a code frees up when its campaign ends or is cancelled */
     code: string;
     kind: 'shared' | 'unique';
     max_redemptions: number | null;

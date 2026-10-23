@@ -134,7 +134,7 @@ MySQL's default collation `utf8mb4_0900_ai_ci` ignores case **and accents**. Use
 | Use | Collation | Why |
 |---|---|---|
 | Every text column by default | **`utf8mb4_0900_bin`** | Compares like MongoDB without a collation: case-sensitive, accent-sensitive, code-point order, no padding. Unique keys and sorts behave as today |
-| Columns with a `lower()` or `upper()` index today, and reads that pass `CASE_INSENSITIVE` (`orders.contact_email`, `promotions.coupon_codes.code`, emails in identity, sellers and customers) | **`utf8mb4_0900_as_ci`** | MongoDB's `{locale:'en', strength:2}` ignores case but not accents. `as_ci` is the same rule, and the index is used directly |
+| Columns with a `lower()` or `upper()` index today, and reads that pass `CASE_INSENSITIVE` — **exactly two, checked in Y0**: `orders.orders.contact_email` and `promotions.coupon_codes.code` | **`utf8mb4_0900_as_ci`** (spec flag `ci`) | MongoDB's `{locale:'en', strength:2}` ignores case but not accents. `as_ci` is the same rule, and the index is used directly. **The emails in identity, sellers and customers turned out not to belong here:** all three lower-case an address before storing it (`identity/domain/policy.ts` `normalizeEmail`, and the same in customers and sellers), so the stored value is already normalised and a case-insensitive collation would add nothing. The one real exception is `sellers.applications` `account.workEmail`, a path inside a JSON column, so it is a generated column in Appendix B rather than a flag here |
 | `contains()` / `startsWith()` search boxes | `col LIKE ? COLLATE utf8mb4_0900_as_ci`, with `%`, `_` and `\` escaped | Same meaning as today's escaped `$regex` with option `i` |
 | ids, codes, hashes | `ascii_bin` | Smaller and exact |
 
@@ -173,14 +173,16 @@ The generator checks that each functional unique key it writes is used by the re
 
 - **Inside a module only.** Cross-module ids (`order.customer_id` → customers) stay plain indexed columns: modules can be switched off and are kept consistent by events, as today.
 - **Default `ON DELETE RESTRICT`**: a parent cannot be deleted while children exist. The repositories already delete children first wherever the old PostgreSQL schema cascaded (docs/04 §2, "deletes that cascaded are explicit"), so RESTRICT changes nothing and catches mistakes.
-- **`ON DELETE CASCADE`** only where the spec marks a reference `→ table cascade`. Candidates are pure child lists that are never read without their parent: `*_lines`, `*_items` of drafts, `role_permissions`, `notice_recipients`. The code that deletes them explicitly stays (simple and visible); the cascade is a backstop.
+- **`ON DELETE CASCADE`** only where the spec marks a reference `→ table cascade`. The code that deletes them explicitly stays (simple and visible); the cascade is a backstop.
+  **Marked in Y0, where the code demonstrably deletes the children and then the parent** (6 references): `notifications.notice_recipients → notices` (`notifications/repository.ts:327-328`) and the five child lists of a blog post and reply that `departments.deletePostCascade` and `deleteReplyCascade` walk. **`role_permissions` was a candidate and is not one:** a role is never deleted anywhere in `access`, so RESTRICT is the honest declaration and would catch a future mistake, which is what RESTRICT is for. The `*_lines` and `*_items` lists are left at RESTRICT for now: each needs its own delete path read, a wrong cascade is silent, and Y2 rewrites those repositories anyway — that is the moment someone is looking at them closely.
+  One consequence worth stating: because MySQL fires no trigger for a cascaded delete, a child table that cascades cannot also keep a parent summary column by trigger (§9.5.3). The departments counters (`blog_posts.like_count`, `reply_count`, `blog_replies.like_count`) are therefore kept by the repository, under the locks added in Appendix C, and §9.5.3 will not propose triggers for them.
 - **`nofk`** in the spec drops one foreign key. It is used only when the load test (§22) shows the parent row's shared lock causing waits. The likely candidates are append-only logs that point at very hot parents (`inventory_stock_movements → stock_items`, `orders_timeline → orders`). In those flows the parent is normally already locked by the same transaction, so a foreign key costs nothing there.
 - **An index on every foreign key column.** The generator reuses an existing index that starts with the column (as MySQL requires) and reports redundant ones; for example `offers stock_item_id` is covered by the unique key on it (an open item from docs/05).
 - **No orphans to clear.** MongoDB enforced none of the 329 references, but D10 starts the MySQL database empty, so the foreign keys are created with the tables and have nothing to validate against. This is the one place where starting empty makes D4 easier; it also means the first rows ever written are the first test of each key.
 
 ### 6.3 Append-only tables
 
-`audit_entries`, `audit_checkpoints`, `finance_ledger_entries` and `wallet_ledger` (append-only by design; Y0 confirms the list from the spec's `appendOnly: true` flag, a new table option) get two triggers:
+**Confirmed in Y0 by reading every write to each table — five tables, not four:** `audit_entries`, **`audit_entry_targets`** (missing from the first list; the repository says as much at `audit/repository.ts:169`, and the retention purge deletes a target row with its entry), `audit_checkpoints`, `finance_ledger_entries` and `wallet_ledger`. All five now carry `"appendOnly": true` in the spec. Two were considered and rejected: `finance_trading_entries` is deleted at `finance/service/ledger.ts:180`, which removes a pending cost-of-goods placeholder, and `wallet_loyalty_entries` is a phase-4 table nothing writes yet, so there is nothing to confirm. Each append-only table gets two triggers:
 
 ```sql
 CREATE TRIGGER audit_entries_no_update BEFORE UPDATE ON audit_entries FOR EACH ROW
@@ -699,7 +701,7 @@ Depth 9, cost 1,500, page size 100 and a 10 s timeout per field stay. The 10 s t
 | table `"appendOnly": true` | append-only triggers (§6.3) |
 | module `"views": [...]` | MERGE views (§9.2) |
 | module `"routines": [...]`, `"triggers": [...]` | stored procedures, functions and summary triggers, bodies in `src/modules/<m>/sql/*.sql` (§9.5) |
-| column `"collation": "ci"` | `utf8mb4_0900_as_ci` (replaces lower()/upper() index notation; the old notation stays accepted) |
+| column flag `ci` | `utf8mb4_0900_as_ci` (replaces lower()/upper() index notation; the old notation stays accepted). **Written as a flag, not as `"collation": "ci"` as first planned**: table columns are a `Record<string, string>` and every other property of a column (`pk`, `unique`, `check`, `→ table`) is already a flag in that string, so a flag needed no change to the spec shape and reads the same way as its neighbours |
 
 ### 17.2 Generator (`npm run gen`)
 

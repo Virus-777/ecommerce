@@ -125,7 +125,22 @@ Used in `types`, `body`, `query`, event `payload` and inline objects.
 
 ## Tables
 
-Each table is a MongoDB collection `<module>.<table>` (docs/04-mongodb-migration.md §2–3); the notation keeps SQL type names. Column notation: `<type>[?] [pk] [unique] [→ table] [check <expr>] [(comment)]`, e.g. `"uuid? → items"`, `"text (open|closed)"` (a list of plain words is the set of allowed values). Types: `uuid`, `text`, `char(n)`, `int`, `smallint`, `bigint`, `numeric(p,s)` (exact, read as a string), `bool`, `date` (`YYYY-MM-DD`), `timestamptz`, `jsonb`, `bytea`, arrays (`text[]`); `tsvector` columns are not stored (search is the search engine's job). `?` allows null; without it a value must be present (an empty string is a value). Index notation: `"(a, b)"`, `"(a, b) unique"`, `"unique (a) where …"`, `"pk (a, b)"`, `"gin(expr)"`, and `"unique nulls not distinct (a, b)"` when null key columns must count as equal (one row per key, e.g. a saved product with no variant); a plain unique key ignores rows with a null in it. `npm run gen` turns tables into the Mongoose schemas, validators and indexes (`backend/tools/lib/tables.ts`, `mongo.ts`, `mongoose.ts`), and the kernel applies them (`npm run migrate`).
+Each table is a MongoDB collection `<module>.<table>` (docs/04-mongodb-migration.md §2–3); the notation keeps SQL type names. Column notation: `<type>[?] [pk] [unique] [ci] [→ table [cascade|nofk]] [check <expr>] [(comment)]`, e.g. `"uuid? → items"`, `"text (open|closed)"` (a list of plain words is the set of allowed values). Types: `uuid`, `text`, `char(n)`, `int`, `smallint`, `bigint`, `numeric(p,s)` (exact, read as a string), `bool`, `date` (`YYYY-MM-DD`), `timestamptz`, `jsonb`, `bytea`, arrays (`text[]`); `tsvector` columns are not stored (search is the search engine's job). `?` allows null; without it a value must be present (an empty string is a value). Index notation: `"(a, b)"`, `"(a, b) unique"`, `"unique (a) where …"`, `"pk (a, b)"`, `"gin(expr)"`, and `"unique nulls not distinct (a, b)"` when null key columns must count as equal (one row per key, e.g. a saved product with no variant); a plain unique key ignores rows with a null in it. `npm run gen` turns tables into the Mongoose schemas, validators and indexes (`backend/tools/lib/tables.ts`, `mongo.ts`, `mongoose.ts`), and the kernel applies them (`npm run migrate`).
+
+### For MySQL (docs/10-mysql-migration.md)
+
+These four additions are read only by the MySQL generator. On MongoDB they change nothing, so they can be written now and are: the point is that the decision is recorded next to the column it belongs to, not in a migration script later.
+
+| Write | Means |
+|---|---|
+| `varchar(n)`, `mediumtext`, `longtext` | a text size. Without one, the generator picks: `VARCHAR(255)` for an indexed or enum column, `TEXT` otherwise (§5.1). Write a size where you know the shape of the value (a 32-character code) or where a body can exceed 64 KB (`mediumtext` for content pages, help articles, news posts, templates and notes) |
+| `ci` | compare and sort this column without case, so a unique key treats `ABC` and `abc` as one value and `LIKE` still uses the index (`utf8mb4_0900_as_ci`). Accents still count. Use it **only** where values are stored as the caller typed them: a column the code lower-cases before writing is already normalised and needs nothing |
+| `→ table cascade` | deleting the parent row deletes this one. For a pure child list the code already deletes with its parent, as a backstop, never as the mechanism — the explicit delete stays. Note MySQL fires no trigger for a cascaded delete, so a table that cascades cannot also keep a parent summary column by trigger (§9.5.3); the repository keeps it instead |
+| `→ table nofk` | write no foreign key for this reference. Only for an append-only log whose parent is hot enough that the key's shared lock is measurable, and only once a load test shows it (§6.2). None yet |
+
+A table may also carry `"appendOnly": true`: rows are only ever inserted. On MySQL the generator adds triggers that refuse UPDATE and DELETE, with one exception for a named retention purge (§6.3). Declare it only where it is true of the code today.
+
+A module may carry `"views": [{ "name", "sql", "desc" }]`: read-only join shapes over that module's **own** tables, created as `<module>_v_<name>`. MERGE-able only — no GROUP BY, DISTINCT, LIMIT or UNION — so the optimizer folds them into the outer query and uses the base indexes. Anything aggregated belongs in a summary table instead (§9.1).
 
 ## Settings
 

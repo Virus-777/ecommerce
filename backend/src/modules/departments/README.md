@@ -1142,7 +1142,7 @@ Indexes: `(status, published_at)`, `(topic_id, status, published_at)`, `(author_
 | Column | Type |
 |---|---|
 | id | uuid pk |
-| post_id | uuid → blog_posts |
+| post_id | uuid → blog_posts cascade |
 | customer_id | uuid |
 | reaction | text |
 | at | timestamptz |
@@ -1154,7 +1154,7 @@ Indexes: `unique (post_id, customer_id)`
 | Column | Type |
 |---|---|
 | id | uuid pk |
-| post_id | uuid → blog_posts |
+| post_id | uuid → blog_posts cascade |
 | parent_id | uuid? |
 | customer_id | uuid |
 | author_name | text |
@@ -1276,7 +1276,7 @@ Indexes: `unique (game_id, period)`
 | Column | Type |
 |---|---|
 | id | uuid pk |
-| post_id | uuid → blog_posts |
+| post_id | uuid → blog_posts cascade |
 | customer_id | uuid |
 | saved_at | timestamptz |
 
@@ -1298,8 +1298,8 @@ Indexes: `unique (author_id, customer_id)`, `(customer_id, followed_at)`
 | Column | Type |
 |---|---|
 | id | uuid pk |
-| reply_id | uuid → blog_replies |
-| post_id | uuid → blog_posts |
+| reply_id | uuid → blog_replies cascade |
+| post_id | uuid → blog_posts cascade |
 | customer_id | uuid |
 | at | timestamptz |
 

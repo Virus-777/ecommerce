@@ -232,7 +232,7 @@ Lengthening applies at once. Shortening needs Business Owner approval (action au
 
 ## Data (schema `audit`)
 
-**entries**: Append-only: the repository only inserts entries and never updates or deletes them, except the retention purge (audit.purge-expired), which deletes the entries before the cut-off by their indexed at; the database user's role should allow no update or delete on audit.* but the purge's. hash = sha256(prev_hash || canonical row). search_words holds the lower-case words of the refs, labels, reason, names and action (the simple text search behind q).
+**entries** (append-only): Append-only: the repository only inserts entries and never updates or deletes them, except the retention purge (audit.purge-expired), which deletes the entries before the cut-off by their indexed at; the database user's role should allow no update or delete on audit.* but the purge's. hash = sha256(prev_hash || canonical row). search_words holds the lower-case words of the refs, labels, reason, names and action (the simple text search behind q).
 
 | Column | Type |
 |---|---|
@@ -270,7 +270,7 @@ Lengthening applies at once. Shortening needs Business Owner approval (action au
 
 Indexes: `(at desc, id)`, `(target_type, target_id, at desc)`, `(actor_id, at desc)`, `(category, at desc)`, `(seller_id, at desc) where visible_to_seller`, `(approval_request_id)`, `gin(search_words)`
 
-**entry_targets**: Related targets for history lookups (an order item entry also appears under its order and seller). at is the entry's at, so the purge deletes a target row with its entry; written in the same transaction as the entry.
+**entry_targets** (append-only): Related targets for history lookups (an order item entry also appears under its order and seller). at is the entry's at, so the purge deletes a target row with its entry; written in the same transaction as the entry.
 
 | Column | Type |
 |---|---|
@@ -311,7 +311,7 @@ Indexes: `(state)`
 | last_purge_removed | bigint? |
 | last_purge_through | timestamptz? |
 
-**checkpoints**: Signed chain checkpoints: written after each successful verification and before a purge, so verification continues across purged ranges and a rewritten chain is detected even if every hash was recomputed
+**checkpoints** (append-only): Signed chain checkpoints: written after each successful verification and before a purge, so verification continues across purged ranges and a rewritten chain is detected even if every hash was recomputed
 
 | Column | Type |
 |---|---|

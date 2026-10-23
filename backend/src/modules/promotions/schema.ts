@@ -186,7 +186,7 @@ const coupon_codes = new Schema(
   {
     _id: { type: String, required: true }, // id
     campaign_id: { type: String, required: true },
-    code: { type: String, required: true }, // case-insensitive: unique by upper(code) among active codes; a code frees up when its campaign ends or is cancelled
+    code: { type: String, required: true }, // unique by code among active codes, compared without case; a code frees up when its campaign ends or is cancelled
     kind: { type: String, required: true, enum: ["shared","unique"] },
     max_redemptions: { type: Number, default: null, validate: integer },
     redemptions: { type: Number, required: true, validate: integer },

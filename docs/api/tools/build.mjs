@@ -490,8 +490,20 @@ for (const m of modules) {
   if (m.tables?.length) {
     lines.push('', `## Data (schema \`${m.name.replace(/-/g, '_')}\`)`);
     for (const t of m.tables) {
-      lines.push('', `**${t.name}**${t.desc ? `: ${t.desc}` : ''}`, '', '| Column | Type |', '|---|---|', ...Object.entries(t.columns).map(([k, v]) => `| ${k} | ${v} |`));
+      lines.push('', `**${t.name}**${t.appendOnly ? ' (append-only)' : ''}${t.desc ? `: ${t.desc}` : ''}`, '', '| Column | Type |', '|---|---|', ...Object.entries(t.columns).map(([k, v]) => `| ${k} | ${v} |`));
       if (t.indexes?.length) lines.push('', `Indexes: ${t.indexes.map((i) => `\`${i}\``).join(', ')}`);
+    }
+    if (m.views?.length) {
+      lines.push(
+        '',
+        '### Views',
+        '',
+        "Read-only join shapes over this module's own tables, created on MySQL as `<module>_v_<name>` (docs/10-mysql-migration.md §9.2).",
+        '',
+        '| View | Reads | SQL |',
+        '|---|---|---|',
+        ...m.views.map((v) => `| \`${m.name.replace(/-/g, '_')}_v_${v.name}\` | ${v.desc} | \`${v.sql.replace(/\s+/g, ' ').trim()}\` |`),
+      );
     }
   }
   if (m.events?.publishes?.length || m.events?.consumes?.length) {

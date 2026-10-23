@@ -1161,7 +1161,7 @@ Indexes: `unique (campaign_id, offer_id)`, `(offer_id, state)`
 |---|---|
 | id | uuid pk |
 | campaign_id | uuid → campaigns |
-| code | text (case-insensitive: unique by upper(code) among active codes; a code frees up when its campaign ends or is cancelled) |
+| code | text ci (unique by code among active codes, compared without case; a code frees up when its campaign ends or is cancelled) |
 | kind | text (shared|unique) |
 | max_redemptions | int? |
 | redemptions | int |

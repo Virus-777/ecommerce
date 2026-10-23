@@ -302,7 +302,7 @@ Redeeming moves the full remaining value into a store credit lot (source gift_ca
 
 Indexes: `(customer_id, state, expires_at)`, `(state, expires_at) where state = 'active'`
 
-**ledger**: Append-only; balance is the sum of entries
+**ledger** (append-only): Append-only; balance is the sum of entries
 
 | Column | Type |
 |---|---|

@@ -853,7 +853,7 @@
       "name": "notice_recipients",
       "desc": "Fan-out with per-person read state (seller members, staff lead/backup)",
       "columns": {
-        "notice_id": "uuid → notices",
+        "notice_id": "uuid → notices cascade",
         "account_id": "uuid",
         "reason": "text",
         "covering_for": "text?",

@@ -58,6 +58,24 @@ export interface TableSpec {
   indexes?: string[];
   /** Owner column, for readers of the spec (FORMAT.md rule 9); false = not a tenant table. Services filter by it. */
   tenant?: string | false;
+  /**
+   * Rows are only ever inserted: ledgers and audit trails. On MongoDB this states the rule the repositories
+   * already keep; on MySQL the generator turns it into triggers that refuse UPDATE and DELETE
+   * (docs/10-mysql-migration.md §6.3). A retention purge is the one exception and names itself to the trigger.
+   */
+  appendOnly?: boolean;
+}
+
+/**
+ * A read-only join shape a module's own code reads often: created on MySQL, ignored on MongoDB
+ * (docs/10-mysql-migration.md §9.1–9.2). MERGE-able only — no GROUP BY, DISTINCT, LIMIT or UNION — so the
+ * optimizer folds it into the outer query and uses the base tables' indexes; anything aggregated becomes a
+ * summary table instead. `name` has no module prefix: the generator makes it `<module>_v_<name>`.
+ */
+export interface ViewSpec {
+  name: string;
+  sql: string;
+  desc: string;
 }
 
 /** A runtime setting a module reads through ctx.settings; the settings module shows and changes it (docs/api/spec/FORMAT.md "Settings") */
@@ -100,6 +118,8 @@ export interface ModuleSpec {
   publicApi?: { name: string; signature: string; desc: string; usedBy?: string[] }[];
   types?: Record<string, ObjectExpr>;
   tables?: TableSpec[];
+  /** Read-only join views over this module's own tables; MySQL only (docs/10-mysql-migration.md §9.2) */
+  views?: ViewSpec[];
   stateMachines?: { name: string; field: string; initial?: string; transitions: [string, string, string][]; notes?: string }[];
   endpoints: EndpointSpec[];
   events?: {

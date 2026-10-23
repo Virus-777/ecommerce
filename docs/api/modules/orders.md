@@ -1081,7 +1081,7 @@ Customer requests start as requested; the seller confirms by respondBy (end of t
 | reservation_id | uuid? |
 | delivery_address_id | uuid? |
 | customer_id | uuid? |
-| contact_email | text |
+| contact_email | text ci |
 | contact_phone | text? |
 | contact_name | text |
 | channel | text |

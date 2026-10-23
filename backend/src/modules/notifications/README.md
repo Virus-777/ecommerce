@@ -781,7 +781,7 @@ Indexes: `(address_kind, address_id, created_at desc)`, `(dedupe_key)`, `(expire
 
 | Column | Type |
 |---|---|
-| notice_id | uuid → notices |
+| notice_id | uuid → notices cascade |
 | account_id | uuid |
 | reason | text |
 | covering_for | text? |

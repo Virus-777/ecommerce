@@ -1291,7 +1291,7 @@
       "name": "blog_reactions",
       "columns": {
         "id": "uuid pk",
-        "post_id": "uuid → blog_posts",
+        "post_id": "uuid → blog_posts cascade",
         "customer_id": "uuid",
         "reaction": "text",
         "at": "timestamptz"
@@ -1304,7 +1304,7 @@
       "name": "blog_replies",
       "columns": {
         "id": "uuid pk",
-        "post_id": "uuid → blog_posts",
+        "post_id": "uuid → blog_posts cascade",
         "parent_id": "uuid?",
         "customer_id": "uuid",
         "author_name": "text",
@@ -1438,7 +1438,7 @@
       "desc": "Posts a customer saved (bookmarks)",
       "columns": {
         "id": "uuid pk",
-        "post_id": "uuid → blog_posts",
+        "post_id": "uuid → blog_posts cascade",
         "customer_id": "uuid",
         "saved_at": "timestamptz"
       },
@@ -1466,8 +1466,8 @@
       "name": "blog_reply_likes",
       "columns": {
         "id": "uuid pk",
-        "reply_id": "uuid → blog_replies",
-        "post_id": "uuid → blog_posts",
+        "reply_id": "uuid → blog_replies cascade",
+        "post_id": "uuid → blog_posts cascade",
         "customer_id": "uuid",
         "at": "timestamptz"
       },

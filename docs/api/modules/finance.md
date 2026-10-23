@@ -1030,7 +1030,7 @@ The open statement of a period exists from the seller's approval (or the previou
 
 Indexes: `(updated_at desc, seller_id desc)`
 
-**ledger_entries**: Append-only seller ledger. Corrections are new entries, never edits.
+**ledger_entries** (append-only): Append-only seller ledger. Corrections are new entries, never edits.
 
 | Column | Type |
 |---|---|
