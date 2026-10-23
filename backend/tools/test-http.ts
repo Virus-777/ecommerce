@@ -30,7 +30,7 @@ import { devSigner, newDevJwk, signAccessToken, type Audience } from '../src/ker
 import { loadConfig } from '../src/kernel/config/index.js';
 import { startHealthServer } from '../src/kernel/http/health.js';
 import { urlOf } from '../src/kernel/http/register.js';
-import { hmacWebhookVerifier, signWebhook } from '../src/kernel/http/webhooks.js';
+import { HMAC_SCHEME, hmacWebhookVerifier, signWebhook } from '../src/kernel/http/webhooks.js';
 import { allSpecs, withDependencies } from '../src/kernel/module-system/loader.js';
 import type { Area, AuthKind, EndpointDef } from '../src/kernel/spec/define.js';
 import { sampleParams, sampleQuery, validSample } from '../src/testing/samples.js';
@@ -48,6 +48,13 @@ const SELLER_ORIGIN = 'http://localhost:3001';
 // modules whose endpoints are tested; the server also runs their dependencies
 const modules = only ?? Object.keys(allSpecs);
 const booted = only ? withDependencies(only) : modules;
+
+/**
+ * Modules that verify their webhooks their own way instead of the shared HMAC signature (departments checks a
+ * game's server key in X-Game-Key). This tool signs with the dev secret, which such a module rightly refuses, so
+ * its success case is left to the module's own suite; the refusal cases below still run.
+ */
+const ownWebhookVerifier = new Set<string>();
 
 let base: string;
 let healthBase: string | undefined;
@@ -74,6 +81,12 @@ if (external) {
     authorities: (a) => ({ ...a, verifyRefreshToken: async (t) => (t === REFRESH ? { sessionId: 'http-test-session', accountId: null, audience: 'store', kind: 'customer' } : a.verifyRefreshToken(t)) }),
     webhookVerifiers: verifiers,
   });
+  // modules whose verifier accepts the HMAC signature this tool can produce keep their success case; a module
+  // with a scheme of its own (departments' game server key) would rightly refuse a signed request
+  for (const m of booted) {
+    const scheme = (app.kernel.boot.webhookVerifiers.get(m) as { scheme?: string } | undefined)?.scheme;
+    if (scheme !== HMAC_SCHEME) ownWebhookVerifier.add(m);
+  }
   await app.listen({ host: '127.0.0.1', port: 0 });
   base = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
   const health = await startHealthServer(() => app.kernel.health(), 0, '127.0.0.1');
@@ -271,6 +284,10 @@ async function testEndpoint(module: string, id: string, d: EndpointDef) {
   // 7. the right token: the request reaches the handler
   if (external && (d.auth === 'refresh' || d.auth === 'provider')) {
     record(op, 'right token', null, 'needs the test verifiers (local run only)');
+    return;
+  }
+  if (d.auth === 'provider' && ownWebhookVerifier.has(module)) {
+    record(op, 'right token', null, `${module} verifies this webhook with its own credential (covered by its module suite)`);
     return;
   }
   const r = await send(d.method, url, { ...extra, ...rightToken(d) }, payload(proof));

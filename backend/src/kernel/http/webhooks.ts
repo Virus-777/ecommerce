@@ -18,11 +18,18 @@ export function signWebhook(secret: string, rawBody: string, timestamp = Math.fl
 }
 
 /**
+ * The scheme name carried by the verifiers below (`verifier.scheme`). A provider with a scheme of its own
+ * (departments' game server key) brings a verifier without it, which is how tooling tells the two apart:
+ * tools/test-http.ts can sign an HMAC request, and leaves the other schemes to their module's own suite.
+ */
+export const HMAC_SCHEME = 'hmac-sha256';
+
+/**
  * A verifier for this module's webhooks. `provider` names the secret (default: the URL's
  * {provider} / {carrier} parameter, else the module name).
  */
 export function hmacWebhookVerifier(config: Config, module: string, opts: { provider?: string } = {}): WebhookVerifier {
-  return (request: FastifyRequest, urlProvider: string | undefined) => {
+  const verify = (request: FastifyRequest, urlProvider: string | undefined) => {
     const provider = opts.provider ?? urlProvider ?? module;
     const secret = config.webhookSecrets[provider] ?? config.webhookSecrets['*'];
     const signature = header(request, 'x-signature');
@@ -33,6 +40,7 @@ export function hmacWebhookVerifier(config: Config, module: string, opts: { prov
     if (expected.length !== given.length || !timingSafeEqual(expected, given)) return false;
     return { provider, eventId: header(request, 'x-event-id'), timestamp: new Date(ts * 1000) };
   };
+  return Object.assign(verify, { scheme: HMAC_SCHEME });
 }
 
 const header = (request: FastifyRequest, name: string): string | undefined => {
