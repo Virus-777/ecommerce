@@ -105,7 +105,8 @@ export class ContentTiles extends ContentBase {
       .slice(0, limit);
     // flash items carry no product slug: catalog has it
     const slugs = await this.productSlugs(items.map((i) => i.productId));
-    return items.map((item): ResolvedProduct => {
+    return this.withThumbs(
+      items.map((item): ResolvedProduct => {
         const left = Math.max(0, item.dealStock - item.claimed);
         const official = item.sellerId === OFFICIAL_STORE_ID;
         return {
@@ -134,7 +135,20 @@ export class ContentTiles extends ContentBase {
             rank: null,
           },
         };
-      });
+      }),
+    );
+  }
+
+  /**
+   * Tiles are cards: the image in the thumbnail size (catalog sends the product-page size). Every row's ref is
+   * read again rather than taken from the card: search documents and flash items keep whole MediaRefs, so the
+   * URLs they carry still name the API host of the day they were written and an API_URL change outlives them.
+   * Media's answer wins; when media cannot answer the row keeps the URL it came with.
+   */
+  private async withThumbs(rows: ResolvedProduct[]): Promise<ResolvedProduct[]> {
+    const thumbs = await this.refsMap(rows.map((r) => r.tile.image?.id), 'thumb');
+    for (const r of rows) if (r.tile.image) r.tile.image = thumbs.get(r.tile.image.id) ?? r.tile.image;
+    return rows;
   }
 
   /** Product slugs by id (catalog, optional) */
@@ -169,7 +183,7 @@ export class ContentTiles extends ContentBase {
     }
     const res = await this.soft('search.searchProducts', () => searchApi.searchProducts(query), { items: [] as search.ProductCard[], total: 0, nextCursor: null });
     const ranked = rule.kind === 'best_sellers' || rule.kind === 'top_sellers_in_category';
-    return (res.items ?? []).map((card, i) => this.fromCard(card, ranked ? i + 1 : null));
+    return this.withThumbs((res.items ?? []).map((card, i) => this.fromCard(card, ranked ? i + 1 : null)));
   }
 
   private fromCard(card: search.ProductCard, rank: number | null): ResolvedProduct {
@@ -288,10 +302,7 @@ export class ContentTiles extends ContentBase {
         },
       };
     });
-    // tiles are cards: the image in the thumbnail size (catalog sends the product-page size)
-    const thumbs = await this.refsMap(rows.map((r) => r.tile.image?.id), 'thumb');
-    for (const r of rows) if (r.tile.image) r.tile.image = thumbs.get(r.tile.image.id) ?? r.tile.image;
-    return rows;
+    return this.withThumbs(rows);
   }
 
   /** Admin drawers say why a product is hidden: a suspended or closed seller */
