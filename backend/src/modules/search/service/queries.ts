@@ -68,6 +68,12 @@ export function pageInfoOf(page: PageRequest, offset: number, limit: number, tot
   return { nextCursor: next, total };
 }
 
+/** A document's image, answered from media when it could be read (thumbRefs) */
+const imageOf = (d: DocRow, thumbs: Map<string, common.MediaRef>): common.MediaRef | null => {
+  const image = (d.image as unknown as common.MediaRef | null) ?? null;
+  return image ? (thumbs.get(image.id) ?? image) : null;
+};
+
 /** 'Fri, Oct 16' n business days after a market date */
 function businessDate(from: string, days: number): string {
   const d = new Date(`${from}T12:00:00Z`);
@@ -324,6 +330,7 @@ export class SearchQueries extends SearchIndexer {
     const today = this.marketDate(now);
     // carrier transit assumed for every destination (setting transitBusinessDays, decision S-D4)
     const transit = Number(await this.setting('transitBusinessDays'));
+    const thumbs = await this.thumbRefs(hits.map((h) => (h.doc.image as unknown as common.MediaRef | null)?.id));
     return hits.map((h, i) => {
       const d = h.doc;
       const o = h.offer;
@@ -364,7 +371,7 @@ export class SearchQueries extends SearchIndexer {
         slug: d.slug,
         title: d.title,
         brandName: d.brand_name,
-        image: (d.image as unknown as common.MediaRef | null) ?? null,
+        image: imageOf(d, thumbs),
         variantId,
         variantCue,
         rating: d.rating === null || !d.rating_count ? null : Number(d.rating),
@@ -1020,11 +1027,12 @@ export class SearchQueries extends SearchIndexer {
       });
 
     // products
+    const productThumbs = await this.thumbRefs(docs.map((d: DocRow) => (d.image as unknown as common.MediaRef | null)?.id));
     const products = docs.map((d: DocRow) => ({
       productId: d.product_id,
       slug: d.slug,
       title: d.title,
-      image: (d.image as unknown as common.MediaRef | null) ?? null,
+      image: imageOf(d, productThumbs),
       fromPrice: d.min_price !== null ? money(d.min_price, d.currency) : d.featured_price !== null ? money(d.featured_price, d.currency) : null,
       sellerName: d.featured_seller_name,
     }));

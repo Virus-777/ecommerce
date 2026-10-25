@@ -115,6 +115,18 @@ export class SearchBase {
     }
   }
 
+  /**
+   * Thumbnail refs by asset id. Documents keep whole MediaRefs, so the URL a card carries still names the API
+   * host of the day the product was indexed; reading media again keeps cards right after an API_URL change
+   * without waiting for a reindex. Media off or failing → an empty map, and the document's own URL stands.
+   */
+  protected async thumbRefs(ids: (string | null | undefined)[]): Promise<Map<string, common.MediaRef>> {
+    const unique = [...new Set(ids.filter((i): i is string => Boolean(i)))];
+    if (!unique.length) return new Map();
+    const refs = await this.optional('media', 'card thumbnails', (m) => m.refs(unique, 'thumb'));
+    return new Map((refs ?? []).map((r) => [r.id, r]));
+  }
+
   /** Audited endpoints (synonyms, reindex, ranking policy): written to the action history when audit is enabled */
   protected async audit(entry: Omit<audit.RecordInput, 'actor' | 'module' | 'requestId'>, by: By) {
     try {
