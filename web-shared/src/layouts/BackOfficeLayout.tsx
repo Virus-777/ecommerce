@@ -78,6 +78,7 @@ export const ADMIN_NAV: NavEntry[] = [
     { key: 'news', label: 'News', icon: 'newspaper', id: 'admin/news' },
     { key: 'help-content', label: 'Help and policies', icon: 'book-open', id: 'admin/help-content' },
     { key: 'ads', label: 'Advertisements', icon: 'megaphone', id: 'admin/ads' },
+    { key: 'app-preview', label: 'App preview', icon: 'smartphone', id: 'admin/app-preview' },
   ] },
   { grp: 'Departments', items: [
     { key: 'dept-phones', label: 'Phones', icon: 'smartphone', id: 'admin/departments-phones' },

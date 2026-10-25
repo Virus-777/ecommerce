@@ -149,6 +149,7 @@ export const SCREENS = [
   { id: 'admin/content', app: 'admin', area: 'admin', group: "Marketing and content", title: "Homepage and pages", path: '/content', file: 'admin-content', views: [{ slug: '', name: "Sections" }, { slug: 'edit-section', name: "Edit section" }] },
   { id: 'admin/help-content', app: 'admin', area: 'admin', group: "Marketing and content", title: "Help articles and policies", path: '/help-content', file: 'admin-help-content', views: [{ slug: '', name: "Articles" }, { slug: 'edit-policy', name: "Edit policy" }] },
   { id: 'admin/news', app: 'admin', area: 'admin', group: "Marketing and content", title: "News", path: '/news', file: '', views: [{ slug: '', name: "Posts" }, { slug: 'edit', name: "Edit post" }] },
+  { id: 'admin/app-preview', app: 'admin', area: 'admin', group: "Marketing and content", title: "App preview", path: '/app-preview', file: '', views: [] },
   { id: 'admin/departments-phones', app: 'admin', area: 'admin', group: "Departments", title: "Phones", path: '/departments/phones', file: '', views: [] },
   { id: 'admin/departments-phone', app: 'admin', area: 'admin', group: "Departments", title: "Edit phone", path: '/departments/phones/:id', sample: { id: 'new' }, file: '', views: [] },
   { id: 'admin/departments-blogs', app: 'admin', area: 'admin', group: "Departments", title: "Blogs", path: '/departments/blogs', file: '', views: [{ slug: '', name: "Posts" }, { slug: 'topics', name: "Topics" }, { slug: 'authors', name: "Authors" }, { slug: 'replies', name: "Replies" }, { slug: 'reports', name: "Reports" }] },
