@@ -8812,6 +8812,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/store/farm/statistics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What the customer spent on farm machines in a period: totals, trend and breakdowns
+         * @description Orders count by the day they were placed (market time zone). Spent is the machine, its attachments and delivery for every order not cancelled or rejected, so a pay-on-delivery order counts in full while only its deposit has been charged; depositsPaid and dueOnDelivery split it. Orders still waiting for payment are left out. from/to (both or neither) replace range; at most 3 years. Default range last_12_months.
+         *
+         *     **Screens:** account/statistics
+         *
+         *     **Launch phase:** 2
+         */
+        get: operations["farm.getMyStatistics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/farm/dealers": {
         parameters: {
             query?: never;
@@ -10774,6 +10798,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/store/food/statistics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What the customer spent on food delivery in a period: totals, trend and breakdowns
+         * @description Orders count by the day and hour they were placed (market time zone). The card is charged on delivery, so spent counts delivered orders — dishes and delivery fee together; orders cancelled by the customer or declined by the restaurant are never charged and counted apart as notDelivered, and one still on its way counts in neither, but shows in byStatus. Orders still waiting for payment are left out. from/to (both or neither) replace range; at most 3 years. Default range last_12_months.
+         *
+         *     **Screens:** account/statistics
+         *
+         *     **Launch phase:** 2
+         */
+        get: operations["food.getMyStatistics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/food/categories": {
         parameters: {
             query?: never;
@@ -12154,10 +12202,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Create a customer account and send an email code
-         * @description Always answers 202 with a challenge so the form cannot be used to discover accounts: if the email already has an account, the email says so and offers sign-in and password reset, and the code will not verify. Password rules are checked live with GET /password-policy and again here.
+         * Create a customer account and sign in
+         * @description Creates the account and opens a store session in the same call: there is no email code step, and the email address is recorded unverified (emailVerified false). An email that already has an account is refused with EMAIL_IN_USE. A visitor session passed in is claimed, so the guest cart moves to the new account. Password rules are checked live with GET /password-policy and again here.
          *
-         *     **Publishes:** `identity.user.registered`, `identity.verification.code_issued`
+         *     **Publishes:** `identity.user.registered`, `identity.guest_session.claimed`, `identity.session.new_device`
          *
          *     **Screens:** auth/register, auth/guest-orders, store/confirmation
          */
@@ -12178,12 +12226,12 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Confirm an email or phone code (registration, email change, phone change)
-         * @description Registration: activates the account and signs the customer in; guest orders placed with this email can then be attached (identity.user.verified, consumed by customers). Email change: switches the sign-in email and alerts the old address. Phone: marks the number verified (identity.user.verified with channel phone).
+         * Confirm an email change or phone code
+         * @description Email change: switches the sign-in email and alerts the old address. Phone: marks the number verified (identity.user.verified with channel phone). Registration issues no codes, so nothing is signed in here.
          *
          *     **Publishes:** `identity.user.verified`, `identity.email.changed`
          *
-         *     **Screens:** auth/register, account/profile
+         *     **Screens:** account/profile
          */
         post: operations["identity.confirmVerification"];
         delete?: never;
@@ -12205,7 +12253,7 @@ export interface paths {
          * Send a new code
          * @description **Publishes:** `identity.verification.code_issued`
          *
-         *     **Screens:** auth/register
+         *     **Screens:** account/profile
          */
         post: operations["identity.resendVerification"];
         delete?: never;
@@ -12225,7 +12273,7 @@ export interface paths {
         put?: never;
         /**
          * Sign in with email and password
-         * @description Returns tokens, or a 2-step challenge, or (seller audience with several sellers) the list of sellers to choose from. Wrong passwords return INVALID_CREDENTIALS with details.attemptsLeft; at the limit the account locks for lockoutMinutes and ACCOUNT_LOCKED carries details.lockedUntil. Unknown emails get the same answer and timing. A guest session passed in is claimed (cart and recently viewed merge). A sign-in from a device not seen before publishes identity.session.new_device for the security alert.
+         * @description Returns tokens, or a 2-step challenge, or (seller audience with several sellers) the list of sellers to choose from. Wrong passwords return INVALID_CREDENTIALS with details.attemptsLeft; at the limit the account locks for lockoutMinutes and ACCOUNT_LOCKED carries details.lockedUntil. Unknown emails get the same answer and timing. An account left pending_verification by the old email code step is activated by a successful sign-in. A guest session passed in is claimed (cart and recently viewed merge). A sign-in from a device not seen before publishes identity.session.new_device for the security alert.
          *
          *     **Publishes:** `identity.session.new_device`, `identity.guest_session.claimed`, `identity.account.locked`
          *
@@ -24668,6 +24716,8 @@ export interface paths {
          * Add or remove a customer's points
          * @description **Permission:** `rewards.manage`
          *
+         *     **Idempotent:** send an Idempotency-Key.
+         *
          *     **Audited:** recorded in the action history.
          *
          *     **Screens:** admin/departments-rewards
@@ -27715,6 +27765,30 @@ export interface paths {
         patch: operations["services.updateMyDevice"];
         trace?: never;
     };
+    "/api/store/services/statistics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The customer's service requests in a period: totals, trend and breakdowns
+         * @description One area with area=, every area without it; the app's Welfare statistics tab asks for welfare. Requests count by the day they were made (market time zone), whichever day the visit was, and cancelled and declined requests are counted too. These services are paid at the provider, so there is no record of what the customer paid: estimated adds up the providers' price lists for the requests that have a fixed price (per visit, per night, free) and leaves out the ones charged by the hour, whose hours are not recorded. Requests made before the estimate was kept fall back to the service's price list today. from/to (both or neither) replace range; at most 3 years. Default range last_12_months.
+         *
+         *     **Screens:** account/statistics
+         *
+         *     **Launch phase:** 2
+         */
+        get: operations["services.getMyStatistics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/services/categories": {
         parameters: {
             query?: never;
@@ -30203,7 +30277,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/store/software/apps/{slug}/get": {
+    "/api/store/software/apps/{slug}/entitlements": {
         parameters: {
             query?: never;
             header?: never;
@@ -30220,7 +30294,7 @@ export interface paths {
          *
          *     **Launch phase:** 2
          */
-        post: operations["software.getFreeApp"];
+        post: operations["software.claimFreeApp"];
         delete?: never;
         options?: never;
         head?: never;
@@ -30389,6 +30463,30 @@ export interface paths {
          *     **Launch phase:** 2
          */
         get: operations["software.listLibrary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/store/software/statistics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What the customer paid for software in a period: totals, trend and breakdowns
+         * @description Money comes from purchases, counted on the day the payment went through; app counts come from the library, counted on the day each app was added. Purchases still waiting for payment are left out, and ones that failed or were cancelled are counted apart. A pack counts once at its price, adds every app in it to the library, and is split across its apps' categories and companies by their share of the pack price. from/to (both or neither) replace range; at most 3 years. Default range last_12_months.
+         *
+         *     **Screens:** account/statistics
+         *
+         *     **Launch phase:** 2
+         */
+        get: operations["software.getMyStatistics"];
         put?: never;
         post?: never;
         delete?: never;
@@ -34973,6 +35071,51 @@ export interface components {
             dueAt: string;
             /** @enum {string} */
             state: "on_time" | "due_soon" | "overdue";
+        };
+        StatSeriesPoint: {
+            /**
+             * Format: date
+             * @description First day of the point (Monday for weeks, the 1st for months; never before the period's from)
+             */
+            start: string;
+            /** @description "Oct 14", "Week of Oct 13", "Oct 2026" */
+            label: string;
+            /** @description Money in the point; zero where the department has no money of its own */
+            amount: components["schemas"]["Money"];
+            /** @description A second series the screen draws beside the first (refunds, cancellations); absent when there is none */
+            secondary?: components["schemas"]["Money"] | null;
+            /** @description Records in the point (orders, purchases, requests) */
+            count: number;
+        };
+        StatShare: {
+            /** @description The thing's id or a stable word, and `other` for the rest beyond the top rows */
+            key: string;
+            label: string;
+            amount: components["schemas"]["Money"];
+            /** @description Share of the period's total, one decimal */
+            sharePct: number;
+            /** @description Records behind the row */
+            count: number;
+            /** @description Items behind the row (machines, apps, dishes); 0 where the department counts none */
+            units: number;
+        };
+        StatWeekday: {
+            /** @enum {string} */
+            weekday: "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+            /** @description Mon … Sun */
+            label: string;
+            amount: components["schemas"]["Money"];
+            count: number;
+        };
+        StatPrevious: {
+            /** Format: date */
+            from: string;
+            /** Format: date */
+            to: string;
+            amount: components["schemas"]["Money"];
+            count: number;
+            /** @description Change of the headline number in %, one decimal; null when the previous period had nothing to compare with */
+            changePct?: number | null;
         };
         PageInfo: {
             /** @description Cursor for the next batch; null on the last page */
@@ -40710,6 +40853,11 @@ export interface components {
             /** @description Attachments to add with the machine (catalog products) */
             attachments: components["schemas"]["search.ProductCard"][];
         };
+        "departments.FarmMachineType": {
+            typeId: string;
+            /** @description e.g. Tractors */
+            typeName: string;
+        };
         "departments.FarmMachineInput": {
             /** Format: uuid */
             productId: string;
@@ -41120,6 +41268,77 @@ export interface components {
             /** @description Shown to the customer (reject and cancel reasons, a note with the date) */
             note?: string | null;
             staffNote?: string | null;
+        };
+        "farm.FarmStatOrderRef": {
+            /** Format: uuid */
+            orderId: string;
+            ref: string;
+            /** Format: date-time */
+            placedAt?: string | null;
+            amount: components["schemas"]["Money"];
+        };
+        "farm.FarmStatMachine": {
+            /** Format: uuid */
+            productId: string;
+            productSlug?: string | null;
+            title: string;
+            image?: components["schemas"]["MediaRef"] | null;
+            orders: number;
+            /** @description The machine itself, attachments and delivery left out */
+            amount: components["schemas"]["Money"];
+            /** Format: date-time */
+            lastOrderedAt?: string | null;
+        };
+        "farm.FarmStatTotals": {
+            /** @description What the machines cost: machine, attachments and delivery of every order the dealer has not rejected and the customer has not cancelled, whether or not the card has been charged */
+            spent: components["schemas"]["Money"];
+            /** @description Orders cancelled or rejected (not in spent) */
+            cancelled: components["schemas"]["Money"];
+            /** @description Delivery fees, included in spent */
+            delivery: components["schemas"]["Money"];
+            /** @description Attachments, included in spent */
+            attachments: components["schemas"]["Money"];
+            /** @description Pay-on-delivery deposits the card has been charged (the dealer confirmed) */
+            depositsPaid: components["schemas"]["Money"];
+            /** @description The rest of pay-on-delivery orders, paid to the dealer when the machine arrives */
+            dueOnDelivery: components["schemas"]["Money"];
+            orders: number;
+            machines: number;
+            attachmentCount: number;
+            averageOrder: components["schemas"]["Money"];
+            /** @description Placed to delivered, one decimal; null until an order has been delivered */
+            averageDeliveryDays?: number | null;
+            largestOrder?: components["schemas"]["farm.FarmStatOrderRef"] | null;
+        };
+        "farm.FarmStatistics": {
+            /**
+             * Format: date
+             * @description First market day covered (range all: the day of the first counted order, else today)
+             */
+            from: string;
+            /** Format: date */
+            to: string;
+            /**
+             * @description Size of each series point: the grain asked for, else day up to 31 days, week up to 92, month beyond
+             * @enum {string}
+             */
+            grain: "day" | "week" | "month";
+            currency: string;
+            totals: components["schemas"]["farm.FarmStatTotals"];
+            /** @description The same number of days just before from; null for range all */
+            previous?: components["schemas"]["StatPrevious"] | null;
+            /** @description Spent per point, with cancelled as the second series; zeros included */
+            series: components["schemas"]["StatSeriesPoint"][];
+            /** @description The Farm machines department's types (Tractors, Harvesters…) by amount, at most 5 plus Other; a machine no longer picked counts as Other machines */
+            byMachineType: components["schemas"]["StatShare"][];
+            /** @description Dealers by amount, at most 5 plus Other */
+            byDealer: components["schemas"]["StatShare"][];
+            /** @description pay_in_full, installments and pay_on_delivery by amount */
+            byPaymentOption: components["schemas"]["StatShare"][];
+            /** @description Monday to Sunday by the day orders were placed (market time zone) */
+            byWeekday: components["schemas"]["StatWeekday"][];
+            /** @description At most 5, by amount */
+            topMachines: components["schemas"]["farm.FarmStatMachine"][];
         };
         "finance.Reference": {
             /** @enum {string} */
@@ -42479,6 +42698,89 @@ export interface components {
             hidden: boolean;
             reason?: string | null;
         };
+        "food.FoodStatOrderRef": {
+            /** Format: uuid */
+            orderId: string;
+            ref: string;
+            restaurant: string;
+            /** Format: date-time */
+            placedAt?: string | null;
+            amount: components["schemas"]["Money"];
+        };
+        "food.FoodStatDish": {
+            /** Format: uuid */
+            itemId: string;
+            name: string;
+            image?: components["schemas"]["MediaRef"] | null;
+            restaurant: string;
+            units: number;
+            amount: components["schemas"]["Money"];
+            /** Format: date-time */
+            lastOrderedAt?: string | null;
+        };
+        "food.FoodStatHourBlock": {
+            /** @description First hour of the four-hour block in market time: 0, 4, 8, 12, 16 or 20 */
+            hour: number;
+            /** @description e.g. 12 am, 4 pm */
+            label: string;
+            amount: components["schemas"]["Money"];
+            count: number;
+        };
+        "food.FoodStatTotals": {
+            /** @description What the card paid for orders that arrived: the dishes and the delivery fee */
+            spent: components["schemas"]["Money"];
+            /** @description Delivery fees, included in spent */
+            delivery: components["schemas"]["Money"];
+            /** @description The dishes alone, delivery fees left out */
+            dishesTotal: components["schemas"]["Money"];
+            /** @description Orders cancelled or declined; never charged, not in spent */
+            notDelivered: components["schemas"]["Money"];
+            /** @description Orders that arrived */
+            orders: number;
+            /** @description Items in those orders, quantities added up */
+            dishes: number;
+            restaurants: number;
+            averageOrder: components["schemas"]["Money"];
+            /** @description Placed to delivered, one decimal; null until an order has been delivered */
+            averageDeliveryMinutes?: number | null;
+            /** @description Reviews the customer left in the period */
+            reviews: number;
+            /** @description Stars the customer gave, one decimal; null when they left none */
+            averageRating?: number | null;
+            largestOrder?: components["schemas"]["food.FoodStatOrderRef"] | null;
+        };
+        "food.FoodStatistics": {
+            /**
+             * Format: date
+             * @description First market day covered (range all: the day of the first counted order, else today)
+             */
+            from: string;
+            /** Format: date */
+            to: string;
+            /**
+             * @description Size of each series point: the grain asked for, else day up to 31 days, week up to 92, month beyond
+             * @enum {string}
+             */
+            grain: "day" | "week" | "month";
+            currency: string;
+            totals: components["schemas"]["food.FoodStatTotals"];
+            /** @description The same number of days just before from; null for range all */
+            previous?: components["schemas"]["StatPrevious"] | null;
+            /** @description Spent per point, with the not-delivered total as the second series; zeros included */
+            series: components["schemas"]["StatSeriesPoint"][];
+            /** @description Restaurants by amount, at most 5 plus Other */
+            byRestaurant: components["schemas"]["StatShare"][];
+            /** @description The restaurants' own menu sections (Pizzas, Ramen, Sides…) by amount of dishes, at most 5 plus Other. Sections belong to one restaurant each, so rows group by name — two restaurants' "Pizza" is one row — and a dish whose item has since been removed counts as Other */
+            byMenuSection: components["schemas"]["StatShare"][];
+            /** @description The statuses the period's orders are in — delivered, on the way, cancelled, declined… — counted in orders; amount is what was spent, so only delivered rows carry money */
+            byStatus: components["schemas"]["StatShare"][];
+            /** @description Monday to Sunday by the day orders were placed (market time zone) */
+            byWeekday: components["schemas"]["StatWeekday"][];
+            /** @description Six four-hour blocks by the hour orders were placed (market time zone) */
+            byHour: components["schemas"]["food.FoodStatHourBlock"][];
+            /** @description At most 5, by amount */
+            topDishes: components["schemas"]["food.FoodStatDish"][];
+        };
         "fulfillment-service.Enrollment": {
             /** Format: uuid */
             id: string;
@@ -43009,9 +43311,16 @@ export interface components {
             marketingOptIn: boolean;
             /** @description Purchase terms / privacy version shown on the form (content module) */
             acceptedTermsVersion: string;
+            /** @description Long refresh token (30 days) instead of 24 hours for the session this call opens */
+            keepSignedIn?: boolean | null;
             /** Format: uuid */
             guestSessionId?: string | null;
             device: components["schemas"]["identity.DeviceInfo"];
+        };
+        "identity.RegistrationResult": {
+            account: components["schemas"]["identity.AccountSummary"];
+            /** @description Registration opens a store session right away */
+            tokens: components["schemas"]["identity.SessionTokens"];
         };
         "identity.VerificationChallenge": {
             /** Format: uuid */
@@ -43030,14 +43339,10 @@ export interface components {
         "identity.VerifyCodeRequest": {
             /** @description 6 digits */
             code: string;
-            keepSignedIn?: boolean | null;
-            device?: components["schemas"]["identity.DeviceInfo"] | null;
         };
         "identity.VerifyResult": {
             verified: boolean;
             account: components["schemas"]["identity.AccountSummary"];
-            /** @description Registration verification signs the customer in */
-            tokens?: components["schemas"]["identity.SessionTokens"] | null;
         };
         "identity.PasswordPolicy": {
             /** @description 10 for members, 12 for staff */
@@ -53562,6 +53867,83 @@ export interface components {
             coveredUntil?: string | null;
             staffNote?: string | null;
         };
+        "services.ServiceStatProviderRef": {
+            /** Format: uuid */
+            providerId: string;
+            slug?: string | null;
+            name: string;
+            requests: number;
+        };
+        "services.ServiceStatService": {
+            /** Format: uuid */
+            serviceId: string;
+            slug?: string | null;
+            title: string;
+            image?: components["schemas"]["MediaRef"] | null;
+            provider: string;
+            requests: number;
+            /** Format: date-time */
+            lastRequestedAt?: string | null;
+        };
+        "services.ServiceStatTotals": {
+            requests: number;
+            completed: number;
+            /** @description Confirmed or in progress */
+            underWay: number;
+            /** @description Cancelled by the customer */
+            cancelled: number;
+            /** @description Declined by the provider */
+            declined: number;
+            services: number;
+            providers: number;
+            /** @description What the providers' price lists come to for the requests that have a fixed price. Never what the customer actually paid: these services are paid at the provider */
+            estimated: components["schemas"]["Money"];
+            /** @description Requests behind estimated (the ones with a fixed price); the rest are charged by the hour, whose hours are not recorded here */
+            estimatedFrom: number;
+            /** @description Requested to completed, one decimal; null until a request has been completed */
+            averageDays?: number | null;
+            reviews: number;
+            /** @description Stars the customer gave, one decimal; null when they left none */
+            averageRating?: number | null;
+            topProvider?: components["schemas"]["services.ServiceStatProviderRef"] | null;
+        };
+        "services.ServiceStatistics": {
+            /**
+             * @description The area asked for; absent when every area is counted
+             * @enum {string|null}
+             */
+            area?: "os_install" | "post_sale" | "welfare" | "booking" | null;
+            /**
+             * Format: date
+             * @description First market day covered (range all: the day of the first counted request, else today)
+             */
+            from: string;
+            /** Format: date */
+            to: string;
+            /**
+             * @description Size of each series point: the grain asked for, else day up to 31 days, week up to 92, month beyond
+             * @enum {string}
+             */
+            grain: "day" | "week" | "month";
+            currency: string;
+            totals: components["schemas"]["services.ServiceStatTotals"];
+            /** @description The same number of days just before from; null for range all. count compares requests, amount the estimate */
+            previous?: components["schemas"]["StatPrevious"] | null;
+            /** @description Requests per point in count, with the estimate in amount; zeros included */
+            series: components["schemas"]["StatSeriesPoint"][];
+            /** @description Services by requests, at most 5 plus Other */
+            byService: components["schemas"]["StatShare"][];
+            /** @description Providers by requests, at most 5 plus Other */
+            byProvider: components["schemas"]["StatShare"][];
+            /** @description The price row the customer chose (Weekly, Per visit, Assessment…) by requests, at most 5 plus Other; requests with no plan count as Other. amount is the estimate for rows with a fixed price, zero for hourly ones */
+            byPlan: components["schemas"]["StatShare"][];
+            /** @description requested, confirmed, in_progress, completed, cancelled and declined, counted in requests */
+            byStatus: components["schemas"]["StatShare"][];
+            /** @description Monday to Sunday by the day the request was made (market time zone) */
+            byWeekday: components["schemas"]["StatWeekday"][];
+            /** @description At most 5, by requests */
+            topServices: components["schemas"]["services.ServiceStatService"][];
+        };
         "settings.DayHours": {
             /** @enum {string} */
             weekday: "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
@@ -55571,6 +55953,82 @@ export interface components {
         "software.ReissueLicenceInput": {
             /** @description Why the key is replaced, e.g. the customer's key leaked; kept in the action history */
             reason: string;
+        };
+        "software.SoftwareStatPurchaseRef": {
+            /** Format: uuid */
+            purchaseId: string;
+            ref: string;
+            /** @description The app or pack name */
+            title: string;
+            /** Format: date-time */
+            paidAt?: string | null;
+            amount: components["schemas"]["Money"];
+        };
+        "software.SoftwareStatApp": {
+            /**
+             * Format: uuid
+             * @description Null for a pack row, which has no single app
+             */
+            appId?: string | null;
+            slug?: string | null;
+            title: string;
+            icon?: components["schemas"]["MediaRef"] | null;
+            company?: string | null;
+            /** @description Apps the purchase added: 1 for an app, the pack's size for a pack */
+            apps: number;
+            amount: components["schemas"]["Money"];
+            /** Format: date-time */
+            boughtAt?: string | null;
+        };
+        "software.SoftwareStatTotals": {
+            /** @description What the card was charged for apps and packs that went through */
+            paid: components["schemas"]["Money"];
+            /** @description Purchases that failed or were cancelled (never charged, not in paid) */
+            notPaid: components["schemas"]["Money"];
+            purchases: number;
+            /** @description Apps added to the library in the period, however they were added */
+            appsAdded: number;
+            paidApps: number;
+            freeApps: number;
+            packs: number;
+            /** @description Keys issued for the paid apps added in the period */
+            licenceKeys: number;
+            /** @description Reviews the customer left in the period */
+            reviews: number;
+            /** @description Stars the customer gave, one decimal; null when they left none */
+            averageRating?: number | null;
+            averagePurchase: components["schemas"]["Money"];
+            largestPurchase?: components["schemas"]["software.SoftwareStatPurchaseRef"] | null;
+        };
+        "software.SoftwareStatistics": {
+            /**
+             * Format: date
+             * @description First market day covered (range all: the day of the first counted purchase or library addition, else today)
+             */
+            from: string;
+            /** Format: date */
+            to: string;
+            /**
+             * @description Size of each series point: the grain asked for, else day up to 31 days, week up to 92, month beyond
+             * @enum {string}
+             */
+            grain: "day" | "week" | "month";
+            currency: string;
+            totals: components["schemas"]["software.SoftwareStatTotals"];
+            /** @description The same number of days just before from; null for range all */
+            previous?: components["schemas"]["StatPrevious"] | null;
+            /** @description Paid per point, count = purchases; zeros included */
+            series: components["schemas"]["StatSeriesPoint"][];
+            /** @description App categories by amount, at most 5 plus Other; a pack counts under the categories of its apps, split by their share of the pack price */
+            byCategory: components["schemas"]["StatShare"][];
+            /** @description Companies by amount, at most 5 plus Other; a pack is split like byCategory */
+            byCompany: components["schemas"]["StatShare"][];
+            /** @description How apps reached the library — free, purchase, pack, staff — counted in apps, not money */
+            bySource: components["schemas"]["StatShare"][];
+            /** @description Monday to Sunday by the day the payment went through (market time zone) */
+            byWeekday: components["schemas"]["StatWeekday"][];
+            /** @description At most 5, by amount; a pack is one row */
+            topApps: components["schemas"]["software.SoftwareStatApp"][];
         };
         "support.DailyCaseStats": {
             /**
@@ -85126,6 +85584,58 @@ export interface operations {
             };
         };
     };
+    "farm.getMyStatistics": {
+        parameters: {
+            query?: {
+                range?: "last_30_days" | "last_3_months" | "last_6_months" | "last_12_months" | "this_year" | "last_year" | "all" | null;
+                from?: string | null;
+                to?: string | null;
+                grain?: "day" | "week" | "month" | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["farm.FarmStatistics"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     "farm.listDealers": {
         parameters: {
             query?: {
@@ -90243,7 +90753,7 @@ export interface operations {
         };
         responses: {
             /** @description Success */
-            200: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -90916,6 +91426,58 @@ export interface operations {
              *     ALREADY_REVIEWED: You already rated this order.
              */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "food.getMyStatistics": {
+        parameters: {
+            query?: {
+                range?: "last_30_days" | "last_3_months" | "last_6_months" | "last_12_months" | "this_year" | "last_year" | "all" | null;
+                from?: string | null;
+                to?: string | null;
+                grain?: "day" | "week" | "month" | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["food.FoodStatistics"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -95214,12 +95776,12 @@ export interface operations {
         };
         responses: {
             /** @description Success */
-            202: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["identity.VerificationChallenge"];
+                    "application/json": components["schemas"]["identity.RegistrationResult"];
                 };
             };
             /**
@@ -95245,6 +95807,15 @@ export interface operations {
             };
             /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description EMAIL_IN_USE: Another account in this realm uses that email. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -95468,7 +96039,6 @@ export interface operations {
             /**
              * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
              *     ACCOUNT_DISABLED: The account is disabled or closed.
-             *     EMAIL_NOT_VERIFIED: Confirm the email first. details.challenge is a fresh VerificationChallenge.
              *     NO_SELLER_ACCESS: This account cannot act for that seller (or for any seller).
              */
             403: {
@@ -133911,7 +134481,10 @@ export interface operations {
     "rewards.adjustPoints": {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description Required on endpoints marked idempotent (orders, payments, refunds, payouts). Same key + same request returns the first result (with Idempotent-Replayed: true). */
+                "Idempotency-Key": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -142847,6 +143420,59 @@ export interface operations {
             };
         };
     };
+    "services.getMyStatistics": {
+        parameters: {
+            query?: {
+                area?: "os_install" | "post_sale" | "welfare" | "booking" | null;
+                range?: "last_30_days" | "last_3_months" | "last_6_months" | "last_12_months" | "this_year" | "last_year" | "all" | null;
+                from?: string | null;
+                to?: string | null;
+                grain?: "day" | "week" | "month" | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["services.ServiceStatistics"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     "services.listCategoriesAdmin": {
         parameters: {
             query?: {
@@ -150648,7 +151274,7 @@ export interface operations {
             };
         };
     };
-    "software.getFreeApp": {
+    "software.claimFreeApp": {
         parameters: {
             query?: never;
             header?: never;
@@ -151226,6 +151852,58 @@ export interface operations {
                         totalPages?: number;
                         total?: number;
                     };
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "software.getMyStatistics": {
+        parameters: {
+            query?: {
+                range?: "last_30_days" | "last_3_months" | "last_6_months" | "last_12_months" | "this_year" | "last_year" | "all" | null;
+                from?: string | null;
+                to?: string | null;
+                grain?: "day" | "week" | "month" | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["software.SoftwareStatistics"];
                 };
             };
             /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */

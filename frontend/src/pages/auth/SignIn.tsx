@@ -22,7 +22,6 @@ import {
   useSecondsUntil,
   type SignInChallenge,
   type SignInResult,
-  type VerificationChallenge,
 } from './data/parts';
 
 // Design: pages/store/auth-sign-in.html
@@ -117,7 +116,7 @@ function Credentials({
       setPassword('');
       onResult(r, body.email);
     },
-    onError: (e, body) => {
+    onError: (e) => {
       if (!(e instanceof ApiError)) return;
       if (e.code === 'INVALID_CREDENTIALS') {
         setAttemptsLeft(typeof e.details.attemptsLeft === 'number' ? e.details.attemptsLeft : null);
@@ -129,15 +128,12 @@ function Credentials({
         setLock({ until: (e.details.lockedUntil as string | null | undefined) ?? null, cause: e.details.cause as string | undefined });
         setPassword('');
         announce('Sign-in is paused for this account');
-      } else if (e.code === 'EMAIL_NOT_VERIFIED' && e.details.challenge) {
-        // Unconfirmed account: continue on the register screen's code step with the fresh challenge.
-        navigate(href('auth/register', 'verify-email', undefined, nextQuery), { state: { challenge: e.details.challenge as VerificationChallenge, email: body.email } });
       }
     },
   });
 
   // A failed sign-in other than the ones shown in the design's own states.
-  const otherError = signIn.error instanceof ApiError && ['INVALID_CREDENTIALS', 'ACCOUNT_LOCKED', 'EMAIL_NOT_VERIFIED'].includes(signIn.error.code) ? null : signIn.error ? authError(signIn.error) : null;
+  const otherError = signIn.error instanceof ApiError && ['INVALID_CREDENTIALS', 'ACCOUNT_LOCKED'].includes(signIn.error.code) ? null : signIn.error ? authError(signIn.error) : null;
 
   const submit = (e: FormEvent) => {
     e.preventDefault();

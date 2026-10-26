@@ -1,71 +1,45 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { useEffect, useState, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { Link, useLocation } from 'react-router';
 import { ApiError, call, useApi } from '@marketly/web-shared/api';
-import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, Button, Checkbox, Field, Icon, TextInput, announce } from '@marketly/web-shared/ui';
 import {
   AuthShell,
-  CodeInput,
-  DevOutboxHint,
   EMAIL_RE,
   PasswordInput,
   PolicyRules,
   WITH_COOKIE,
   authError,
   deviceInfo,
-  emptyCode,
-  minutesUntil,
-  mss,
   passwordChecks,
   useFinishSignIn,
   useNextQuery,
   usePasswordPolicy,
   useRedirectSignedIn,
-  useSecondsUntil,
-  type VerificationChallenge,
 } from './data/parts';
 
-// Design: pages/store/auth-register.html · view "verify-email" = the code step after "Create account".
-// POST /api/public/identity/registrations (always 202: an existing owner gets an email instead of a code), then
-// POST …/verifications/{id}/confirm signs the new customer in (visitor token: the guest cart moves along).
-// Password rules come from GET …/password-policy. The password is never prefilled.
+// Design: pages/store/auth-register.html.
+// POST /api/public/identity/registrations creates the account and signs the new customer in on the spot (visitor
+// token: the guest cart moves along). There is no email code step; an email that already has an account is
+// refused with EMAIL_IN_USE. Password rules come from GET …/password-policy. The password is never prefilled.
 
 type Form = { first: string; last: string; email: string; password: string; marketing: boolean };
-/** Router state from sign-in when the account exists but the email isn't confirmed (EMAIL_NOT_VERIFIED). */
+/** Router state from sign-in: the email typed there. */
 interface InState {
-  challenge?: VerificationChallenge;
   email?: string;
 }
 
 export default function Register() {
-  const [view, setView] = useView<'verify-email'>();
   const st = (useLocation().state ?? null) as InState | null;
   const [form, setForm] = useState<Form>({ first: '', last: '', email: st?.email ?? '', password: '', marketing: false });
-  const [challenge, setChallenge] = useState<VerificationChallenge | null>(st?.challenge ?? null);
   useRedirectSignedIn();
-
-  // The code step needs a live challenge; opened without one it falls back to the form.
-  useEffect(() => {
-    if (view === 'verify-email' && !challenge) setView('', { replace: true });
-  }, [view, challenge, setView]);
-
-  if (view === 'verify-email' && challenge) return <Verify challenge={challenge} setChallenge={setChallenge} />;
-  return (
-    <CreateAccount
-      form={form}
-      setForm={setForm}
-      onCreated={(c) => {
-        setChallenge(c);
-        setView('verify-email');
-      }}
-    />
-  );
+  return <CreateAccount form={form} setForm={setForm} />;
 }
 
-function CreateAccount({ form, setForm, onCreated }: { form: Form; setForm: (f: Form) => void; onCreated: (c: VerificationChallenge) => void }) {
+function CreateAccount({ form, setForm }: { form: Form; setForm: (f: Form) => void }) {
   const { api } = useApi();
+  const finish = useFinishSignIn();
   const nextQuery = useNextQuery();
   const policy = usePasswordPolicy();
   // The purchase terms version shown on the form is recorded with the account (acceptedTermsVersion).
@@ -93,6 +67,7 @@ function CreateAccount({ form, setForm, onCreated }: { form: Form; setForm: (f: 
     mutationFn: async () => {
       const version = terms.data?.version ?? (await terms.refetch({ throwOnError: true })).data?.version;
       if (!version) throw new Error('Purchase terms unavailable');
+      // keepSignedIn: the account this creates stays signed in, as after a sign-in with "Keep me signed in".
       return call(
         api.POST('/api/public/identity/registrations', {
           body: {
@@ -102,25 +77,29 @@ function CreateAccount({ form, setForm, onCreated }: { form: Form; setForm: (f: 
             lastName: form.last.trim(),
             marketingOptIn: form.marketing,
             acceptedTermsVersion: version,
+            keepSignedIn: true,
             device: deviceInfo(),
           },
+          ...WITH_COOKIE,
         }),
       );
     },
-    onSuccess: (c) => {
+    onSuccess: (r) => {
       setForm({ ...form, password: '' });
-      onCreated(c);
+      finish(r.tokens, 'Your account is ready.');
     },
     onError: (e) => {
       if (!(e instanceof ApiError)) return;
       if (e.code === 'WEAK_PASSWORD') setServerErrors({ password: authError(e) });
+      else if (e.code === 'EMAIL_IN_USE') setServerErrors({ email: 'That email already has an account. Sign in instead.' });
       else if (e.code === 'VALIDATION_FAILED') {
         const f = e.fieldErrors;
         setServerErrors({ first: f.firstName, last: f.lastName, email: f.email, password: f.password });
       }
     },
   });
-  const formError = register.error && !(register.error instanceof ApiError && ['WEAK_PASSWORD', 'VALIDATION_FAILED'].includes(register.error.code)) ? authError(register.error) : null;
+  const formError =
+    register.error && !(register.error instanceof ApiError && ['WEAK_PASSWORD', 'EMAIL_IN_USE', 'VALIDATION_FAILED'].includes(register.error.code)) ? authError(register.error) : null;
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -147,7 +126,7 @@ function CreateAccount({ form, setForm, onCreated }: { form: Form; setForm: (f: 
           <TextInput id="rg-last" value={form.last} error={!!shown.last} autoComplete="family-name" onChange={(e) => set('last', e.target.value)} />
         </Field>
       </div>
-      <Field label="Email" hint="We'll send a code to confirm it." error={shown.email}>
+      <Field label="Email" hint="We'll use it for order updates and signing in." error={shown.email}>
         <TextInput id="rg-email" type="email" value={form.email} error={!!shown.email} autoComplete="email" onChange={(e) => set('email', e.target.value)} />
       </Field>
       <div className="field">
@@ -187,103 +166,6 @@ function CreateAccount({ form, setForm, onCreated }: { form: Form; setForm: (f: 
           Sign in
         </Link>
       </p>
-    </AuthShell>
-  );
-}
-
-function Verify({ challenge, setChallenge }: { challenge: VerificationChallenge; setChallenge: (c: VerificationChallenge) => void }) {
-  const { api } = useApi();
-  const finish = useFinishSignIn();
-  const nextQuery = useNextQuery();
-  const [code, setCode] = useState(() => emptyCode(challenge.codeLength || 6));
-  const [error, setError] = useState('');
-  const resendLeft = useSecondsUntil(challenge.resendAvailableAt);
-
-  const confirm = useMutation({
-    mutationFn: (value: string) =>
-      call(api.POST('/api/public/identity/verifications/{id}/confirm', { params: { path: { id: challenge.id } }, body: { code: value, keepSignedIn: true, device: deviceInfo() }, ...WITH_COOKIE })),
-    onSuccess: (r) => {
-      if (r.tokens) finish(r.tokens, 'Email verified. Your account is ready.');
-      else setError('Your email is verified. Sign in to continue.');
-    },
-    onError: (e) => {
-      setError(authError(e));
-      setCode(emptyCode(challenge.codeLength || 6));
-    },
-  });
-  const resend = useMutation({
-    mutationFn: () => call(api.POST('/api/public/identity/verifications/{id}/resend', { params: { path: { id: challenge.id } } })),
-    onSuccess: (c) => {
-      setChallenge(c);
-      setCode(emptyCode(c.codeLength || 6));
-      setError('');
-      announce(`We sent a new code to ${c.emailMasked}`);
-    },
-    onError: (e) => setError(authError(e)),
-  });
-
-  const verify = (e: FormEvent) => {
-    e.preventDefault();
-    if (confirm.isPending) return;
-    if (code.some((d) => !d)) {
-      setError(`Enter all ${code.length} digits of the code.`);
-      return;
-    }
-    confirm.mutate(code.join(''));
-  };
-
-  return (
-    <AuthShell title="Verify email" back={href('auth/register', undefined, undefined, nextQuery)} onSubmit={verify}>
-      <span className="buy-result-icon t-info">
-        <Icon name="mail-check" />
-      </span>
-      <div className="stack gap-1">
-        <h1 className="h2">Check your email</h1>
-        <p className="small sub">
-          Enter the {code.length}-digit code we sent to <b>{challenge.emailMasked}</b>. It expires in {minutesUntil(challenge.expiresAt)} minutes.
-        </p>
-      </div>
-      <CodeInput
-        idPrefix="rg-code"
-        legend="Verification code"
-        value={code}
-        onChange={(v) => {
-          setCode(v);
-          setError('');
-        }}
-      />
-      {error && (
-        <span className="error-text" role="alert">
-          <Icon name="circle-alert" className="ic-sm" />
-          {error}
-        </span>
-      )}
-      <Button type="submit" size="lg" block disabled={confirm.isPending}>
-        {confirm.isPending ? 'Verifying…' : 'Verify email'}
-      </Button>
-      <div className="row between small">
-        {resendLeft > 0 || resend.isPending ? (
-          <span className="muted">
-            <Icon name="clock" className="ic-sm" /> Resend code in {mss(resendLeft)}
-          </span>
-        ) : (
-          <a
-            href="#"
-            className="link-inline"
-            onClick={(e) => {
-              e.preventDefault();
-              resend.mutate();
-            }}
-          >
-            Resend code
-          </a>
-        )}
-        <Link to={href('auth/register', undefined, undefined, nextQuery)} className="link-inline">
-          Change email
-        </Link>
-      </div>
-      <p className="xs muted">Can't find it? Check your spam folder. The email comes from no-reply@marketly.example.</p>
-      <DevOutboxHint what="code" />
     </AuthShell>
   );
 }

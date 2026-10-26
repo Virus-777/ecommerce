@@ -13,9 +13,9 @@ import { ApiLink } from '../help/data/links';
 import { LoadError, Loading, SkLines } from '../help/data/states';
 import { UploadList } from '../help/data/UploadList';
 import { APPLICATION_KEY, displayPhone, e164, formatAddress, sections, stateName, US_STATES, useApplication, type SellerApplication } from './data/application';
-import { CodePanel, splitName, useNewLoginApi, usePurchaseTerms, type VerificationChallenge } from './data/new-login';
+import { splitName, useNewLoginApi, usePurchaseTerms } from './data/new-login';
 import { contactLine, useSellerProgram } from './data/program';
-import { PasswordInput, PolicyRules, authError, emptyCode, passwordChecks, usePasswordPolicy } from '../auth/data/parts';
+import { PasswordInput, PolicyRules, authError, passwordChecks, usePasswordPolicy } from '../auth/data/parts';
 
 // Design: pages/store/sell-apply.html (step 1, account) · views business-details, verification,
 // payout-and-return-address (steps 4–5 on one page) and agreement. Each step validates, then saves:
@@ -550,13 +550,10 @@ export default function Apply() {
   const [removing, setRemoving] = useState<string | null>(null);
   const [removeError, setRemoveError] = useState('');
 
-  // "Create a new seller login" (data/new-login.tsx): the password typed here, the email code challenge once the
-  // login is registered, and the login's email once it is verified and signed in. From then on step 1 only
-  // creates the application (a retry after, say, a wrong invitation code doesn't register again).
+  // "Create a new seller login" (data/new-login.tsx): the password typed here, and the login's email once it is
+  // registered and signed in. From then on step 1 only creates the application (a retry after, say, a wrong
+  // invitation code doesn't register again).
   const [pw, setPw] = useState('');
-  const [challenge, setChallenge] = useState<VerificationChallenge | null>(null);
-  const [code, setCode] = useState<string[]>(() => emptyCode());
-  const [codeError, setCodeError] = useState('');
   const [newLogin, setNewLogin] = useState<string | null>(null);
   const loginApi = useNewLoginApi();
   const policy = usePasswordPolicy(f.acct === 'new');
@@ -641,10 +638,8 @@ export default function Apply() {
         // identity needs a first and last name for the new login, and its own email.
         if (f.contact.trim() && !splitName(f.contact).last) e.contact = 'Enter a first and last name. It is also the name on your new seller login.';
         if (customer && f.cemail.trim().toLowerCase() === customer.email.toLowerCase()) e.cemail = 'That’s the email of the account you’re signed in with. Use another business email, or choose “Use my Marketly account”.';
-        if (!challenge) {
-          if (!pw) e.pw = 'Create a password for your seller login.';
-          else if (!pwChecks.every((c) => c.ok)) e.pw = 'Your password needs to meet every rule below.';
-        }
+        if (!pw) e.pw = 'Create a password for your seller login.';
+        else if (!pwChecks.every((c) => c.ok)) e.pw = 'Your password needs to meet every rule below.';
       }
     }
     if (st === 1) {
@@ -778,35 +773,17 @@ export default function Apply() {
     },
   });
 
-  // Step 1 with "Create a new seller login": first click registers the login and sends the email code; the next
-  // (with the code) verifies it, signs the new login in and creates the application on that session.
+  // Step 1 with "Create a new seller login": the click registers the login, which signs it in, and the
+  // application is created on that session.
   const createLogin = useMutation({
     mutationFn: async (): Promise<SellerApplication | null> => {
-      if (!challenge) {
-        const version = terms.data?.version ?? (await terms.refetch({ throwOnError: true })).data?.version;
-        if (!version) throw new Error('We couldn’t load the purchase terms. Try again.');
-        const { first, last } = splitName(f.contact);
-        const c = await loginApi.register({ email: f.cemail.trim(), password: pw, firstName: first, lastName: last, termsVersion: version });
-        setChallenge(c);
-        setCode(emptyCode(c.codeLength || 6));
-        setCodeError('');
-        announce(`We sent a code to ${c.emailMasked}`);
-        return null;
-      }
-      let tokens;
-      try {
-        tokens = (await loginApi.confirm(challenge.id, code.join(''))).tokens;
-      } catch (e) {
-        // A wrong or expired code stays in the code panel; the form above is fine.
-        setCodeError(authError(e));
-        setCode(emptyCode(challenge.codeLength || 6));
-        return null;
-      }
-      if (!tokens) throw new Error('Your email is verified. Sign in with your new seller login to continue.');
+      const version = terms.data?.version ?? (await terms.refetch({ throwOnError: true })).data?.version;
+      if (!version) throw new Error('We couldn’t load the purchase terms. Try again.');
+      const { first, last } = splitName(f.contact);
+      const { tokens } = await loginApi.register({ email: f.cemail.trim(), password: pw, firstName: first, lastName: last, termsVersion: version });
       // Read the form before the session changes (the new customer's profile loads next).
       const body = { ...accountBody(), invitationCode: f.invite.trim() || undefined };
       setNewLogin(f.cemail.trim());
-      setChallenge(null);
       setPw('');
       adopt(tokens);
       const created = await call(api.POST('/api/store/sellers/applications', { body }));
@@ -820,16 +797,6 @@ export default function Apply() {
       announce('Your seller login is ready and your application is started.');
       go(1);
     },
-  });
-  const resendCode = useMutation({
-    mutationFn: () => loginApi.resend(challenge!.id),
-    onSuccess: (c) => {
-      setChallenge(c);
-      setCode(emptyCode(c.codeLength || 6));
-      setCodeError('');
-      announce(`We sent a new code to ${c.emailMasked}`);
-    },
-    onError: (e) => setCodeError(authError(e)),
   });
 
   const removeDoc = async (d: AppDoc) => {
@@ -858,10 +825,6 @@ export default function Apply() {
     setTried((t) => t.map((v, i) => (i === step ? true : v)));
     if (Object.keys(validate(step)).length) return;
     if (step === 0 && registering) {
-      if (challenge && code.some((d) => !d)) {
-        setCodeError(`Enter all ${code.length} digits of the code.`);
-        return;
-      }
       save.reset();
       createLogin.mutate();
       return;
@@ -934,12 +897,8 @@ export default function Apply() {
   const label =
     step === 0 && registering
       ? createLogin.isPending
-        ? challenge
-          ? 'Verifying…'
-          : 'Creating your login…'
-        : challenge
-          ? 'Verify email and start application'
-          : 'Create seller login'
+        ? 'Creating your login…'
+        : 'Create seller login'
       : save.isPending
         ? step === VIEWS.length - 1
           ? 'Submitting…'
@@ -958,7 +917,7 @@ export default function Apply() {
       </Button>
     );
 
-  // The "Create a new seller login" part of step 1: password, then the email code, then the login that was made.
+  // The "Create a new seller login" part of step 1: the password, then the login that was made.
   const loginPanel =
     appForForm || newLogin ? (
       <div className="panel row gap-3">
@@ -967,22 +926,6 @@ export default function Apply() {
           Your seller login is {newLogin ?? customer?.email ?? 'the account you’re signed in with'}. You sign in to Seller Center with it.
         </span>
       </div>
-    ) : challenge ? (
-      <CodePanel
-        challenge={challenge}
-        code={code}
-        setCode={(v) => {
-          setCode(v);
-          setCodeError('');
-        }}
-        error={codeError}
-        onResend={() => resendCode.mutate()}
-        resending={resendCode.isPending}
-        onRestart={() => {
-          setChallenge(null);
-          setCodeError('');
-        }}
-      />
     ) : (
       <>
         <div className="field">
@@ -1116,7 +1059,7 @@ export default function Apply() {
               {step === 4 && <CardHead title="Review and accept" sub="Step 6 of 6 · Read each document before you accept it." />}
               <div className="card-body">
                 {summary}
-                {step === 0 && <AccountStep {...formProps} email={customer?.email ?? ''} inviteNeeded={inviteNeeded} loginLocked={Boolean(newLogin || challenge)} loginPanel={loginPanel} />}
+                {step === 0 && <AccountStep {...formProps} email={customer?.email ?? ''} inviteNeeded={inviteNeeded} loginLocked={Boolean(newLogin)} loginPanel={loginPanel} />}
                 {step === 1 && <BusinessStep {...formProps} categories={p?.launchCategories ?? []} />}
                 {step === 2 && <VerificationStep {...formProps} docs={docs} onRemove={removeDoc} removing={removing} />}
                 {step === 4 && <AgreementStep {...formProps} agreements={agreements} />}

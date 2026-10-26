@@ -1,7 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link } from 'react-router';
-import { call, errorMessage, useApi } from '@marketly/web-shared/api';
+import { call, errorMessage, newIdempotencyKey, useApi } from '@marketly/web-shared/api';
 import { num } from '@marketly/web-shared/lib/format';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
@@ -704,10 +704,18 @@ function CustomersTab({ notify, canManage }: Ctx) {
     points: /^[-+]?\d+$/.test(adjust.points.trim()) && Number(adjust.points) !== 0 && Math.abs(Number(adjust.points)) <= 100_000 ? '' : 'Enter whole points to add, or with a minus to remove, e.g. 50 or -20.',
     reason: adjust.reason.trim() ? '' : 'Say why, e.g. Missed check-in during the outage.',
   };
-  const open = (id: string) => (setOpenId(id), setAdjust({ points: '', reason: '' }), setTried(false), setError(''));
+  // one key per drawer: a retry of the same adjustment is not counted twice
+  const adjustKey = useRef(newIdempotencyKey());
+  const open = (id: string) => ((adjustKey.current = newIdempotencyKey()), setOpenId(id), setAdjust({ points: '', reason: '' }), setTried(false), setError(''));
 
   const save = useMutation({
-    mutationFn: () => call(api.POST('/api/admin/rewards/adjustments', { body: { customerId: openId!, points: Number(adjust.points), reason: adjust.reason.trim() } })),
+    mutationFn: () =>
+      call(
+        api.POST('/api/admin/rewards/adjustments', {
+          params: { header: { 'Idempotency-Key': adjustKey.current } },
+          body: { customerId: openId!, points: Number(adjust.points), reason: adjust.reason.trim() },
+        }),
+      ),
     onSuccess: (r) => {
       qc.setQueryData(['rewards', 'customer', r.customerId], r);
       void qc.invalidateQueries({ queryKey: ['rewards', 'customers'] });
