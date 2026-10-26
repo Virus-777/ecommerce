@@ -311,7 +311,7 @@
         "featured_offer_id": "uuid?", "featured_price": "bigint?", "featured_seller_name": "text?", "featured_official": "bool", "min_price": "bigint?", "max_price": "bigint?", "currency": "char(3)",
         "was_price": "bigint?", "deal_ends_at": "timestamptz?", "on_sale": "bool (an active campaign price from promotions or a verified compare-at on the featured offer)", "gtins": "text[] (variant GTINs from catalog, normalized)", "variant_gtins": "jsonb (GTIN → variantId)", "badges": "jsonb",
         "in_stock": "bool", "low_stock": "bool", "free_delivery": "bool", "fastest_dispatch_days": "int?", "same_day_cutoff": "time?",
-        "rating": "numeric(2,1)?", "rating_count": "int", "sales_30d": "int", "first_listed_at": "timestamptz", "popularity": "numeric",
+        "rating": "numeric(2,1)?", "rating_count": "int", "sales_30d": "int", "first_listed_at": "timestamptz", "popularity": "numeric(12,6)",
         "terms": "jsonb? (development engine: stemmed words of the title and brand (weight 1), category (0.4), attributes (0.2) and description (0.1), as [{t, w}])", "title_norm": "text (for trigram)",
         "version": "bigint", "indexed_at": "timestamptz",
         "offers": "jsonb? (the product's offers as search_offers stores them, kept in step by the repository; the MongoDB engine reads them here instead of joining search_offers on every query, docs/07-search-speed-plan.md)",
@@ -333,7 +333,7 @@
       "columns": { "offer_id": "uuid pk", "product_id": "uuid → search_documents", "variant_id": "uuid", "seller_id": "uuid?", "official": "bool", "condition": "text", "price": "bigint", "in_stock": "bool", "free_delivery": "bool", "dispatch_days": "int", "featured_eligible": "bool" },
       "indexes": ["(product_id)", "(seller_id, price)", "(condition, price)"]
     },
-    { "name": "suggestion_terms", "desc": "Popular queries, category, brand, store and product names for suggestions and spelling correction", "columns": { "id": "uuid pk", "term": "text", "kind": "text (query|category|brand|store|product)", "target_id": "uuid?", "weight": "numeric", "updated_at": "timestamptz" }, "indexes": ["gin(term gin_trgm_ops)", "(kind, weight desc)"] },
+    { "name": "suggestion_terms", "desc": "Popular queries, category, brand, store and product names for suggestions and spelling correction", "columns": { "id": "uuid pk", "term": "text", "kind": "text (query|category|brand|store|product)", "target_id": "uuid?", "weight": "numeric(12,6)", "updated_at": "timestamptz" }, "indexes": ["gin(term gin_trgm_ops)", "(kind, weight desc)"] },
     { "name": "synonyms", "columns": { "id": "uuid pk", "terms": "text[]", "kind": "text", "from_term": "text?", "active": "bool", "note": "text?", "updated_by": "text", "updated_at": "timestamptz" } },
     { "name": "recent_searches", "columns": { "id": "uuid pk", "owner_kind": "text (customer|guest)", "owner_id": "text", "query": "text", "filters": "jsonb", "searched_at": "timestamptz" }, "indexes": ["(owner_kind, owner_id, searched_at desc)"] },
     { "name": "query_log", "desc": "Every search (partitioned by month); feeds zero-result reports, suggestions and ranking", "columns": { "id": "uuid pk", "search_id": "text", "raw": "text?", "normalized": "text?", "filters": "jsonb", "sort": "text", "results": "int", "corrected_to": "text?", "session_key": "text?", "at": "timestamptz" }, "indexes": ["(normalized, at)", "(results, at) where results = 0"] },

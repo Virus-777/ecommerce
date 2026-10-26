@@ -343,7 +343,7 @@
     }
   },
   "tables": [
-    { "name": "carriers", "columns": { "id": "uuid pk", "code": "text unique", "name": "text", "account_label": "text?", "status": "text", "tracking_mode": "text", "credentials_ref": "text? (secret store key)", "contacts": "jsonb (CarrierContact[])", "last_event_at": "timestamptz?", "on_time_rate_30d": "numeric?" } },
+    { "name": "carriers", "columns": { "id": "uuid pk", "code": "text unique", "name": "text", "account_label": "text?", "status": "text", "tracking_mode": "text", "credentials_ref": "text? (secret store key)", "contacts": "jsonb (CarrierContact[])", "last_event_at": "timestamptz?", "on_time_rate_30d": "numeric(5,2)?" } },
     { "name": "carrier_services", "columns": { "id": "uuid pk", "carrier_id": "uuid → carriers", "code": "text", "name": "text", "transit_min": "int", "transit_max": "int", "enabled": "bool", "label_supported": "bool", "tracking_pattern": "text?" }, "indexes": ["unique (carrier_id, code)"] },
     { "name": "methods", "columns": { "id": "uuid pk", "code": "text unique", "name": "text", "customer_label": "text", "transit_min": "int", "transit_max": "int", "carrier_service_ids": "jsonb", "active": "bool", "position": "int" } },
     { "name": "zones", "columns": { "id": "uuid pk", "name": "text", "kind": "text", "regions": "jsonb", "postal_prefixes": "jsonb", "address_kinds": "jsonb", "transit_by_method": "jsonb", "status": "text", "customer_message": "text?" } },
