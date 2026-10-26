@@ -36,7 +36,8 @@
     "prod:bootstrap-owner": "node --enable-source-maps --env-file-if-exists=.env.production dist/tools/bootstrap-owner.js",
     "prod:staff-link": "node --enable-source-maps --env-file-if-exists=.env.production dist/tools/staff-link.js",
     "prod:keys": "node dist/tools/keys.js",
-    "prod:db-setup": "node --env-file-if-exists=.env.production dist/tools/db-setup.js"
+    "prod:db-setup": "node --env-file-if-exists=.env.production dist/tools/db-setup.js",
+    "check:ddl": "tsx tools/check-mysql-ddl.ts"
   },
   "dependencies": {
     "@fastify/compress": "^9.2.2",

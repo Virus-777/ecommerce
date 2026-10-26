@@ -717,6 +717,24 @@ Depth 9, cost 1,500, page size 100 and a 10 s timeout per field stay. The 10 s t
 - `tools/lib/tables.ts` (the parser) stays and learns the §17.1 notation.
 - Checks: index key length; reserved words (quoted); functional key parts; partial-unique translation; index redundancy; foreign-key indexes; view mergeability; table name collisions.
 
+**Applied to a real server, 2026-10-27.** `npm run check:ddl` generates the whole schema from the spec and creates it on a throwaway database, because a generated string can look perfect and still be refused. The result: **471 of 471 tables, 1,568 indexes, 329 foreign keys, 161 CHECK constraints and 10 append-only triggers, every statement accepted** by MySQL 8.4.13.
+
+It did not pass first time, and the seven things it caught are worth keeping, because none would have been found by reading:
+
+| Refused | Why, and what it changed |
+|---|---|
+| `access_role_assignments`, `notifications_template_versions` | A partial index carries its condition's columns, so `where status = 'active'` puts `status` in a key — but the generator only counted columns named in the index's own column list, so `status` stayed `TEXT`, which MySQL will not key without a prefix length. The condition's columns now count as indexed |
+| `reports_metric_suggestions`, `support_cases` | Same cause, different route: a **foreign key column** is indexed by MySQL itself, so a `text` FK source cannot stay `TEXT`. A reference now counts as indexed |
+| Nine foreign keys | The generator assumed every target keys on `id`. `access.permissions` and `access.approval_actions` key on `key`, `finance.recon_days` on `date`, `notifications.topics` on `key`. The key now follows the target's declared primary key, and a composite or surrogate target gets no single-column key and says so |
+| `catalog_brand_stats` | `pk (brand_id, category_id)` with a nullable `category_id`, where NULL means "all categories". MySQL refuses NULL in a PRIMARY KEY. It now takes the invisible surrogate of §5.3 as its primary key and the declared key becomes a UNIQUE with `COALESCE` on the nullable part — the "nulls not distinct" treatment of §6.1 — so the rollup row stays unique instead of unconstrained |
+| `media_usages` | `unique (asset_id, module, kind, ref_id)` came to 3,096 bytes, just past InnoDB's 3,072. §5.1's default of `VARCHAR(255)` for an indexed text column is too generous for a four-column key: `module`, `kind` and `ref_id` are now `varchar(32)`, `varchar(32)` and `varchar(64)` in the spec |
+| `search_search_documents` | A plain index over `category_path_ids`, an array column. MySQL indexes JSON only through a generated column or a multi-valued index, and which one depends on the query (§8.1), so the generator emits no key and says what the spec has to decide |
+| `wallet_gift_card_batches` | `where codes_ciphertext is not null` tried to put a BLOB in the key. A condition column MySQL cannot key is now left out, with a note naming Appendix A's answer — a generated `has_codes` flag, which Y2 adds with the query in front of it |
+
+Two translations that Appendix A describes were also missing entirely and are now in: an index column written `lower(col)` or `upper(col)` becomes a plain key on the column, because on MySQL the collation does the work — and the generator **refuses** it unless the column carries `ci`, since a key on the raw column with a case-sensitive collation would quietly stop treating `ABC` and `abc` as one value. An index column written `coalesce(col, 'sentinel')` keeps the COALESCE as a functional key part, with the spec's own sentinel rather than an empty string.
+
+`docs/api/db/<module>.sql` (40 files, 552 KB) is the readable output, each statement preceded by the decisions behind it — including every partial index whose column order Y2 should confirm with EXPLAIN.
+
 ### 17.3 Migrate (`npm run migrate`, and at start-up outside production)
 
 - `migrateMysql` reads `information_schema` (tables, columns, indexes, check constraints, foreign keys, views, triggers) and compares it with the spec's DDL. Unchanged modules are skipped by hash, as today.
