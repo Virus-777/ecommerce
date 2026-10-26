@@ -878,6 +878,27 @@ The backend supports **MySQL 8.0 from 8.0.36, 8.4 LTS and later releases** with 
 
 **Floor and start-up check.** At connect, the kernel reads `SELECT VERSION()` and refuses to start on anything older than 8.0.36, or on 8.0.29 (a release with known instant-ADD COLUMN bugs). The error message names the version found and the supported range. `npm run migrate` and `db-setup` run the same check.
 
+**Verified on a real server, 2026-10-27.** Before any kernel code was written, MySQL **8.4.13** was unzipped to `~/.cache/mysql` (D9) and every claim below was executed against it. All passed. What was proved, and why each one matters:
+
+| Checked | Result |
+|---|---|
+| The Appendix A partial unique key, `UNIQUE ((IF(cond, col, NULL)))` | Two rows inside the condition collide (1062); rows **outside** it are not compared at all. This is the cleverest single translation in the plan, and it behaves exactly as §6.1 claims |
+| A NULL key part is never compared | Two `payments_intents` rows with a NULL `purchase_module` coexist, while two live purchase intents on the same purchase collide. The Appendix A key added for it is correctly scoped |
+| `utf8mb4_0900_bin` / `as_ci` / `ai_ci` | `ABC = abc` is false under `bin` and true under `as_ci`; `as_ci` is accent-**sensitive** and `ai_ci` is not. §5.2's whole collation argument holds |
+| Duplicate key inside a transaction | Fails **only its own statement**: the two neighbouring inserts committed. This is what `insertIfAbsent` and `claim()` rest on (§25), and it is the opposite of MongoDB |
+| `FOR UPDATE SKIP LOCKED` | With one session holding job 1, a second session claimed job 2. The job queue of §12 works |
+| Multi-valued index on a JSON array | `MEMBER OF` matched, and `EXPLAIN` showed `key: mv_flags` — the index is **used**, not merely created (§8.1) |
+| Row alias `AS new` in `ON DUPLICATE KEY UPDATE` | A counter reached 8 from 5 + 3 (§10.4) |
+| `LAST_INSERT_ID(n + ?)` for an exact new value | Returned 2 after two increments — the ref-counter trick of §11.2 |
+| Invisible surrogate primary key | `SELECT *` returned only the spec's columns (§5.3) |
+| Enforced `CHECK` | Refused a value outside the enum list with 3819 (§6.1) |
+| `COALESCE` unique (nulls not distinct) | Two NULLs counted as equal and collided (§6.1) |
+| Descending index + `ROW_NUMBER` + CTE | Latest-per-key returned correctly (§7.3, §13.1) |
+| `FULLTEXT ... WITH PARSER ngram` | Matched `iPhone` inside a product title (§6.1) |
+| `DATETIME(3)` | Kept milliseconds (.144, .145, .146) (§5.1) |
+
+**One practical finding for §21 and MAINTAINING.md:** the Windows `mysql` client defaults to the console code page (cp850 on this machine), and a collation expression then fails with 1253, `COLLATION 'utf8mb4_0900_bin' is not valid for CHARACTER SET 'cp850'`. Every command-line invocation needs `--default-character-set=utf8mb4`: `db-setup`, the backup and restore scripts, and any ad-hoc SQL the maintainer runs. The driver sets it already (§10.2), so this is the command line only.
+
 **Features the plan relies on, and the version that added them** (all present in 8.0.36, 8.4 and later):
 
 | Feature | Since |
