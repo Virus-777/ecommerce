@@ -455,7 +455,7 @@ describe('account tools', () => {
     expect(detail.status).toBe(200);
     expect(detail.body).toMatchObject({ account: { id: c.accountId, email: c.email }, failedSignInsInWindow: 0, sellerContexts: [], invitation: null });
     expect(detail.body.devices).toHaveLength(1);
-    expect(detail.body.recentActivity.map((e: any) => e.kind)).toEqual(expect.arrayContaining(['signed_in', 'email_verified']));
+    expect(detail.body.recentActivity.map((e: any) => e.kind)).toEqual(expect.arrayContaining(['signed_in']));
     expect((await kit.call('GET', `${ADMIN}/accounts/01900000-0000-7000-8000-00000000ffff`, { token: staffToken() })).status).toBe(404);
   });
 });

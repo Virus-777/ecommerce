@@ -288,12 +288,9 @@ describe('guest sessions and order links', () => {
       token: v.accessToken,
       body: { email, password: STRONG, firstName: 'Cleo', lastName: 'Claim', marketingOptIn: false, acceptedTermsVersion: '2026-01', device: android() },
     });
-    expect(reg.status, JSON.stringify(reg.body)).toBe(202);
-    const code = kit.of('identity.verification.code_issued').filter((e) => e.challengeId === reg.body.id).at(-1).code as string;
-    const conf = await kit.call('POST', `${PUBLIC}/verifications/${reg.body.id}/confirm`, { token: v.accessToken, body: { code, device: android() } });
-    expect(conf.status, JSON.stringify(conf.body)).toBe(200);
-    const claimed = kit.of('identity.guest_session.claimed').filter((e) => e.accountId === conf.body.account.id);
-    expect(claimed).toEqual([{ guestSessionId: v.sessionId, accountId: conf.body.account.id }]);
+    expect(reg.status, JSON.stringify(reg.body)).toBe(201);
+    const claimed = kit.of('identity.guest_session.claimed').filter((e) => e.accountId === reg.body.account.id);
+    expect(claimed).toEqual([{ guestSessionId: v.sessionId, accountId: reg.body.account.id }]);
     for (const e of kit.of('identity.guest_session.claimed')) expect(e.guestSessionId).toEqual(expect.any(String));
   });
 });
@@ -301,7 +298,7 @@ describe('guest sessions and order links', () => {
 describe('in-process API', () => {
   it('looks accounts up', async () => {
     const c = await customer(kit);
-    expect(await identity.getAccount(c.accountId)).toMatchObject({ id: c.accountId, realm: 'member', status: 'active', emailVerified: true, twoStepEnabled: false });
+    expect(await identity.getAccount(c.accountId)).toMatchObject({ id: c.accountId, realm: 'member', status: 'active', emailVerified: false, twoStepEnabled: false });
     expect(await identity.getAccount(newId())).toBeNull();
     const many = await identity.getAccounts([c.accountId, newId(), 'not-a-uuid']);
     expect(many.map((a) => a.id)).toEqual([c.accountId]);
@@ -425,12 +422,10 @@ describe('jobs', () => {
       const api = k.app.kernel.boot.apis.get('identity') as IdentityPublicApi;
       const { invitation: inv } = await api.inviteStaff({ email: uniqueEmail('late'), name: 'Late Larry', invitedBy: { kind: 'staff', id: newId() } });
       const c = await customer(k);
-      const v = await visitor(k);
-      await k.call('POST', `${PUBLIC}/registrations`, {
-        token: v.accessToken,
-        body: { email: uniqueEmail('never'), password: STRONG, firstName: 'Nev', lastName: 'Er', marketingOptIn: false, acceptedTermsVersion: '1', device: web },
-      });
+      const never = await customer(k, { email: uniqueEmail('never') });
       const table = <T extends Parameters<typeof identityTable>[1]>(name: T) => identityTable(k.app, name);
+      // left pending_verification by the email code step this flow no longer has
+      await table('accounts').updateMany({ id: never.accountId }, { status: 'pending_verification' });
       expect(await table('accounts').count({ status: 'pending_verification' })).toBe(1);
 
       k.clock.advance(8 * 24 * 3600_000);
@@ -471,7 +466,7 @@ describe('GraphQL Customer.security', () => {
     const ctx = { area: 'admin', principal: null, requestId: 'r', permissions: new Map() } as unknown as GraphQLContext;
     const [ra, rb, none] = (await Promise.all([field({ userId: a.accountId }, {}, ctx, {} as never), field({ userId: b.accountId }, {}, ctx, {} as never), field({ userId: newId() }, {}, ctx, {} as never)])) as any[];
     expect(calls).toBe(1);
-    expect(ra).toMatchObject({ accountId: a.accountId, status: 'ACTIVE', email: a.email, emailVerified: true, signInSummary: 'Password only', twoStep: { enabled: false, required: false } });
+    expect(ra).toMatchObject({ accountId: a.accountId, status: 'ACTIVE', email: a.email, emailVerified: false, signInSummary: 'Password only', twoStep: { enabled: false, required: false } });
     expect(rb.accountId).toBe(b.accountId);
     expect(none).toBeNull();
     const activity = ra.recentActivity({ limit: 1 });

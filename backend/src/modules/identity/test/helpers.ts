@@ -105,7 +105,7 @@ export const STRONG = 'Correct-Horse-42';
 let seq = 0;
 export const uniqueEmail = (prefix = 'user') => `${prefix}.${Date.now().toString(36)}${seq++}@example.com`;
 
-/** Registers and confirms a customer; returns the store tokens and the account id */
+/** Registers a customer (signed in by the registration itself); returns the store tokens and the account id */
 export async function customer(kit: TestKit, o: { email?: string; password?: string; device?: object } = {}) {
   const email = o.email ?? uniqueEmail();
   const v = await visitor(kit);
@@ -113,11 +113,8 @@ export async function customer(kit: TestKit, o: { email?: string; password?: str
     token: v.accessToken,
     body: { email, password: o.password ?? STRONG, firstName: 'Ana', lastName: 'Lopez', marketingOptIn: false, acceptedTermsVersion: '2026-01', device: o.device ?? android() },
   });
-  expect(reg.status, JSON.stringify(reg.body)).toBe(202);
-  const code = kit.of('identity.verification.code_issued').filter((e) => e.challengeId === reg.body.id).at(-1).code as string;
-  const conf = await kit.call('POST', `${PUBLIC}/verifications/${reg.body.id}/confirm`, { token: v.accessToken, body: { code, device: o.device ?? android() } });
-  expect(conf.status, JSON.stringify(conf.body)).toBe(200);
-  return { email, password: o.password ?? STRONG, accountId: conf.body.account.id as string, tokens: conf.body.tokens, visitor: v };
+  expect(reg.status, JSON.stringify(reg.body)).toBe(201);
+  return { email, password: o.password ?? STRONG, accountId: reg.body.account.id as string, tokens: reg.body.tokens, visitor: v };
 }
 
 /** Password sign-in with a fresh visitor token */

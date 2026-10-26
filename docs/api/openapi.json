@@ -63334,8 +63334,8 @@
         "tags": [
           "Public API · Identity"
         ],
-        "summary": "Create a customer account and send an email code",
-        "description": "Always answers 202 with a challenge so the form cannot be used to discover accounts: if the email already has an account, the email says so and offers sign-in and password reset, and the code will not verify. Password rules are checked live with GET /password-policy and again here.\n\n**Publishes:** `identity.user.registered`, `identity.verification.code_issued`\n\n**Screens:** auth/register, auth/guest-orders, store/confirmation",
+        "summary": "Create a customer account and sign in",
+        "description": "Creates the account and opens a store session in the same call: there is no email code step, and the email address is recorded unverified (emailVerified false). An email that already has an account is refused with EMAIL_IN_USE. A visitor session passed in is claimed, so the guest cart moves to the new account. Password rules are checked live with GET /password-policy and again here.\n\n**Publishes:** `identity.user.registered`, `identity.guest_session.claimed`, `identity.session.new_device`\n\n**Screens:** auth/register, auth/guest-orders, store/confirmation",
         "security": [
           {
             "bearer": []
@@ -63352,12 +63352,12 @@
           }
         },
         "responses": {
-          "202": {
+          "201": {
             "description": "Success",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/identity.VerificationChallenge"
+                  "$ref": "#/components/schemas/identity.RegistrationResult"
                 }
               }
             }
@@ -63392,6 +63392,16 @@
               }
             }
           },
+          "409": {
+            "description": "EMAIL_IN_USE: Another account in this realm uses that email.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "429": {
             "description": "RATE_LIMITED: Too many requests; retry after the Retry-After header (seconds, also in details.retryAfterSeconds).",
             "content": {
@@ -63413,7 +63423,8 @@
         ],
         "x-events": [
           "identity.user.registered",
-          "identity.verification.code_issued"
+          "identity.guest_session.claimed",
+          "identity.session.new_device"
         ],
         "x-phase": 1,
         "x-rate-limit": "registration"
@@ -63425,8 +63436,8 @@
         "tags": [
           "Public API · Identity"
         ],
-        "summary": "Confirm an email or phone code (registration, email change, phone change)",
-        "description": "Registration: activates the account and signs the customer in; guest orders placed with this email can then be attached (identity.user.verified, consumed by customers). Email change: switches the sign-in email and alerts the old address. Phone: marks the number verified (identity.user.verified with channel phone).\n\n**Publishes:** `identity.user.verified`, `identity.email.changed`\n\n**Screens:** auth/register, account/profile",
+        "summary": "Confirm an email change or phone code",
+        "description": "Email change: switches the sign-in email and alerts the old address. Phone: marks the number verified (identity.user.verified with channel phone). Registration issues no codes, so nothing is signed in here.\n\n**Publishes:** `identity.user.verified`, `identity.email.changed`\n\n**Screens:** account/profile",
         "security": [
           {
             "bearer": []
@@ -63529,7 +63540,6 @@
         "x-area": "public",
         "x-auth": "visitor",
         "x-screens": [
-          "auth/register",
           "account/profile"
         ],
         "x-events": [
@@ -63547,7 +63557,7 @@
           "Public API · Identity"
         ],
         "summary": "Send a new code",
-        "description": "**Publishes:** `identity.verification.code_issued`\n\n**Screens:** auth/register",
+        "description": "**Publishes:** `identity.verification.code_issued`\n\n**Screens:** account/profile",
         "security": [
           {
             "bearer": []
@@ -63640,7 +63650,7 @@
         "x-area": "public",
         "x-auth": "visitor",
         "x-screens": [
-          "auth/register"
+          "account/profile"
         ],
         "x-events": [
           "identity.verification.code_issued"
@@ -63656,7 +63666,7 @@
           "Public API · Identity"
         ],
         "summary": "Sign in with email and password",
-        "description": "Returns tokens, or a 2-step challenge, or (seller audience with several sellers) the list of sellers to choose from. Wrong passwords return INVALID_CREDENTIALS with details.attemptsLeft; at the limit the account locks for lockoutMinutes and ACCOUNT_LOCKED carries details.lockedUntil. Unknown emails get the same answer and timing. A guest session passed in is claimed (cart and recently viewed merge). A sign-in from a device not seen before publishes identity.session.new_device for the security alert.\n\n**Publishes:** `identity.session.new_device`, `identity.guest_session.claimed`, `identity.account.locked`\n\n**Screens:** auth/sign-in, store/checkout",
+        "description": "Returns tokens, or a 2-step challenge, or (seller audience with several sellers) the list of sellers to choose from. Wrong passwords return INVALID_CREDENTIALS with details.attemptsLeft; at the limit the account locks for lockoutMinutes and ACCOUNT_LOCKED carries details.lockedUntil. Unknown emails get the same answer and timing. An account left pending_verification by the old email code step is activated by a successful sign-in. A guest session passed in is claimed (cart and recently viewed merge). A sign-in from a device not seen before publishes identity.session.new_device for the security alert.\n\n**Publishes:** `identity.session.new_device`, `identity.guest_session.claimed`, `identity.account.locked`\n\n**Screens:** auth/sign-in, store/checkout",
         "security": [
           {
             "bearer": []
@@ -63704,7 +63714,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nACCOUNT_DISABLED: The account is disabled or closed.\nEMAIL_NOT_VERIFIED: Confirm the email first. details.challenge is a fresh VerificationChallenge.\nNO_SELLER_ACCESS: This account cannot act for that seller (or for any seller).",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nACCOUNT_DISABLED: The account is disabled or closed.\nNO_SELLER_ACCESS: This account cannot act for that seller (or for any seller).",
             "content": {
               "application/json": {
                 "schema": {
@@ -213519,6 +213529,13 @@
             "type": "string",
             "description": "Purchase terms / privacy version shown on the form (content module)"
           },
+          "keepSignedIn": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Long refresh token (30 days) instead of 24 hours for the session this call opens"
+          },
           "guestSessionId": {
             "type": [
               "string",
@@ -213538,6 +213555,22 @@
           "marketingOptIn",
           "acceptedTermsVersion",
           "device"
+        ]
+      },
+      "identity.RegistrationResult": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/identity.AccountSummary"
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/identity.SessionTokens",
+            "description": "Registration opens a store session right away"
+          }
+        },
+        "required": [
+          "account",
+          "tokens"
         ]
       },
       "identity.VerificationChallenge": {
@@ -213590,22 +213623,6 @@
           "code": {
             "type": "string",
             "description": "6 digits"
-          },
-          "keepSignedIn": {
-            "type": [
-              "boolean",
-              "null"
-            ]
-          },
-          "device": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/identity.DeviceInfo"
-              },
-              {
-                "type": "null"
-              }
-            ]
           }
         },
         "required": [
@@ -213620,17 +213637,6 @@
           },
           "account": {
             "$ref": "#/components/schemas/identity.AccountSummary"
-          },
-          "tokens": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/identity.SessionTokens"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Registration verification signs the customer in"
           }
         },
         "required": [

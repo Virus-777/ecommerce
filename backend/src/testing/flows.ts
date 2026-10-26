@@ -199,11 +199,8 @@ export function flows(app: FastifyInstance, _clock: { now(): Date; advance(ms: n
         token: v,
         body: { email, password: PASSWORD, firstName: 'Ana', lastName: 'Lopez', marketingOptIn: false, acceptedTermsVersion: '2026-01', device: device() },
       });
-      expect(reg.status, JSON.stringify(reg.body)).toBe(202);
-      const issued = events('identity.verification.code_issued').findLast((e) => e.challengeId === reg.body.id);
-      const conf = await call('POST', `/api/public/identity/verifications/${reg.body.id}/confirm`, { token: v, body: { code: issued.code, device: device() } });
-      expect(conf.status, JSON.stringify(conf.body)).toBe(200);
-      return { accountId: conf.body.account.id, accessToken: conf.body.tokens.accessToken, email, password: PASSWORD };
+      expect(reg.status, JSON.stringify(reg.body)).toBe(201);
+      return { accountId: reg.body.account.id, accessToken: reg.body.tokens.accessToken, email, password: PASSWORD };
     },
     async signIn(body) {
       const v = await visitor(body.audience);
