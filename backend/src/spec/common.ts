@@ -193,6 +193,91 @@ export const Deadline: z.ZodType<Deadline> = z.object({
   state: z.enum(["on_time", "due_soon", "overdue"]),
 }).register(apiTypes, { id: "Deadline" });
 
+export interface StatSeriesPoint {
+  /** First day of the point (Monday for weeks, the 1st for months; never before the period's from) */
+  start: string;
+  /** "Oct 14", "Week of Oct 13", "Oct 2026" */
+  label: string;
+  /** Money in the point; zero where the department has no money of its own */
+  amount: Money;
+  /** A second series the screen draws beside the first (refunds, cancellations); absent when there is none */
+  secondary?: Money | null;
+  /** Records in the point (orders, purchases, requests) */
+  count: number;
+}
+
+export const StatSeriesPoint: z.ZodType<StatSeriesPoint> = z.object({
+  start: z.iso.date().describe("First day of the point (Monday for weeks, the 1st for months; never before the period's from)"),
+  label: z.string().describe("\"Oct 14\", \"Week of Oct 13\", \"Oct 2026\""),
+  get amount() {
+    return Money;
+  },
+  get secondary() {
+    return Money.nullish();
+  },
+  count: z.number().int().describe("Records in the point (orders, purchases, requests)"),
+}).register(apiTypes, { id: "StatSeriesPoint" });
+
+export interface StatShare {
+  /** The thing's id or a stable word, and `other` for the rest beyond the top rows */
+  key: string;
+  label: string;
+  amount: Money;
+  /** Share of the period's total, one decimal */
+  sharePct: number;
+  /** Records behind the row */
+  count: number;
+  /** Items behind the row (machines, apps, dishes); 0 where the department counts none */
+  units: number;
+}
+
+export const StatShare: z.ZodType<StatShare> = z.object({
+  key: z.string().describe("The thing's id or a stable word, and `other` for the rest beyond the top rows"),
+  label: z.string(),
+  get amount() {
+    return Money;
+  },
+  sharePct: z.number().describe("Share of the period's total, one decimal"),
+  count: z.number().int().describe("Records behind the row"),
+  units: z.number().int().describe("Items behind the row (machines, apps, dishes); 0 where the department counts none"),
+}).register(apiTypes, { id: "StatShare" });
+
+export interface StatWeekday {
+  weekday: "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+  /** Mon … Sun */
+  label: string;
+  amount: Money;
+  count: number;
+}
+
+export const StatWeekday: z.ZodType<StatWeekday> = z.object({
+  weekday: z.enum(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]),
+  label: z.string().describe("Mon … Sun"),
+  get amount() {
+    return Money;
+  },
+  count: z.number().int(),
+}).register(apiTypes, { id: "StatWeekday" });
+
+export interface StatPrevious {
+  from: string;
+  to: string;
+  amount: Money;
+  count: number;
+  /** Change of the headline number in %, one decimal; null when the previous period had nothing to compare with */
+  changePct?: number | null;
+}
+
+export const StatPrevious: z.ZodType<StatPrevious> = z.object({
+  from: z.iso.date(),
+  to: z.iso.date(),
+  get amount() {
+    return Money;
+  },
+  count: z.number().int(),
+  changePct: z.number().describe("Change of the headline number in %, one decimal; null when the previous period had nothing to compare with").nullish(),
+}).register(apiTypes, { id: "StatPrevious" });
+
 export interface PageInfo {
   /** Cursor for the next batch; null on the last page */
   nextCursor?: string | null;

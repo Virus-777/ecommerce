@@ -132,6 +132,34 @@
       "dueAt": "datetime",
       "state": "enum(on_time|due_soon|overdue)"
     },
+    "StatSeriesPoint": {
+      "start": { "type": "date", "desc": "First day of the point (Monday for weeks, the 1st for months; never before the period's from)" },
+      "label": { "type": "string", "desc": "\"Oct 14\", \"Week of Oct 13\", \"Oct 2026\"" },
+      "amount": { "type": "Money", "desc": "Money in the point; zero where the department has no money of its own" },
+      "secondary": { "type": "Money?", "desc": "A second series the screen draws beside the first (refunds, cancellations); absent when there is none" },
+      "count": { "type": "int", "desc": "Records in the point (orders, purchases, requests)" }
+    },
+    "StatShare": {
+      "key": { "type": "string", "desc": "The thing's id or a stable word, and `other` for the rest beyond the top rows" },
+      "label": "string",
+      "amount": "Money",
+      "sharePct": { "type": "number", "desc": "Share of the period's total, one decimal" },
+      "count": { "type": "int", "desc": "Records behind the row" },
+      "units": { "type": "int", "desc": "Items behind the row (machines, apps, dishes); 0 where the department counts none" }
+    },
+    "StatWeekday": {
+      "weekday": "enum(mon|tue|wed|thu|fri|sat|sun)",
+      "label": { "type": "string", "desc": "Mon … Sun" },
+      "amount": "Money",
+      "count": "int"
+    },
+    "StatPrevious": {
+      "from": "date",
+      "to": "date",
+      "amount": "Money",
+      "count": "int",
+      "changePct": { "type": "number?", "desc": "Change of the headline number in %, one decimal; null when the previous period had nothing to compare with" }
+    },
     "PageInfo": {
       "nextCursor": { "type": "string?", "desc": "Cursor for the next batch; null on the last page" },
       "page": "int?",

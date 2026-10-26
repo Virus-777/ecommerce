@@ -1839,6 +1839,17 @@ export const FarmMachine: z.ZodType<FarmMachine> = z.object({
   },
 }).register(common.apiTypes, { id: "departments.FarmMachine" });
 
+export interface FarmMachineType {
+  typeId: string;
+  /** e.g. Tractors */
+  typeName: string;
+}
+
+export const FarmMachineType: z.ZodType<FarmMachineType> = z.object({
+  typeId: z.string(),
+  typeName: z.string().describe("e.g. Tractors"),
+}).register(common.apiTypes, { id: "departments.FarmMachineType" });
+
 export interface FarmMachineInput {
   productId: string;
   typeId: string;
@@ -1945,6 +1956,8 @@ export interface DepartmentsPublicApi {
   linkTargets(input: { kind: 'phone', q?: string, ids?: string[], slugs?: string[], limit?: number }): Promise<common.LinkTarget[]>;
   /** A picked farm machine with its attachments as product cards (prices and availability now), like GET /farm/machines/{productId}; NOT_FOUND when it isn't picked or the store no longer shows it. Farm orders price machines and attachments with it. Used by: farm. */
   getFarmMachine(productId: string): Promise<FarmMachine>;
+  /** The Farm machines department's type (id and name) for each picked machine, keyed by product id, for grouping farm orders by machine type. Products that are not picked any more, or whose type has been removed, are left out rather than failing, so old orders can still be counted. Used by: farm. */
+  farmMachineTypes(productIds: string[]): Promise<Record<string, FarmMachineType>>;
   /** The customer's blog reactions, replies, reports, saved posts, followed authors and reply likes; company inquiries; company and game reviews; Play center player ID, scores and prize coupons, for the personal data export. Reactions, replies, reports and inquiries are kept by account id, the rest by customers-module id (both ids are looked up everywhere) Used by: customers. */
   exportCustomerData(input: { customerId: string, accountId: string }): Promise<common.CustomerDataSection[]>;
 }
@@ -3716,7 +3729,7 @@ export const spec = defineModuleSpec({
   summary: "The app's department pages opened from the home Departments rail: the Phones (standalone phones staff add), Blogs (topics, staff authors, posts, reactions, replies and reports), the Companies directory (industries, company pages, inquiries) and the Play center (games and ranking tables). Staff manage all of it in Admin › Departments.",
   dependsOn: ["media"],
   optionalDeps: ["search","catalog","customers","audit","promotions"],
-  publicApi: ["linkTargets","getFarmMachine","exportCustomerData"],
+  publicApi: ["linkTargets","getFarmMachine","farmMachineTypes","exportCustomerData"],
   permissions: [
     {
       "key": "departments.view",

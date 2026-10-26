@@ -1118,6 +1118,177 @@ export const ReviewModeration: z.ZodType<ReviewModeration> = z.object({
   reason: z.string().nullish(),
 }).register(common.apiTypes, { id: "food.ReviewModeration" });
 
+export interface FoodStatOrderRef {
+  orderId: string;
+  ref: string;
+  restaurant: string;
+  placedAt?: string | null;
+  amount: common.Money;
+}
+
+export const FoodStatOrderRef: z.ZodType<FoodStatOrderRef> = z.object({
+  orderId: z.uuid(),
+  ref: z.string(),
+  restaurant: z.string(),
+  placedAt: z.iso.datetime({ offset: true }).nullish(),
+  get amount() {
+    return common.Money;
+  },
+}).register(common.apiTypes, { id: "food.FoodStatOrderRef" });
+
+export interface FoodStatDish {
+  itemId: string;
+  name: string;
+  image?: common.MediaRef | null;
+  restaurant: string;
+  units: number;
+  amount: common.Money;
+  lastOrderedAt?: string | null;
+}
+
+export const FoodStatDish: z.ZodType<FoodStatDish> = z.object({
+  itemId: z.uuid(),
+  name: z.string(),
+  get image() {
+    return common.MediaRef.nullish();
+  },
+  restaurant: z.string(),
+  units: z.number().int(),
+  get amount() {
+    return common.Money;
+  },
+  lastOrderedAt: z.iso.datetime({ offset: true }).nullish(),
+}).register(common.apiTypes, { id: "food.FoodStatDish" });
+
+export interface FoodStatHourBlock {
+  /** First hour of the four-hour block in market time: 0, 4, 8, 12, 16 or 20 */
+  hour: number;
+  /** e.g. 12 am, 4 pm */
+  label: string;
+  amount: common.Money;
+  count: number;
+}
+
+export const FoodStatHourBlock: z.ZodType<FoodStatHourBlock> = z.object({
+  hour: z.number().int().describe("First hour of the four-hour block in market time: 0, 4, 8, 12, 16 or 20"),
+  label: z.string().describe("e.g. 12 am, 4 pm"),
+  get amount() {
+    return common.Money;
+  },
+  count: z.number().int(),
+}).register(common.apiTypes, { id: "food.FoodStatHourBlock" });
+
+export interface FoodStatTotals {
+  /** What the card paid for orders that arrived: the dishes and the delivery fee */
+  spent: common.Money;
+  /** Delivery fees, included in spent */
+  delivery: common.Money;
+  /** The dishes alone, delivery fees left out */
+  dishesTotal: common.Money;
+  /** Orders cancelled or declined; never charged, not in spent */
+  notDelivered: common.Money;
+  /** Orders that arrived */
+  orders: number;
+  /** Items in those orders, quantities added up */
+  dishes: number;
+  restaurants: number;
+  averageOrder: common.Money;
+  /** Placed to delivered, one decimal; null until an order has been delivered */
+  averageDeliveryMinutes?: number | null;
+  /** Reviews the customer left in the period */
+  reviews: number;
+  /** Stars the customer gave, one decimal; null when they left none */
+  averageRating?: number | null;
+  largestOrder?: FoodStatOrderRef | null;
+}
+
+export const FoodStatTotals: z.ZodType<FoodStatTotals> = z.object({
+  get spent() {
+    return common.Money;
+  },
+  get delivery() {
+    return common.Money;
+  },
+  get dishesTotal() {
+    return common.Money;
+  },
+  get notDelivered() {
+    return common.Money;
+  },
+  orders: z.number().int().describe("Orders that arrived"),
+  dishes: z.number().int().describe("Items in those orders, quantities added up"),
+  restaurants: z.number().int(),
+  get averageOrder() {
+    return common.Money;
+  },
+  averageDeliveryMinutes: z.number().describe("Placed to delivered, one decimal; null until an order has been delivered").nullish(),
+  reviews: z.number().int().describe("Reviews the customer left in the period"),
+  averageRating: z.number().describe("Stars the customer gave, one decimal; null when they left none").nullish(),
+  get largestOrder() {
+    return FoodStatOrderRef.nullish();
+  },
+}).register(common.apiTypes, { id: "food.FoodStatTotals" });
+
+export interface FoodStatistics {
+  /** First market day covered (range all: the day of the first counted order, else today) */
+  from: string;
+  to: string;
+  /** Size of each series point: the grain asked for, else day up to 31 days, week up to 92, month beyond */
+  grain: "day" | "week" | "month";
+  currency: string;
+  totals: FoodStatTotals;
+  /** The same number of days just before from; null for range all */
+  previous?: common.StatPrevious | null;
+  /** Spent per point, with the not-delivered total as the second series; zeros included */
+  series: common.StatSeriesPoint[];
+  /** Restaurants by amount, at most 5 plus Other */
+  byRestaurant: common.StatShare[];
+  /** The restaurants' own menu sections (Pizzas, Ramen, Sides…) by amount of dishes, at most 5 plus Other. Sections belong to one restaurant each, so rows group by name — two restaurants' "Pizza" is one row — and a dish whose item has since been removed counts as Other */
+  byMenuSection: common.StatShare[];
+  /** The statuses the period's orders are in — delivered, on the way, cancelled, declined… — counted in orders; amount is what was spent, so only delivered rows carry money */
+  byStatus: common.StatShare[];
+  /** Monday to Sunday by the day orders were placed (market time zone) */
+  byWeekday: common.StatWeekday[];
+  /** Six four-hour blocks by the hour orders were placed (market time zone) */
+  byHour: FoodStatHourBlock[];
+  /** At most 5, by amount */
+  topDishes: FoodStatDish[];
+}
+
+export const FoodStatistics: z.ZodType<FoodStatistics> = z.object({
+  from: z.iso.date().describe("First market day covered (range all: the day of the first counted order, else today)"),
+  to: z.iso.date(),
+  grain: z.enum(["day", "week", "month"]).describe("Size of each series point: the grain asked for, else day up to 31 days, week up to 92, month beyond"),
+  currency: z.string(),
+  get totals() {
+    return FoodStatTotals;
+  },
+  get previous() {
+    return common.StatPrevious.nullish();
+  },
+  get series() {
+    return z.array(common.StatSeriesPoint);
+  },
+  get byRestaurant() {
+    return z.array(common.StatShare);
+  },
+  get byMenuSection() {
+    return z.array(common.StatShare);
+  },
+  get byStatus() {
+    return z.array(common.StatShare);
+  },
+  get byWeekday() {
+    return z.array(common.StatWeekday);
+  },
+  get byHour() {
+    return z.array(FoodStatHourBlock);
+  },
+  get topDishes() {
+    return z.array(FoodStatDish);
+  },
+}).register(common.apiTypes, { id: "food.FoodStatistics" });
+
 /* ------------------------------------------------------------------ events */
 
 /** food.order.status_changed: A food order is placed or moves (accepted, preparing, on the way, delivered, cancelled, declined, payment failed) */
@@ -1672,6 +1843,27 @@ export const endpoints = defineEndpoints({
     status: 200,
     errors: ["NOT_FOUND","ILLEGAL_TRANSITION","ALREADY_REVIEWED"],
     screens: ["store/food-order"],
+    phase: 2,
+  },
+  getMyStatistics: {
+    area: "store",
+    method: "GET",
+    path: "/statistics",
+    auth: "customer",
+    scope: "own-customer",
+    summary: "What the customer spent on food delivery in a period: totals, trend and breakdowns",
+    desc: "Orders count by the day and hour they were placed (market time zone). The card is charged on delivery, so spent counts delivered orders — dishes and delivery fee together; orders cancelled by the customer or declined by the restaurant are never charged and counted apart as notDelivered, and one still on its way counts in neither, but shows in byStatus. Orders still waiting for payment are left out. from/to (both or neither) replace range; at most 3 years. Default range last_12_months.",
+    query: () =>
+      z.object({
+        range: z.enum(["last_30_days", "last_3_months", "last_6_months", "last_12_months", "this_year", "last_year", "all"]).optional(),
+        from: z.iso.date().optional(),
+        to: z.iso.date().optional(),
+        grain: z.enum(["day", "week", "month"]).optional(),
+      }),
+    response: () => FoodStatistics,
+    status: 200,
+    errors: ["VALIDATION_FAILED"],
+    screens: ["account/statistics"],
     phase: 2,
   },
   listCategoriesAdmin: {

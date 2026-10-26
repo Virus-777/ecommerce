@@ -40,6 +40,12 @@
       "usedBy": ["farm"]
     },
     {
+      "name": "farmMachineTypes",
+      "signature": "(productIds: uuid[]) => map<FarmMachineType>",
+      "desc": "The Farm machines department's type (id and name) for each picked machine, keyed by product id, for grouping farm orders by machine type. Products that are not picked any more, or whose type has been removed, are left out rather than failing, so old orders can still be counted.",
+      "usedBy": ["farm"]
+    },
+    {
       "name": "exportCustomerData",
       "signature": "(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]",
       "desc": "The customer's blog reactions, replies, reports, saved posts, followed authors and reply likes; company inquiries; company and game reviews; Play center player ID, scores and prize coupons, for the personal data export. Reactions, replies, reports and inquiries are kept by account id, the rest by customers-module id (both ids are looked up everywhere)",
@@ -1169,6 +1175,13 @@
       "attachments": {
         "type": "search.ProductCard[]",
         "desc": "Attachments to add with the machine (catalog products)"
+      }
+    },
+    "FarmMachineType": {
+      "typeId": "string",
+      "typeName": {
+        "type": "string",
+        "desc": "e.g. Tractors"
       }
     },
     "FarmMachineInput": {

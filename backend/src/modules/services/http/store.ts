@@ -58,6 +58,8 @@ export const storeRoutes = (service: ServicesService) =>
     cancelMyRequest: async ({ params, body, scope, actor, requestId }) => service.cancelMyRequest(customerOf(scope), params.id, body ?? {}, { actor, requestId }),
     /** POST /requests/{id}/review: Rate a completed request */
     reviewMyRequest: async ({ params, body, scope, actor, requestId }) => service.reviewMyRequest(customerOf(scope), params.id, body, { actor, requestId }),
+    /** GET /statistics: The customer's service requests in a period (one area with area=, else every area) */
+    getMyStatistics: async ({ query, scope }) => service.statisticsFor(customerOf(scope), query),
     /** GET /devices: My registered devices, newest first */
     listMyDevices: async ({ scope }) => service.listMyDevices(ownerOf(scope)),
     /** POST /devices: Register a device for post-sale cover */

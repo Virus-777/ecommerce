@@ -38,4 +38,6 @@ export const storeRoutes = (service: FarmService) =>
     retryOrderPayment: async ({ params, body, scope, principal, idempotencyKey, actor, requestId }) => service.retryOrderPayment(customerOf(scope, principal), params.id, body, idempotencyKey!, { actor, requestId }),
     /** POST /orders/{id}/cancel: Cancel an order the dealer hasn't confirmed */
     cancelOrder: async ({ params, body, scope, principal, actor, requestId }) => service.cancelOrder(customerOf(scope, principal), params.id, body ?? {}, { actor, requestId }),
+    /** GET /statistics: What the customer spent on farm machines in a period */
+    getMyStatistics: async ({ query, scope, principal }) => service.statisticsFor(customerOf(scope, principal), query),
   });

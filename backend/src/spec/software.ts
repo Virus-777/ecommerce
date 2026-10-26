@@ -1127,6 +1127,152 @@ export const ReissueLicenceInput: z.ZodType<ReissueLicenceInput> = z.object({
   reason: z.string().describe("Why the key is replaced, e.g. the customer's key leaked; kept in the action history"),
 }).register(common.apiTypes, { id: "software.ReissueLicenceInput" });
 
+export interface SoftwareStatPurchaseRef {
+  purchaseId: string;
+  ref: string;
+  /** The app or pack name */
+  title: string;
+  paidAt?: string | null;
+  amount: common.Money;
+}
+
+export const SoftwareStatPurchaseRef: z.ZodType<SoftwareStatPurchaseRef> = z.object({
+  purchaseId: z.uuid(),
+  ref: z.string(),
+  title: z.string().describe("The app or pack name"),
+  paidAt: z.iso.datetime({ offset: true }).nullish(),
+  get amount() {
+    return common.Money;
+  },
+}).register(common.apiTypes, { id: "software.SoftwareStatPurchaseRef" });
+
+export interface SoftwareStatApp {
+  /** Null for a pack row, which has no single app */
+  appId?: string | null;
+  slug?: string | null;
+  title: string;
+  icon?: common.MediaRef | null;
+  company?: string | null;
+  /** Apps the purchase added: 1 for an app, the pack's size for a pack */
+  apps: number;
+  amount: common.Money;
+  boughtAt?: string | null;
+}
+
+export const SoftwareStatApp: z.ZodType<SoftwareStatApp> = z.object({
+  appId: z.uuid().describe("Null for a pack row, which has no single app").nullish(),
+  slug: z.string().nullish(),
+  title: z.string(),
+  get icon() {
+    return common.MediaRef.nullish();
+  },
+  company: z.string().nullish(),
+  apps: z.number().int().describe("Apps the purchase added: 1 for an app, the pack's size for a pack"),
+  get amount() {
+    return common.Money;
+  },
+  boughtAt: z.iso.datetime({ offset: true }).nullish(),
+}).register(common.apiTypes, { id: "software.SoftwareStatApp" });
+
+export interface SoftwareStatTotals {
+  /** What the card was charged for apps and packs that went through */
+  paid: common.Money;
+  /** Purchases that failed or were cancelled (never charged, not in paid) */
+  notPaid: common.Money;
+  purchases: number;
+  /** Apps added to the library in the period, however they were added */
+  appsAdded: number;
+  paidApps: number;
+  freeApps: number;
+  packs: number;
+  /** Keys issued for the paid apps added in the period */
+  licenceKeys: number;
+  /** Reviews the customer left in the period */
+  reviews: number;
+  /** Stars the customer gave, one decimal; null when they left none */
+  averageRating?: number | null;
+  averagePurchase: common.Money;
+  largestPurchase?: SoftwareStatPurchaseRef | null;
+}
+
+export const SoftwareStatTotals: z.ZodType<SoftwareStatTotals> = z.object({
+  get paid() {
+    return common.Money;
+  },
+  get notPaid() {
+    return common.Money;
+  },
+  purchases: z.number().int(),
+  appsAdded: z.number().int().describe("Apps added to the library in the period, however they were added"),
+  paidApps: z.number().int(),
+  freeApps: z.number().int(),
+  packs: z.number().int(),
+  licenceKeys: z.number().int().describe("Keys issued for the paid apps added in the period"),
+  reviews: z.number().int().describe("Reviews the customer left in the period"),
+  averageRating: z.number().describe("Stars the customer gave, one decimal; null when they left none").nullish(),
+  get averagePurchase() {
+    return common.Money;
+  },
+  get largestPurchase() {
+    return SoftwareStatPurchaseRef.nullish();
+  },
+}).register(common.apiTypes, { id: "software.SoftwareStatTotals" });
+
+export interface SoftwareStatistics {
+  /** First market day covered (range all: the day of the first counted purchase or library addition, else today) */
+  from: string;
+  to: string;
+  /** Size of each series point: the grain asked for, else day up to 31 days, week up to 92, month beyond */
+  grain: "day" | "week" | "month";
+  currency: string;
+  totals: SoftwareStatTotals;
+  /** The same number of days just before from; null for range all */
+  previous?: common.StatPrevious | null;
+  /** Paid per point, count = purchases; zeros included */
+  series: common.StatSeriesPoint[];
+  /** App categories by amount, at most 5 plus Other; a pack counts under the categories of its apps, split by their share of the pack price */
+  byCategory: common.StatShare[];
+  /** Companies by amount, at most 5 plus Other; a pack is split like byCategory */
+  byCompany: common.StatShare[];
+  /** How apps reached the library — free, purchase, pack, staff — counted in apps, not money */
+  bySource: common.StatShare[];
+  /** Monday to Sunday by the day the payment went through (market time zone) */
+  byWeekday: common.StatWeekday[];
+  /** At most 5, by amount; a pack is one row */
+  topApps: SoftwareStatApp[];
+}
+
+export const SoftwareStatistics: z.ZodType<SoftwareStatistics> = z.object({
+  from: z.iso.date().describe("First market day covered (range all: the day of the first counted purchase or library addition, else today)"),
+  to: z.iso.date(),
+  grain: z.enum(["day", "week", "month"]).describe("Size of each series point: the grain asked for, else day up to 31 days, week up to 92, month beyond"),
+  currency: z.string(),
+  get totals() {
+    return SoftwareStatTotals;
+  },
+  get previous() {
+    return common.StatPrevious.nullish();
+  },
+  get series() {
+    return z.array(common.StatSeriesPoint);
+  },
+  get byCategory() {
+    return z.array(common.StatShare);
+  },
+  get byCompany() {
+    return z.array(common.StatShare);
+  },
+  get bySource() {
+    return z.array(common.StatShare);
+  },
+  get byWeekday() {
+    return z.array(common.StatWeekday);
+  },
+  get topApps() {
+    return z.array(SoftwareStatApp);
+  },
+}).register(common.apiTypes, { id: "software.SoftwareStatistics" });
+
 /* ------------------------------------------------------------------ events */
 
 /** software.purchase.paid: A purchase is paid and its apps are owned */
@@ -1606,6 +1752,27 @@ export const endpoints = defineEndpoints({
     response: () => LibraryApp,
     status: 200,
     screens: ["store/software-library"],
+    phase: 2,
+  },
+  getMyStatistics: {
+    area: "store",
+    method: "GET",
+    path: "/statistics",
+    auth: "customer",
+    scope: "own-customer",
+    summary: "What the customer paid for software in a period: totals, trend and breakdowns",
+    desc: "Money comes from purchases, counted on the day the payment went through; app counts come from the library, counted on the day each app was added. Purchases still waiting for payment are left out, and ones that failed or were cancelled are counted apart. A pack counts once at its price, adds every app in it to the library, and is split across its apps' categories and companies by their share of the pack price. from/to (both or neither) replace range; at most 3 years. Default range last_12_months.",
+    query: () =>
+      z.object({
+        range: z.enum(["last_30_days", "last_3_months", "last_6_months", "last_12_months", "this_year", "last_year", "all"]).optional(),
+        from: z.iso.date().optional(),
+        to: z.iso.date().optional(),
+        grain: z.enum(["day", "week", "month"]).optional(),
+      }),
+    response: () => SoftwareStatistics,
+    status: 200,
+    errors: ["VALIDATION_FAILED"],
+    screens: ["account/statistics"],
     phase: 2,
   },
   listCategoriesAdmin: {

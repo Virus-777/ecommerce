@@ -144,7 +144,52 @@
       "purchaseId": "uuid?", "purchaseRef": { "type": "string?", "desc": "SW- reference of the purchase that granted it" }, "grantedBy": { "type": "string?", "desc": "Staff who gave it (source staff)" },
       "licenceKey": { "type": "string?", "desc": "Paid apps only" }, "licenceIssuedAt": "datetime?", "licenceReissues": { "type": "int", "desc": "Times staff replaced the key" }
     },
-    "ReissueLicenceInput": { "reason": { "type": "string", "desc": "Why the key is replaced, e.g. the customer's key leaked; kept in the action history" } }
+    "ReissueLicenceInput": { "reason": { "type": "string", "desc": "Why the key is replaced, e.g. the customer's key leaked; kept in the action history" } },
+    "SoftwareStatPurchaseRef": {
+      "purchaseId": "uuid",
+      "ref": "string",
+      "title": { "type": "string", "desc": "The app or pack name" },
+      "paidAt": "datetime?",
+      "amount": "Money"
+    },
+    "SoftwareStatApp": {
+      "appId": { "type": "uuid?", "desc": "Null for a pack row, which has no single app" },
+      "slug": "string?",
+      "title": "string",
+      "icon": "MediaRef?",
+      "company": "string?",
+      "apps": { "type": "int", "desc": "Apps the purchase added: 1 for an app, the pack's size for a pack" },
+      "amount": "Money",
+      "boughtAt": "datetime?"
+    },
+    "SoftwareStatTotals": {
+      "paid": { "type": "Money", "desc": "What the card was charged for apps and packs that went through" },
+      "notPaid": { "type": "Money", "desc": "Purchases that failed or were cancelled (never charged, not in paid)" },
+      "purchases": "int",
+      "appsAdded": { "type": "int", "desc": "Apps added to the library in the period, however they were added" },
+      "paidApps": "int",
+      "freeApps": "int",
+      "packs": "int",
+      "licenceKeys": { "type": "int", "desc": "Keys issued for the paid apps added in the period" },
+      "reviews": { "type": "int", "desc": "Reviews the customer left in the period" },
+      "averageRating": { "type": "number?", "desc": "Stars the customer gave, one decimal; null when they left none" },
+      "averagePurchase": "Money",
+      "largestPurchase": "SoftwareStatPurchaseRef?"
+    },
+    "SoftwareStatistics": {
+      "from": { "type": "date", "desc": "First market day covered (range all: the day of the first counted purchase or library addition, else today)" },
+      "to": "date",
+      "grain": { "type": "enum(day|week|month)", "desc": "Size of each series point: the grain asked for, else day up to 31 days, week up to 92, month beyond" },
+      "currency": "string",
+      "totals": "SoftwareStatTotals",
+      "previous": { "type": "StatPrevious?", "desc": "The same number of days just before from; null for range all" },
+      "series": { "type": "StatSeriesPoint[]", "desc": "Paid per point, count = purchases; zeros included" },
+      "byCategory": { "type": "StatShare[]", "desc": "App categories by amount, at most 5 plus Other; a pack counts under the categories of its apps, split by their share of the pack price" },
+      "byCompany": { "type": "StatShare[]", "desc": "Companies by amount, at most 5 plus Other; a pack is split like byCategory" },
+      "bySource": { "type": "StatShare[]", "desc": "How apps reached the library — free, purchase, pack, staff — counted in apps, not money" },
+      "byWeekday": { "type": "StatWeekday[]", "desc": "Monday to Sunday by the day the payment went through (market time zone)" },
+      "topApps": { "type": "SoftwareStatApp[]", "desc": "At most 5, by amount; a pack is one row" }
+    }
   },
   "tables": [
     { "name": "categories", "columns": { "id": "uuid pk", "slug": "text unique", "name": "text", "icon": "text?", "position": "int", "visible": "bool", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(position)"] },
@@ -181,6 +226,7 @@
     { "id": "retryPurchase", "area": "store", "method": "POST", "path": "/purchases/{id}/retry", "summary": "Pay a failed purchase again", "auth": "customer", "params": { "id": "uuid" }, "body": "RetryPaymentInput", "response": "SoftwarePurchase", "idempotent": true, "errors": ["NOT_FOUND", "ILLEGAL_TRANSITION", "ALREADY_OWNED"], "screens": ["store/software-purchase"] },
     { "id": "listMyPurchases", "area": "store", "method": "GET", "path": "/purchases", "summary": "My software purchases, newest first", "auth": "customer", "paging": true, "response": "SoftwarePurchase", "screens": ["store/software-library"] },
     { "id": "listLibrary", "area": "store", "method": "GET", "path": "/library", "summary": "Apps I own, newest first", "auth": "customer", "paging": true, "response": "LibraryApp", "screens": ["store/software-library"] },
+    { "id": "getMyStatistics", "area": "store", "method": "GET", "path": "/statistics", "summary": "What the customer paid for software in a period: totals, trend and breakdowns", "desc": "Money comes from purchases, counted on the day the payment went through; app counts come from the library, counted on the day each app was added. Purchases still waiting for payment are left out, and ones that failed or were cancelled are counted apart. A pack counts once at its price, adds every app in it to the library, and is split across its apps' categories and companies by their share of the pack price. from/to (both or neither) replace range; at most 3 years. Default range last_12_months.", "auth": "customer", "query": { "range": "enum(last_30_days|last_3_months|last_6_months|last_12_months|this_year|last_year|all)?", "from": "date?", "to": "date?", "grain": "enum(day|week|month)?" }, "response": "SoftwareStatistics", "errors": ["VALIDATION_FAILED"], "screens": ["account/statistics"] },
 
     { "id": "listCategoriesAdmin", "area": "admin", "method": "GET", "path": "/categories", "summary": "All categories in order", "auth": "staff", "permission": "software.view", "response": "SoftwareCategory[]", "screens": ["admin/departments-software"] },
     { "id": "createCategory", "area": "admin", "method": "POST", "path": "/categories", "summary": "Add a category", "auth": "staff", "permission": "software.manage", "body": "SoftwareCategoryInput", "response": "SoftwareCategory", "status": 201, "errors": ["SLUG_TAKEN"], "audited": true, "screens": ["admin/departments-software"] },
