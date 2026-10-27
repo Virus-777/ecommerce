@@ -78,7 +78,7 @@ Owner decisions of 2026-10-22: **D1, D2, D5 and D9**. Owner decisions of 2026-10
 
 | # | Decision | Choice | Alternative and trade-off |
 |---|---|---|---|
-| D1 | Server version | **Decided: MySQL 8.0 or later.** Supported range: **8.0 from 8.0.36** (never 8.0.29), **8.4 LTS**, and later releases. The code, the DDL and the configuration use only what every version in the range accepts (§20.1); the start-up check refuses an older server. Note: Oracle's support for 8.0 ended in April 2026, so a new server should get 8.4 LTS (supported until 2032), unless it must match another 8.0 environment. Ubuntu 22.04 and 24.04 still ship and patch their own `mysql-server-8.0` package. | — |
+| D1 | Server version | **Decided: MySQL 8.0 or later.** Supported range: **8.0 from 8.0.36** (never 8.0.29), **8.4 LTS**, and later releases. The code, the DDL and the configuration use only what every version in the range accepts (§20.1); the start-up check refuses an older server. **The production server will run Ubuntu's own `mysql-server-8.0` package** (owner, 2026-10-27), which 22.04 and 24.04 still ship and patch past the April 2026 end of Oracle's own 8.0 support. So the 8.0 half of the range is not a precaution — it is the server — and the **8.0 test run of §19 is a real gate on Y1, not a formality**. Nothing in the code may use a feature newer than 8.0.36. | (not chosen) 8.4 LTS from Oracle's apt repository: supported until 2032 and would let the 8.0 half of the range be dropped, at the cost of a third-party repository on an offline server |
 | D2 | How ids are stored | **Decided: as readable text**, `CHAR(36) ascii_bin`. Readable in any SQL tool; GraphQL ids, cursors and logs stay exactly the same; no conversion code to get wrong | (not chosen) `BINARY(16)`: keys about 2× smaller, but every query must convert ids |
 | D3 | Query layer | **Decided (2026-10-24): mysql2 + Kysely**: typed SQL, generated table types, `forUpdate()`, `skipLocked()`, `onDuplicateKeyUpdate()`. The codebase used Kysely before (PostgreSQL). | Raw mysql2 strings: fewer layers, no compiler help. Drizzle/Prisma: an ORM model on top of the spec, two sources of truth. |
 | D4 | Foreign keys | **Decided (2026-10-23): on, inside each module** (ON DELETE RESTRICT; CASCADE only for pure child lists that the code already deletes with their parent). The spec can turn one off with `nofk` where the load test shows lock waits. | None: a little faster to write, but integrity rests on code alone (as on MongoDB). |
@@ -914,6 +914,21 @@ The same file works on 8.0, 8.4 LTS and later releases (D1). It contains no sett
 The backend supports **MySQL 8.0 from 8.0.36, 8.4 LTS and later releases** with one code base, one DDL and one configuration file. The rules below keep it that way.
 
 **Floor and start-up check.** At connect, the kernel reads `SELECT VERSION()` and refuses to start on anything older than 8.0.36, or on 8.0.29 (a release with known instant-ADD COLUMN bugs). The error message names the version found and the supported range. `npm run migrate` and `db-setup` run the same check.
+
+**What the code relies on, and when each arrived.** Every one is at or below the 8.0.36 floor, so Ubuntu's `mysql-server-8.0` has all of them:
+
+| Feature | Since | Used by |
+|---|---|---|
+| `CHECK` constraints enforced | 8.0.16 | the enum and range checks of §6.1 |
+| Functional key parts | 8.0.13 | the partial unique keys of Appendix A, `IF(cond, col, NULL)` |
+| Multi-valued indexes | 8.0.17 | the array columns of §8.1 |
+| `INSTANT` ADD COLUMN | 8.0.12 (never 8.0.29) | `migrateMysql` adding a column online (§17.3) |
+| `SELECT … FOR UPDATE SKIP LOCKED` | 8.0.1 | the job claim of §12 |
+| Row alias in `ON DUPLICATE KEY UPDATE` (`AS new`) | **8.0.19** | upsert, `increment`, counters, rate limits — the newest thing used anywhere |
+| `INVISIBLE` columns | 8.0.23 | the surrogate primary key of §5.3 |
+| `utf8mb4_0900_bin` / `as_ci` | 8.0.0 | §5.2 |
+
+The row alias is the one to watch: it is the newest feature in the code base and the floor exists mostly for it. The older `VALUES(col)` form it replaces is deprecated from 8.0.20, so there is no version in the supported range where both are wrong.
 
 **Verified on a real server, 2026-10-27.** Before any kernel code was written, MySQL **8.4.13** was unzipped to `~/.cache/mysql` (D9) and every claim below was executed against it. All passed. What was proved, and why each one matters:
 
