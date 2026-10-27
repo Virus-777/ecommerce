@@ -186,7 +186,8 @@ describe('brands', () => {
     t.app.kernel.events.publish('sellers', 'sellers.change_request.decided', { ...payload, changeRequestId: newId(), approved: false, brandRequest: { brandName: 'Nope' } });
     await t.app.kernel.events.drain();
     const list = (await a.admin('GET', '/brands?requested=true&q=lumen')).json();
-    expect(list.items).toHaveLength(1);
+    // names and ids, because this one failed once in a full run and "expected 1, got 2" says nothing about which brand the second one is
+    expect(list.items.map((b: { id: string; name: string }) => `${b.name} (${b.id})`)).toHaveLength(1);
     expect(list.items[0]).toMatchObject({ status: 'active', sellingPolicy: 'open', authorizedSellerIds: [], requestedBy: { sellerId, changeRequestId } });
     expect((await a.admin('GET', '/brands?q=nope')).json().items).toHaveLength(0);
   });

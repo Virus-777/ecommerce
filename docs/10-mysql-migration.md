@@ -821,6 +821,11 @@ Expected downtime: minutes, and bounded by `migrate` rather than by the size of 
   - where it looks: `MYSQLD_PATH`; `C:\Program Files\MySQL\MySQL Server <version>\bin` (8.0, 8.4 or later; the newest found wins); `/usr/sbin/mysqld`; or an unzipped "ZIP Archive" build under `~/.cache/mysql` (offline: copy the zip once). Pointing `MYSQLD_PATH` at another unzipped version is how the 8.0 and 8.4 test runs of §20.1 are made;
   - the same version floor as the server check (§20.1);
   - first run: `--initialize-insecure` in `.data/mysql-test` (tests) or `MYSQL_DATA_DIR` (development);
+  - **one data directory per server version**, inside the one the caller names. InnoDB will not open a data dictionary
+    a newer server wrote — `Cannot downgrade from 80413 to 80045. Downgrade is only permitted between patch releases`,
+    then `Failed to initialize DD Storage Engine` — so a directory shared between versions lets whichever ran first
+    start and the other one not at all. Found on 2026-10-28 by the first 8.0.45 run, in the directory 8.4.13 had
+    initialised: taking turns on one machine is exactly what §20.1 asks for, so the version belongs in the path;
   - it listens on `127.0.0.1:MYSQL_PORT` (default 3307, so it never collides with a service on 3306);
   - test server only: `innodb_flush_log_at_trx_commit=2`, `sync_binlog=0`, `skip-log-bin` for speed.
 
@@ -982,6 +987,25 @@ The generator's DDL check (§17.2) refuses the avoided items, so a spec change c
 **Upgrading later.** 8.0 → 8.4 is an in-place upgrade: stop the server, install the new package, start it (the server upgrades its data dictionary itself), then run `marketly check`. Take a backup before, and restore it once on a spare machine afterwards (§21.3). No code or spec change is needed. A move past 8.4 follows the same steps, after its release notes are checked against the table above.
 
 **Tested on both.** The kernel tests, the contract suite and the concurrency integration tests (§19) run on **8.0 and 8.4** before Y1 ends and again before the cutover. The full module suite runs on the version the server will use.
+
+**Done, 2026-10-28 — the gate D1 asks for is met.** MySQL **8.0.45** was unzipped beside 8.4.13 (`~/.cache/mysql`) and
+the whole suite run against it with `npm run test:mysql80`:
+
+| Run | Result |
+|---|---|
+| `kernel/**` on 8.0.45 | 371 of 371 |
+| whole suite on 8.0.45 | 9,954 of 9,956, 1 skipped; one failure, `catalog/taxonomy.test.ts` |
+| whole suite on 8.4.13 | 9,955 of 9,956, 1 skipped; no failures |
+
+Nothing in the kernel needed changing. The row alias of 8.0.19 is the newest thing it uses and 8.0.45 has every feature
+in the table above, so the two versions are not distinguishable by anything written so far.
+
+The two things the run did find were elsewhere. **The harness**: the versions shared one data directory, and InnoDB will
+not open a dictionary a newer server wrote, so 8.0.45 could not start at all until the data directory was keyed on the
+version (§19). **A module**: the one failing test touches no MySQL — it is the concurrent-delivery race now listed as open
+in Appendix C, which 8.0 only exposed by changing the timing of everything running beside it, and which passes alone and
+on 8.4. Worth saying plainly: the 8.0 run earned its keep by finding two real faults, neither of them a version
+difference.
 
 ---
 
@@ -1290,8 +1314,9 @@ Each fix makes the write safe without relying on MongoDB's write-conflict retry.
 | **Already safe** — struck | payments/intents (reads with `forUpdate` at `intents.ts:299`); inventory `incoming_expectations` (all four sites already pass `{ forUpdate: true }`); trust/extend (every caller goes through `core.write`, which locks the report); orders/placement (`core.write` → `lockAndLoad` locks the order) |
 | **Correct by design** — documented | fulfillment-service/inbound; warehouse/packing: the parent is locked and every writer of the children locks the parent first |
 | **Open** | purchasing/receipts.ts:192 writes `qtyReceived`/`qtyDamaged` from values computed before the lock. It is partly protected by a `curPo.status` compare-and-set that raises CONFLICT, so a concurrent receipt that does not move the status could still race. Left alone deliberately: the fix means restructuring how `afterLines` is built, which is more than a lock. Y2 does it with the module |
+| **Open** | `catalog/service/taxonomy.ts:439` (`brandFromChangeRequest`) decides "already handled" by reading `findBrandByChangeRequest` and then inserting, with nothing structural behind it. Two deliveries of the same `sellers.change_request.decided` add the brand twice — and `kernel/events` delivers concurrently (`#deliver`: `await setImmediate()`, then every handler at once), so a re-delivery or a double approval is enough. Found on 2026-10-28, not by reading: the 8.0.45 run of the suite failed `taxonomy.test.ts` "adds an active brand once (idempotent)" with 2 rows, having passed alone and on 8.4. **This is a third case §11.2 rule 2 cannot see** — the handler opens no transaction. The fix is a unique key on `brands.requested_change_request_id` and an insert that catches the duplicate, which is also what makes it right on MySQL; it is a module change, so Y2 does it with catalog |
 
-Two lessons for the phases after this one. **The detector of §11.2 rule 2 would have found none of the three worst cases**, because they never opened a transaction. **And an appendix of file:line entries decays**: five entries were already fixed and one site was missing, inside two days. Re-read the code, do not trust the list.
+Two lessons for the phases after this one. **The detector of §11.2 rule 2 would have found none of the three worst cases**, because they never opened a transaction (the catalog brand case of 2026-10-28 is a fourth). **And an appendix of file:line entries decays**: five entries were already fixed and one site was missing, inside two days. Re-read the code, do not trust the list.
 
 Re-run on 2026-10-23 over the six Departments modules. They are mostly written in the locked style already — `rewards` reads its progress row with `forUpdate` before `count + 1`, and `departments.reactToBlogPost` locks the post before recomputing its counters — but two writers in `departments/service/blogs.ts` recount from the source rows and write the result **with no transaction at all**. They are the last two rows below. Note what they imply for §11.2 rule 2: the detector watches unlocked reads *inside* a transaction, so it will not catch a read-modify-write that never opens one. Those have to be found by reading the code, which is why this appendix is re-run whenever modules are added.
 

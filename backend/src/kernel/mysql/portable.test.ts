@@ -105,6 +105,30 @@ describe('starting one', () => {
     server = undefined;
   }, 180_000);
 
+  it('keeps each version in a data directory of its own', async () => {
+    // The two versions of §20.1 take turns on one machine, and InnoDB will not open a data dictionary a newer
+    // server wrote: 8.0.45 in the directory 8.4.13 had initialised answered "Cannot downgrade from 80413 to
+    // 80045" and refused to start. So the version has to be in the path, and the path the caller gives must not
+    // be a data directory itself.
+    const own = join(tmpdir(), 'marketly-portable-versions');
+    rmSync(own, { recursive: true, force: true });
+    const one = await startPortableMysql({ dataDir: own, port: 3398, forTests: true });
+    try {
+      const { createConnection } = await import('mysql2/promise');
+      const conn = await createConnection({ host: '127.0.0.1', port: 3398, user: 'root' });
+      const [rows] = await conn.query<any[]>('SELECT @@datadir d, VERSION() v');
+      await conn.end();
+      // what the server is actually using, not what we think we asked for
+      expect(one.version).toBe(parseVersion(rows[0].v)!.join('.'));
+      expect(rows[0].d, `the server is serving out of ${rows[0].d}`).toContain(one.version);
+      expect(existsSync(join(own, one.version, 'd', 'mysql'))).toBe(true);
+      expect(existsSync(join(own, 'd')), 'the directory the caller gave must stay a container').toBe(false);
+    } finally {
+      await one.stop();
+      rmSync(own, { recursive: true, force: true });
+    }
+  }, 180_000);
+
   it('reuses the data directory on a second start, without initialising again', async () => {
     server = await startPortableMysql({ dataDir, port: 3399, forTests: true });
     const { createConnection } = await import('mysql2/promise');

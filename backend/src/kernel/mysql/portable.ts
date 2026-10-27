@@ -1,7 +1,8 @@
 /**
  * A private `mysqld` for development without `MYSQL_URL` and for the test run (docs/10-mysql-migration.md §19, D9).
  * It is the MySQL counterpart of what mongodb-memory-server did: no installed service, no Windows service, nothing
- * to configure. The first run initialises a data directory; later runs reuse it.
+ * to configure. The first run initialises a data directory; later runs reuse it -- one directory per server version,
+ * because InnoDB will not open a data dictionary a newer server wrote.
  *
  * Where a server is looked for, in order:
  *   1. `MYSQLD_PATH`, when the owner points at one (this is also how the 8.0 and 8.4 test runs of §20.1 are made);
@@ -156,13 +157,20 @@ export async function startPortableMysql(o: PortableOptions): Promise<PortableMy
   }
   const basedir = basedirOf(mysqld);
   const port = o.port ?? Number(process.env.MYSQL_PORT ?? 3307);
-  const data = join(o.dataDir, 'd');
 
   const version = (await run(mysqld, ['--version'])).output;
-  checkVersion(version, mysqld);
+  const v = checkVersion(version, mysqld);
+
+  // One data directory per server version, inside the caller's. InnoDB refuses to open a data dictionary that a
+  // newer server wrote -- "Cannot downgrade from 80413 to 80045. Downgrade is only permitted between patch
+  // releases" -- so a directory shared between versions lets whichever ran first start and the other one not at
+  // all. Found on 2026-10-28 by the first 8.0.45 run of the suite, in the directory 8.4.13 had initialised: the
+  // whole point of §20.1 is to run on both, and they cannot take turns in one directory.
+  const home = join(o.dataDir, v.join('.'));
+  const data = join(home, 'd');
 
   if (!existsSync(join(data, 'mysql'))) {
-    mkdirSync(o.dataDir, { recursive: true });
+    mkdirSync(home, { recursive: true });
     const init = await run(mysqld, ['--initialize-insecure', `--basedir=${basedir}`, `--datadir=${data}`]);
     if (init.code !== 0) throw new Error(`mysqld --initialize-insecure failed (${init.code}):\n${init.output.slice(-2000)}`);
   }
@@ -172,8 +180,8 @@ export async function startPortableMysql(o: PortableOptions): Promise<PortableMy
     `--datadir=${data}`,
     `--port=${port}`,
     '--bind-address=127.0.0.1',
-    `--pid-file=${join(o.dataDir, 'mysqld.pid')}`,
-    `--log-error=${join(o.dataDir, 'error.log')}`,
+    `--pid-file=${join(home, 'mysqld.pid')}`,
+    `--log-error=${join(home, 'error.log')}`,
     '--mysqlx=0', // the X plugin would take another port (33060) for nothing
     '--character-set-server=utf8mb4',
     '--collation-server=utf8mb4_0900_bin',
@@ -204,7 +212,7 @@ export async function startPortableMysql(o: PortableOptions): Promise<PortableMy
       break;
     } catch (err) {
       lastError = err;
-      if (child.exitCode !== null) throw new Error(`mysqld exited with ${child.exitCode}; see ${join(o.dataDir, 'error.log')}`);
+      if (child.exitCode !== null) throw new Error(`mysqld exited with ${child.exitCode}; see ${join(home, 'error.log')}`);
       await new Promise((r) => setTimeout(r, 250));
     }
   }
@@ -216,7 +224,7 @@ export async function startPortableMysql(o: PortableOptions): Promise<PortableMy
   return {
     url,
     port,
-    version: (parseVersion(version) ?? []).join('.'),
+    version: v.join('.'),
     /**
      * Stops the server and does not answer until the process has gone.
      *
