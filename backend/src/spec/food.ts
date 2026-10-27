@@ -1314,6 +1314,8 @@ export const FoodOrderStatusChangedEvent: z.ZodType<FoodOrderStatusChangedEvent>
 
 /** What other modules may call in-process: `ctx.use('food')` (or `ctx.tryUse` for an optional dependency). */
 export interface FoodPublicApi {
+  /** Integrated search: listed restaurants, their menu items and visible food categories that match the typed text, as ranked hits with their store paths. Used by: search. */
+  searchFood(input: common.DeptSearchRequest): Promise<common.DeptSearchResult>;
   /** Link targets for ad destination pickers (search by q, or resolve ids or URL slugs): restaurants (/food/restaurants/{slug}; available when published), each with its store path the app opens, a label, a short meta line, an image and whether it is shown in the store. Unknown ids are left out. Used by: advertising. */
   linkTargets(input: { kind: 'restaurant', q?: string, ids?: string[], slugs?: string[], limit?: number }): Promise<common.LinkTarget[]>;
   /** The customer's food orders (reference, restaurant, items, amounts, address, status, dates), reviews and saved restaurants for the personal data export Used by: customers. */
@@ -2279,7 +2281,7 @@ export const spec = defineModuleSpec({
   summary: "The app's Food delivery department: restaurants staff keep in Admin › Departments › Food delivery, their menus with sizes and extras, a basket that holds one restaurant's food, and food orders paid by card in their own payment flow (payments purchase intents, not cart and checkout). Staff move each order through accepted, preparing, on the way and delivered on the restaurant's behalf; the card is charged on delivery.",
   dependsOn: ["media","payments","customers"],
   optionalDeps: ["audit","notifications"],
-  publicApi: ["linkTargets","exportCustomerData"],
+  publicApi: ["searchFood","linkTargets","exportCustomerData"],
   permissions: [
     {
       "key": "food.view",

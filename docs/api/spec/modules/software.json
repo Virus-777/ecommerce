@@ -22,6 +22,7 @@
   "dependsOn": ["media", "payments"],
   "optionalDeps": ["customers", "audit", "notifications"],
   "publicApi": [
+    { "name": "searchSoftware", "signature": "(input: DeptSearchRequest) => DeptSearchResult", "desc": "Integrated search: published apps, packs and visible categories that match the typed text, as ranked hits with their store paths.", "usedBy": ["search"] },
     { "name": "exportCustomerData", "signature": "(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]", "desc": "The customer's software purchases (reference, apps, amount, status, dates), owned apps and reviews for the personal data export", "usedBy": ["customers"] }
   ],
   "types": {

@@ -129032,6 +129032,219 @@
         "x-phase": 1
       }
     },
+    "/api/store/search/departments": {
+      "get": {
+        "operationId": "search.searchDepartmentsAll",
+        "tags": [
+          "Store API · Search"
+        ],
+        "summary": "The same query answered by every department: one section per department with matches",
+        "description": "Asks each department module in parallel and ranks the sections against each other (best hit first, then the number of matches, then the home rail's order). A department that is off, not built yet or too slow is left out and partial is true. Departments the query names but that have no matching record come back as shortcuts.\n\n**Screens:** store/search",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "Hits per group, default departmentSectionLimit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/search.DepartmentResults"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "search",
+        "x-area": "store",
+        "x-auth": "visitor",
+        "x-screens": [
+          "store/search"
+        ],
+        "x-phase": 1
+      }
+    },
+    "/api/store/search/departments/{key}": {
+      "get": {
+        "operationId": "search.searchDepartmentScope",
+        "tags": [
+          "Store API · Search"
+        ],
+        "summary": "One department's results for the query, paged group by group",
+        "description": "The scoped list behind a department's chip. Each group pages on its own: send kind and that group's cursor. NOT_FOUND when the key is not a department or its module is off.\n\n**Screens:** store/search",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Page this group only"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "Hits per group, default departmentScopeLimit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/search.DepartmentSection"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "search",
+        "x-area": "store",
+        "x-auth": "visitor",
+        "x-screens": [
+          "store/search"
+        ],
+        "x-phase": 1
+      }
+    },
     "/api/store/search/popular-searches": {
       "get": {
         "operationId": "search.listPopularSearches",
@@ -181525,6 +181738,203 @@
   },
   "components": {
     "schemas": {
+      "DeptSearchRequest": {
+        "type": "object",
+        "properties": {
+          "q": {
+            "type": "string",
+            "description": "What the customer typed, trimmed; never empty"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Hits per group at most"
+          },
+          "kinds": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Answer only for these kinds; a scoped list pages one kind"
+          },
+          "cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor of the one kind being paged (from that group's nextCursor)"
+          },
+          "customerId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The signed-in customer: owned, saved and customer-only records"
+          },
+          "sections": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Answer only for these sections; the departments and services modules answer for several"
+          }
+        },
+        "required": [
+          "q",
+          "limit"
+        ]
+      },
+      "DeptSearchHit": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "description": "What the record is: restaurant, dish, app, phone, post, company, game, …"
+          },
+          "title": {
+            "type": "string"
+          },
+          "meta": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The grey line under the title, e.g. 'Pizza · Italian · ★ 4.7 (1,204)'"
+          },
+          "sub": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A second grey line, shown only in a scoped list, e.g. 'Open until 11 PM · 1.2 mi'"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MediaRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "badge": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Short mark on the row, e.g. Verified, Free delivery, −15%"
+          },
+          "badgeTone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "brand",
+              "deal",
+              "info",
+              "neutral"
+            ]
+          },
+          "priceLabel": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Right side of the row: $12.00, Free, 150 points, ★ 4.6"
+          },
+          "wasLabel": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Struck-through price under priceLabel"
+          },
+          "path": {
+            "type": "string",
+            "description": "Store path the app opens, e.g. /food/restaurants/napoli-pizza"
+          },
+          "score": {
+            "type": "integer",
+            "description": "0–100 match strength, so sections of different departments can be ranked together"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "title",
+          "path",
+          "score"
+        ]
+      },
+      "DeptSearchGroup": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "The kind every hit of this group has"
+          },
+          "title": {
+            "type": "string",
+            "description": "Heading of the group, e.g. Restaurants, Dishes, Apps, Posts"
+          },
+          "area": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "services only: os_install | post_sale | welfare | booking, so search knows which section the group belongs to"
+          },
+          "total": {
+            "type": "integer",
+            "description": "Matching records of this kind, also when only a few are sent"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeptSearchHit"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "More of this group; null when the last hit was sent"
+          }
+        },
+        "required": [
+          "kind",
+          "title",
+          "total",
+          "items"
+        ]
+      },
+      "DeptSearchResult": {
+        "type": "object",
+        "properties": {
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeptSearchGroup"
+            },
+            "description": "Only groups with at least one hit, the module's own order"
+          }
+        },
+        "required": [
+          "groups"
+        ]
+      },
       "Money": {
         "type": "object",
         "properties": {
@@ -245228,6 +245638,156 @@
           "query"
         ]
       },
+      "search.DepartmentSection": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "enum": [
+              "phones",
+              "farm",
+              "software",
+              "welfare",
+              "booking",
+              "food",
+              "blogs",
+              "companies",
+              "play",
+              "rewards"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "description": "The department's name as the home rail shows it, e.g. Food delivery"
+          },
+          "icon": {
+            "type": "string",
+            "description": "Lucide icon name, the rail's icon for this department"
+          },
+          "path": {
+            "type": "string",
+            "description": "The department's own screen, e.g. /food (the 'Open department' link)"
+          },
+          "total": {
+            "type": "integer",
+            "description": "Matching records in every group of this section"
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeptSearchGroup"
+            }
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "icon",
+          "path",
+          "total",
+          "groups"
+        ]
+      },
+      "search.DepartmentShortcut": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "tagline": {
+            "type": "string",
+            "description": "One line under the name, e.g. Order from restaurants near you"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "icon",
+          "path",
+          "tagline"
+        ]
+      },
+      "search.DepartmentSuggestGroup": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string",
+            "description": "The department's own screen"
+          },
+          "total": {
+            "type": "integer"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeptSearchHit"
+            }
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "icon",
+          "path",
+          "total",
+          "items"
+        ]
+      },
+      "search.DepartmentResults": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "total": {
+            "type": "integer",
+            "description": "Matching records in every section together"
+          },
+          "sections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/search.DepartmentSection"
+            },
+            "description": "Only departments with matches, best match first"
+          },
+          "shortcuts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/search.DepartmentShortcut"
+            },
+            "description": "Departments the query names that have no section of their own"
+          },
+          "partial": {
+            "type": "boolean",
+            "description": "A department could not answer in time or failed: its section is missing from this answer"
+          }
+        },
+        "required": [
+          "query",
+          "total",
+          "sections",
+          "shortcuts",
+          "partial"
+        ]
+      },
       "search.Suggestions": {
         "type": "object",
         "properties": {
@@ -245270,6 +245830,13 @@
               "$ref": "#/components/schemas/search.RecentSearch"
             },
             "description": "Only when a customer or guest session is present and recent searches are on"
+          },
+          "departments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/search.DepartmentSuggestGroup"
+            },
+            "description": "Matching records of each department, one group per department with matches (at most departmentSuggestLimit hits each)"
           }
         },
         "required": [
@@ -245279,7 +245846,8 @@
           "brands",
           "stores",
           "products",
-          "recent"
+          "recent",
+          "departments"
         ]
       },
       "search.RankingFactor": {

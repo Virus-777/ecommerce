@@ -1,6 +1,7 @@
 import { AppError, isAppError } from '../../kernel/errors/index.js';
 import type { EventPayload } from '../../kernel/events/index.js';
 import { dateInZone } from '../../kernel/lib/clock.js';
+import { groupFromList, line, scoreOf, wanted } from '../../kernel/lib/dept-search.js';
 import { isUuid, newId } from '../../kernel/lib/ids.js';
 import type { Page, PageRequest } from '../../kernel/lib/pagination.js';
 import type { ModuleContext } from '../../kernel/module-system/index.js';
@@ -535,6 +536,32 @@ export class RewardsService implements RewardsPublicApi {
   }
 
   /* ---------------------------------------------------------------- public API (in-process) */
+
+  /**
+   * Public API (search): rewards of the catalogue whose title or condition matches the typed text, as hits that
+   * open the Daily rewards department. With a customerId the points still missing for a reward are shown.
+   */
+  async searchRewards(input: common.DeptSearchRequest): Promise<common.DeptSearchResult> {
+    const q = input.q.trim();
+    if (!q || !wanted(input, 'reward')) return { groups: [] };
+    const rewards = await this.repo.listRewards({ visibleOnly: true });
+    const balance = input.customerId ? ((await this.repo.getAccount(input.customerId))?.balance ?? 0) : 0;
+    const group = groupFromList('reward', 'Rewards', rewards, input, (r) => ({
+      id: r.id,
+      kind: 'reward',
+      title: r.title,
+      meta: line(r.condition, input.customerId && r.cost > balance ? `${(r.cost - balance).toLocaleString('en-US')} points to go` : null),
+      sub: null,
+      image: null,
+      badge: r.stock !== null && r.stock <= 0 ? 'All taken' : null,
+      badgeTone: 'neutral' as const,
+      priceLabel: `${r.cost.toLocaleString('en-US')} points`,
+      wasLabel: null,
+      path: '/rewards',
+      score: scoreOf(q, r.title, [r.condition]),
+    }));
+    return { groups: group ? [group] : [] };
+  }
 
   /** The customer's points history, check-ins and redemptions for the personal data export */
   async exportCustomerData(input: { customerId: string; accountId: string }): Promise<common.CustomerDataSection[]> {

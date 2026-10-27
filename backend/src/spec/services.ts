@@ -1572,6 +1572,8 @@ export const ServicesDeviceRejectedEvent: z.ZodType<ServicesDeviceRejectedEvent>
 
 /** What other modules may call in-process: `ctx.use('services')` (or `ctx.tryUse` for an optional dependency). */
 export interface ServicesPublicApi {
+  /** Integrated search: published services, providers and categories that match the typed text, as ranked hits with their store paths. Each group carries its area (os_install and post_sale belong to the Phones section, welfare and booking to their own). Used by: search. */
+  searchServices(input: common.DeptSearchRequest): Promise<common.DeptSearchResult>;
   /** The customer's service requests and bookings (reference, service, provider, time, contact, details, device, status history), reviews, saved providers and registered devices (with the full IMEI) for the personal data export. Requests and reviews are found by the account id, saved providers and devices by the customers-module id (and the account id they fall back to). Staff notes are left out. Used by: customers. */
   exportCustomerData(input: { customerId: string, accountId: string }): Promise<common.CustomerDataSection[]>;
 }
@@ -2609,7 +2611,7 @@ export const spec = defineModuleSpec({
   summary: "Services customers request or book in the app's department pages: OS installs and post-sale repairs (Phones), welfare services and time-slot bookings. Staff keep the providers, their services and opening hours, and handle every request in Admin › Departments. No online payment at this phase: customers pay the provider.",
   dependsOn: ["media"],
   optionalDeps: ["customers","audit","notifications"],
-  publicApi: ["exportCustomerData"],
+  publicApi: ["searchServices","exportCustomerData"],
   permissions: [
     {
       "key": "services.view",

@@ -858,6 +858,7 @@ Indexes: `unique (app_id, customer_id)`, `(app_id, hidden, created_at)`
 
 | Function | Signature | Used by |
 |---|---|---|
+| searchSoftware | `(input: DeptSearchRequest) => DeptSearchResult`<br>Integrated search: published apps, packs and visible categories that match the typed text, as ranked hits with their store paths. | search |
 | exportCustomerData | `(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]`<br>The customer's software purchases (reference, apps, amount, status, dates), owned apps and reviews for the personal data export | customers |
 
 ## Permissions

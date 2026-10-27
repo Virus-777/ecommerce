@@ -430,8 +430,11 @@ export const testOpenSearchConfig = (o: Partial<OpenSearchConfig> = {}): OpenSea
   ...o,
 });
 
-/** `settings`: search setting overrides by key (e.g. { transitBusinessDays: 0 }); others keep their defaults */
-export async function boot(o: { settings?: Record<string, unknown>; engine?: Engine; fake?: FakeOpenSearch; opensearch?: Partial<OpenSearchConfig> } = {}): Promise<Kit> {
+/**
+ * `settings`: search setting overrides by key (e.g. { transitBusinessDays: 0 }); others keep their defaults.
+ * `stubs`: extra public APIs behind modules that are not booted (the department modules of the integrated search).
+ */
+export async function boot(o: { settings?: Record<string, unknown>; engine?: Engine; fake?: FakeOpenSearch; opensearch?: Partial<OpenSearchConfig>; stubs?: Record<string, unknown>; only?: string[] } = {}): Promise<Kit> {
   const world = new World();
   const clock = movingClock();
   const overrides = o.settings ?? {};
@@ -445,10 +448,10 @@ export async function boot(o: { settings?: Record<string, unknown>; engine?: Eng
   } else if (live) openSearchTesting.config = { engine: 'opensearch', opensearch: live };
   else openSearchTesting.config = { engine: 'mongo' };
   const app = await buildTestApp({
-    only: ['search', 'inventory', 'reviews', 'sellers', 'advertising', 'promotions', 'customers', 'orders', 'returns', 'audit'],
+    only: o.only ?? ['search', 'inventory', 'reviews', 'sellers', 'advertising', 'promotions', 'customers', 'orders', 'returns', 'audit'],
     clock,
     config: { rateLimits: false, launchPhase: 4 },
-    apiStubs: { ...(world.stubs() as object), ...(o.settings ? { settings: { get: async (key: string) => (key.startsWith('search.') ? (overrides[key.slice(7)] ?? null) : null) } } : {}) } as never,
+    apiStubs: { ...(world.stubs() as object), ...(o.stubs ?? {}), ...(o.settings ? { settings: { get: async (key: string) => (key.startsWith('search.') ? (overrides[key.slice(7)] ?? null) : null) } } : {}) } as never,
   }).finally(() => {
     delete openSearchTesting.config;
     delete openSearchTesting.clientOptions;

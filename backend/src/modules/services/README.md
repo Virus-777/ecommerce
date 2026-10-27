@@ -984,6 +984,7 @@ Indexes: `(customer_id, created_at)`, `(status, created_at)`, `(imei)`
 
 | Function | Signature | Used by |
 |---|---|---|
+| searchServices | `(input: DeptSearchRequest) => DeptSearchResult`<br>Integrated search: published services, providers and categories that match the typed text, as ranked hits with their store paths. Each group carries its area (os_install and post_sale belong to the Phones section, welfare and booking to their own). | search |
 | exportCustomerData | `(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]`<br>The customer's service requests and bookings (reference, service, provider, time, contact, details, device, status history), reviews, saved providers and registered devices (with the full IMEI) for the personal data export. Requests and reviews are found by the account id, saved providers and devices by the customers-module id (and the account id they fall back to). Staff notes are left out. | customers |
 
 ## Permissions

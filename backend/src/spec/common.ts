@@ -41,6 +41,106 @@ export const pageQuery = {
 export const DEFAULT_PAGE_LIMIT = 24;
 export const MAX_PAGE_LIMIT = 100;
 
+export interface DeptSearchRequest {
+  /** What the customer typed, trimmed; never empty */
+  q: string;
+  /** Hits per group at most */
+  limit: number;
+  /** Answer only for these kinds; a scoped list pages one kind */
+  kinds?: string[] | null;
+  /** Cursor of the one kind being paged (from that group's nextCursor) */
+  cursor?: string | null;
+  /** The signed-in customer: owned, saved and customer-only records */
+  customerId?: string | null;
+  /** Answer only for these sections; the departments and services modules answer for several */
+  sections?: string[] | null;
+}
+
+export const DeptSearchRequest: z.ZodType<DeptSearchRequest> = z.object({
+  q: z.string().describe("What the customer typed, trimmed; never empty"),
+  limit: z.number().int().describe("Hits per group at most"),
+  kinds: z.array(z.string()).describe("Answer only for these kinds; a scoped list pages one kind").nullish(),
+  cursor: z.string().describe("Cursor of the one kind being paged (from that group's nextCursor)").nullish(),
+  customerId: z.uuid().describe("The signed-in customer: owned, saved and customer-only records").nullish(),
+  sections: z.array(z.string()).describe("Answer only for these sections; the departments and services modules answer for several").nullish(),
+}).register(apiTypes, { id: "DeptSearchRequest" });
+
+export interface DeptSearchHit {
+  id: string;
+  /** What the record is: restaurant, dish, app, phone, post, company, game, … */
+  kind: string;
+  title: string;
+  /** The grey line under the title, e.g. 'Pizza · Italian · ★ 4.7 (1,204)' */
+  meta?: string | null;
+  /** A second grey line, shown only in a scoped list, e.g. 'Open until 11 PM · 1.2 mi' */
+  sub?: string | null;
+  image?: MediaRef | null;
+  /** Short mark on the row, e.g. Verified, Free delivery, −15% */
+  badge?: string | null;
+  badgeTone?: "brand" | "deal" | "info" | "neutral" | null;
+  /** Right side of the row: $12.00, Free, 150 points, ★ 4.6 */
+  priceLabel?: string | null;
+  /** Struck-through price under priceLabel */
+  wasLabel?: string | null;
+  /** Store path the app opens, e.g. /food/restaurants/napoli-pizza */
+  path: string;
+  /** 0–100 match strength, so sections of different departments can be ranked together */
+  score: number;
+}
+
+export const DeptSearchHit: z.ZodType<DeptSearchHit> = z.object({
+  id: z.string(),
+  kind: z.string().describe("What the record is: restaurant, dish, app, phone, post, company, game, …"),
+  title: z.string(),
+  meta: z.string().describe("The grey line under the title, e.g. 'Pizza · Italian · ★ 4.7 (1,204)'").nullish(),
+  sub: z.string().describe("A second grey line, shown only in a scoped list, e.g. 'Open until 11 PM · 1.2 mi'").nullish(),
+  get image() {
+    return MediaRef.nullish();
+  },
+  badge: z.string().describe("Short mark on the row, e.g. Verified, Free delivery, −15%").nullish(),
+  badgeTone: z.enum(["brand", "deal", "info", "neutral"]).nullish(),
+  priceLabel: z.string().describe("Right side of the row: $12.00, Free, 150 points, ★ 4.6").nullish(),
+  wasLabel: z.string().describe("Struck-through price under priceLabel").nullish(),
+  path: z.string().describe("Store path the app opens, e.g. /food/restaurants/napoli-pizza"),
+  score: z.number().int().describe("0–100 match strength, so sections of different departments can be ranked together"),
+}).register(apiTypes, { id: "DeptSearchHit" });
+
+export interface DeptSearchGroup {
+  /** The kind every hit of this group has */
+  kind: string;
+  /** Heading of the group, e.g. Restaurants, Dishes, Apps, Posts */
+  title: string;
+  /** services only: os_install | post_sale | welfare | booking, so search knows which section the group belongs to */
+  area?: string | null;
+  /** Matching records of this kind, also when only a few are sent */
+  total: number;
+  items: DeptSearchHit[];
+  /** More of this group; null when the last hit was sent */
+  nextCursor?: string | null;
+}
+
+export const DeptSearchGroup: z.ZodType<DeptSearchGroup> = z.object({
+  kind: z.string().describe("The kind every hit of this group has"),
+  title: z.string().describe("Heading of the group, e.g. Restaurants, Dishes, Apps, Posts"),
+  area: z.string().describe("services only: os_install | post_sale | welfare | booking, so search knows which section the group belongs to").nullish(),
+  total: z.number().int().describe("Matching records of this kind, also when only a few are sent"),
+  get items() {
+    return z.array(DeptSearchHit);
+  },
+  nextCursor: z.string().describe("More of this group; null when the last hit was sent").nullish(),
+}).register(apiTypes, { id: "DeptSearchGroup" });
+
+export interface DeptSearchResult {
+  /** Only groups with at least one hit, the module's own order */
+  groups: DeptSearchGroup[];
+}
+
+export const DeptSearchResult: z.ZodType<DeptSearchResult> = z.object({
+  get groups() {
+    return z.array(DeptSearchGroup);
+  },
+}).register(apiTypes, { id: "DeptSearchResult" });
+
 export interface Money {
   /** Minor units (cents). 18900 = $189.00 */
   amount: number;

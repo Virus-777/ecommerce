@@ -1332,6 +1332,8 @@ export const SoftwareLicenceReissuedEvent: z.ZodType<SoftwareLicenceReissuedEven
 
 /** What other modules may call in-process: `ctx.use('software')` (or `ctx.tryUse` for an optional dependency). */
 export interface SoftwarePublicApi {
+  /** Integrated search: published apps, packs and visible categories that match the typed text, as ranked hits with their store paths. Used by: search. */
+  searchSoftware(input: common.DeptSearchRequest): Promise<common.DeptSearchResult>;
   /** The customer's software purchases (reference, apps, amount, status, dates), owned apps and reviews for the personal data export Used by: customers. */
   exportCustomerData(input: { customerId: string, accountId: string }): Promise<common.CustomerDataSection[]>;
 }
@@ -2168,7 +2170,7 @@ export const spec = defineModuleSpec({
   summary: "The app's Softwares department: apps for phones and PCs that customers download. Staff keep the categories, apps, files, packs and the home rails in Admin › Departments › Softwares. Free apps are owned on Get; paid apps and packs are bought with a card in their own payment flow (payments purchase intents, not cart and checkout) and come with a licence key. Any signed-in customer downloads the files through signed links.",
   dependsOn: ["media","payments"],
   optionalDeps: ["customers","audit","notifications"],
-  publicApi: ["exportCustomerData"],
+  publicApi: ["searchSoftware","exportCustomerData"],
   permissions: [
     {
       "key": "software.view",

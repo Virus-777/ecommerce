@@ -1,6 +1,7 @@
+import { AppError } from '../../kernel/errors/index.js';
 import { encodeCursor, toPageRequest } from '../../kernel/lib/pagination.js';
 import type * as common from '../../spec/common.js';
-import type { ProductCard, SearchPublicApi, Suggestions, ZeroResultQuery } from '../../spec/search.js';
+import type { DepartmentSection, ProductCard, SearchPublicApi, Suggestions, ZeroResultQuery } from '../../spec/search.js';
 import type { SearchQuery, SearchResultSet, SearchSession } from './domain/types.js';
 import { windowOf } from './service/queries.js';
 import { SearchAdmin } from './service/admin.js';
@@ -21,6 +22,18 @@ export class SearchService extends SearchAdmin implements SearchPublicApi {
   /** offers' public API (GraphQL read layer: the offer of a search match) */
   offersApi() {
     return this.offers;
+  }
+
+  /* ---------------------------------------------------------------- endpoints */
+
+  /**
+   * One department's own results for the query (the scoped list behind a department's chip). An unknown key, or a
+   * department whose module is switched off, is NOT_FOUND: the chip only exists when that department answered.
+   */
+  async departmentScope(key: string, query: { q: string; kind?: string; cursor?: string; limit?: number }): Promise<DepartmentSection> {
+    const section = await this.departmentSection(key, query.q, query);
+    if (!section) throw new AppError('NOT_FOUND', 'Department not found');
+    return section;
   }
 
   /* ---------------------------------------------------------------- public API (in-process) */
