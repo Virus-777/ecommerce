@@ -6,6 +6,13 @@
 export const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /**
+ * Escapes the characters that mean something in a SQL `LIKE` pattern, so a term the customer typed matches
+ * itself: `%` is a per-cent sign rather than "anything", `_` is an underscore rather than "one character".
+ * The backslash goes first, or escaping the others would escape the escapes.
+ */
+export const escapeLike = (s: string): string => s.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+
+/**
  * A URL slug: accents dropped, "&" read as "and", anything else not a letter or digit becomes one hyphen, at most
  * `max` characters and never ending in a hyphen. Text with no letters or digits gives `fallback`.
  */
