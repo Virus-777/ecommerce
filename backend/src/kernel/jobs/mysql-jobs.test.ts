@@ -251,6 +251,36 @@ describe('what MySQL does that MongoDB did not', () => {
     }
   }, 30_000);
 
+  it('runs a statement again when InnoDB picks it as the deadlock victim', async () => {
+    // A deadlock escaped from here in a full test run on 2026-10-27 and failed the call. It takes real
+    // contention to produce one -- several instances inserting the same job name, racing on the
+    // insert-intention locks of uq_kernel_jobs_queued -- so this test makes the server's answer instead of
+    // the conditions, which is the only way to pin the behaviour down rather than wait for it to happen.
+    const s = scheduler();
+    let runs = 0;
+    s.declare(job('q.deadlocked'));
+    s.handle('test', 'q.deadlocked', async () => {
+      runs++;
+    });
+
+    const real = store.pool.query.bind(store.pool);
+    let thrown = 0;
+    (store.pool as { query: unknown }).query = (...args: unknown[]) => {
+      if (thrown === 0 && String(args[0]).startsWith('INSERT INTO \`kernel_jobs\`')) {
+        thrown++;
+        return Promise.reject(Object.assign(new Error('Deadlock found when trying to get lock; try restarting transaction'), { errno: 1213, code: 'ER_LOCK_DEADLOCK' }));
+      }
+      return (real as (...a: unknown[]) => unknown)(...args);
+    };
+    try {
+      await s.runNow('q.deadlocked');
+    } finally {
+      (store.pool as { query: unknown }).query = real;
+    }
+    expect(thrown).toBe(1); // the enqueue really was refused once
+    expect(runs).toBe(1); // and the job still ran
+  });
+
   it('treats "another instance is already running it" as a duplicate key, not an error', async () => {
     // uq_kernel_jobs_active holds one active row per job. The claim's UPDATE is what runs into it, and a
     // 1062 there means someone else won the race — the run simply is not ours.

@@ -5,7 +5,10 @@
  * Keys are scoped to the operation and the caller, and kept for 24 hours.
  */
 import { createHash } from 'node:crypto';
+import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import type { MongoStore } from '../mongo/index.js';
+import { isDuplicateKey } from '../mysql/errors.js';
+import type { MysqlStore } from '../mysql/index.js';
 import { AppError } from '../errors/index.js';
 import { systemClock, type Clock } from '../lib/clock.js';
 
@@ -57,6 +60,73 @@ export function mongoIdempotencyStore(store: MongoStore, clock: Clock = systemCl
     },
     async release(scope, key) {
       await keys.deleteOne({ _id: idOf(scope, key) });
+    },
+  };
+}
+
+/**
+ * Keys in MySQL (`kernel_idempotency_keys`, purged after 24 h by kernel.purge-expired).
+ *
+ * `begin` is an INSERT that catches the duplicate, which is the whole of it: the request that manages to
+ * insert the row is the one that runs, and every other request with that key reads the row and is answered
+ * from it. MongoDB needed an upsert returning the previous document because a duplicate key there would
+ * have aborted the caller's transaction; here it costs the statement and nothing else. The happy path —
+ * a key never seen before — is one round trip.
+ */
+export function mysqlIdempotencyStore(store: MysqlStore, clock: Clock = systemClock): IdempotencyStore {
+  interface Row extends RowDataPacket {
+    request_hash: string;
+    status: string;
+    response_status: number | null;
+    response_body: string | null;
+    created_at: Date;
+  }
+
+  const read = async (scope: string, key: string): Promise<Row | undefined> => {
+    const [rows] = await store.pool.query<Row[]>(
+      'SELECT `request_hash`, `status`, `response_status`, `response_body`, `created_at` FROM `kernel_idempotency_keys` WHERE `scope` = ? AND `key` = ?',
+      [scope, key],
+    );
+    return rows[0];
+  };
+
+  const begin = async (scope: string, key: string, requestHash: string, attempt: number): Promise<{ status: number; body: unknown } | null> => {
+    // a key that keeps vanishing between the insert and the read is a bug, not a race worth retrying forever
+    if (attempt > 2) throw new AppError('CONFLICT', 'A request with this Idempotency-Key could not be settled; try again');
+    try {
+      await store.pool.query('INSERT INTO `kernel_idempotency_keys` (`scope`, `key`, `request_hash`, `status`, `created_at`) VALUES (?, ?, ?, ?, ?)', [
+        scope,
+        key,
+        requestHash,
+        'in_progress',
+        clock.now(),
+      ]);
+      return null;
+    } catch (err) {
+      if (!isDuplicateKey(err)) throw err;
+    }
+    const row = await read(scope, key);
+    if (!row) return begin(scope, key, requestHash, attempt + 1); // purged between the insert and the read
+    if (clock.now().getTime() - row.created_at.getTime() > TTL_MS) {
+      // delete only the row we read, so a request that has already replaced it is left alone
+      await store.pool.query('DELETE FROM `kernel_idempotency_keys` WHERE `scope` = ? AND `key` = ? AND `created_at` = ?', [scope, key, row.created_at]);
+      return begin(scope, key, requestHash, attempt + 1);
+    }
+    if (row.request_hash !== requestHash) throw new AppError('IDEMPOTENCY_KEY_REUSED');
+    if (row.status !== 'completed') throw new AppError('CONFLICT', 'A request with this Idempotency-Key is still being processed');
+    return { status: row.response_status!, body: row.response_body === null ? null : JSON.parse(row.response_body) };
+  };
+
+  return {
+    begin: (scope, key, requestHash) => begin(scope, key, requestHash, 1),
+    async complete(scope, key, status, body) {
+      await store.pool.query<ResultSetHeader>(
+        'UPDATE `kernel_idempotency_keys` SET `status` = ?, `response_status` = ?, `response_body` = ?, `completed_at` = ? WHERE `scope` = ? AND `key` = ?',
+        ['completed', status, JSON.stringify(body ?? null), clock.now(), scope, key],
+      );
+    },
+    async release(scope, key) {
+      await store.pool.query('DELETE FROM `kernel_idempotency_keys` WHERE `scope` = ? AND `key` = ?', [scope, key]);
     },
   };
 }

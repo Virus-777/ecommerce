@@ -69,7 +69,9 @@ export interface MysqlStore {
   close(): Promise<void>;
 }
 
-const jitter = () => BACKOFF_MIN_MS + Math.floor(Math.random() * (BACKOFF_MAX_MS - BACKOFF_MIN_MS));
+/** The wait before another attempt, jittered so two instances that collided do not collide again (§10.3) */
+export const retryDelayMs = () => BACKOFF_MIN_MS + Math.floor(Math.random() * (BACKOFF_MAX_MS - BACKOFF_MIN_MS));
+const jitter = retryDelayMs;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export interface MysqlOptions {
@@ -169,8 +171,9 @@ export function mysqlStore(pool: Pool, o: { watch?: TransactionWatch; slowAcquir
         // affectedRows is 1 when the row was created and 2 when it was updated. The distinction matters:
         // LAST_INSERT_ID() is per connection and a plain INSERT does not set it, so on a pooled connection it
         // would still hold a value from an earlier counter — silently handing out numbers already given away.
-        const last =
-          res.affectedRows === 1 ? n : Number((await conn.query<RowDataPacket[]>('SELECT LAST_INSERT_ID() AS v'))[0][0]?.v);
+        // On the update branch the value comes back on the result itself, so there is no second round trip:
+        // the server puts what LAST_INSERT_ID(…) was handed into the same OK packet.
+        const last = res.affectedRows === 1 ? n : Number(res.insertId);
         if (!Number.isFinite(last) || last < n) throw new Error(`kernel_counters: ${counter} answered ${String(last)} for ${n} values`);
         return Array.from({ length: n }, (_, i) => last - n + 1 + i);
       } finally {

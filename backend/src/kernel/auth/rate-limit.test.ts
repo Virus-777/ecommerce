@@ -1,32 +1,39 @@
 /**
- * Rate-limit stores: the same contract in memory and in MongoDB (kernel.rate_limits), and two app
- * instances on one database sharing the middleware's limits.
+ * Rate-limit stores: the same contract in memory, in MongoDB (kernel.rate_limits) and in MySQL
+ * (kernel_rate_limits), and two app instances on one database sharing the middleware's limits.
  */
 import type { FastifyInstance } from 'fastify';
+import type { RowDataPacket } from 'mysql2/promise';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../../app.js';
 import { TEST_JWK } from '../../testing/app.js';
 import { testMongo } from '../../testing/mongo.js';
+import { testMysql } from '../../testing/mysql.js';
 import type { MongoStore } from '../mongo/index.js';
+import type { MysqlStore } from '../mysql/index.js';
 import { migrateMongo } from '../mongo/schema.js';
-import { IP_LIMIT, memoryRateLimitStore, mongoRateLimitStore, type RateLimitStore } from './rate-limit.js';
+import { IP_LIMIT, memoryRateLimitStore, mongoRateLimitStore, mysqlRateLimitStore, type RateLimitStore } from './rate-limit.js';
 
 const HOUR = 3_600_000;
 let now = Date.parse('2026-05-04T10:15:00Z');
 const clock = { now: () => new Date(now) };
 
 let mongo: MongoStore;
+let mysql: MysqlStore;
 beforeAll(async () => {
   mongo = await testMongo();
   await migrateMongo(mongo, []);
+  mysql = await testMysql();
 });
 afterAll(async () => {
   await mongo?.close();
+  await mysql?.close();
 });
 
 describe.each([
   ['memory', () => memoryRateLimitStore(clock)],
   ['mongo', () => mongoRateLimitStore(mongo, clock)],
+  ['mysql', () => mysqlRateLimitStore(mysql, clock)],
 ])('%s store', (_name, make) => {
   let store: RateLimitStore;
   beforeAll(() => {
@@ -74,6 +81,34 @@ describe.each([
     expect(await store.purge()).toBeGreaterThanOrEqual(1);
     // the hour window is still running and still counts
     expect((await store.hit('test', 'q', { limit: 1, windowMs: HOUR })).allowed).toBe(false);
+  });
+});
+
+/**
+ * MySQL answers "allowed?" with LAST_INSERT_ID, which is per connection and survives between statements.
+ * The first request of a new window therefore has to set it itself — `LAST_INSERT_ID(1)` in the VALUES —
+ * or it is judged by whatever the previous statement on that pooled connection left behind.
+ */
+describe('the MySQL store and its one statement', () => {
+  it('allows the first request of a new window right after a refusal', async () => {
+    const store = mysqlRateLimitStore(mysql, clock);
+    const l = { limit: 1, windowMs: HOUR };
+    now = Date.parse('2026-06-01T10:00:00Z');
+    expect((await store.hit('trap', 'x', l)).allowed).toBe(true);
+    expect((await store.hit('trap', 'x', l)).allowed).toBe(false); // leaves last_insert_id at 0
+    // a key never seen before, on the same pooled connection: this is the one that would be refused
+    expect((await store.hit('trap', 'fresh', l)).allowed).toBe(true);
+    now = Date.parse('2026-06-01T11:00:00Z');
+    expect((await store.hit('trap', 'x', l)).allowed).toBe(true); // a new window of a key that was refused
+  });
+
+  it('counts an allowed attempt and leaves a refused one alone', async () => {
+    const store = mysqlRateLimitStore(mysql, clock);
+    const l = { limit: 2, windowMs: HOUR };
+    now = Date.parse('2026-06-01T12:00:00Z');
+    for (let i = 0; i < 5; i++) await store.hit('trap', 'counted', l);
+    const [rows] = await mysql.pool.query<RowDataPacket[]>('SELECT `count` FROM `kernel_rate_limits` WHERE `scope` = ? AND `key` = ?', ['trap', 'counted']);
+    expect(Number(rows[0]!.count)).toBe(2); // not 5: the three refused attempts added nothing
   });
 });
 

@@ -15,7 +15,10 @@ import type { Config } from '../config/index.js';
 import { AppError } from '../errors/index.js';
 import { appOrigins } from '../http/security.js';
 import type { Clock } from '../lib/clock.js';
+import type { RowDataPacket } from 'mysql2/promise';
 import type { MongoStore } from '../mongo/index.js';
+import { isDuplicateKey } from '../mysql/errors.js';
+import type { MysqlStore } from '../mysql/index.js';
 import type { Area, AuthKind, EndpointDef } from '../spec/define.js';
 import type { AppProofVerifier } from './app-proof.js';
 import { verifyFileLink } from './file-links.js';
@@ -561,6 +564,24 @@ export function mongoWebhookEventLog(store: MongoStore): WebhookEventLog {
     seen: async (provider, eventId) => Boolean(await events.exists({ _id: `${provider}|${eventId}` })),
     async record(provider, eventId) {
       await events.updateOne({ _id: `${provider}|${eventId}` }, { $setOnInsert: { provider, event_id: eventId, received_at: new Date() } }, { upsert: true });
+    },
+  };
+}
+
+/** In MySQL (`kernel_webhook_events`, purged after 90 days by kernel.purge-expired) */
+export function mysqlWebhookEventLog(store: MysqlStore): WebhookEventLog {
+  return {
+    async seen(provider, eventId) {
+      const [rows] = await store.pool.query<RowDataPacket[]>('SELECT 1 FROM `kernel_webhook_events` WHERE `provider` = ? AND `event_id` = ? LIMIT 1', [provider, eventId]);
+      return rows.length > 0;
+    },
+    async record(provider, eventId) {
+      // recording the same event twice is the ordinary case for a replayed webhook, not an error
+      try {
+        await store.pool.query('INSERT INTO `kernel_webhook_events` (`provider`, `event_id`, `received_at`) VALUES (?, ?, ?)', [provider, eventId, new Date()]);
+      } catch (err) {
+        if (!isDuplicateKey(err)) throw err;
+      }
     },
   };
 }

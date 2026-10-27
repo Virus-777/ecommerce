@@ -7,9 +7,11 @@
  * is not counted. Two stores (RATE_LIMIT_STORE): MongoDB (kernel.rate_limits), shared by every server
  * instance, and memory, per process (development and tests). A key always uses one window size.
  */
+import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { AppError } from '../errors/index.js';
 import type { Clock } from '../lib/clock.js';
 import type { MongoStore } from '../mongo/index.js';
+import type { MysqlStore } from '../mysql/index.js';
 
 export interface Limit {
   limit: number;
@@ -89,6 +91,50 @@ export function mongoRateLimitStore(store: MongoStore, clock: Clock): RateLimitS
     },
     async purge() {
       return (await windows.deleteMany({ window_end: { $lte: clock.now() } })).deletedCount;
+    },
+  };
+}
+
+/**
+ * Windows in MySQL (`kernel_rate_limits`), shared by every instance. **One statement per request**, which
+ * matters because this is the busiest statement in the system — every HTTP request passes through it:
+ *
+ *   INSERT … VALUES (…, LAST_INSERT_ID(1))
+ *   ON DUPLICATE KEY UPDATE count = IF(count < ?, count + LAST_INSERT_ID(1), count + LAST_INSERT_ID(0))
+ *
+ * It has to answer two questions at once — count the attempt, and say whether it was allowed — and
+ * `affectedRows` cannot: a row inserted and a row left alone both report 1. So the answer rides on
+ * `LAST_INSERT_ID`, which the taken branch of the `IF` sets to 1 or 0 (only the taken branch is
+ * evaluated). A refused attempt adds zero, so it is not counted, which is the rule the MongoDB store keeps.
+ *
+ * `LAST_INSERT_ID(1)` in the VALUES is the part that is easy to leave out and impossible to notice. On a
+ * plain INSERT nothing sets the value, so a new window would be judged by whatever the last statement on
+ * that pooled connection left behind — after a refusal, that is 0, and the first request of every new
+ * window would be refused. The value comes from `insertId` on the result, not from a second
+ * `SELECT LAST_INSERT_ID()`: the server sends it in the same packet.
+ */
+export function mysqlRateLimitStore(store: MysqlStore, clock: Clock): RateLimitStore {
+  const HIT =
+    'INSERT INTO `kernel_rate_limits` (`scope`, `key`, `window_start`, `window_end`, `count`) VALUES (?, ?, ?, ?, LAST_INSERT_ID(1)) ' +
+    'ON DUPLICATE KEY UPDATE `count` = IF(`count` < ?, `count` + LAST_INSERT_ID(1), `count` + LAST_INSERT_ID(0))';
+  return {
+    async hit(scope, key, l, o = {}) {
+      const now = clock.now().getTime();
+      const { start, end } = windowOf(now, l.windowMs);
+      if (l.limit <= 0) return refused(end, now);
+      if (o.peek) {
+        const [rows] = await store.pool.query<RowDataPacket[]>(
+          'SELECT `count` FROM `kernel_rate_limits` WHERE `scope` = ? AND `key` = ? AND `window_start` = ?',
+          [scope, key, new Date(start)],
+        );
+        return Number(rows[0]?.count ?? 0) < l.limit ? ALLOWED : refused(end, now);
+      }
+      const [res] = await store.pool.query<ResultSetHeader>(HIT, [scope, key, new Date(start), new Date(end), l.limit]);
+      return Number(res.insertId) === 1 ? ALLOWED : refused(end, now);
+    },
+    async purge() {
+      const [res] = await store.pool.query<ResultSetHeader>('DELETE FROM `kernel_rate_limits` WHERE `window_end` <= ?', [clock.now()]);
+      return res.affectedRows;
     },
   };
 }

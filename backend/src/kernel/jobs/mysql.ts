@@ -27,8 +27,8 @@ import type { FastifyBaseLogger } from 'fastify';
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { systemClock, type Clock } from '../lib/clock.js';
 import { newId } from '../lib/ids.js';
-import { isDuplicateKey } from '../mysql/errors.js';
-import type { MysqlStore } from '../mysql/index.js';
+import { isDuplicateKey, isRetryable } from '../mysql/errors.js';
+import { MAX_ATTEMPTS, retryDelayMs, type MysqlStore } from '../mysql/index.js';
 import { JobRegistry, nextOccurrence, type JobScheduler } from './index.js';
 
 export interface MysqlSchedulerOptions {
@@ -75,14 +75,36 @@ export class MysqlScheduler extends JobRegistry implements JobScheduler {
     this.#retry = { ...RETRY, ...o.retry };
   }
 
+  /**
+   * One statement on the pool, run again when InnoDB rolls it back.
+   *
+   * §10.3 gives transactions a retry because a deadlock means "that one was the victim, try again", and
+   * these single autocommit statements need it for the same reason. They are not an unlikely corner: several
+   * instances enqueue and claim the same job names at once, and two INSERTs racing on the functional unique
+   * index `uq_kernel_jobs_queued` take insert-intention locks that can deadlock. One escaped in a full test
+   * run on 2026-10-27 and failed the request, which is exactly what the retry is there to prevent.
+   *
+   * Every statement in this file is safe to run again: an INSERT that was rolled back either inserts or
+   * finds the row (1062, which is not retryable and still means what it meant), and the updates are by
+   * primary key or guarded by the value they expect to find.
+   */
+  async #retrying<T>(run: () => Promise<T>): Promise<T> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await run();
+      } catch (err) {
+        if (!isRetryable(err) || attempt >= MAX_ATTEMPTS) throw err;
+        await sleep(retryDelayMs());
+      }
+    }
+  }
+
   async #rows<T extends RowDataPacket>(sql: string, params: readonly unknown[] = []): Promise<T[]> {
-    const [rows] = await this.#o.store.pool.query<T[]>(sql, [...params]);
-    return rows;
+    return this.#retrying(async () => (await this.#o.store.pool.query<T[]>(sql, [...params]))[0]);
   }
 
   async #write(sql: string, params: readonly unknown[] = []): Promise<ResultSetHeader> {
-    const [res] = await this.#o.store.pool.query<ResultSetHeader>(sql, [...params]);
-    return res;
+    return this.#retrying(async () => (await this.#o.store.pool.query<ResultSetHeader>(sql, [...params]))[0]);
   }
 
   /** Queues a run, or returns the id of the run already waiting (one per job) */
