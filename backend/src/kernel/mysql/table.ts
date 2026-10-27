@@ -108,6 +108,9 @@ export interface FindOptions extends ReadOptions {
   nullsLast?: readonly string[];
 }
 
+/** What `pageQuery` reads: a fragment of our own, or a Kysely query's `compile()`, which names its values `parameters` */
+export type Compiled = Sql | { readonly sql: string; readonly parameters: readonly unknown[] };
+
 /** The order of `pageQuery`: a value the query computes (or a column), then the primary key */
 export interface ComputedOrder {
   key: string;
@@ -329,7 +332,8 @@ export class Table<R extends object> {
    *
    * It is wrapped as a derived table, so the key can be paged on without being computed twice.
    */
-  async pageQuery(query: Sql, req: PageRequest, order: ComputedOrder): Promise<Page<R>> {
+  async pageQuery(compiled: Compiled, req: PageRequest, order: ComputedOrder): Promise<Page<R>> {
+    const query: Sql = { sql: compiled.sql, params: [...('params' in compiled ? compiled.params : compiled.parameters)] };
     const idColumn = this.#idColumn('pageQuery');
     const dir = order.direction === 'desc' ? -1 : 1;
     const orderBy = ` ORDER BY ${q(order.key)} ${dir === -1 ? 'DESC' : 'ASC'}, ${q(idColumn)} ${dir === -1 ? 'DESC' : 'ASC'}`;

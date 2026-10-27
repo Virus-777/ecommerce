@@ -16,9 +16,16 @@ import { createPool, type Pool, type PoolConnection, type ResultSetHeader, type 
 import { AppError } from '../errors/index.js';
 import { isConnectionLost, isRetryable } from './errors.js';
 import { KERNEL_TABLES, kernelDdl, type KernelTable } from './kernel-tables.js';
+import { ModuleStore, type ModuleTables } from './module-store.js';
 import { CLIENT_OPTIONS, SESSION_COLLATION } from './portable.js';
 
 export { KERNEL_TABLES, type KernelTable };
+export { ModuleStore, type ModuleTables };
+export { Table } from './table.js';
+export type { Sort, Patch, FindOptions, ReadOptions, ComputedOrder, TableContext } from './table.js';
+export { decToZero, expr, inc, jsonAppend, q, raw } from './table.js';
+export type { Cond, Where } from './where.js';
+export { allMembersOf, contains, equalsIgnoringCase, memberOf, startsWith } from './where.js';
 
 /** §10.3: five attempts, then the caller is told to try again (D8) */
 export const MAX_ATTEMPTS = 5;
@@ -49,6 +56,8 @@ export interface Tx {
 
 export interface MysqlStore {
   readonly pool: Pool;
+  /** A module's view: its own tables only (ctx.mysql), typed with the generated `<Module>Tables` */
+  module<DB = Record<string, never>>(name: string, tables: ModuleTables): ModuleStore<DB>;
   /** fn in a transaction, retried when InnoDB rolls it back. Inside one already, fn simply runs in it. */
   transaction<T>(fn: (tx: Tx) => Promise<T>, outer?: Tx, module?: string): Promise<T>;
   /** Next value of a named counter; never rolled back, so a number taken by an aborted transaction is skipped */
@@ -86,6 +95,8 @@ export function mysqlStore(pool: Pool, o: { watch?: TransactionWatch; slowAcquir
 
   const store: MysqlStore = {
     pool,
+
+    module: (name, tables) => new ModuleStore(store, name, tables),
 
     async transaction<T>(fn: (tx: Tx) => Promise<T>, outer?: Tx, module?: string): Promise<T> {
       if (outer) return fn(outer); // already inside one: join it, as the MongoDB store did

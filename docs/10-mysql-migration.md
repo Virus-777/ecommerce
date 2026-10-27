@@ -387,7 +387,8 @@ Each trigger is written in the spec, owned by its module, and covered by the mod
 
 | File | Holds | Replaces |
 |---|---|---|
-| `index.ts` | pool, `MysqlStore` (transaction with retry, counters, `kernel()` tables), `ModuleStore` (`table()`, `db` Kysely typed to the module's tables, `transaction`, `lock`, `claim`, `seen`, `nextValue(s)`, `call` for the module's stored procedures, §9.5.2), `connectMysql` (URL, or the portable server in dev/tests) | `kernel/mongo/index.ts` |
+| `index.ts` | pool, `MysqlStore` (transaction with retry, counters, `module()`, kernel tables), `connectMysql` (URL, or the portable server in dev/tests) | `kernel/mongo/index.ts` |
+| `module-store.ts` | `ModuleStore` (`table()`, `db` Kysely typed to the module's tables, `transaction`, `lock`, `claim`, `seen`, `nextValue(s)`; `call` for the module's stored procedures comes with §9.5.2). Its own file rather than part of `index.ts`, as the MongoDB one was: it is the only place that touches `kernel_locks` and `kernel_processed_events`, and the Kysely wiring below is a page of its own | `kernel/mongo/index.ts` |
 | `table.ts` | `Table<R>`, with the same method names as today: get, findOne, find, getMany, count, exists, distinct, page, pageQuery (was pageAggregate), insert, insertMany, insertIfAbsent, insertManyIfAbsent, upsert, upsertMany, increment, update, updateOne, updateMany, delete, deleteMany | `kernel/mongo/table.ts` |
 | `where.ts` | `Where<R>` → SQL with SQL's own null rules (the `whereFilter` meanings move unchanged), plus `or`, `contains`, `startsWith`, `equalsIgnoringCase`, `memberOf`/`allMembersOf`, and `raw` for a condition `Where` has no shape for. No `likePattern`: the `like` condition is MySQL's own `LIKE` | `kernel/mongo/filters.ts` |
 | `schema.ts` | `migrateMysql`: desired DDL from the spec vs `information_schema`, applying additive changes online; data migrations; hashes in `kernel_migrations` | `kernel/mongo/schema.ts` |
@@ -453,6 +454,8 @@ Repositories pass MongoDB filter objects today (`{ status: { $in: [...] }, $or: 
 ### 10.6 Boundaries
 
 - `ModuleStore.db` is a Kysely instance typed with **only that module's tables and views** (the generated `src/spec/<module>.ts` exports `<Module>Tables`). A query on another module's table does not compile.
+- **Inside a transaction, `db` is built on a pool of exactly one connection: the transaction's** (built 2026-10-27). Kysely takes a connection from a pool per statement, so a `db` built on the real pool would open a *second* connection and see none of the transaction's uncommitted work — and worse, its own writes would commit outside it and survive a rollback. Both are in the tests. Two details make it work: Kysely wants mysql2's **callback** pool, which `mysql2/promise` keeps one level down (`pool.pool`, `connection.connection`, neither in the published types), and the one-connection pool must pass on only the handful of members Kysely asks for — handing it the connection itself lets it `release()` the transaction's connection mid-transaction, and wrapping it in a clone or a prototype breaks mysql2's internals. `release` and `end` do nothing: the connection goes back to the real pool when the transaction ends.
+- The pool's `SET NAMES … COLLATE utf8mb4_0900_bin` reaches Kysely's connections because it uses the same underlying pool, whose `connection` event runs the session setup. A test asks six connections at once what `@@collation_connection` is, rather than one — one connection has been set up by hand since the version check, so asking once passes even when the hook is gone.
 - `check:boundaries` adds two checks:
   - no `sql` string in `src/modules/<m>/` names another module's table prefix;
   - no `kernel_` table is used outside the kernel.
