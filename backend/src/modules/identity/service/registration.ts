@@ -1,6 +1,6 @@
 /**
- * Registration: app sessions for the store and Seller Center apps, customer sign-up and the email or phone codes
- * that confirm it (and later email and phone changes).
+ * Registration: app sessions for the store and Seller Center apps, customer sign-up (which signs the new
+ * customer in without an email code), and the email and phone codes behind later address or number changes.
  */
 import { maskEmail, maskPhone } from '../../../kernel/lib/mask.js';
 import { AppError } from '../../../kernel/errors/index.js';
@@ -8,6 +8,7 @@ import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type {
   DeviceInfo,
   RegistrationRequest,
+  RegistrationResult,
   SessionTokens,
   VerificationChallenge,
   VerifyCodeRequest,
@@ -47,8 +48,12 @@ export class Registration {
     return { result: out.result.tokens!, cookie: out.cookie };
   }
 
-  /** POST /registrations: always 202 with a challenge, whether or not the email has an account */
-  async register(body: RegistrationRequest, caller: Caller): Promise<VerificationChallenge> {
+  /**
+   * POST /registrations: creates the account and opens a store session in the same call. There is no email
+   * code step: the address is recorded unverified (email_verified_at null) and an email that already has an
+   * account is refused with EMAIL_IN_USE.
+   */
+  async register(body: RegistrationRequest, caller: Caller): Promise<WithCookie<RegistrationResult>> {
     const s = await this.core.cfg();
     const now = this.core.now();
     const email = normalizeEmail(body.email);
@@ -59,106 +64,70 @@ export class Registration {
     const hash = await hashPassword(body.password);
     const visitorSessionId = caller.principal?.kind === 'visitor' && caller.principal.audience === 'store' ? caller.principal.sessionId : null;
     const displayName = `${firstName} ${lastName}`;
+    const keepSignedIn = body.keepSignedIn ?? false;
 
     const out = await this.core.repo.transaction(async (repo) => {
-      const existing = await repo.findAccount('member', email, { forUpdate: true });
-      if (existing && existing.status !== 'pending_verification') {
-        // the email says "you already have an account"; this code will never verify
-        const { row, code } = await this.core.newEmailCode(repo, { accountId: existing.id, purpose: 'email_verification', email: existing.email, payload: { existingAccount: true } }, s, now);
-        return { row, code, registered: null };
-      }
-      let account: AccountRow;
-      if (existing) {
-        // a registration that was never confirmed: the newest attempt replaces it (the code proves the email)
-        await repo.supersedeChallenges(existing.id, 'email_verification');
-        account = await this.core.storePassword(repo, existing.id, hash, now, { display_name: displayName, email: body.email.trim(), accepted_terms_version: body.acceptedTermsVersion });
-      } else {
-        account = {
-          id: newId(),
-          realm: 'member',
-          email: body.email.trim(),
-          email_normalized: email,
-          email_verified_at: null,
-          display_name: displayName,
-          status: accountStatusMachine.initial,
-          password_hash: hash,
-          password_changed_at: now,
-          must_reset_password: false,
-          failed_sign_ins: 0,
-          failed_window_started_at: null,
-          locked_until: null,
-          lock_reason: null,
-          locked_by: null,
-          closed_at: null,
-          accepted_terms_version: body.acceptedTermsVersion,
-          created_at: now,
-          last_sign_in_at: null,
-          last_active_at: null,
-          version: 1,
-          tokens_valid_after: null,
-        };
-        await repo.insertAccount(account);
-        await repo.addPasswordHistory({ id: newId(), account_id: account.id, password_hash: hash, created_at: now });
-      }
-      const { row, code } = await this.core.newEmailCode(
-        repo,
-        { accountId: account.id, purpose: 'email_verification', email: account.email, payload: { visitorSessionId, device: body.device, marketingOptIn: body.marketingOptIn } },
-        s,
-        now,
-      );
-      return { row, code, registered: account };
+      if (await repo.findAccount('member', email, { forUpdate: true })) throw new AppError('EMAIL_IN_USE', 'An account already uses that email; sign in instead');
+      const account: AccountRow = {
+        id: newId(),
+        realm: 'member',
+        email: body.email.trim(),
+        email_normalized: email,
+        email_verified_at: null,
+        display_name: displayName,
+        status: accountStatusMachine.initial,
+        password_hash: hash,
+        password_changed_at: now,
+        must_reset_password: false,
+        failed_sign_ins: 0,
+        failed_window_started_at: null,
+        locked_until: null,
+        lock_reason: null,
+        locked_by: null,
+        closed_at: null,
+        accepted_terms_version: body.acceptedTermsVersion,
+        created_at: now,
+        last_sign_in_at: null,
+        last_active_at: null,
+        version: 1,
+        tokens_valid_after: null,
+      };
+      await repo.insertAccount(account);
+      await repo.addPasswordHistory({ id: newId(), account_id: account.id, password_hash: hash, created_at: now });
+      const opened = await this.core.openSession(repo, account, { audience: 'store', device: body.device, client: caller.client, keepSignedIn, twoStepVerified: false, visitorSessionId, method: 'password' }, s, now);
+      const fresh = (await repo.getAccount(account.id))!;
+      return { account: fresh, summary: await this.core.summaryOf(fresh, repo), tokens: this.core.sessionTokens(opened.session, fresh, opened.refreshToken, s), after: opened.after };
     });
 
-    if (out.registered) {
-      this.core.publish(
-        'identity.user.registered',
-        {
-          accountId: out.registered.id,
-          email: out.registered.email,
-          firstName,
-          lastName,
-          marketingOptIn: body.marketingOptIn,
-          acceptedTermsVersion: body.acceptedTermsVersion,
-          guestSessionId: visitorSessionId,
-          at: map.iso(now),
-        },
-        caller,
-      );
-    }
-    this.core.codeIssued(out.row, out.code, 'email', out.row.target_email!);
-    return map.verificationChallenge(out.row);
+    // the profile is created from this event, before the claimed guest session is attached to it
+    this.core.publish(
+      'identity.user.registered',
+      {
+        accountId: out.account.id,
+        email: out.account.email,
+        firstName,
+        lastName,
+        marketingOptIn: body.marketingOptIn,
+        acceptedTermsVersion: body.acceptedTermsVersion,
+        guestSessionId: visitorSessionId,
+        at: map.iso(now),
+      },
+      caller,
+    );
+    out.after();
+    return this.core.deliver({ account: out.summary, tokens: out.tokens }, body.device.kind === 'web', now);
   }
 
-  /** POST /verifications/{id}/confirm: registration, email change or phone code */
-  async confirmVerification(id: string, body: VerifyCodeRequest, caller: Caller): Promise<WithCookie<VerifyResult>> {
-    const s = await this.core.cfg();
+  /** POST /verifications/{id}/confirm: email change or phone code */
+  async confirmVerification(id: string, body: VerifyCodeRequest, caller: Caller): Promise<VerifyResult> {
     const now = this.core.now();
     let after = () => {};
-    let web = false;
     const outcome = await this.core.repo.transaction(async (repo) => {
-      const c = this.core.openChallenge(await repo.getChallenge(id, { forUpdate: true }), ['email_verification', 'email_change', 'phone_verification'], now);
-      const payload = (c.payload ?? {}) as Record<string, unknown>;
-      if (payload.existingAccount === true || !c.code_hash || !safeEqual(c.code_hash, this.core.codeHash(c.id, body.code))) return { error: await this.core.wrongCode(repo, c) };
+      const c = this.core.openChallenge(await repo.getChallenge(id, { forUpdate: true }), ['email_change', 'phone_verification'], now);
+      if (!c.code_hash || !safeEqual(c.code_hash, this.core.codeHash(c.id, body.code))) return { error: await this.core.wrongCode(repo, c) };
       await repo.updateChallenge(c.id, { status: 'completed', completed_at: now });
       const account = c.account_id ? await repo.getAccount(c.account_id, { forUpdate: true }) : undefined;
       if (!account) throw new AppError('NOT_FOUND', 'Account not found');
-
-      if (c.purpose === 'email_verification') {
-        if (account.status !== 'pending_verification') return { error: new AppError('CODE_EXPIRED', 'This code is no longer valid') };
-        const status = accountStatusMachine.next('pending_verification', 'verifyEmail');
-        const verified = await repo.updateAccount(account.id, { status, email_verified_at: now });
-        await this.core.securityEvent(repo, account.id, 'email_verified', 'completed', { client: caller.client });
-        const device = (body.device ?? (payload.device as DeviceInfo | undefined) ?? { kind: 'web' }) as DeviceInfo;
-        web = device.kind === 'web';
-        const visitorSessionId = (payload.visitorSessionId as string | null | undefined) ?? (caller.principal?.kind === 'visitor' ? caller.principal.sessionId : null);
-        const opened = await this.core.openSession(repo, verified, { audience: 'store', device, client: caller.client, keepSignedIn: body.keepSignedIn ?? false, twoStepVerified: false, visitorSessionId, method: 'code' }, s, now);
-        const fresh = (await repo.getAccount(account.id))!;
-        after = () => {
-          this.core.publish('identity.user.verified', { accountId: account.id, channel: 'email', email: verified.email, phone: null, guestSessionId: opened.claimed ?? visitorSessionId ?? null, at: map.iso(now) }, caller);
-          opened.after();
-        };
-        return { result: { verified: true, account: await this.core.summaryOf(fresh, repo), tokens: this.core.sessionTokens(opened.session, fresh, opened.refreshToken, s) } };
-      }
 
       if (c.purpose === 'email_change') {
         const newEmail = c.target_email!;
@@ -168,17 +137,17 @@ export class Registration {
         const changed = await repo.updateAccount(account.id, { email: newEmail, email_normalized: normalizeEmail(newEmail), email_verified_at: now });
         await this.core.securityEvent(repo, account.id, 'email_changed', 'completed', { client: caller.client, detail: { from: maskEmail(oldEmail), to: maskEmail(newEmail) } });
         after = () => this.core.publish('identity.email.changed', { accountId: account.id, oldEmail, newEmail }, caller);
-        return { result: { verified: true, account: await this.core.summaryOf(changed, repo), tokens: null } };
+        return { result: { verified: true, account: await this.core.summaryOf(changed, repo) } };
       }
 
       // phone_verification
       const phone = c.target_phone_encrypted ? this.core.keys.decrypt(c.target_phone_encrypted).toString('utf8') : null;
       after = () => this.core.publish('identity.user.verified', { accountId: account.id, channel: 'phone', email: account.email, phone, guestSessionId: null, at: map.iso(now) }, caller);
-      return { result: { verified: true, account: await this.core.summaryOf(account, repo), tokens: null } };
+      return { result: { verified: true, account: await this.core.summaryOf(account, repo) } };
     });
     if ('error' in outcome) throw outcome.error;
     after();
-    return this.core.deliver(outcome.result, web, now);
+    return outcome.result;
   }
 
   /** POST /verifications/{id}/resend: a new code on the same challenge after the resend timer */
@@ -187,7 +156,7 @@ export class Registration {
     const now = this.core.now();
     const out = await this.core.repo.transaction(async (repo) => {
       const c = await repo.getChallenge(id, { forUpdate: true });
-      if (!c || !['email_verification', 'email_change', 'phone_verification'].includes(c.purpose)) throw new AppError('NOT_FOUND', 'Code request not found');
+      if (!c || !['email_change', 'phone_verification'].includes(c.purpose)) throw new AppError('NOT_FOUND', 'Code request not found');
       if (c.status !== 'pending') throw new AppError('CODE_EXPIRED', 'This request has ended; start again');
       if (c.resend_available_at && c.resend_available_at > now) throw new AppError('RESEND_TOO_SOON', 'Wait a moment before asking for a new code', { resendAvailableAt: map.iso(c.resend_available_at) });
       const code = sixDigitCode();

@@ -9,7 +9,7 @@ import { newId } from '../../../kernel/lib/ids.js';
 import { money } from '../../../kernel/lib/money.js';
 import { pageOf, type Page, type PageRequest } from '../../../kernel/lib/pagination.js';
 import type { ProviderStaff, RequestAdmin, RequestDetails, RequestDevice, RequestInput, RequestUpdate, ReviewAdmin, ReviewInput, ServiceRequest, StatusChange } from '../../../spec/services.js';
-import { dayLabel, deviceLabel, HANDOVER_MODES, LIMITS, makeRef, OPEN_STATUSES, requestPriceLabel, shortName, STATUS_EVENT, statusLabel, timeLabel, withRating } from '../domain/rules.js';
+import { dayLabel, deviceLabel, HANDOVER_MODES, LIMITS, makeRef, OPEN_STATUSES, requestEstimate, requestPriceLabel, shortName, STATUS_EVENT, statusLabel, timeLabel, withRating } from '../domain/rules.js';
 import { serviceRequestMachine } from '../domain/state-machines.js';
 import type { ProviderRow, RequestRow, ReviewRow, ServiceRow } from '../ports.js';
 import { actorKey, invalid, notFound, optionalText, requireText, unique, type By } from './base.js';
@@ -172,6 +172,10 @@ export class ServicesRequests extends ServicesCatalog {
         staffId = checked.staffId;
       }
       const now = this.now();
+      // What the price list says one request costs, for the statistics tab; null when the service charges by the
+      // hour. Kept at request time so a later price change does not rewrite the past — an estimate either way,
+      // since these services are paid at the provider.
+      const estimate = device?.covered ? money(0, s.currency) : requestEstimate(s, details.plan);
       await tx.insertRequest({
         id,
         ref: await this.freshRef(tx),
@@ -191,6 +195,8 @@ export class ServicesRequests extends ServicesCatalog {
         staff_note: null,
         history: [{ status: 'requested', at: now.toISOString(), by: 'customer' }] as never,
         reviewed: false,
+        estimated_amount: estimate?.amount ?? null,
+        estimated_currency: estimate?.currency ?? null,
         created_at: now,
         updated_at: now,
       });

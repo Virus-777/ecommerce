@@ -33,6 +33,7 @@ Farm machine orders from the app's Farm machines department: the dealers staff k
 | POST | `/api/store/farm/orders/{id}/complete-action` | Finish the bank challenge of a farm order _(idempotent)_ | customer | `CompleteActionInput` → `FarmOrder` |
 | POST | `/api/store/farm/orders/{id}/retry` | Pay a failed farm order again _(idempotent)_ | customer | `RetryPaymentInput` → `FarmOrder` |
 | POST | `/api/store/farm/orders/{id}/cancel` | Cancel an order the dealer hasn't confirmed | customer | `CancelInput` → `FarmOrder` |
+| GET | `/api/store/farm/statistics` | What the customer spent on farm machines in a period: totals, trend and breakdowns | customer | `FarmStatistics` |
 
 ## Admin API
 
@@ -364,6 +365,61 @@ Farm machine orders from the app's Farm machines department: the dealers staff k
 | deliveryDate | `date?` confirm: the delivery date (the requested one when left out); reschedule: the new date (required). Today or later |
 | note | `string?` Shown to the customer (reject and cancel reasons, a note with the date) |
 | staffNote | `string?` |
+
+### FarmStatOrderRef
+
+| Field | Type |
+|---|---|
+| orderId | `uuid` |
+| ref | `string` |
+| placedAt | `datetime?` |
+| amount | `Money` |
+
+### FarmStatMachine
+
+| Field | Type |
+|---|---|
+| productId | `uuid` |
+| productSlug | `string?` |
+| title | `string` |
+| image | `MediaRef?` |
+| orders | `int` |
+| amount | `Money` The machine itself, attachments and delivery left out |
+| lastOrderedAt | `datetime?` |
+
+### FarmStatTotals
+
+| Field | Type |
+|---|---|
+| spent | `Money` What the machines cost: machine, attachments and delivery of every order the dealer has not rejected and the customer has not cancelled, whether or not the card has been charged |
+| cancelled | `Money` Orders cancelled or rejected (not in spent) |
+| delivery | `Money` Delivery fees, included in spent |
+| attachments | `Money` Attachments, included in spent |
+| depositsPaid | `Money` Pay-on-delivery deposits the card has been charged (the dealer confirmed) |
+| dueOnDelivery | `Money` The rest of pay-on-delivery orders, paid to the dealer when the machine arrives |
+| orders | `int` |
+| machines | `int` |
+| attachmentCount | `int` |
+| averageOrder | `Money` |
+| averageDeliveryDays | `number?` Placed to delivered, one decimal; null until an order has been delivered |
+| largestOrder | `FarmStatOrderRef?` |
+
+### FarmStatistics
+
+| Field | Type |
+|---|---|
+| from | `date` First market day covered (range all: the day of the first counted order, else today) |
+| to | `date` |
+| grain | `enum(day|week|month)` Size of each series point: the grain asked for, else day up to 31 days, week up to 92, month beyond |
+| currency | `string` |
+| totals | `FarmStatTotals` |
+| previous | `StatPrevious?` The same number of days just before from; null for range all |
+| series | `StatSeriesPoint[]` Spent per point, with cancelled as the second series; zeros included |
+| byMachineType | `StatShare[]` The Farm machines department's types (Tractors, Harvesters…) by amount, at most 5 plus Other; a machine no longer picked counts as Other machines |
+| byDealer | `StatShare[]` Dealers by amount, at most 5 plus Other |
+| byPaymentOption | `StatShare[]` pay_in_full, installments and pay_on_delivery by amount |
+| byWeekday | `StatWeekday[]` Monday to Sunday by the day orders were placed (market time zone) |
+| topMachines | `FarmStatMachine[]` At most 5, by amount |
 
 ## Status flows
 

@@ -26,6 +26,7 @@
   "dependsOn": ["media", "payments", "customers"],
   "optionalDeps": ["audit", "notifications"],
   "publicApi": [
+    { "name": "searchFood", "signature": "(input: DeptSearchRequest) => DeptSearchResult", "desc": "Integrated search: listed restaurants, their menu items and visible food categories that match the typed text, as ranked hits with their store paths.", "usedBy": ["search"] },
     {"name":"linkTargets","signature":"(input: { kind: 'restaurant', q?: string, ids?: string[], slugs?: string[], limit?: int }) => LinkTarget[]","desc":"Link targets for ad destination pickers (search by q, or resolve ids or URL slugs): restaurants (/food/restaurants/{slug}; available when published), each with its store path the app opens, a label, a short meta line, an image and whether it is shown in the store. Unknown ids are left out.","usedBy":["advertising"]},
     { "name": "exportCustomerData", "signature": "(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]", "desc": "The customer's food orders (reference, restaurant, items, amounts, address, status, dates), reviews and saved restaurants for the personal data export", "usedBy": ["customers"] }
   ],
@@ -145,7 +146,58 @@
     },
     "OrderAction": { "action": "enum(accept|decline|prepare|send|deliver|cancel)", "note": { "type": "string?", "desc": "Shown to the customer (decline and cancel reasons)" }, "staffNote": "string?" },
     "ReviewAdmin": { "id": "uuid", "orderRef": "string", "restaurant": "RestaurantCard", "name": "string", "customerId": "uuid", "stars": "int", "text": "string?", "hidden": "bool", "date": "datetime" },
-    "ReviewModeration": { "hidden": "bool", "reason": "string?" }
+    "ReviewModeration": { "hidden": "bool", "reason": "string?" },
+    "FoodStatOrderRef": {
+      "orderId": "uuid",
+      "ref": "string",
+      "restaurant": "string",
+      "placedAt": "datetime?",
+      "amount": "Money"
+    },
+    "FoodStatDish": {
+      "itemId": "uuid",
+      "name": "string",
+      "image": "MediaRef?",
+      "restaurant": "string",
+      "units": "int",
+      "amount": "Money",
+      "lastOrderedAt": "datetime?"
+    },
+    "FoodStatHourBlock": {
+      "hour": { "type": "int", "desc": "First hour of the four-hour block in market time: 0, 4, 8, 12, 16 or 20" },
+      "label": { "type": "string", "desc": "e.g. 12 am, 4 pm" },
+      "amount": "Money",
+      "count": "int"
+    },
+    "FoodStatTotals": {
+      "spent": { "type": "Money", "desc": "What the card paid for orders that arrived: the dishes and the delivery fee" },
+      "delivery": { "type": "Money", "desc": "Delivery fees, included in spent" },
+      "dishesTotal": { "type": "Money", "desc": "The dishes alone, delivery fees left out" },
+      "notDelivered": { "type": "Money", "desc": "Orders cancelled or declined; never charged, not in spent" },
+      "orders": { "type": "int", "desc": "Orders that arrived" },
+      "dishes": { "type": "int", "desc": "Items in those orders, quantities added up" },
+      "restaurants": "int",
+      "averageOrder": "Money",
+      "averageDeliveryMinutes": { "type": "number?", "desc": "Placed to delivered, one decimal; null until an order has been delivered" },
+      "reviews": { "type": "int", "desc": "Reviews the customer left in the period" },
+      "averageRating": { "type": "number?", "desc": "Stars the customer gave, one decimal; null when they left none" },
+      "largestOrder": "FoodStatOrderRef?"
+    },
+    "FoodStatistics": {
+      "from": { "type": "date", "desc": "First market day covered (range all: the day of the first counted order, else today)" },
+      "to": "date",
+      "grain": { "type": "enum(day|week|month)", "desc": "Size of each series point: the grain asked for, else day up to 31 days, week up to 92, month beyond" },
+      "currency": "string",
+      "totals": "FoodStatTotals",
+      "previous": { "type": "StatPrevious?", "desc": "The same number of days just before from; null for range all" },
+      "series": { "type": "StatSeriesPoint[]", "desc": "Spent per point, with the not-delivered total as the second series; zeros included" },
+      "byRestaurant": { "type": "StatShare[]", "desc": "Restaurants by amount, at most 5 plus Other" },
+      "byMenuSection": { "type": "StatShare[]", "desc": "The restaurants' own menu sections (Pizzas, Ramen, Sides…) by amount of dishes, at most 5 plus Other. Sections belong to one restaurant each, so rows group by name — two restaurants' \"Pizza\" is one row — and a dish whose item has since been removed counts as Other" },
+      "byStatus": { "type": "StatShare[]", "desc": "The statuses the period's orders are in — delivered, on the way, cancelled, declined… — counted in orders; amount is what was spent, so only delivered rows carry money" },
+      "byWeekday": { "type": "StatWeekday[]", "desc": "Monday to Sunday by the day orders were placed (market time zone)" },
+      "byHour": { "type": "FoodStatHourBlock[]", "desc": "Six four-hour blocks by the hour orders were placed (market time zone)" },
+      "topDishes": { "type": "FoodStatDish[]", "desc": "At most 5, by amount" }
+    }
   },
   "tables": [
     { "name": "categories", "columns": { "id": "uuid pk", "slug": "text unique", "name": "text", "icon": "text?", "image_id": "uuid?", "position": "int", "visible": "bool", "created_at": "timestamptz", "updated_at": "timestamptz" }, "indexes": ["(position)"] },
@@ -189,6 +241,7 @@
     { "id": "retryOrderPayment", "area": "store", "method": "POST", "path": "/orders/{id}/retry", "summary": "Pay a failed food order again", "auth": "customer", "params": { "id": "uuid" }, "body": "RetryPaymentInput", "response": "FoodOrder", "idempotent": true, "errors": ["NOT_FOUND", "ILLEGAL_TRANSITION", "RESTAURANT_CLOSED"], "screens": ["store/food-order"] },
     { "id": "cancelOrder", "area": "store", "method": "POST", "path": "/orders/{id}/cancel", "summary": "Cancel an order the restaurant hasn't accepted", "auth": "customer", "params": { "id": "uuid" }, "body": "CancelInput", "response": "FoodOrder", "errors": ["NOT_FOUND", "ILLEGAL_TRANSITION"], "events": ["food.order.status_changed"], "screens": ["store/food-order"] },
     { "id": "reviewOrder", "area": "store", "method": "POST", "path": "/orders/{id}/review", "summary": "Rate a delivered order", "auth": "customer", "params": { "id": "uuid" }, "body": "ReviewInput", "response": "FoodOrder", "errors": ["NOT_FOUND", "ILLEGAL_TRANSITION", "ALREADY_REVIEWED"], "screens": ["store/food-order"] },
+    { "id": "getMyStatistics", "area": "store", "method": "GET", "path": "/statistics", "summary": "What the customer spent on food delivery in a period: totals, trend and breakdowns", "desc": "Orders count by the day and hour they were placed (market time zone). The card is charged on delivery, so spent counts delivered orders — dishes and delivery fee together; orders cancelled by the customer or declined by the restaurant are never charged and counted apart as notDelivered, and one still on its way counts in neither, but shows in byStatus. Orders still waiting for payment are left out. from/to (both or neither) replace range; at most 3 years. Default range last_12_months.", "auth": "customer", "query": { "range": "enum(last_30_days|last_3_months|last_6_months|last_12_months|this_year|last_year|all)?", "from": "date?", "to": "date?", "grain": "enum(day|week|month)?" }, "response": "FoodStatistics", "errors": ["VALIDATION_FAILED"], "screens": ["account/statistics"] },
 
     { "id": "listCategoriesAdmin", "area": "admin", "method": "GET", "path": "/categories", "summary": "All food categories in order", "auth": "staff", "permission": "food.view", "response": "FoodCategory[]", "screens": ["admin/departments-food"] },
     { "id": "createCategory", "area": "admin", "method": "POST", "path": "/categories", "summary": "Add a food category", "auth": "staff", "permission": "food.manage", "body": "FoodCategoryInput", "response": "FoodCategory", "status": 201, "errors": ["SLUG_TAKEN"], "audited": true, "screens": ["admin/departments-food"] },

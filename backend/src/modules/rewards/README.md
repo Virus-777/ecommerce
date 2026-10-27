@@ -362,6 +362,7 @@ Indexes: `(customer_id, at)`, `(reward_id, at)`
 
 | Function | Signature | Used by |
 |---|---|---|
+| searchRewards | `(input: DeptSearchRequest) => DeptSearchResult`<br>Integrated search: rewards of the catalogue whose title or condition matches the typed text, as ranked hits that open the Daily rewards department. Needs customerId for the customer's own points; a visitor gets the catalogue without them. | search |
 | exportCustomerData | `(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]`<br>The customer's points history, check-ins and redemptions for the personal data export | customers |
 
 ## Permissions

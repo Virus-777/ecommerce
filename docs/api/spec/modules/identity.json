@@ -12,7 +12,7 @@
   "summary": "Who someone is and how they prove it: accounts for customers, seller members and staff, credentials, email verification, sessions and refresh tokens for the website and the Android app, password recovery, 2-step verification, signed-in devices, guest sessions and the security activity log.",
   "owns": [
     "Accounts in two realms: member (customers and seller members share one account) and staff (invite-only: an invitation link plus a pass code; email and password sign-in, no 2-step)",
-    "Registration with email verification codes (6 digits, 10 minutes, resend timer)",
+    "Registration for customers: the account is created and signed in straight away (no email code step); the email address stays unverified",
     "Phone number verification codes (requested by customers when the mobile number changes)",
     "Sign-in for the store, Seller Center and Admin Center; access tokens plus rotating refresh tokens; keep me signed in",
     "Failed sign-in counting and temporary lockout (attempts left shown to the user)",
@@ -386,8 +386,19 @@
         "type": "string",
         "desc": "Purchase terms / privacy version shown on the form (content module)"
       },
+      "keepSignedIn": {
+        "type": "bool?",
+        "desc": "Long refresh token (30 days) instead of 24 hours for the session this call opens"
+      },
       "guestSessionId": "uuid?",
       "device": "DeviceInfo"
+    },
+    "RegistrationResult": {
+      "account": "AccountSummary",
+      "tokens": {
+        "type": "SessionTokens",
+        "desc": "Registration opens a store session right away"
+      }
     },
     "VerificationChallenge": {
       "id": "uuid",
@@ -405,17 +416,11 @@
       "code": {
         "type": "string",
         "desc": "6 digits"
-      },
-      "keepSignedIn": "bool?",
-      "device": "DeviceInfo?"
+      }
     },
     "VerifyResult": {
       "verified": "bool",
-      "account": "AccountSummary",
-      "tokens": {
-        "type": "SessionTokens?",
-        "desc": "Registration verification signs the customer in"
-      }
+      "account": "AccountSummary"
     },
     "PasswordPolicy": {
       "minLength": {
@@ -1053,7 +1058,7 @@
     {
       "name": "Account status",
       "field": "AccountSummary.status",
-      "initial": "pending_verification",
+      "initial": "active",
       "transitions": [
         [
           "pending_verification",
@@ -1116,7 +1121,7 @@
           "closed"
         ]
       ],
-      "notes": "Staff accounts start as invited (initial state for that realm); member accounts start pending_verification and cannot sign in until the email code is confirmed (sign-in returns EMAIL_NOT_VERIFIED with a fresh challenge). Automatic locks (failed sign-ins) expire after lockoutMinutes; staff locks have an optional end date. Every move writes a security_events row; staff-initiated moves are also audited. Unverified accounts older than 7 days are deleted by identity.purge-expired."
+      "notes": "Staff accounts start as invited (initial state for that realm); member accounts start active: registration signs the customer in and the email address is recorded unverified. pending_verification is kept for accounts created before the email code step was removed; a successful sign-in moves them to active. Automatic locks (failed sign-ins) expire after lockoutMinutes; staff locks have an optional end date. Every move writes a security_events row; staff-initiated moves are also audited. Accounts left pending_verification for 7 days are deleted by identity.purge-expired."
     },
     {
       "name": "Session",
@@ -1244,20 +1249,22 @@
       "area": "public",
       "method": "POST",
       "path": "/registrations",
-      "summary": "Create a customer account and send an email code",
-      "desc": "Always answers 202 with a challenge so the form cannot be used to discover accounts: if the email already has an account, the email says so and offers sign-in and password reset, and the code will not verify. Password rules are checked live with GET /password-policy and again here.",
+      "summary": "Create a customer account and sign in",
+      "desc": "Creates the account and opens a store session in the same call: there is no email code step, and the email address is recorded unverified (emailVerified false). An email that already has an account is refused with EMAIL_IN_USE. A visitor session passed in is claimed, so the guest cart moves to the new account. Password rules are checked live with GET /password-policy and again here.",
       "auth": "visitor",
       "body": "RegistrationRequest",
-      "response": "VerificationChallenge",
-      "status": 202,
+      "response": "RegistrationResult",
+      "status": 201,
       "errors": [
         "VALIDATION_FAILED",
         "WEAK_PASSWORD",
+        "EMAIL_IN_USE",
         "RATE_LIMITED"
       ],
       "events": [
         "identity.user.registered",
-        "identity.verification.code_issued"
+        "identity.guest_session.claimed",
+        "identity.session.new_device"
       ],
       "screens": [
         "auth/register",
@@ -1271,8 +1278,8 @@
       "area": "public",
       "method": "POST",
       "path": "/verifications/{id}/confirm",
-      "summary": "Confirm an email or phone code (registration, email change, phone change)",
-      "desc": "Registration: activates the account and signs the customer in; guest orders placed with this email can then be attached (identity.user.verified, consumed by customers). Email change: switches the sign-in email and alerts the old address. Phone: marks the number verified (identity.user.verified with channel phone).",
+      "summary": "Confirm an email change or phone code",
+      "desc": "Email change: switches the sign-in email and alerts the old address. Phone: marks the number verified (identity.user.verified with channel phone). Registration issues no codes, so nothing is signed in here.",
       "auth": "visitor",
       "params": {
         "id": "uuid"
@@ -1290,7 +1297,6 @@
         "identity.email.changed"
       ],
       "screens": [
-        "auth/register",
         "account/profile"
       ],
       "rateLimit": "code"
@@ -1314,7 +1320,7 @@
         "identity.verification.code_issued"
       ],
       "screens": [
-        "auth/register"
+        "account/profile"
       ],
       "rateLimit": "code"
     },
@@ -1324,7 +1330,7 @@
       "method": "POST",
       "path": "/sessions",
       "summary": "Sign in with email and password",
-      "desc": "Returns tokens, or a 2-step challenge, or (seller audience with several sellers) the list of sellers to choose from. Wrong passwords return INVALID_CREDENTIALS with details.attemptsLeft; at the limit the account locks for lockoutMinutes and ACCOUNT_LOCKED carries details.lockedUntil. Unknown emails get the same answer and timing. A guest session passed in is claimed (cart and recently viewed merge). A sign-in from a device not seen before publishes identity.session.new_device for the security alert.",
+      "desc": "Returns tokens, or a 2-step challenge, or (seller audience with several sellers) the list of sellers to choose from. Wrong passwords return INVALID_CREDENTIALS with details.attemptsLeft; at the limit the account locks for lockoutMinutes and ACCOUNT_LOCKED carries details.lockedUntil. Unknown emails get the same answer and timing. An account left pending_verification by the old email code step is activated by a successful sign-in. A guest session passed in is claimed (cart and recently viewed merge). A sign-in from a device not seen before publishes identity.session.new_device for the security alert.",
       "auth": "visitor",
       "body": "SignInRequest",
       "response": "SignInResult",
@@ -1332,7 +1338,6 @@
         "INVALID_CREDENTIALS",
         "ACCOUNT_LOCKED",
         "ACCOUNT_DISABLED",
-        "EMAIL_NOT_VERIFIED",
         "NO_SELLER_ACCESS",
         "RATE_LIMITED"
       ],
@@ -2326,7 +2331,7 @@
     "publishes": [
       {
         "name": "identity.user.registered",
-        "when": "A customer account is created (before email verification)",
+        "when": "A customer account is created (the email address is not verified)",
         "payload": {
           "accountId": "uuid",
           "email": "email",
@@ -2340,7 +2345,7 @@
       },
       {
         "name": "identity.user.verified",
-        "when": "The registration email code, or a new phone number's code, is confirmed",
+        "when": "An email change code, or a new phone number's code, is confirmed",
         "payload": {
           "accountId": "uuid",
           "channel": "enum(email|phone)",
@@ -2363,7 +2368,7 @@
       },
       {
         "name": "identity.verification.code_issued",
-        "when": "An email or SMS code is issued (registration, email change, 2-step SMS)",
+        "when": "An email or SMS code is issued (email change, phone number, 2-step SMS)",
         "payload": {
           "challengeId": "uuid",
           "accountId": "uuid?",
@@ -2379,7 +2384,7 @@
           },
           "existingAccount": {
             "type": "bool",
-            "desc": "Registration attempt for an email that already has an account: send the 'you already have an account' email instead of a code"
+            "desc": "Unused since registration stopped issuing codes: it marked the 'you already have an account' email"
           },
           "expiresAt": "datetime"
         }
@@ -2549,7 +2554,7 @@
     {
       "name": "identity.purge-expired",
       "schedule": "hourly",
-      "does": "Delete expired challenges, reset tokens, re-auth tokens, order links and guest sessions past their TTL (keeping grants for orders still open), and member accounts never verified after 7 days"
+      "does": "Delete expired challenges, reset tokens, re-auth tokens, order links and guest sessions past their TTL (keeping grants for orders still open), and member accounts left pending_verification for 7 days by the old email code step"
     },
     {
       "name": "identity.expire-invitations",
@@ -2728,10 +2733,6 @@
     "ACCOUNT_DISABLED": {
       "status": 403,
       "meaning": "The account is disabled or closed."
-    },
-    "EMAIL_NOT_VERIFIED": {
-      "status": 403,
-      "meaning": "Confirm the email first. details.challenge is a fresh VerificationChallenge."
     },
     "CODE_INVALID": {
       "status": 400,

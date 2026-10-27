@@ -10,7 +10,7 @@ Who someone is and how they prove it: accounts for customers, seller members and
 
 ## Owns
 - Accounts in two realms: member (customers and seller members share one account) and staff (invite-only: an invitation link plus a pass code; email and password sign-in, no 2-step)
-- Registration with email verification codes (6 digits, 10 minutes, resend timer)
+- Registration for customers: the account is created and signed in straight away (no email code step); the email address stays unverified
 - Phone number verification codes (requested by customers when the mobile number changes)
 - Sign-in for the store, Seller Center and Admin Center; access tokens plus rotating refresh tokens; keep me signed in
 - Failed sign-in counting and temporary lockout (attempts left shown to the user)
@@ -81,8 +81,8 @@ Who someone is and how they prove it: accounts for customers, seller members and
 
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
-| POST | `/api/public/identity/registrations` | Create a customer account and send an email code | visitor | `RegistrationRequest` → `VerificationChallenge` |
-| POST | `/api/public/identity/verifications/{id}/confirm` | Confirm an email or phone code (registration, email change, phone change) | visitor | `VerifyCodeRequest` → `VerifyResult` |
+| POST | `/api/public/identity/registrations` | Create a customer account and sign in | visitor | `RegistrationRequest` → `RegistrationResult` |
+| POST | `/api/public/identity/verifications/{id}/confirm` | Confirm an email change or phone code | visitor | `VerifyCodeRequest` → `VerifyResult` |
 | POST | `/api/public/identity/verifications/{id}/resend` | Send a new code | visitor | `VerificationChallenge` |
 | POST | `/api/public/identity/sessions` | Sign in with email and password | visitor | `SignInRequest` → `SignInResult` |
 | POST | `/api/public/identity/sign-in-challenges/{id}/verify` | Complete sign-in with a 2-step code or recovery code | visitor | `SecondFactorRequest` → `SignInResult` |
@@ -209,8 +209,16 @@ Who someone is and how they prove it: accounts for customers, seller members and
 | lastName | `string` |
 | marketingOptIn | `bool` Unchecked by default. Forwarded to notifications as promotional email consent. |
 | acceptedTermsVersion | `string` Purchase terms / privacy version shown on the form (content module) |
+| keepSignedIn | `bool?` Long refresh token (30 days) instead of 24 hours for the session this call opens |
 | guestSessionId | `uuid?` |
 | device | `DeviceInfo` |
+
+### RegistrationResult
+
+| Field | Type |
+|---|---|
+| account | `AccountSummary` |
+| tokens | `SessionTokens` Registration opens a store session right away |
 
 ### VerificationChallenge
 
@@ -229,8 +237,6 @@ Who someone is and how they prove it: accounts for customers, seller members and
 | Field | Type |
 |---|---|
 | code | `string` 6 digits |
-| keepSignedIn | `bool?` |
-| device | `DeviceInfo?` |
 
 ### VerifyResult
 
@@ -238,7 +244,6 @@ Who someone is and how they prove it: accounts for customers, seller members and
 |---|---|
 | verified | `bool` |
 | account | `AccountSummary` |
-| tokens | `SessionTokens?` Registration verification signs the customer in |
 
 ### PasswordPolicy
 
@@ -512,7 +517,7 @@ Who someone is and how they prove it: accounts for customers, seller members and
 
 ```mermaid
 stateDiagram-v2
-  [*] --> pending_verification
+  [*] --> active
   pending_verification --> active: verifyEmail
   invited --> active: acceptInvitation
   invited --> closed: revokeInvitation
@@ -527,7 +532,7 @@ stateDiagram-v2
   locked --> closed: close
 ```
 
-Staff accounts start as invited (initial state for that realm); member accounts start pending_verification and cannot sign in until the email code is confirmed (sign-in returns EMAIL_NOT_VERIFIED with a fresh challenge). Automatic locks (failed sign-ins) expire after lockoutMinutes; staff locks have an optional end date. Every move writes a security_events row; staff-initiated moves are also audited. Unverified accounts older than 7 days are deleted by identity.purge-expired.
+Staff accounts start as invited (initial state for that realm); member accounts start active: registration signs the customer in and the email address is recorded unverified. pending_verification is kept for accounts created before the email code step was removed; a successful sign-in moves them to active. Automatic locks (failed sign-ins) expire after lockoutMinutes; staff locks have an optional end date. Every move writes a security_events row; staff-initiated moves are also audited. Accounts left pending_verification for 7 days are deleted by identity.purge-expired.
 
 ### Session (`SessionTokens.sessionId (sessions.revoked_at / expires_at)`)
 
@@ -864,10 +869,10 @@ Indexes: `(expires_at)`
 
 | Publishes | When | Payload | Consumed by |
 |---|---|---|---|
-| `identity.user.registered` | A customer account is created (before email verification) | `{ accountId: uuid, email: email, firstName: string, lastName: string, marketingOptIn: bool, acceptedTermsVersion: string, guestSessionId: uuid?, at: datetime }` | customers, wallet |
-| `identity.user.verified` | The registration email code, or a new phone number's code, is confirmed | `{ accountId: uuid, channel: enum(email|phone), email: email, phone: string?, guestSessionId: uuid?, at: datetime }` | customers, notifications, orders |
+| `identity.user.registered` | A customer account is created (the email address is not verified) | `{ accountId: uuid, email: email, firstName: string, lastName: string, marketingOptIn: bool, acceptedTermsVersion: string, guestSessionId: uuid?, at: datetime }` | customers, wallet |
+| `identity.user.verified` | An email change code, or a new phone number's code, is confirmed | `{ accountId: uuid, channel: enum(email|phone), email: email, phone: string?, guestSessionId: uuid?, at: datetime }` | customers, notifications, orders |
 | `identity.password.changed` | A password is changed, reset or force-reset | `{ accountId: uuid, realm: enum(member|staff), via: enum(change|reset|forced_reset), otherSessionsRevoked: bool, at: datetime }` | notifications |
-| `identity.verification.code_issued` | An email or SMS code is issued (registration, email change, 2-step SMS) | `{ challengeId: uuid, accountId: uuid?, purpose: enum(email_verification|email_change|phone_verification|sign_in_second_factor), channel: enum(email|sms), to: string, code: string, existingAccount: bool, expiresAt: datetime }` | notifications |
+| `identity.verification.code_issued` | An email or SMS code is issued (email change, phone number, 2-step SMS) | `{ challengeId: uuid, accountId: uuid?, purpose: enum(email_verification|email_change|phone_verification|sign_in_second_factor), channel: enum(email|sms), to: string, code: string, existingAccount: bool, expiresAt: datetime }` | notifications |
 | `identity.password_reset.requested` | A reset link is issued (self-service or forced by staff) | `{ accountId: uuid, email: email, resetUrl: url, expiresAt: datetime, forcedBy: Actor? }` | notifications |
 | `identity.session.new_device` | Someone signs in from a device not seen before for this account | `{ accountId: uuid, realm: enum(member|staff), deviceLabel: string, location: string?, at: datetime }` | notifications |
 | `identity.account.locked` | An account is locked by failed sign-ins, refresh-token reuse or staff | `{ accountId: uuid, realm: enum(member|staff), cause: enum(failed_sign_ins|refresh_token_reused|staff_action), until: datetime?, by: Actor?, reason: text? }` | access, notifications |
@@ -930,7 +935,6 @@ Indexes: `(expires_at)`
 | `INVALID_CREDENTIALS` | 401 | Email and password don't match. details.attemptsLeft before a temporary lock of details.lockoutMinutes minutes. |
 | `ACCOUNT_LOCKED` | 423 | Sign-in is paused. details.lockedUntil (null = until staff unlock) and details.cause. |
 | `ACCOUNT_DISABLED` | 403 | The account is disabled or closed. |
-| `EMAIL_NOT_VERIFIED` | 403 | Confirm the email first. details.challenge is a fresh VerificationChallenge. |
 | `CODE_INVALID` | 400 | The code is wrong. details.attemptsLeft. |
 | `CODE_EXPIRED` | 410 | The code or challenge has expired; request a new one. |
 | `CHALLENGE_LOCKED` | 429 | Too many wrong codes; start again. |
@@ -954,7 +958,7 @@ Indexes: `(expires_at)`
 
 | Job | Schedule | Does |
 |---|---|---|
-| `identity.purge-expired` | hourly | Delete expired challenges, reset tokens, re-auth tokens, order links and guest sessions past their TTL (keeping grants for orders still open), and member accounts never verified after 7 days |
+| `identity.purge-expired` | hourly | Delete expired challenges, reset tokens, re-auth tokens, order links and guest sessions past their TTL (keeping grants for orders still open), and member accounts left pending_verification for 7 days by the old email code step |
 | `identity.expire-invitations` | hourly | Move pending invitations past expires_at to expired |
 | `identity.expire-sessions` | every 15 min | Mark sessions past expires_at or absolute_expires_at as expired; prune revoked sessions older than 90 days |
 | `identity.prune-security-events` | daily | Delete security events older than securityEventRetentionDays and sign-in attempts older than 30 days |

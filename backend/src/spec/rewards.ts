@@ -394,6 +394,8 @@ export const RewardsRewardRedeemedEvent: z.ZodType<RewardsRewardRedeemedEvent> =
 
 /** What other modules may call in-process: `ctx.use('rewards')` (or `ctx.tryUse` for an optional dependency). */
 export interface RewardsPublicApi {
+  /** Integrated search: rewards of the catalogue whose title or condition matches the typed text, as ranked hits that open the Daily rewards department. Needs customerId for the customer's own points; a visitor gets the catalogue without them. Used by: search. */
+  searchRewards(input: common.DeptSearchRequest): Promise<common.DeptSearchResult>;
   /** The customer's points history, check-ins and redemptions for the personal data export Used by: customers. */
   exportCustomerData(input: { customerId: string, accountId: string }): Promise<common.CustomerDataSection[]>;
 }
@@ -848,7 +850,7 @@ export const spec = defineModuleSpec({
   summary: "The app's Daily rewards department: customers check in every day for points (a 7-day streak with a bonus on day 7), earn points for daily tasks, and swap points for coupons. Staff set the check-in schedule, the tasks and the reward catalogue in Admin › Departments › Daily rewards, and can adjust a customer's points. Each coupon is a single-use code of a promotions coupon campaign given to the customer.",
   dependsOn: ["promotions"],
   optionalDeps: ["customers","audit","notifications"],
-  publicApi: ["exportCustomerData"],
+  publicApi: ["searchRewards","exportCustomerData"],
   permissions: [
     {
       "key": "rewards.view",

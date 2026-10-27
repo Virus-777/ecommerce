@@ -16,7 +16,8 @@
     "Empty-result guidance: remove one filter (with counts), nearby categories, tips, popular products",
     "Recently searched (per customer or guest session) with removal and clear all",
     "Popular searches: the most searched keywords with results across the store",
-    "Search synonyms, reindexing, zero-result query reporting, ranking policy"
+    "Search synonyms, reindexing, zero-result query reporting, ranking policy",
+    "Integrated search: the same query answered by all ten departments (fan-out to each department module), sections ranked against each other, and a shortcut card for a department the query names"
   ],
   "notOwns": [
     "Which ads appear and where: advertising (search asks for sponsored slots and marks them)",
@@ -24,10 +25,11 @@
     "Prices, featured offer and delivery estimates: offers (search indexes them)",
     "Homepage sections and curated collections: content (uses search for product cards and listings)",
     "Recently viewed products: customers; back-in-stock alerts: wishlist",
-    "Personalized recommendations and visual search: later projects (plan ch. 4)"
+    "Personalized recommendations and visual search: later projects (plan ch. 4)",
+    "The department records themselves: departments, software, services, food and rewards own them and answer for them (search only ranks and lays out what they send)"
   ],
   "dependsOn": ["catalog", "offers"],
-  "optionalDeps": ["inventory", "reviews", "sellers", "advertising", "promotions", "customers", "media", "reports", "wishlist", "orders", "returns", "audit"],
+  "optionalDeps": ["inventory", "reviews", "sellers", "advertising", "promotions", "customers", "media", "reports", "wishlist", "orders", "returns", "audit", "departments", "software", "services", "food", "rewards"],
   "publicApi": [
     { "name": "searchProducts", "signature": "(query: SearchQuery) => { items: ProductCard[], total: int, nextCursor: string|null }", "desc": "Same engine as the store endpoint, without sponsored slots. Used for collections (new arrivals, best sellers, category picks).", "usedBy": ["content", "promotions"] },
     { "name": "getProductCards", "signature": "(productIds: uuid[], opts?: { postalCode?: string, sellerId?: uuid }) => ProductCard[]", "desc": "Cards for any product list (home sections, recently viewed, related products), same shape everywhere", "usedBy": ["content", "wishlist", "reviews", "advertising"] },
@@ -206,6 +208,36 @@
     "ProductSuggestion": { "productId": "uuid", "slug": "string", "title": "string", "image": "MediaRef?", "fromPrice": "Money?", "sellerName": "string?" },
     "RecentSearch": { "id": "uuid", "query": "string", "filtersLabel": "string?", "searchedAt": "datetime" },
     "PopularSearch": { "query": { "type": "string", "desc": "Normalized keyword, e.g. 'wireless headphones'" } },
+    "DepartmentSection": {
+      "key": "enum(phones|farm|software|welfare|booking|food|blogs|companies|play|rewards)",
+      "name": { "type": "string", "desc": "The department's name as the home rail shows it, e.g. Food delivery" },
+      "icon": { "type": "string", "desc": "Lucide icon name, the rail's icon for this department" },
+      "path": { "type": "string", "desc": "The department's own screen, e.g. /food (the 'Open department' link)" },
+      "total": { "type": "int", "desc": "Matching records in every group of this section" },
+      "groups": "DeptSearchGroup[]"
+    },
+    "DepartmentShortcut": {
+      "key": "string",
+      "name": "string",
+      "icon": "string",
+      "path": "string",
+      "tagline": { "type": "string", "desc": "One line under the name, e.g. Order from restaurants near you" }
+    },
+    "DepartmentSuggestGroup": {
+      "key": "string",
+      "name": "string",
+      "icon": "string",
+      "path": { "type": "string", "desc": "The department's own screen" },
+      "total": "int",
+      "items": "DeptSearchHit[]"
+    },
+    "DepartmentResults": {
+      "query": "string",
+      "total": { "type": "int", "desc": "Matching records in every section together" },
+      "sections": { "type": "DepartmentSection[]", "desc": "Only departments with matches, best match first" },
+      "shortcuts": { "type": "DepartmentShortcut[]", "desc": "Departments the query names that have no section of their own" },
+      "partial": { "type": "bool", "desc": "A department could not answer in time or failed: its section is missing from this answer" }
+    },
     "Suggestions": {
       "query": "string",
       "queries": "QuerySuggestion[]",
@@ -213,7 +245,8 @@
       "brands": "BrandSuggestion[]",
       "stores": "StoreSuggestion[]",
       "products": "ProductSuggestion[]",
-      "recent": { "type": "RecentSearch[]", "desc": "Only when a customer or guest session is present and recent searches are on" }
+      "recent": { "type": "RecentSearch[]", "desc": "Only when a customer or guest session is present and recent searches are on" },
+      "departments": { "type": "DepartmentSuggestGroup[]", "desc": "Matching records of each department, one group per department with matches (at most departmentSuggestLimit hits each)" }
     },
     "RankingFactor": { "key": "string", "label": "string", "weight": "number" },
     "RankingPolicy": {
@@ -408,6 +441,8 @@
       "screens": ["store/search", "store/search-empty", "store/category", "store/official", "store/seller", "store/brand"]
     },
     { "id": "getSuggestions", "area": "store", "method": "GET", "path": "/suggestions", "summary": "Suggestions while typing: queries, categories, brands, stores, products and recent searches", "desc": "Tolerates misspellings. Store suggestions link to the seller's store page. Recent searches are included only when a customer or guest session is sent and recent searches are turned on in the profile.", "auth": "visitor", "query": { "q": "string", "limit": { "type": "int?", "desc": "Per group, default 5" } }, "response": "Suggestions", "screens": ["store/search", "store/home"] },
+    { "id": "searchDepartmentsAll", "area": "store", "method": "GET", "path": "/departments", "summary": "The same query answered by every department: one section per department with matches", "desc": "Asks each department module in parallel and ranks the sections against each other (best hit first, then the number of matches, then the home rail's order). A department that is off, not built yet or too slow is left out and partial is true. Departments the query names but that have no matching record come back as shortcuts.", "auth": "visitor", "query": { "q": "string", "limit": { "type": "int?", "desc": "Hits per group, default departmentSectionLimit" } }, "response": "DepartmentResults", "errors": ["VALIDATION_FAILED"], "screens": ["store/search"] },
+    { "id": "searchDepartmentScope", "area": "store", "method": "GET", "path": "/departments/{key}", "summary": "One department's results for the query, paged group by group", "desc": "The scoped list behind a department's chip. Each group pages on its own: send kind and that group's cursor. NOT_FOUND when the key is not a department or its module is off.", "auth": "visitor", "params": { "key": "string" }, "query": { "q": "string", "kind": { "type": "string?", "desc": "Page this group only" }, "cursor": "string?", "limit": { "type": "int?", "desc": "Hits per group, default departmentScopeLimit" } }, "response": "DepartmentSection", "errors": ["NOT_FOUND", "VALIDATION_FAILED"], "screens": ["store/search"] },
     { "id": "listPopularSearches", "area": "store", "method": "GET", "path": "/popular-searches", "summary": "Popular search keywords across the store (shown as chips before the customer types)", "desc": "The most searched keywords of the last 30 days that found results (suggestion_terms of kind query, rebuilt hourly by search.refresh-suggestions), most searched first. A keyword needs at least popularSearchesMinCount searches to be listed.", "auth": "visitor", "query": { "limit": { "type": "int?", "desc": "Default 8, at most 20" } }, "response": "PopularSearch[]", "screens": ["store/search"] },
     { "id": "listRecentSearches", "area": "store", "method": "GET", "path": "/recent-searches", "summary": "Recent searches for this customer or guest session (max 10)", "auth": "shopper", "response": "RecentSearch[]", "screens": ["store/search", "store/home"], "desc": "Signed-in customers: searches are saved to the account only while customers.MarketingPreferences.recentSearches is on (read with customers.getMarketingConsent); with it off nothing is saved and the list is empty. Guest sessions keep their own list until sign-in." },
     { "id": "deleteRecentSearch", "area": "store", "method": "DELETE", "path": "/recent-searches/{id}", "summary": "Remove one recent search", "auth": "shopper", "params": { "id": "uuid" }, "response": null, "screens": ["store/search"] },
@@ -488,6 +523,11 @@
     { "key": "bestSellingMinOrders", "type": "int", "default": 500, "desc": "Platform orders in 30 days before best-selling sort is offered", "min": 0 },
     { "key": "transitBusinessDays", "type": "duration", "default": 3, "desc": "Carrier transit business days assumed for every destination in the market (decision S-D4): search results' arrives-by filter and delivery cues use dispatch days + this. The purchase box and checkout show shipping's real estimate", "unit": "business days", "min": 0, "max": 15 },
     { "key": "excludeOutOfStockByDefault", "type": "bool", "default": true, "desc": "Out-of-stock products appear only with 'Include out of stock'" },
+    { "key": "departmentSearch", "type": "bool", "default": true, "desc": "Answer the search with the departments as well as the product catalogue" },
+    { "key": "departmentSectionLimit", "type": "int", "default": 3, "desc": "Hits per group in the search screen's department sections", "min": 1, "max": 20 },
+    { "key": "departmentScopeLimit", "type": "int", "default": 20, "desc": "Hits per group in one department's own results list", "min": 1, "max": 100 },
+    { "key": "departmentSuggestLimit", "type": "int", "default": 2, "desc": "Hits per department in the suggestions panel while typing", "min": 1, "max": 5 },
+    { "key": "departmentFanoutTimeoutMs", "type": "int", "default": 1500, "desc": "How long a department module may take before its section is left out of the answer", "min": 100, "max": 10000 },
     { "key": "pricePresets", "type": "json", "default": [2500, 5000, 10000, 20000], "desc": "Boundaries of the price facet presets in minor units, ascending: Under $25, $25 to $50, … $200 and above. Each preset shows its result count" }
   ],
   "integrations": [

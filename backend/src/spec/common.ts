@@ -41,6 +41,106 @@ export const pageQuery = {
 export const DEFAULT_PAGE_LIMIT = 24;
 export const MAX_PAGE_LIMIT = 100;
 
+export interface DeptSearchRequest {
+  /** What the customer typed, trimmed; never empty */
+  q: string;
+  /** Hits per group at most */
+  limit: number;
+  /** Answer only for these kinds; a scoped list pages one kind */
+  kinds?: string[] | null;
+  /** Cursor of the one kind being paged (from that group's nextCursor) */
+  cursor?: string | null;
+  /** The signed-in customer: owned, saved and customer-only records */
+  customerId?: string | null;
+  /** Answer only for these sections; the departments and services modules answer for several */
+  sections?: string[] | null;
+}
+
+export const DeptSearchRequest: z.ZodType<DeptSearchRequest> = z.object({
+  q: z.string().describe("What the customer typed, trimmed; never empty"),
+  limit: z.number().int().describe("Hits per group at most"),
+  kinds: z.array(z.string()).describe("Answer only for these kinds; a scoped list pages one kind").nullish(),
+  cursor: z.string().describe("Cursor of the one kind being paged (from that group's nextCursor)").nullish(),
+  customerId: z.uuid().describe("The signed-in customer: owned, saved and customer-only records").nullish(),
+  sections: z.array(z.string()).describe("Answer only for these sections; the departments and services modules answer for several").nullish(),
+}).register(apiTypes, { id: "DeptSearchRequest" });
+
+export interface DeptSearchHit {
+  id: string;
+  /** What the record is: restaurant, dish, app, phone, post, company, game, … */
+  kind: string;
+  title: string;
+  /** The grey line under the title, e.g. 'Pizza · Italian · ★ 4.7 (1,204)' */
+  meta?: string | null;
+  /** A second grey line, shown only in a scoped list, e.g. 'Open until 11 PM · 1.2 mi' */
+  sub?: string | null;
+  image?: MediaRef | null;
+  /** Short mark on the row, e.g. Verified, Free delivery, −15% */
+  badge?: string | null;
+  badgeTone?: "brand" | "deal" | "info" | "neutral" | null;
+  /** Right side of the row: $12.00, Free, 150 points, ★ 4.6 */
+  priceLabel?: string | null;
+  /** Struck-through price under priceLabel */
+  wasLabel?: string | null;
+  /** Store path the app opens, e.g. /food/restaurants/napoli-pizza */
+  path: string;
+  /** 0–100 match strength, so sections of different departments can be ranked together */
+  score: number;
+}
+
+export const DeptSearchHit: z.ZodType<DeptSearchHit> = z.object({
+  id: z.string(),
+  kind: z.string().describe("What the record is: restaurant, dish, app, phone, post, company, game, …"),
+  title: z.string(),
+  meta: z.string().describe("The grey line under the title, e.g. 'Pizza · Italian · ★ 4.7 (1,204)'").nullish(),
+  sub: z.string().describe("A second grey line, shown only in a scoped list, e.g. 'Open until 11 PM · 1.2 mi'").nullish(),
+  get image() {
+    return MediaRef.nullish();
+  },
+  badge: z.string().describe("Short mark on the row, e.g. Verified, Free delivery, −15%").nullish(),
+  badgeTone: z.enum(["brand", "deal", "info", "neutral"]).nullish(),
+  priceLabel: z.string().describe("Right side of the row: $12.00, Free, 150 points, ★ 4.6").nullish(),
+  wasLabel: z.string().describe("Struck-through price under priceLabel").nullish(),
+  path: z.string().describe("Store path the app opens, e.g. /food/restaurants/napoli-pizza"),
+  score: z.number().int().describe("0–100 match strength, so sections of different departments can be ranked together"),
+}).register(apiTypes, { id: "DeptSearchHit" });
+
+export interface DeptSearchGroup {
+  /** The kind every hit of this group has */
+  kind: string;
+  /** Heading of the group, e.g. Restaurants, Dishes, Apps, Posts */
+  title: string;
+  /** services only: os_install | post_sale | welfare | booking, so search knows which section the group belongs to */
+  area?: string | null;
+  /** Matching records of this kind, also when only a few are sent */
+  total: number;
+  items: DeptSearchHit[];
+  /** More of this group; null when the last hit was sent */
+  nextCursor?: string | null;
+}
+
+export const DeptSearchGroup: z.ZodType<DeptSearchGroup> = z.object({
+  kind: z.string().describe("The kind every hit of this group has"),
+  title: z.string().describe("Heading of the group, e.g. Restaurants, Dishes, Apps, Posts"),
+  area: z.string().describe("services only: os_install | post_sale | welfare | booking, so search knows which section the group belongs to").nullish(),
+  total: z.number().int().describe("Matching records of this kind, also when only a few are sent"),
+  get items() {
+    return z.array(DeptSearchHit);
+  },
+  nextCursor: z.string().describe("More of this group; null when the last hit was sent").nullish(),
+}).register(apiTypes, { id: "DeptSearchGroup" });
+
+export interface DeptSearchResult {
+  /** Only groups with at least one hit, the module's own order */
+  groups: DeptSearchGroup[];
+}
+
+export const DeptSearchResult: z.ZodType<DeptSearchResult> = z.object({
+  get groups() {
+    return z.array(DeptSearchGroup);
+  },
+}).register(apiTypes, { id: "DeptSearchResult" });
+
 export interface Money {
   /** Minor units (cents). 18900 = $189.00 */
   amount: number;
@@ -192,6 +292,91 @@ export const Deadline: z.ZodType<Deadline> = z.object({
   dueAt: z.iso.datetime({ offset: true }),
   state: z.enum(["on_time", "due_soon", "overdue"]),
 }).register(apiTypes, { id: "Deadline" });
+
+export interface StatSeriesPoint {
+  /** First day of the point (Monday for weeks, the 1st for months; never before the period's from) */
+  start: string;
+  /** "Oct 14", "Week of Oct 13", "Oct 2026" */
+  label: string;
+  /** Money in the point; zero where the department has no money of its own */
+  amount: Money;
+  /** A second series the screen draws beside the first (refunds, cancellations); absent when there is none */
+  secondary?: Money | null;
+  /** Records in the point (orders, purchases, requests) */
+  count: number;
+}
+
+export const StatSeriesPoint: z.ZodType<StatSeriesPoint> = z.object({
+  start: z.iso.date().describe("First day of the point (Monday for weeks, the 1st for months; never before the period's from)"),
+  label: z.string().describe("\"Oct 14\", \"Week of Oct 13\", \"Oct 2026\""),
+  get amount() {
+    return Money;
+  },
+  get secondary() {
+    return Money.nullish();
+  },
+  count: z.number().int().describe("Records in the point (orders, purchases, requests)"),
+}).register(apiTypes, { id: "StatSeriesPoint" });
+
+export interface StatShare {
+  /** The thing's id or a stable word, and `other` for the rest beyond the top rows */
+  key: string;
+  label: string;
+  amount: Money;
+  /** Share of the period's total, one decimal */
+  sharePct: number;
+  /** Records behind the row */
+  count: number;
+  /** Items behind the row (machines, apps, dishes); 0 where the department counts none */
+  units: number;
+}
+
+export const StatShare: z.ZodType<StatShare> = z.object({
+  key: z.string().describe("The thing's id or a stable word, and `other` for the rest beyond the top rows"),
+  label: z.string(),
+  get amount() {
+    return Money;
+  },
+  sharePct: z.number().describe("Share of the period's total, one decimal"),
+  count: z.number().int().describe("Records behind the row"),
+  units: z.number().int().describe("Items behind the row (machines, apps, dishes); 0 where the department counts none"),
+}).register(apiTypes, { id: "StatShare" });
+
+export interface StatWeekday {
+  weekday: "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+  /** Mon … Sun */
+  label: string;
+  amount: Money;
+  count: number;
+}
+
+export const StatWeekday: z.ZodType<StatWeekday> = z.object({
+  weekday: z.enum(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]),
+  label: z.string().describe("Mon … Sun"),
+  get amount() {
+    return Money;
+  },
+  count: z.number().int(),
+}).register(apiTypes, { id: "StatWeekday" });
+
+export interface StatPrevious {
+  from: string;
+  to: string;
+  amount: Money;
+  count: number;
+  /** Change of the headline number in %, one decimal; null when the previous period had nothing to compare with */
+  changePct?: number | null;
+}
+
+export const StatPrevious: z.ZodType<StatPrevious> = z.object({
+  from: z.iso.date(),
+  to: z.iso.date(),
+  get amount() {
+    return Money;
+  },
+  count: z.number().int(),
+  changePct: z.number().describe("Change of the headline number in %, one decimal; null when the previous period had nothing to compare with").nullish(),
+}).register(apiTypes, { id: "StatPrevious" });
 
 export interface PageInfo {
   /** Cursor for the next batch; null on the last page */

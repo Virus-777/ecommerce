@@ -58,6 +58,39 @@
     "bootstrap": "No token: an app proof (Play Integrity or bot challenge). Only POST /api/public/identity/app-sessions"
   },
   "types": {
+    "DeptSearchRequest": {
+      "q": { "type": "string", "desc": "What the customer typed, trimmed; never empty" },
+      "limit": { "type": "int", "desc": "Hits per group at most" },
+      "kinds": { "type": "string[]?", "desc": "Answer only for these kinds; a scoped list pages one kind" },
+      "cursor": { "type": "string?", "desc": "Cursor of the one kind being paged (from that group's nextCursor)" },
+      "customerId": { "type": "uuid?", "desc": "The signed-in customer: owned, saved and customer-only records" },
+      "sections": { "type": "string[]?", "desc": "Answer only for these sections; the departments and services modules answer for several" }
+    },
+    "DeptSearchHit": {
+      "id": "string",
+      "kind": { "type": "string", "desc": "What the record is: restaurant, dish, app, phone, post, company, game, …" },
+      "title": "string",
+      "meta": { "type": "string?", "desc": "The grey line under the title, e.g. 'Pizza · Italian · ★ 4.7 (1,204)'" },
+      "sub": { "type": "string?", "desc": "A second grey line, shown only in a scoped list, e.g. 'Open until 11 PM · 1.2 mi'" },
+      "image": "MediaRef?",
+      "badge": { "type": "string?", "desc": "Short mark on the row, e.g. Verified, Free delivery, −15%" },
+      "badgeTone": "enum(brand|deal|info|neutral)?",
+      "priceLabel": { "type": "string?", "desc": "Right side of the row: $12.00, Free, 150 points, ★ 4.6" },
+      "wasLabel": { "type": "string?", "desc": "Struck-through price under priceLabel" },
+      "path": { "type": "string", "desc": "Store path the app opens, e.g. /food/restaurants/napoli-pizza" },
+      "score": { "type": "int", "desc": "0–100 match strength, so sections of different departments can be ranked together" }
+    },
+    "DeptSearchGroup": {
+      "kind": { "type": "string", "desc": "The kind every hit of this group has" },
+      "title": { "type": "string", "desc": "Heading of the group, e.g. Restaurants, Dishes, Apps, Posts" },
+      "area": { "type": "string?", "desc": "services only: os_install | post_sale | welfare | booking, so search knows which section the group belongs to" },
+      "total": { "type": "int", "desc": "Matching records of this kind, also when only a few are sent" },
+      "items": "DeptSearchHit[]",
+      "nextCursor": { "type": "string?", "desc": "More of this group; null when the last hit was sent" }
+    },
+    "DeptSearchResult": {
+      "groups": { "type": "DeptSearchGroup[]", "desc": "Only groups with at least one hit, the module's own order" }
+    },
     "Money": {
       "amount": {
         "type": "int",
@@ -131,6 +164,34 @@
     "Deadline": {
       "dueAt": "datetime",
       "state": "enum(on_time|due_soon|overdue)"
+    },
+    "StatSeriesPoint": {
+      "start": { "type": "date", "desc": "First day of the point (Monday for weeks, the 1st for months; never before the period's from)" },
+      "label": { "type": "string", "desc": "\"Oct 14\", \"Week of Oct 13\", \"Oct 2026\"" },
+      "amount": { "type": "Money", "desc": "Money in the point; zero where the department has no money of its own" },
+      "secondary": { "type": "Money?", "desc": "A second series the screen draws beside the first (refunds, cancellations); absent when there is none" },
+      "count": { "type": "int", "desc": "Records in the point (orders, purchases, requests)" }
+    },
+    "StatShare": {
+      "key": { "type": "string", "desc": "The thing's id or a stable word, and `other` for the rest beyond the top rows" },
+      "label": "string",
+      "amount": "Money",
+      "sharePct": { "type": "number", "desc": "Share of the period's total, one decimal" },
+      "count": { "type": "int", "desc": "Records behind the row" },
+      "units": { "type": "int", "desc": "Items behind the row (machines, apps, dishes); 0 where the department counts none" }
+    },
+    "StatWeekday": {
+      "weekday": "enum(mon|tue|wed|thu|fri|sat|sun)",
+      "label": { "type": "string", "desc": "Mon … Sun" },
+      "amount": "Money",
+      "count": "int"
+    },
+    "StatPrevious": {
+      "from": "date",
+      "to": "date",
+      "amount": "Money",
+      "count": "int",
+      "changePct": { "type": "number?", "desc": "Change of the headline number in %, one decimal; null when the previous period had nothing to compare with" }
     },
     "PageInfo": {
       "nextCursor": { "type": "string?", "desc": "Cursor for the next batch; null on the last page" },

@@ -3,7 +3,7 @@
 Finding products: a product index built from catalog, offers, inventory and reviews events; search with misspelling tolerance and corrections, suggestions (queries, categories, brands, stores, products, recent searches), universal and category filters with counts, sorting, sponsored slots from advertising, and guidance for empty or unavailable results.
 
 - **Group:** Catalog and stock · **Launch phase:** 1 · **Plan chapters:** 4, 3, 19
-- **Depends on:** [catalog](catalog.md), [offers](offers.md) · **Optional:** [inventory](inventory.md), [reviews](reviews.md), [sellers](sellers.md), [advertising](advertising.md), [promotions](promotions.md), [customers](customers.md), [media](media.md), [reports](reports.md), [wishlist](wishlist.md), [orders](orders.md), [returns](returns.md), [audit](audit.md)
+- **Depends on:** [catalog](catalog.md), [offers](offers.md) · **Optional:** [inventory](inventory.md), [reviews](reviews.md), [sellers](sellers.md), [advertising](advertising.md), [promotions](promotions.md), [customers](customers.md), [media](media.md), [reports](reports.md), [wishlist](wishlist.md), [orders](orders.md), [returns](returns.md), [audit](audit.md), [departments](departments.md), [software](software.md), [services](services.md), [food](food.md), [rewards](rewards.md)
 
 ## Owns
 - Product search index (OpenSearch in production; a MongoDB engine for development and tests)
@@ -17,6 +17,7 @@ Finding products: a product index built from catalog, offers, inventory and revi
 - Recently searched (per customer or guest session) with removal and clear all
 - Popular searches: the most searched keywords with results across the store
 - Search synonyms, reindexing, zero-result query reporting, ranking policy
+- Integrated search: the same query answered by all ten departments (fan-out to each department module), sections ranked against each other, and a shortcut card for a department the query names
 
 **Not here:**
 - Which ads appear and where: advertising (search asks for sponsored slots and marks them)
@@ -25,6 +26,7 @@ Finding products: a product index built from catalog, offers, inventory and revi
 - Homepage sections and curated collections: content (uses search for product cards and listings)
 - Recently viewed products: customers; back-in-stock alerts: wishlist
 - Personalized recommendations and visual search: later projects (plan ch. 4)
+- The department records themselves: departments, software, services, food and rewards own them and answer for them (search only ranks and lays out what they send)
 
 ## Store API
 
@@ -33,6 +35,8 @@ Finding products: a product index built from catalog, offers, inventory and revi
 | GET | `/api/store/search/products` | Search results or category listing (product cards with sponsored slots marked) | visitor | Page<SearchHit> |
 | GET | `/api/store/search/facets` | Everything around the results for the same query: total, correction, applied filters, facets with counts, sorts, store match, category context, empty guidance | visitor | `SearchContext` |
 | GET | `/api/store/search/suggestions` | Suggestions while typing: queries, categories, brands, stores, products and recent searches | visitor | `Suggestions` |
+| GET | `/api/store/search/departments` | The same query answered by every department: one section per department with matches | visitor | `DepartmentResults` |
+| GET | `/api/store/search/departments/{key}` | One department's results for the query, paged group by group | visitor | `DepartmentSection` |
 | GET | `/api/store/search/popular-searches` | Popular search keywords across the store (shown as chips before the customer types) | visitor | `PopularSearch[]` |
 | GET | `/api/store/search/recent-searches` | Recent searches for this customer or guest session (max 10) | shopper | `RecentSearch[]` |
 | DELETE | `/api/store/search/recent-searches/{id}` | Remove one recent search | shopper | 204 No content |
@@ -376,6 +380,48 @@ Finding products: a product index built from catalog, offers, inventory and revi
 |---|---|
 | query | `string` Normalized keyword, e.g. 'wireless headphones' |
 
+### DepartmentSection
+
+| Field | Type |
+|---|---|
+| key | `enum(phones|farm|software|welfare|booking|food|blogs|companies|play|rewards)` |
+| name | `string` The department's name as the home rail shows it, e.g. Food delivery |
+| icon | `string` Lucide icon name, the rail's icon for this department |
+| path | `string` The department's own screen, e.g. /food (the 'Open department' link) |
+| total | `int` Matching records in every group of this section |
+| groups | `DeptSearchGroup[]` |
+
+### DepartmentShortcut
+
+| Field | Type |
+|---|---|
+| key | `string` |
+| name | `string` |
+| icon | `string` |
+| path | `string` |
+| tagline | `string` One line under the name, e.g. Order from restaurants near you |
+
+### DepartmentSuggestGroup
+
+| Field | Type |
+|---|---|
+| key | `string` |
+| name | `string` |
+| icon | `string` |
+| path | `string` The department's own screen |
+| total | `int` |
+| items | `DeptSearchHit[]` |
+
+### DepartmentResults
+
+| Field | Type |
+|---|---|
+| query | `string` |
+| total | `int` Matching records in every section together |
+| sections | `DepartmentSection[]` Only departments with matches, best match first |
+| shortcuts | `DepartmentShortcut[]` Departments the query names that have no section of their own |
+| partial | `bool` A department could not answer in time or failed: its section is missing from this answer |
+
 ### Suggestions
 
 | Field | Type |
@@ -387,6 +433,7 @@ Finding products: a product index built from catalog, offers, inventory and revi
 | stores | `StoreSuggestion[]` |
 | products | `ProductSuggestion[]` |
 | recent | `RecentSearch[]` Only when a customer or guest session is present and recent searches are on |
+| departments | `DepartmentSuggestGroup[]` Matching records of each department, one group per department with matches (at most departmentSuggestLimit hits each) |
 
 ### RankingFactor
 
@@ -843,6 +890,11 @@ Indexes: `pk (product_id, day)`, `(day)`
 | bestSellingMinOrders | `500` | int, 0–… | Platform orders in 30 days before best-selling sort is offered |
 | transitBusinessDays | `3` | duration, business days, 0–15 | Carrier transit business days assumed for every destination in the market (decision S-D4): search results' arrives-by filter and delivery cues use dispatch days + this. The purchase box and checkout show shipping's real estimate |
 | excludeOutOfStockByDefault | `true` | bool | Out-of-stock products appear only with 'Include out of stock' |
+| departmentSearch | `true` | bool | Answer the search with the departments as well as the product catalogue |
+| departmentSectionLimit | `3` | int, 1–20 | Hits per group in the search screen's department sections |
+| departmentScopeLimit | `20` | int, 1–100 | Hits per group in one department's own results list |
+| departmentSuggestLimit | `2` | int, 1–5 | Hits per department in the suggestions panel while typing |
+| departmentFanoutTimeoutMs | `1500` | int, 100–10000 | How long a department module may take before its section is left out of the answer |
 | pricePresets | `[2500,5000,10000,20000]` | json | Boundaries of the price facet presets in minor units, ascending: Under $25, $25 to $50, … $200 and above. Each preset shows its result count |
 
 ## Integrations

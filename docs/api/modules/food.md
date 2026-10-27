@@ -49,6 +49,7 @@ The app's Food delivery department: restaurants staff keep in Admin › Departme
 | POST | `/api/store/food/orders/{id}/retry` | Pay a failed food order again _(idempotent)_ | customer | `RetryPaymentInput` → `FoodOrder` |
 | POST | `/api/store/food/orders/{id}/cancel` | Cancel an order the restaurant hasn't accepted | customer | `CancelInput` → `FoodOrder` |
 | POST | `/api/store/food/orders/{id}/review` | Rate a delivered order | customer | `ReviewInput` → `FoodOrder` |
+| GET | `/api/store/food/statistics` | What the customer spent on food delivery in a period: totals, trend and breakdowns | customer | `FoodStatistics` |
 
 ## Admin API
 
@@ -592,6 +593,72 @@ The app's Food delivery department: restaurants staff keep in Admin › Departme
 | hidden | `bool` |
 | reason | `string?` |
 
+### FoodStatOrderRef
+
+| Field | Type |
+|---|---|
+| orderId | `uuid` |
+| ref | `string` |
+| restaurant | `string` |
+| placedAt | `datetime?` |
+| amount | `Money` |
+
+### FoodStatDish
+
+| Field | Type |
+|---|---|
+| itemId | `uuid` |
+| name | `string` |
+| image | `MediaRef?` |
+| restaurant | `string` |
+| units | `int` |
+| amount | `Money` |
+| lastOrderedAt | `datetime?` |
+
+### FoodStatHourBlock
+
+| Field | Type |
+|---|---|
+| hour | `int` First hour of the four-hour block in market time: 0, 4, 8, 12, 16 or 20 |
+| label | `string` e.g. 12 am, 4 pm |
+| amount | `Money` |
+| count | `int` |
+
+### FoodStatTotals
+
+| Field | Type |
+|---|---|
+| spent | `Money` What the card paid for orders that arrived: the dishes and the delivery fee |
+| delivery | `Money` Delivery fees, included in spent |
+| dishesTotal | `Money` The dishes alone, delivery fees left out |
+| notDelivered | `Money` Orders cancelled or declined; never charged, not in spent |
+| orders | `int` Orders that arrived |
+| dishes | `int` Items in those orders, quantities added up |
+| restaurants | `int` |
+| averageOrder | `Money` |
+| averageDeliveryMinutes | `number?` Placed to delivered, one decimal; null until an order has been delivered |
+| reviews | `int` Reviews the customer left in the period |
+| averageRating | `number?` Stars the customer gave, one decimal; null when they left none |
+| largestOrder | `FoodStatOrderRef?` |
+
+### FoodStatistics
+
+| Field | Type |
+|---|---|
+| from | `date` First market day covered (range all: the day of the first counted order, else today) |
+| to | `date` |
+| grain | `enum(day|week|month)` Size of each series point: the grain asked for, else day up to 31 days, week up to 92, month beyond |
+| currency | `string` |
+| totals | `FoodStatTotals` |
+| previous | `StatPrevious?` The same number of days just before from; null for range all |
+| series | `StatSeriesPoint[]` Spent per point, with the not-delivered total as the second series; zeros included |
+| byRestaurant | `StatShare[]` Restaurants by amount, at most 5 plus Other |
+| byMenuSection | `StatShare[]` The restaurants' own menu sections (Pizzas, Ramen, Sides…) by amount of dishes, at most 5 plus Other. Sections belong to one restaurant each, so rows group by name — two restaurants' "Pizza" is one row — and a dish whose item has since been removed counts as Other |
+| byStatus | `StatShare[]` The statuses the period's orders are in — delivered, on the way, cancelled, declined… — counted in orders; amount is what was spent, so only delivered rows carry money |
+| byWeekday | `StatWeekday[]` Monday to Sunday by the day orders were placed (market time zone) |
+| byHour | `FoodStatHourBlock[]` Six four-hour blocks by the hour orders were placed (market time zone) |
+| topDishes | `FoodStatDish[]` At most 5, by amount |
+
 ## Status flows
 
 ### Food order (`FoodOrder.status`)
@@ -807,6 +874,7 @@ Indexes: `(restaurant_id, hidden, created_at)`
 
 | Function | Signature | Used by |
 |---|---|---|
+| searchFood | `(input: DeptSearchRequest) => DeptSearchResult`<br>Integrated search: listed restaurants, their menu items and visible food categories that match the typed text, as ranked hits with their store paths. | search |
 | linkTargets | `(input: { kind: 'restaurant', q?: string, ids?: string[], slugs?: string[], limit?: int }) => LinkTarget[]`<br>Link targets for ad destination pickers (search by q, or resolve ids or URL slugs): restaurants (/food/restaurants/{slug}; available when published), each with its store path the app opens, a label, a short meta line, an image and whether it is shown in the store. Unknown ids are left out. | advertising |
 | exportCustomerData | `(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]`<br>The customer's food orders (reference, restaurant, items, amounts, address, status, dates), reviews and saved restaurants for the personal data export | customers |
 

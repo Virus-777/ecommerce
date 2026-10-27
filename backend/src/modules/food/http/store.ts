@@ -65,4 +65,6 @@ export const storeRoutes = (service: FoodService) =>
     cancelOrder: async ({ params, body, scope, principal, actor, requestId }) => service.cancelOrder(customerOf(scope, principal), params.id, body ?? {}, { actor, requestId }),
     /** POST /orders/{id}/review: Rate a delivered order */
     reviewOrder: async ({ params, body, scope, principal, actor, requestId }) => service.reviewOrder(customerOf(scope, principal), params.id, body, { actor, requestId }),
+    /** GET /statistics: What the customer spent on food delivery in a period */
+    getMyStatistics: async ({ query, scope, principal }) => service.statisticsFor(customerOf(scope, principal), query),
   });

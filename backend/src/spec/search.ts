@@ -642,6 +642,92 @@ export const PopularSearch: z.ZodType<PopularSearch> = z.object({
   query: z.string().describe("Normalized keyword, e.g. 'wireless headphones'"),
 }).register(common.apiTypes, { id: "search.PopularSearch" });
 
+export interface DepartmentSection {
+  key: "phones" | "farm" | "software" | "welfare" | "booking" | "food" | "blogs" | "companies" | "play" | "rewards";
+  /** The department's name as the home rail shows it, e.g. Food delivery */
+  name: string;
+  /** Lucide icon name, the rail's icon for this department */
+  icon: string;
+  /** The department's own screen, e.g. /food (the 'Open department' link) */
+  path: string;
+  /** Matching records in every group of this section */
+  total: number;
+  groups: common.DeptSearchGroup[];
+}
+
+export const DepartmentSection: z.ZodType<DepartmentSection> = z.object({
+  key: z.enum(["phones", "farm", "software", "welfare", "booking", "food", "blogs", "companies", "play", "rewards"]),
+  name: z.string().describe("The department's name as the home rail shows it, e.g. Food delivery"),
+  icon: z.string().describe("Lucide icon name, the rail's icon for this department"),
+  path: z.string().describe("The department's own screen, e.g. /food (the 'Open department' link)"),
+  total: z.number().int().describe("Matching records in every group of this section"),
+  get groups() {
+    return z.array(common.DeptSearchGroup);
+  },
+}).register(common.apiTypes, { id: "search.DepartmentSection" });
+
+export interface DepartmentShortcut {
+  key: string;
+  name: string;
+  icon: string;
+  path: string;
+  /** One line under the name, e.g. Order from restaurants near you */
+  tagline: string;
+}
+
+export const DepartmentShortcut: z.ZodType<DepartmentShortcut> = z.object({
+  key: z.string(),
+  name: z.string(),
+  icon: z.string(),
+  path: z.string(),
+  tagline: z.string().describe("One line under the name, e.g. Order from restaurants near you"),
+}).register(common.apiTypes, { id: "search.DepartmentShortcut" });
+
+export interface DepartmentSuggestGroup {
+  key: string;
+  name: string;
+  icon: string;
+  /** The department's own screen */
+  path: string;
+  total: number;
+  items: common.DeptSearchHit[];
+}
+
+export const DepartmentSuggestGroup: z.ZodType<DepartmentSuggestGroup> = z.object({
+  key: z.string(),
+  name: z.string(),
+  icon: z.string(),
+  path: z.string().describe("The department's own screen"),
+  total: z.number().int(),
+  get items() {
+    return z.array(common.DeptSearchHit);
+  },
+}).register(common.apiTypes, { id: "search.DepartmentSuggestGroup" });
+
+export interface DepartmentResults {
+  query: string;
+  /** Matching records in every section together */
+  total: number;
+  /** Only departments with matches, best match first */
+  sections: DepartmentSection[];
+  /** Departments the query names that have no section of their own */
+  shortcuts: DepartmentShortcut[];
+  /** A department could not answer in time or failed: its section is missing from this answer */
+  partial: boolean;
+}
+
+export const DepartmentResults: z.ZodType<DepartmentResults> = z.object({
+  query: z.string(),
+  total: z.number().int().describe("Matching records in every section together"),
+  get sections() {
+    return z.array(DepartmentSection);
+  },
+  get shortcuts() {
+    return z.array(DepartmentShortcut);
+  },
+  partial: z.boolean().describe("A department could not answer in time or failed: its section is missing from this answer"),
+}).register(common.apiTypes, { id: "search.DepartmentResults" });
+
 export interface Suggestions {
   query: string;
   queries: QuerySuggestion[];
@@ -651,6 +737,8 @@ export interface Suggestions {
   products: ProductSuggestion[];
   /** Only when a customer or guest session is present and recent searches are on */
   recent: RecentSearch[];
+  /** Matching records of each department, one group per department with matches (at most departmentSuggestLimit hits each) */
+  departments: DepartmentSuggestGroup[];
 }
 
 export const Suggestions: z.ZodType<Suggestions> = z.object({
@@ -672,6 +760,9 @@ export const Suggestions: z.ZodType<Suggestions> = z.object({
   },
   get recent() {
     return z.array(RecentSearch);
+  },
+  get departments() {
+    return z.array(DepartmentSuggestGroup);
   },
 }).register(common.apiTypes, { id: "search.Suggestions" });
 
@@ -1286,6 +1377,50 @@ export const endpoints = defineEndpoints({
     screens: ["store/search","store/home"],
     phase: 1,
   },
+  searchDepartmentsAll: {
+    area: "store",
+    method: "GET",
+    path: "/departments",
+    auth: "visitor",
+    scope: "public",
+    summary: "The same query answered by every department: one section per department with matches",
+    desc: "Asks each department module in parallel and ranks the sections against each other (best hit first, then the number of matches, then the home rail's order). A department that is off, not built yet or too slow is left out and partial is true. Departments the query names but that have no matching record come back as shortcuts.",
+    query: () =>
+      z.object({
+        q: z.string(),
+        limit: z.coerce.number().int().describe("Hits per group, default departmentSectionLimit").optional(),
+      }),
+    response: () => DepartmentResults,
+    status: 200,
+    errors: ["VALIDATION_FAILED"],
+    screens: ["store/search"],
+    phase: 1,
+  },
+  searchDepartmentScope: {
+    area: "store",
+    method: "GET",
+    path: "/departments/{key}",
+    auth: "visitor",
+    scope: "public",
+    summary: "One department's results for the query, paged group by group",
+    desc: "The scoped list behind a department's chip. Each group pages on its own: send kind and that group's cursor. NOT_FOUND when the key is not a department or its module is off.",
+    params: () =>
+      z.object({
+        key: z.string(),
+      }),
+    query: () =>
+      z.object({
+        q: z.string(),
+        kind: z.string().describe("Page this group only").optional(),
+        cursor: z.string().optional(),
+        limit: z.coerce.number().int().describe("Hits per group, default departmentScopeLimit").optional(),
+      }),
+    response: () => DepartmentSection,
+    status: 200,
+    errors: ["NOT_FOUND","VALIDATION_FAILED"],
+    screens: ["store/search"],
+    phase: 1,
+  },
   listPopularSearches: {
     area: "store",
     method: "GET",
@@ -1659,7 +1794,7 @@ export const spec = defineModuleSpec({
   chapters: [4,3,19],
   summary: "Finding products: a product index built from catalog, offers, inventory and reviews events; search with misspelling tolerance and corrections, suggestions (queries, categories, brands, stores, products, recent searches), universal and category filters with counts, sorting, sponsored slots from advertising, and guidance for empty or unavailable results.",
   dependsOn: ["catalog","offers"],
-  optionalDeps: ["inventory","reviews","sellers","advertising","promotions","customers","media","reports","wishlist","orders","returns","audit"],
+  optionalDeps: ["inventory","reviews","sellers","advertising","promotions","customers","media","reports","wishlist","orders","returns","audit","departments","software","services","food","rewards"],
   publicApi: ["searchProducts","getProductCards","zeroResultStats","runSearch","listCategoryProducts","getSuggestions","similarProducts","listSellerProducts","sellerCategoryCounts","bestSellerRanks"],
   permissions: [
     {
@@ -1830,6 +1965,39 @@ export const spec = defineModuleSpec({
       "default": true,
       "desc": "Out-of-stock products appear only with 'Include out of stock'",
       "type": "bool"
+    },
+    "departmentSearch": {
+      "default": true,
+      "desc": "Answer the search with the departments as well as the product catalogue",
+      "type": "bool"
+    },
+    "departmentSectionLimit": {
+      "default": 3,
+      "desc": "Hits per group in the search screen's department sections",
+      "type": "int",
+      "min": 1,
+      "max": 20
+    },
+    "departmentScopeLimit": {
+      "default": 20,
+      "desc": "Hits per group in one department's own results list",
+      "type": "int",
+      "min": 1,
+      "max": 100
+    },
+    "departmentSuggestLimit": {
+      "default": 2,
+      "desc": "Hits per department in the suggestions panel while typing",
+      "type": "int",
+      "min": 1,
+      "max": 5
+    },
+    "departmentFanoutTimeoutMs": {
+      "default": 1500,
+      "desc": "How long a department module may take before its section is left out of the answer",
+      "type": "int",
+      "min": 100,
+      "max": 10000
     },
     "pricePresets": {
       "default": [

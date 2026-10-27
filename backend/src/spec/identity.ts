@@ -204,6 +204,8 @@ export interface RegistrationRequest {
   marketingOptIn: boolean;
   /** Purchase terms / privacy version shown on the form (content module) */
   acceptedTermsVersion: string;
+  /** Long refresh token (30 days) instead of 24 hours for the session this call opens */
+  keepSignedIn?: boolean | null;
   guestSessionId?: string | null;
   device: DeviceInfo;
 }
@@ -215,11 +217,27 @@ export const RegistrationRequest: z.ZodType<RegistrationRequest> = z.object({
   lastName: z.string(),
   marketingOptIn: z.boolean().describe("Unchecked by default. Forwarded to notifications as promotional email consent."),
   acceptedTermsVersion: z.string().describe("Purchase terms / privacy version shown on the form (content module)"),
+  keepSignedIn: z.boolean().describe("Long refresh token (30 days) instead of 24 hours for the session this call opens").nullish(),
   guestSessionId: z.uuid().nullish(),
   get device() {
     return DeviceInfo;
   },
 }).register(common.apiTypes, { id: "identity.RegistrationRequest" });
+
+export interface RegistrationResult {
+  account: AccountSummary;
+  /** Registration opens a store session right away */
+  tokens: SessionTokens;
+}
+
+export const RegistrationResult: z.ZodType<RegistrationResult> = z.object({
+  get account() {
+    return AccountSummary;
+  },
+  get tokens() {
+    return SessionTokens;
+  },
+}).register(common.apiTypes, { id: "identity.RegistrationResult" });
 
 export interface VerificationChallenge {
   id: string;
@@ -245,32 +263,21 @@ export const VerificationChallenge: z.ZodType<VerificationChallenge> = z.object(
 export interface VerifyCodeRequest {
   /** 6 digits */
   code: string;
-  keepSignedIn?: boolean | null;
-  device?: DeviceInfo | null;
 }
 
 export const VerifyCodeRequest: z.ZodType<VerifyCodeRequest> = z.object({
   code: z.string().describe("6 digits"),
-  keepSignedIn: z.boolean().nullish(),
-  get device() {
-    return DeviceInfo.nullish();
-  },
 }).register(common.apiTypes, { id: "identity.VerifyCodeRequest" });
 
 export interface VerifyResult {
   verified: boolean;
   account: AccountSummary;
-  /** Registration verification signs the customer in */
-  tokens?: SessionTokens | null;
 }
 
 export const VerifyResult: z.ZodType<VerifyResult> = z.object({
   verified: z.boolean(),
   get account() {
     return AccountSummary;
-  },
-  get tokens() {
-    return SessionTokens.nullish();
   },
 }).register(common.apiTypes, { id: "identity.VerifyResult" });
 
@@ -788,7 +795,7 @@ export const OrderLinkRedemption: z.ZodType<OrderLinkRedemption> = z.object({
 
 /* ------------------------------------------------------------------ events */
 
-/** identity.user.registered: A customer account is created (before email verification) */
+/** identity.user.registered: A customer account is created (the email address is not verified) */
 export interface IdentityUserRegisteredEvent {
   accountId: string;
   email: string;
@@ -811,7 +818,7 @@ export const IdentityUserRegisteredEvent: z.ZodType<IdentityUserRegisteredEvent>
   at: z.iso.datetime({ offset: true }),
 });
 
-/** identity.user.verified: The registration email code, or a new phone number's code, is confirmed */
+/** identity.user.verified: An email change code, or a new phone number's code, is confirmed */
 export interface IdentityUserVerifiedEvent {
   accountId: string;
   channel: "email" | "phone";
@@ -847,7 +854,7 @@ export const IdentityPasswordChangedEvent: z.ZodType<IdentityPasswordChangedEven
   at: z.iso.datetime({ offset: true }),
 });
 
-/** identity.verification.code_issued: An email or SMS code is issued (registration, email change, 2-step SMS) */
+/** identity.verification.code_issued: An email or SMS code is issued (email change, phone number, 2-step SMS) */
 export interface IdentityVerificationCodeIssuedEvent {
   challengeId: string;
   accountId?: string | null;
@@ -857,7 +864,7 @@ export interface IdentityVerificationCodeIssuedEvent {
   to: string;
   /** SENSITIVE: in-process delivery only, never persisted to the outbox or logs */
   code: string;
-  /** Registration attempt for an email that already has an account: send the 'you already have an account' email instead of a code */
+  /** Unused since registration stopped issuing codes: it marked the 'you already have an account' email */
   existingAccount: boolean;
   expiresAt: string;
 }
@@ -869,7 +876,7 @@ export const IdentityVerificationCodeIssuedEvent: z.ZodType<IdentityVerification
   channel: z.enum(["email", "sms"]),
   to: z.string().describe("Email address or E.164 phone"),
   code: z.string().describe("SENSITIVE: in-process delivery only, never persisted to the outbox or logs"),
-  existingAccount: z.boolean().describe("Registration attempt for an email that already has an account: send the 'you already have an account' email instead of a code"),
+  existingAccount: z.boolean().describe("Unused since registration stopped issuing codes: it marked the 'you already have an account' email"),
   expiresAt: z.iso.datetime({ offset: true }),
 });
 
@@ -1374,13 +1381,13 @@ export const endpoints = defineEndpoints({
     auth: "visitor",
     scope: "public",
     rateLimit: "registration",
-    summary: "Create a customer account and send an email code",
-    desc: "Always answers 202 with a challenge so the form cannot be used to discover accounts: if the email already has an account, the email says so and offers sign-in and password reset, and the code will not verify. Password rules are checked live with GET /password-policy and again here.",
+    summary: "Create a customer account and sign in",
+    desc: "Creates the account and opens a store session in the same call: there is no email code step, and the email address is recorded unverified (emailVerified false). An email that already has an account is refused with EMAIL_IN_USE. A visitor session passed in is claimed, so the guest cart moves to the new account. Password rules are checked live with GET /password-policy and again here.",
     body: () => RegistrationRequest,
-    response: () => VerificationChallenge,
-    status: 202,
-    errors: ["VALIDATION_FAILED","WEAK_PASSWORD","RATE_LIMITED"],
-    events: ["identity.user.registered","identity.verification.code_issued"],
+    response: () => RegistrationResult,
+    status: 201,
+    errors: ["VALIDATION_FAILED","WEAK_PASSWORD","EMAIL_IN_USE","RATE_LIMITED"],
+    events: ["identity.user.registered","identity.guest_session.claimed","identity.session.new_device"],
     screens: ["auth/register","auth/guest-orders","store/confirmation"],
     phase: 1,
   },
@@ -1391,8 +1398,8 @@ export const endpoints = defineEndpoints({
     auth: "visitor",
     scope: "public",
     rateLimit: "code",
-    summary: "Confirm an email or phone code (registration, email change, phone change)",
-    desc: "Registration: activates the account and signs the customer in; guest orders placed with this email can then be attached (identity.user.verified, consumed by customers). Email change: switches the sign-in email and alerts the old address. Phone: marks the number verified (identity.user.verified with channel phone).",
+    summary: "Confirm an email change or phone code",
+    desc: "Email change: switches the sign-in email and alerts the old address. Phone: marks the number verified (identity.user.verified with channel phone). Registration issues no codes, so nothing is signed in here.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -1402,7 +1409,7 @@ export const endpoints = defineEndpoints({
     status: 200,
     errors: ["CODE_INVALID","CODE_EXPIRED","CHALLENGE_LOCKED","NOT_FOUND"],
     events: ["identity.user.verified","identity.email.changed"],
-    screens: ["auth/register","account/profile"],
+    screens: ["account/profile"],
     phase: 1,
   },
   resendVerification: {
@@ -1421,7 +1428,7 @@ export const endpoints = defineEndpoints({
     status: 200,
     errors: ["RESEND_TOO_SOON","CODE_EXPIRED"],
     events: ["identity.verification.code_issued"],
-    screens: ["auth/register"],
+    screens: ["account/profile"],
     phase: 1,
   },
   signIn: {
@@ -1432,11 +1439,11 @@ export const endpoints = defineEndpoints({
     scope: "public",
     rateLimit: "sign-in",
     summary: "Sign in with email and password",
-    desc: "Returns tokens, or a 2-step challenge, or (seller audience with several sellers) the list of sellers to choose from. Wrong passwords return INVALID_CREDENTIALS with details.attemptsLeft; at the limit the account locks for lockoutMinutes and ACCOUNT_LOCKED carries details.lockedUntil. Unknown emails get the same answer and timing. A guest session passed in is claimed (cart and recently viewed merge). A sign-in from a device not seen before publishes identity.session.new_device for the security alert.",
+    desc: "Returns tokens, or a 2-step challenge, or (seller audience with several sellers) the list of sellers to choose from. Wrong passwords return INVALID_CREDENTIALS with details.attemptsLeft; at the limit the account locks for lockoutMinutes and ACCOUNT_LOCKED carries details.lockedUntil. Unknown emails get the same answer and timing. An account left pending_verification by the old email code step is activated by a successful sign-in. A guest session passed in is claimed (cart and recently viewed merge). A sign-in from a device not seen before publishes identity.session.new_device for the security alert.",
     body: () => SignInRequest,
     response: () => SignInResult,
     status: 200,
-    errors: ["INVALID_CREDENTIALS","ACCOUNT_LOCKED","ACCOUNT_DISABLED","EMAIL_NOT_VERIFIED","NO_SELLER_ACCESS","RATE_LIMITED"],
+    errors: ["INVALID_CREDENTIALS","ACCOUNT_LOCKED","ACCOUNT_DISABLED","NO_SELLER_ACCESS","RATE_LIMITED"],
     events: ["identity.session.new_device","identity.guest_session.claimed","identity.account.locked"],
     screens: ["auth/sign-in","store/checkout"],
     phase: 1,
@@ -2283,7 +2290,7 @@ export const spec = defineModuleSpec({
   stateMachines: {
     "Account status": {
       "field": "AccountSummary.status",
-      "initial": "pending_verification",
+      "initial": "active",
       "transitions": [
         [
           "pending_verification",
@@ -2463,10 +2470,10 @@ export const spec = defineModuleSpec({
   },
   events: {
     publishes: {
-      "identity.user.registered": { when: "A customer account is created (before email verification)", payload: () => IdentityUserRegisteredEvent },
-      "identity.user.verified": { when: "The registration email code, or a new phone number's code, is confirmed", payload: () => IdentityUserVerifiedEvent },
+      "identity.user.registered": { when: "A customer account is created (the email address is not verified)", payload: () => IdentityUserRegisteredEvent },
+      "identity.user.verified": { when: "An email change code, or a new phone number's code, is confirmed", payload: () => IdentityUserVerifiedEvent },
       "identity.password.changed": { when: "A password is changed, reset or force-reset", payload: () => IdentityPasswordChangedEvent },
-      "identity.verification.code_issued": { when: "An email or SMS code is issued (registration, email change, 2-step SMS)", payload: () => IdentityVerificationCodeIssuedEvent },
+      "identity.verification.code_issued": { when: "An email or SMS code is issued (email change, phone number, 2-step SMS)", payload: () => IdentityVerificationCodeIssuedEvent },
       "identity.password_reset.requested": { when: "A reset link is issued (self-service or forced by staff)", payload: () => IdentityPasswordResetRequestedEvent },
       "identity.session.new_device": { when: "Someone signs in from a device not seen before for this account", payload: () => IdentitySessionNewDeviceEvent },
       "identity.account.locked": { when: "An account is locked by failed sign-ins, refresh-token reuse or staff", payload: () => IdentityAccountLockedEvent },
@@ -2488,7 +2495,7 @@ export const spec = defineModuleSpec({
   jobs: {
     "identity.purge-expired": {
       "schedule": "hourly",
-      "does": "Delete expired challenges, reset tokens, re-auth tokens, order links and guest sessions past their TTL (keeping grants for orders still open), and member accounts never verified after 7 days"
+      "does": "Delete expired challenges, reset tokens, re-auth tokens, order links and guest sessions past their TTL (keeping grants for orders still open), and member accounts left pending_verification for 7 days by the old email code step"
     },
     "identity.expire-invitations": {
       "schedule": "hourly",
@@ -2732,10 +2739,6 @@ export const spec = defineModuleSpec({
     "ACCOUNT_DISABLED": {
       "status": 403,
       "meaning": "The account is disabled or closed."
-    },
-    "EMAIL_NOT_VERIFIED": {
-      "status": 403,
-      "meaning": "Confirm the email first. details.challenge is a fresh VerificationChallenge."
     },
     "CODE_INVALID": {
       "status": 400,

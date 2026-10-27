@@ -1378,6 +1378,148 @@ export const DeviceVerifyInput: z.ZodType<DeviceVerifyInput> = z.object({
   staffNote: z.string().nullish(),
 }).register(common.apiTypes, { id: "services.DeviceVerifyInput" });
 
+export interface ServiceStatProviderRef {
+  providerId: string;
+  slug?: string | null;
+  name: string;
+  requests: number;
+}
+
+export const ServiceStatProviderRef: z.ZodType<ServiceStatProviderRef> = z.object({
+  providerId: z.uuid(),
+  slug: z.string().nullish(),
+  name: z.string(),
+  requests: z.number().int(),
+}).register(common.apiTypes, { id: "services.ServiceStatProviderRef" });
+
+export interface ServiceStatService {
+  serviceId: string;
+  slug?: string | null;
+  title: string;
+  image?: common.MediaRef | null;
+  provider: string;
+  requests: number;
+  lastRequestedAt?: string | null;
+}
+
+export const ServiceStatService: z.ZodType<ServiceStatService> = z.object({
+  serviceId: z.uuid(),
+  slug: z.string().nullish(),
+  title: z.string(),
+  get image() {
+    return common.MediaRef.nullish();
+  },
+  provider: z.string(),
+  requests: z.number().int(),
+  lastRequestedAt: z.iso.datetime({ offset: true }).nullish(),
+}).register(common.apiTypes, { id: "services.ServiceStatService" });
+
+export interface ServiceStatTotals {
+  requests: number;
+  completed: number;
+  /** Confirmed or in progress */
+  underWay: number;
+  /** Cancelled by the customer */
+  cancelled: number;
+  /** Declined by the provider */
+  declined: number;
+  services: number;
+  providers: number;
+  /** What the providers' price lists come to for the requests that have a fixed price. Never what the customer actually paid: these services are paid at the provider */
+  estimated: common.Money;
+  /** Requests behind estimated (the ones with a fixed price); the rest are charged by the hour, whose hours are not recorded here */
+  estimatedFrom: number;
+  /** Requested to completed, one decimal; null until a request has been completed */
+  averageDays?: number | null;
+  reviews: number;
+  /** Stars the customer gave, one decimal; null when they left none */
+  averageRating?: number | null;
+  topProvider?: ServiceStatProviderRef | null;
+}
+
+export const ServiceStatTotals: z.ZodType<ServiceStatTotals> = z.object({
+  requests: z.number().int(),
+  completed: z.number().int(),
+  underWay: z.number().int().describe("Confirmed or in progress"),
+  cancelled: z.number().int().describe("Cancelled by the customer"),
+  declined: z.number().int().describe("Declined by the provider"),
+  services: z.number().int(),
+  providers: z.number().int(),
+  get estimated() {
+    return common.Money;
+  },
+  estimatedFrom: z.number().int().describe("Requests behind estimated (the ones with a fixed price); the rest are charged by the hour, whose hours are not recorded here"),
+  averageDays: z.number().describe("Requested to completed, one decimal; null until a request has been completed").nullish(),
+  reviews: z.number().int(),
+  averageRating: z.number().describe("Stars the customer gave, one decimal; null when they left none").nullish(),
+  get topProvider() {
+    return ServiceStatProviderRef.nullish();
+  },
+}).register(common.apiTypes, { id: "services.ServiceStatTotals" });
+
+export interface ServiceStatistics {
+  /** The area asked for; absent when every area is counted */
+  area?: "os_install" | "post_sale" | "welfare" | "booking" | null;
+  /** First market day covered (range all: the day of the first counted request, else today) */
+  from: string;
+  to: string;
+  /** Size of each series point: the grain asked for, else day up to 31 days, week up to 92, month beyond */
+  grain: "day" | "week" | "month";
+  currency: string;
+  totals: ServiceStatTotals;
+  /** The same number of days just before from; null for range all. count compares requests, amount the estimate */
+  previous?: common.StatPrevious | null;
+  /** Requests per point in count, with the estimate in amount; zeros included */
+  series: common.StatSeriesPoint[];
+  /** Services by requests, at most 5 plus Other */
+  byService: common.StatShare[];
+  /** Providers by requests, at most 5 plus Other */
+  byProvider: common.StatShare[];
+  /** The price row the customer chose (Weekly, Per visit, Assessment…) by requests, at most 5 plus Other; requests with no plan count as Other. amount is the estimate for rows with a fixed price, zero for hourly ones */
+  byPlan: common.StatShare[];
+  /** requested, confirmed, in_progress, completed, cancelled and declined, counted in requests */
+  byStatus: common.StatShare[];
+  /** Monday to Sunday by the day the request was made (market time zone) */
+  byWeekday: common.StatWeekday[];
+  /** At most 5, by requests */
+  topServices: ServiceStatService[];
+}
+
+export const ServiceStatistics: z.ZodType<ServiceStatistics> = z.object({
+  area: z.enum(["os_install", "post_sale", "welfare", "booking"]).describe("The area asked for; absent when every area is counted").nullish(),
+  from: z.iso.date().describe("First market day covered (range all: the day of the first counted request, else today)"),
+  to: z.iso.date(),
+  grain: z.enum(["day", "week", "month"]).describe("Size of each series point: the grain asked for, else day up to 31 days, week up to 92, month beyond"),
+  currency: z.string(),
+  get totals() {
+    return ServiceStatTotals;
+  },
+  get previous() {
+    return common.StatPrevious.nullish();
+  },
+  get series() {
+    return z.array(common.StatSeriesPoint);
+  },
+  get byService() {
+    return z.array(common.StatShare);
+  },
+  get byProvider() {
+    return z.array(common.StatShare);
+  },
+  get byPlan() {
+    return z.array(common.StatShare);
+  },
+  get byStatus() {
+    return z.array(common.StatShare);
+  },
+  get byWeekday() {
+    return z.array(common.StatWeekday);
+  },
+  get topServices() {
+    return z.array(ServiceStatService);
+  },
+}).register(common.apiTypes, { id: "services.ServiceStatistics" });
+
 /* ------------------------------------------------------------------ events */
 
 /** services.request.status_changed: Staff or the customer change a request's status */
@@ -1430,6 +1572,8 @@ export const ServicesDeviceRejectedEvent: z.ZodType<ServicesDeviceRejectedEvent>
 
 /** What other modules may call in-process: `ctx.use('services')` (or `ctx.tryUse` for an optional dependency). */
 export interface ServicesPublicApi {
+  /** Integrated search: published services, providers and categories that match the typed text, as ranked hits with their store paths. Each group carries its area (os_install and post_sale belong to the Phones section, welfare and booking to their own). Used by: search. */
+  searchServices(input: common.DeptSearchRequest): Promise<common.DeptSearchResult>;
   /** The customer's service requests and bookings (reference, service, provider, time, contact, details, device, status history), reviews, saved providers and registered devices (with the full IMEI) for the personal data export. Requests and reviews are found by the account id, saved providers and devices by the customers-module id (and the account id they fall back to). Staff notes are left out. Used by: customers. */
   exportCustomerData(input: { customerId: string, accountId: string }): Promise<common.CustomerDataSection[]>;
 }
@@ -1534,6 +1678,9 @@ export interface ServicesDb {
     staff_note: string | null;
     history: Json;
     reviewed: boolean;
+    /** what the provider's price list came to when the request was made, when it is a fixed price: the chosen price row, else the service's from price. Null when the price is by the hour or unknown — these services are paid at the provider, so nothing here is what the customer paid */
+    estimated_amount: number | null;
+    estimated_currency: string | null;
     created_at: Date;
     updated_at: Date;
   };
@@ -1957,6 +2104,28 @@ export const endpoints = defineEndpoints({
     status: 204,
     errors: ["NOT_FOUND"],
     screens: ["store/device"],
+    phase: 2,
+  },
+  getMyStatistics: {
+    area: "store",
+    method: "GET",
+    path: "/statistics",
+    auth: "customer",
+    scope: "own-customer",
+    summary: "The customer's service requests in a period: totals, trend and breakdowns",
+    desc: "One area with area=, every area without it; the app's Welfare statistics tab asks for welfare. Requests count by the day they were made (market time zone), whichever day the visit was, and cancelled and declined requests are counted too. These services are paid at the provider, so there is no record of what the customer paid: estimated adds up the providers' price lists for the requests that have a fixed price (per visit, per night, free) and leaves out the ones charged by the hour, whose hours are not recorded. Requests made before the estimate was kept fall back to the service's price list today. from/to (both or neither) replace range; at most 3 years. Default range last_12_months.",
+    query: () =>
+      z.object({
+        area: z.enum(["os_install", "post_sale", "welfare", "booking"]).optional(),
+        range: z.enum(["last_30_days", "last_3_months", "last_6_months", "last_12_months", "this_year", "last_year", "all"]).optional(),
+        from: z.iso.date().optional(),
+        to: z.iso.date().optional(),
+        grain: z.enum(["day", "week", "month"]).optional(),
+      }),
+    response: () => ServiceStatistics,
+    status: 200,
+    errors: ["VALIDATION_FAILED"],
+    screens: ["account/statistics"],
     phase: 2,
   },
   listCategoriesAdmin: {
@@ -2442,7 +2611,7 @@ export const spec = defineModuleSpec({
   summary: "Services customers request or book in the app's department pages: OS installs and post-sale repairs (Phones), welfare services and time-slot bookings. Staff keep the providers, their services and opening hours, and handle every request in Admin › Departments. No online payment at this phase: customers pay the provider.",
   dependsOn: ["media"],
   optionalDeps: ["customers","audit","notifications"],
-  publicApi: ["exportCustomerData"],
+  publicApi: ["searchServices","exportCustomerData"],
   permissions: [
     {
       "key": "services.view",
@@ -3201,6 +3370,8 @@ export const spec = defineModuleSpec({
         "staff_note",
         "history",
         "reviewed",
+        "estimated_amount",
+        "estimated_currency",
         "created_at",
         "updated_at"
       ],
@@ -3211,7 +3382,9 @@ export const spec = defineModuleSpec({
         "device_id",
         "device",
         "provider_note",
-        "staff_note"
+        "staff_note",
+        "estimated_amount",
+        "estimated_currency"
       ],
       "decimal": [],
       "binary": [],
@@ -3311,6 +3484,20 @@ export const spec = defineModuleSpec({
             "history": {},
             "reviewed": {
               "bsonType": "bool"
+            },
+            "estimated_amount": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "estimated_currency": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
             },
             "created_at": {
               "bsonType": "date"

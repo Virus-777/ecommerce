@@ -79,6 +79,15 @@ export async function boot(): Promise<Kit> {
           if (!m) throw new AppError('NOT_FOUND', 'Machine not found');
           return structuredClone(m);
         },
+        // The type of each picked machine, named after its id ("tractors" → "Tractors"), as the department would
+        farmMachineTypes: async (productIds: string[]) => {
+          const out: Record<string, departments.FarmMachineType> = {};
+          for (const id of productIds) {
+            const typeId = k.machines.get(id)?.typeId;
+            if (typeId) out[id] = { typeId, typeName: typeId.charAt(0).toUpperCase() + typeId.slice(1) };
+          }
+          return out;
+        },
       },
       customers: {
         getCustomer: async (id: string) => (k.names.has(id) ? ({ id, userId: id, ref: 'CU-1', displayName: k.names.get(id)!, email: 'dana@example.com', accountStatus: 'active', canOrder: true, canMessage: true } as never) : null),

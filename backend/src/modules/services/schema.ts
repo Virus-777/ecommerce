@@ -130,6 +130,8 @@ const requests = new Schema(
     staff_note: { type: String, default: null },
     history: { type: Schema.Types.Mixed },
     reviewed: { type: Boolean, required: true },
+    estimated_amount: { type: Number, default: null, validate: integer }, // what the provider's price list came to when the request was made, when it is a fixed price: the chosen price row, else the service's from pr
+    estimated_currency: { type: String, default: null },
     created_at: { type: Date, required: true },
     updated_at: { type: Date, required: true },
     /** lock-by-write counter (kernel/mongo/table.ts) */

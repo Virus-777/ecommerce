@@ -10,13 +10,27 @@
 import { isAppError } from '../../../kernel/errors/index.js';
 import { dateInZone } from '../../../kernel/lib/clock.js';
 import { money } from '../../../kernel/lib/money.js';
+import {
+  bucketOf,
+  buckets,
+  pointLabel,
+  previousPeriod,
+  round1,
+  statPeriod,
+  weekdayOf,
+  TOP_ROWS as TOP,
+  WEEKDAYS,
+  WEEKDAY_LABELS as WEEKDAY_LABEL,
+  type StatPeriod,
+  type StatRange,
+} from '../../../kernel/lib/stats-period.js';
 import type * as common from '../../../spec/common.js';
 import type { CustomerSpending, SpendingProduct, SpendingShare, SpendingWeekday } from '../../../spec/orders.js';
-import { DAY, dayStart, discountSum } from '../domain/rules.js';
-import { invalid, type Agg, type Core } from './core.js';
+import { dayStart, discountSum } from '../domain/rules.js';
+import { type Agg, type Core } from './core.js';
 import type { Views } from './views.js';
 
-type Range = 'last_30_days' | 'last_3_months' | 'last_6_months' | 'last_12_months' | 'this_year' | 'last_year' | 'all';
+type Range = StatRange;
 type Grain = CustomerSpending['grain'];
 
 export interface SpendingQuery {
@@ -26,62 +40,8 @@ export interface SpendingQuery {
   grain?: Grain;
 }
 
-/** Longest period asked by from/to: 3 years */
-const MAX_DAYS = 3 * 366;
 /** Most orders read for one answer (a customer's whole history in practice) */
 const MAX_ORDERS = 5000;
-/** Breakdown rows before the rest becomes "Other" */
-const TOP = 5;
-const WEEKDAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
-const WEEKDAY_LABEL = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
-/* ------------------------------------------------------------------ market dates (YYYY-MM-DD) */
-
-const utc = (ymd: string) => new Date(`${ymd}T00:00:00Z`);
-const addDays = (ymd: string, n: number) => new Date(utc(ymd).getTime() + n * DAY).toISOString().slice(0, 10);
-const daysBetween = (from: string, to: string) => Math.round((utc(to).getTime() - utc(from).getTime()) / DAY) + 1;
-/** 0 = Monday … 6 = Sunday */
-const weekdayOf = (ymd: string) => (utc(ymd).getUTCDay() + 6) % 7;
-const monthStart = (ymd: string) => `${ymd.slice(0, 7)}-01`;
-const nextMonth = (ymd: string) => {
-  const d = utc(monthStart(ymd));
-  d.setUTCMonth(d.getUTCMonth() + 1);
-  return d.toISOString().slice(0, 10);
-};
-const fmt = (ymd: string, opts: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('en-US', { ...opts, timeZone: 'UTC' }).format(utc(ymd));
-
-/** The point a day falls in: itself, its week's Monday or its month's 1st (never before from) */
-function bucketOf(ymd: string, grain: Grain, from: string): string {
-  const start = grain === 'day' ? ymd : grain === 'week' ? addDays(ymd, -weekdayOf(ymd)) : monthStart(ymd);
-  return start < from ? from : start;
-}
-
-/** Every point from from to to, zeros included */
-function buckets(from: string, to: string, grain: Grain): string[] {
-  const out: string[] = [];
-  let day = from;
-  while (day <= to) {
-    out.push(day);
-    day = grain === 'day' ? addDays(day, 1) : grain === 'week' ? addDays(day, 7 - weekdayOf(day)) : nextMonth(day);
-  }
-  return out;
-}
-
-function pointLabel(start: string, grain: Grain, years: boolean): string {
-  if (grain === 'month') return fmt(start, { month: 'short', year: 'numeric' });
-  const day = fmt(start, years ? { month: 'short', day: 'numeric', year: 'numeric' } : { month: 'short', day: 'numeric' });
-  return grain === 'week' ? `Week of ${day}` : day;
-}
-
-/** Day up to 31 days, week up to 92, month beyond; a grain asked for that would give more than 400 points falls back */
-function grainFor(days: number, asked?: Grain): Grain {
-  const auto: Grain = days <= 31 ? 'day' : days <= 92 ? 'week' : 'month';
-  if (!asked) return auto;
-  const points = asked === 'day' ? days : asked === 'week' ? days / 7 : days / 30;
-  return points > 400 ? auto : asked;
-}
-
-const round1 = (n: number) => Math.round(n * 10) / 10;
 
 /* ------------------------------------------------------------------ the part */
 
@@ -101,9 +61,8 @@ export class Spending {
   async forCustomer(customerId: string | null, q: SpendingQuery): Promise<CustomerSpending> {
     const tz = this.core.tz;
     const today = this.core.today();
-    const { from, to, all } = await this.period(customerId, q, today);
-    const days = daysBetween(from, to);
-    const grain = grainFor(days, q.grain);
+    const period = statPeriod(q, today, await this.firstDay(customerId, q, today));
+    const { from, to, all, grain } = period;
     const orders = customerId ? await this.ordersIn(customerId, from, to) : [];
     const currency = orders[0]?.order.currency ?? this.core.ctx.config.market.currency;
     const m = (amount: number): common.Money => money(amount, currency);
@@ -200,7 +159,7 @@ export class Spending {
       lastBoughtAt: p.last.toISOString(),
     }));
 
-    const years = from.slice(0, 4) !== to.slice(0, 4);
+    const years = period.years;
     return {
       from,
       to,
@@ -218,7 +177,7 @@ export class Spending {
         averageOrder: m(totals.orders ? Math.round(totals.spent / totals.orders) : 0),
         largestOrder: largest ? { orderId: largest.agg.order.id, ref: largest.agg.order.ref, placedAt: largest.agg.order.placed_at.toISOString(), amount: m(largest.amount) } : null,
       },
-      previous: all || !customerId ? null : await this.previous(customerId, from, days, totals.spent, m),
+      previous: all || !customerId ? null : await this.previous(customerId, period, totals.spent, m),
       series: starts.map((s) => {
         const p = points.get(s)!;
         return { start: s, label: pointLabel(s, grain, years), spent: m(p.spent), refunded: m(p.refunded), orders: p.orders };
@@ -232,33 +191,11 @@ export class Spending {
   }
 
   /** The market days asked for: from/to (both, at most 3 years), else the range (default last 12 months) */
-  private async period(customerId: string | null, q: SpendingQuery, today: string): Promise<{ from: string; to: string; all: boolean }> {
-    if (q.from || q.to) {
-      if (!q.from || !q.to) throw invalid([{ path: q.from ? 'to' : 'from', message: 'Give both from and to' }]);
-      if (q.from > q.to) throw invalid([{ path: 'to', message: 'to must be on or after from' }]);
-      if (daysBetween(q.from, q.to) > MAX_DAYS) throw invalid([{ path: 'from', message: 'At most 3 years at a time' }]);
-      return { from: q.from, to: q.to, all: false };
-    }
-    const year = Number(today.slice(0, 4));
-    switch (q.range ?? 'last_12_months') {
-      case 'last_30_days':
-        return { from: addDays(today, -29), to: today, all: false };
-      case 'last_3_months':
-        return { from: addDays(today, -90), to: today, all: false };
-      case 'last_6_months':
-        return { from: addDays(today, -181), to: today, all: false };
-      case 'this_year':
-        return { from: `${year}-01-01`, to: today, all: false };
-      case 'last_year':
-        return { from: `${year - 1}-01-01`, to: `${year - 1}-12-31`, all: false };
-      case 'all': {
-        const first = customerId ? await this.core.repo.firstPaidOrderOf(customerId) : undefined;
-        const day = first ? dateInZone(first.placed_at, this.core.tz) : today;
-        return { from: day < today ? day : today, to: today, all: true };
-      }
-      default:
-        return { from: addDays(today, -364), to: today, all: false };
-    }
+  /** range=all starts at the customer's first counted order; every other range needs no lookup */
+  private async firstDay(customerId: string | null, q: SpendingQuery, today: string): Promise<string | null> {
+    if (q.from || q.to || q.range !== 'all' || !customerId) return null;
+    const first = await this.core.repo.firstPaidOrderOf(customerId);
+    return first ? dateInZone(first.placed_at, this.core.tz) : today;
   }
 
   /** The customer's orders placed from..to (market days), payment waiting left out */
@@ -281,9 +218,8 @@ export class Spending {
   }
 
   /** The same number of days just before from: spent (same rules) and orders */
-  private async previous(customerId: string, from: string, days: number, spent: number, m: (n: number) => common.Money): Promise<CustomerSpending['previous']> {
-    const pTo = addDays(from, -1);
-    const pFrom = addDays(pTo, -(days - 1));
+  private async previous(customerId: string, period: StatPeriod, spent: number, m: (n: number) => common.Money): Promise<CustomerSpending['previous']> {
+    const { from: pFrom, to: pTo } = previousPeriod(period);
     let total = 0;
     let orders = 0;
     for (const agg of await this.ordersIn(customerId, pFrom, pTo)) {

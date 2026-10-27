@@ -44,6 +44,11 @@ export function dateInZone(at: Date, timeZone: string): string {
   return `${get('year')}-${get('month')}-${get('day')}`;
 }
 
+/** The hour of the day (0–23) of an instant in a time zone, for "when do you order" style reports. */
+export function hourInZone(at: Date, timeZone: string): number {
+  return new Date(at.getTime() + zoneOffsetMs(at, timeZone)).getUTCHours();
+}
+
 /**
  * The instants a range of calendar days covers in a time zone: from the start of `from` up to (not including) the
  * start of the day after `to`. Use it for date filters ("orders from 2026-10-01 to 2026-10-07"): reading such
