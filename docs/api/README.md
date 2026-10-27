@@ -148,6 +148,7 @@ Every REST error is `{ "error": { "code", "message", "details"? } }` with the st
 | `NO_SELLER_ACCESS` | 403 | This account cannot act for that seller (or for any seller). |
 | `UPGRADE_REQUIRED` | 426 | This Android app version is no longer supported; update the app. details.minVersionCode, details.updateUrl. |
 | `SERVICE_UNAVAILABLE` | 503 | A service needed to authorize the request is unavailable; retry later. |
+| `SERVICE_BUSY` | 503 | The rows this request needs were contended and it was retried as far as it can be; send it again. Retry-After says how long to wait. (docs/10-mysql-migration.md D8) |
 
 Sign-in and session codes from [identity](modules/identity.md) that every app meets:
 

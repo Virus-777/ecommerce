@@ -326,6 +326,10 @@ export const commonErrors = {
   "SERVICE_UNAVAILABLE": {
     "status": 503,
     "meaning": "A service needed to authorize the request is unavailable; retry later."
+  },
+  "SERVICE_BUSY": {
+    "status": 503,
+    "meaning": "The rows this request needs were contended and it was retried as far as it can be; send it again. Retry-After says how long to wait. (docs/10-mysql-migration.md D8)"
   }
 } as const;
 

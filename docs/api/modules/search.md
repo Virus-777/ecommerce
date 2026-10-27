@@ -599,7 +599,7 @@ One full reindex at a time (REINDEX_ALREADY_RUNNING). Scoped jobs only mark docu
 | rating_count | int |
 | sales_30d | int |
 | first_listed_at | timestamptz |
-| popularity | numeric |
+| popularity | numeric(12,6) |
 | terms | jsonb? (development engine: stemmed words of the title and brand (weight 1), category (0.4), attributes (0.2) and description (0.1), as [{t, w}]) |
 | title_norm | text (for trigram) |
 | version | bigint |
@@ -643,7 +643,7 @@ Indexes: `(product_id)`, `(seller_id, price)`, `(condition, price)`
 | term | text |
 | kind | text (query|category|brand|store|product) |
 | target_id | uuid? |
-| weight | numeric |
+| weight | numeric(12,6) |
 | updated_at | timestamptz |
 
 Indexes: `gin(term gin_trgm_ops)`, `(kind, weight desc)`
