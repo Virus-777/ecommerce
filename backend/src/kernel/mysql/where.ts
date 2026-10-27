@@ -31,6 +31,13 @@ export const NOTHING: Sql = { sql: '1 = 0', params: [] };
 
 export const q = (ident: string) => `\`${ident.replace(/`/g, '``')}\``;
 
+/**
+ * A fragment written by hand, for the conditions `Where` has no shape for — a comparison between two columns,
+ * a JSON path, a function call. Values are bound; a value written into the text is what `check:boundaries`
+ * refuses (§10.5).
+ */
+export const raw = (sql: string, params: readonly unknown[] = []): Sql => ({ sql, params: [...params] });
+
 const COMPARE = new Set(['<', '<=', '>', '>=']);
 const isOperator = (v: unknown): v is { op: string; value: unknown } =>
   typeof v === 'object' && v !== null && !Array.isArray(v) && !(v instanceof Date) && 'op' in v;

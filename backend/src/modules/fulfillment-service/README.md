@@ -531,7 +531,7 @@ Posted charges reach the seller statement as fulfillment-service lines separate 
 | fee_schedule_version | text |
 | accepted_at | timestamptz? |
 | accepted_by | text? |
-| max_cubic_feet | numeric |
+| max_cubic_feet | numeric(12,3) |
 | max_skus | int (approved SKU allowance; never the applicant's expectedSkus) |
 | expected_skus | int |
 | expected_monthly_units | int |
@@ -748,7 +748,7 @@ Indexes: `unique (sku_enrollment_id, day)`, `(state, day)`, `(seller_id, state)`
 | type | text |
 | period | text? |
 | reference | text? |
-| units | numeric |
+| units | numeric(14,3) |
 | rate | bigint |
 | amount | bigint |
 | currency | text |
@@ -768,7 +768,7 @@ Indexes: `(seller_id, state)`, `(type, period)`, `(seller_id, period)`, `(refere
 | seller_id | uuid |
 | sku_enrollment_id | uuid |
 | units | int |
-| cubic_feet | numeric |
+| cubic_feet | numeric(12,3) |
 | aged_units | jsonb |
 
 Indexes: `unique (day, sku_enrollment_id)`, `(seller_id, day)`

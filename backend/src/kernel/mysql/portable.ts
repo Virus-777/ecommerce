@@ -34,6 +34,32 @@ export const MYSQL_REFUSED = '8.0.29';
 export const CONNECT_CHARSET = 'utf8mb4';
 export const SESSION_COLLATION = 'SET NAMES utf8mb4 COLLATE utf8mb4_0900_bin';
 
+/**
+ * The options every mysql2 connection is opened with — the pool, the tools and the tests alike, for the same
+ * reason the charset constants live here: a connection that differs in any of them reads and writes different
+ * values from the same bytes.
+ *
+ * `timezone: 'Z'` is the one that would have bitten hardest, and a round trip cannot see it. mysql2 turns a JS
+ * Date into a DATETIME **in the host's local time** and reads it back the same way, so one connection always
+ * agrees with itself. What is stored does not: on this machine (UTC+9) a 12:00Z timestamp was written as 21:00 —
+ * nine hours in the future to `NOW()`, to every date function and to every report that groups by day, because
+ * the session is `time_zone = '+00:00'` (§10.2). And two connections that disagree about the host's offset
+ * disagree about the value: with `'Z'` that same row read back as 21:00Z. Found on 2026-10-27 by storing one
+ * timestamp and printing `DATE_FORMAT` of it beside the Date.
+ */
+export const CLIENT_OPTIONS = {
+  charset: CONNECT_CHARSET,
+  /** Send and read DATETIME as UTC, whatever the host's offset is */
+  timezone: 'Z',
+  /** A DATE stays 'YYYY-MM-DD'; a DATETIME(3) becomes a Date (§10.2) */
+  dateStrings: ['DATE'] as ('DATE')[],
+  supportBigNumbers: true,
+  /** DECIMAL stays exact, as a string, which is the shape the spec gives `numeric` columns */
+  decimalNumbers: false,
+  namedPlaceholders: false,
+  multipleStatements: false,
+};
+
 const EXE = process.platform === 'win32' ? 'mysqld.exe' : 'mysqld';
 
 /** "…Ver 8.4.13 for Win64…" → [8, 4, 13] */

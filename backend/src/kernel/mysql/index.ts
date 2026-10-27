@@ -16,7 +16,7 @@ import { createPool, type Pool, type PoolConnection, type ResultSetHeader, type 
 import { AppError } from '../errors/index.js';
 import { isConnectionLost, isRetryable } from './errors.js';
 import { KERNEL_TABLES, kernelDdl, type KernelTable } from './kernel-tables.js';
-import { CONNECT_CHARSET, SESSION_COLLATION } from './portable.js';
+import { CLIENT_OPTIONS, SESSION_COLLATION } from './portable.js';
 
 export { KERNEL_TABLES, type KernelTable };
 
@@ -198,12 +198,7 @@ export async function connectMysql(o: MysqlOptions): Promise<MysqlStore> {
     waitForConnections: true,
     queueLimit: 0,
     connectTimeout: 10_000,
-    charset: CONNECT_CHARSET,
-    dateStrings: ['DATE'], // a DATE stays 'YYYY-MM-DD'; a DATETIME becomes a Date (§10.2)
-    supportBigNumbers: true,
-    decimalNumbers: false, // DECIMAL stays exact, as a string
-    namedPlaceholders: false,
-    multipleStatements: false,
+    ...CLIENT_OPTIONS,
   });
 
   // mysql2 has no per-connection init hook, so the setup runs on each new connection as the pool makes it

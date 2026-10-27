@@ -662,9 +662,9 @@ Indexes: `(account_id) where status = 'active'`, `(role_id) where status = 'acti
 | authority | text |
 | limit_amount_minor | bigint? |
 | limit_currency | text? |
-| limit_number | numeric? |
+| limit_number | numeric(14,4)? |
 | second_above_amount_minor | bigint? |
-| second_above_number | numeric? |
+| second_above_number | numeric(14,4)? |
 | second_reviewer_role_keys | jsonb |
 | effective_from | timestamptz |
 | effective_to | timestamptz? |
@@ -707,7 +707,7 @@ Indexes: `(status, effective_from)`
 | seller_id | uuid? |
 | amount_minor | bigint? |
 | currency | text? |
-| quantity | numeric? |
+| quantity | numeric(14,4)? |
 | summary | text |
 | details | jsonb |
 | reason | text |

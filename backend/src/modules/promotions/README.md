@@ -1101,7 +1101,7 @@ Indexes: `(offer_id, campaign_id)`, `(campaign_id, seller_id)`, `(seller_id, eli
 | platform_max | bigint |
 | sellers_max | bigint |
 | expected_sales | bigint? |
-| margin_impact_pts | numeric? |
+| margin_impact_pts | numeric(6,2)? |
 | comment | text? |
 | approval_request_id | uuid? |
 

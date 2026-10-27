@@ -1184,7 +1184,7 @@ Voiding is possible only before the first carrier scan; the carrier refunds the 
 | credentials_ref | text? (secret store key) |
 | contacts | jsonb (CarrierContact[]) |
 | last_event_at | timestamptz? |
-| on_time_rate_30d | numeric? |
+| on_time_rate_30d | numeric(5,2)? |
 
 **carrier_services**
 

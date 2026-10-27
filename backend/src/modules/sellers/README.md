@@ -1877,7 +1877,7 @@ Indexes: `unique(seller_id, email) where status in ('invited','active','suspende
 | seller_id | uuid |
 | kind | text (order_accepted|dispatched|dispatched_late|tracking_valid|tracking_missing|seller_cancelled|units_sold|return_requested|message_received|first_reply|case_opened|case_resolved|case_overdue|policy_violation) |
 | subject_id | uuid? |
-| value | numeric? |
+| value | numeric(14,4)? |
 | occurred_at | timestamptz |
 | category_id | uuid? |
 
@@ -1906,7 +1906,7 @@ Indexes: `(seller_id, computed_at desc)`
 | metric | text |
 | category_id | uuid? |
 | comparator | text |
-| threshold | numeric |
+| threshold | numeric(14,4) |
 | unit | text |
 | window_days | int |
 | is_example | bool |

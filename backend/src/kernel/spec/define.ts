@@ -108,6 +108,8 @@ export interface ModuleSpecDef {
   readonly errorCodes: Readonly<Record<string, { readonly status: number; readonly meaning: string }>>;
   /** table → its MongoDB collection: _id field, validator and indexes (tools/lib/mongo.ts, docs/04-mongodb-migration.md) */
   readonly collections: Readonly<Record<string, CollectionDef>>;
+  /** table → its MySQL table: columns, types to convert and unique keys (tools/lib/mysql.ts, docs/10-mysql-migration.md) */
+  readonly tables?: Readonly<Record<string, TableDef>>;
   readonly endpoints: EndpointTable;
 }
 
@@ -144,4 +146,44 @@ export interface CollectionDef {
 
 export function defineModuleSpec<const S extends ModuleSpecDef>(spec: S): S {
   return spec;
+}
+
+/** One unique key of a table, as `insertIfAbsent` and `upsert` need to know it */
+export interface UniqueKeyDef {
+  /** The index name MySQL reports in a duplicate-key error (1062); the primary key is `PRIMARY` */
+  readonly name: string;
+  readonly columns: readonly string[];
+  /** A partial unique index (`unique (a) where …`): it only refuses rows its condition covers */
+  readonly partial?: boolean;
+}
+
+/**
+ * A spec table as a MySQL table `<module>_<table>` (docs/10-mysql-migration.md §10.4). The lists of columns by
+ * type are what `Table` needs to turn rows into parameters and rows back again: mysql2 reads and writes most
+ * types correctly on its own, and these are the ones it cannot know about from the value alone.
+ */
+export interface TableDef {
+  /** `<module>_<table>` (`-` replaced by `_`) */
+  readonly table: string;
+  /** Primary key columns */
+  readonly key: readonly string[];
+  /** The single primary key column, else null (get/update/delete by id need one) */
+  readonly idColumn: string | null;
+  /** Stored columns, in spec order (tsvector columns are not stored) */
+  readonly columns: readonly string[];
+  readonly nullable: readonly string[];
+  /** DECIMAL columns: exact, so strings in JS both ways */
+  readonly decimal: readonly string[];
+  /** BINARY/BLOB columns: Uint8Array in JS, Buffer on the wire */
+  readonly binary: readonly string[];
+  /** DATETIME(3) columns: Date in JS (a DATE column is a 'YYYY-MM-DD' string and is not here) */
+  readonly dates: readonly string[];
+  /** JSON columns, arrays included: mysql2 parses them on the way out but not on the way in */
+  readonly json: readonly string[];
+  /** TINYINT(1) columns: booleans in JS */
+  readonly booleans: readonly string[];
+  /** AUTO_INCREMENT column, numbered by the server */
+  readonly identity: string | null;
+  /** Every unique key, primary key first: a duplicate-key error names one of these */
+  readonly uniqueKeys: readonly UniqueKeyDef[];
 }

@@ -341,7 +341,7 @@ complete is called by the client (POST /uploads/{id}/complete) or by the storage
 | phash | bigint? (images) |
 | width | int? |
 | height | int? |
-| duration_seconds | numeric? |
+| duration_seconds | numeric(10,3)? |
 | page_count | int? |
 | alt | text? |
 | title | text? |
@@ -403,9 +403,9 @@ Indexes: `(url_expires_at) where completed_at is null`, `(asset_id)`
 |---|---|
 | id | uuid pk |
 | asset_id | uuid → assets |
-| module | text |
-| kind | text |
-| ref_id | text |
+| module | varchar(32) |
+| kind | varchar(32) |
+| ref_id | varchar(64) |
 | ref_label | text? |
 | evidence | bool |
 | attached_at | timestamptz |
