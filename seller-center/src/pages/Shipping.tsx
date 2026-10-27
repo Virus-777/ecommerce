@@ -7,7 +7,7 @@ import { formatMoney, money, parseCents } from '@marketly/web-shared/lib/format'
 import { href } from '@marketly/web-shared/routes';
 import { Alert, Badge, Button, Card, Checkbox, Dialog, Field, Icon, KeyValue, OptionCard, PageHeader, PhoneInput, Select, Switch, TableWrap, TextInput, Timeline, announce, type TimelineEvent } from '@marketly/web-shared/ui';
 import { useSellerSession } from '@/app/session';
-import { addDays, dayKey, dayRange, phoneText, ptDateTime, ptInstant, weekdayDay, type Carrier, type PlatformMethod, type ProfileMethod, type ReturnTerms, type ShippingSettings } from './data/orders';
+import { addDays, dayKey, dayRange, phoneText, ptDateTime, ptInstant, weekdayDay, type Carrier, type PlatformMethod, type ProfileMethod, type ReturnTerms, type SellerCarrier, type ShippingSettings } from './data/orders';
 
 // Design: pages/seller/seller-shipping.html (single view).
 // Data: GET/PUT /api/seller/shipping/settings (coverage, dispatch schedule, label preference, preview, history),
@@ -56,6 +56,27 @@ const dollars = (amount?: number | null) => (amount == null ? '' : (amount / 100
 const isAmount = (v: string) => /^\d+(\.\d{1,2})?$/.test(v.trim());
 const isEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
 const freeError = (v: string) => (!v.trim() || (isAmount(v) && Number(v) > 0) ? '' : 'Enter an amount in dollars, like 49.00, or leave it empty for no free shipping.');
+// A seller's own carrier: the API checks the same three things and answers per field.
+const carrierNameError = (v: string) => (!v.trim() ? 'Name the carrier, like Speedy Local Courier.' : v.trim().length > 60 ? 'Keep the name under 60 characters.' : '');
+const trackingLinkError = (v: string) => {
+  const t = v.trim();
+  if (!t) return '';
+  if (t.length > 300) return 'Keep the link under 300 characters.';
+  if (!/^https:\/\//i.test(t)) return 'The tracking link must start with https://';
+  return t.includes('{n}') ? '' : 'Put {n} where the tracking number goes.';
+};
+const trackingPatternError = (v: string) => {
+  const t = v.trim();
+  if (!t) return '';
+  if (t.length > 120) return 'Keep the pattern under 120 characters.';
+  try {
+    new RegExp(t);
+    return '';
+  } catch {
+    return 'That is not a valid pattern. Leave it empty to accept any number.';
+  }
+};
+const trackingHost = (template?: string | null) => template?.trim().split('://')[1]?.split('/')[0] || '';
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const sentence = (l: string[]) => l.join(', ').replace(/^./, (c) => c.toUpperCase());
 const lbs = (g: number) => `${Math.round((g / 453.592) * 10) / 10} lb`;
@@ -310,6 +331,53 @@ function ShippingForm({ settings: st, methods, carriers }: { settings: ShippingS
     setClosureTried(true);
     if (!closure.name.trim() || !closure.from || (closure.to && closure.to < closure.from)) return;
     addClosureM.mutate();
+  };
+
+  // Carriers the seller ships with itself. Each is saved on its own, not with the settings above.
+  const own = useQuery({ queryKey: ['shipping', 'own-carriers', sellerId], queryFn: () => call(api.GET('/api/seller/shipping/carriers')) });
+  const [ownOpen, setOwnOpen] = useState(false);
+  const [ownDraft, setOwnDraft] = useState({ id: '', name: '', template: '', pattern: '' });
+  const [ownTried, setOwnTried] = useState(false);
+  const [ownErr, setOwnErr] = useState('');
+  const ownErrors = {
+    name: ownTried ? carrierNameError(ownDraft.name) : '',
+    template: ownTried ? trackingLinkError(ownDraft.template) : '',
+    pattern: ownTried ? trackingPatternError(ownDraft.pattern) : '',
+  };
+  const saveOwnM = useMutation({
+    mutationFn: () => {
+      const body = {
+        name: ownDraft.name.trim(),
+        trackingUrlTemplate: ownDraft.template.trim() || null,
+        trackingPattern: ownDraft.pattern.trim() || null,
+      };
+      return ownDraft.id
+        ? call(api.PATCH('/api/seller/shipping/carriers/{id}', { params: { path: { id: ownDraft.id } }, body }))
+        : call(api.POST('/api/seller/shipping/carriers', { body }));
+    },
+    onSuccess: (c) => {
+      setOwnOpen(false);
+      announce(`${c.name} saved`);
+    },
+    onError: (e) => setOwnErr(errorMessage(e)),
+    onSettled: refresh,
+  });
+  const removeOwnM = useMutation({
+    mutationFn: (id: string) => call(api.DELETE('/api/seller/shipping/carriers/{id}', { params: { path: { id } } })),
+    onSuccess: () => announce('Carrier removed'),
+    onError: (e) => setNotice({ tone: 'danger', title: 'Could not remove the carrier', body: errorMessage(e) }),
+    onSettled: refresh,
+  });
+  const openOwn = (c?: SellerCarrier) => {
+    setOwnDraft({ id: c?.id ?? '', name: c?.name ?? '', template: c?.trackingUrlTemplate ?? '', pattern: c?.trackingPattern ?? '' });
+    setOwnTried(false);
+    setOwnErr('');
+    setOwnOpen(true);
+  };
+  const saveOwn = () => {
+    setOwnTried(true);
+    if (carrierNameError(ownDraft.name) || trackingLinkError(ownDraft.template) || trackingPatternError(ownDraft.pattern)) return;
+    saveOwnM.mutate();
   };
 
   // Return address: lives in the return terms (returns module); saved at once.
@@ -644,6 +712,55 @@ function ShippingForm({ settings: st, methods, carriers }: { settings: ShippingS
             </p>
           </Card>
 
+          <Card
+            title="Your own carriers"
+            titleAs="h3"
+            sub="Carriers you ship with yourself — your own van, a local courier"
+            actions={
+              canManage ? (
+                <Button variant="ghost" size="sm" icon="plus" onClick={() => openOwn()}>
+                  Add a carrier
+                </Button>
+              ) : undefined
+            }
+          >
+            {own.isError ? (
+              <Alert tone="danger">
+                {errorMessage(own.error)}{' '}
+                <Button variant="secondary" size="sm" onClick={() => void own.refetch()}>
+                  Try again
+                </Button>
+              </Alert>
+            ) : own.data?.length ? (
+              <ul className="list">
+                {own.data.map((c) => (
+                  <li key={c.id}>
+                    <span className="grow stack gap-0">
+                      <span className="small strong">{c.name}</span>
+                      <span className="xs muted">{trackingHost(c.trackingUrlTemplate) ? `Tracking on ${trackingHost(c.trackingUrlTemplate)}` : 'No tracking page'}</span>
+                    </span>
+                    {canManage && (
+                      <>
+                        <Button variant="ghost" size="sm" icon="pencil" onClick={() => openOwn(c)}>
+                          Edit
+                        </Button>
+                        <Button variant="ghost" size="sm" icon="trash" disabled={removeOwnM.isPending} onClick={() => removeOwnM.mutate(c.id)}>
+                          Remove
+                        </Button>
+                      </>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="small sub">You haven't added any. You can still ship with the carriers Marketly lists.</p>
+            )}
+            <p className="xs muted row gap-1 nowrap top">
+              <Icon name="info" className="ic-sm" />
+              <span className="wrap">They appear next to Marketly's carriers when you mark an order shipped. Marketly can't track these for you, so the buyer sees the tracking number as you enter it.</span>
+            </p>
+          </Card>
+
           {canManage && (
             <div className="sa-savebar">
               <div className="stack gap-1">
@@ -781,6 +898,40 @@ function ShippingForm({ settings: st, methods, carriers }: { settings: ShippingS
           </span>
         )}
         {method.rate && isAmount(method.rate) && <span className="xs muted">Customers pay {money(Number(method.rate))} per package.</span>}
+      </Dialog>
+
+      <Dialog
+        open={ownOpen}
+        onClose={() => setOwnOpen(false)}
+        title={ownDraft.id ? 'Edit carrier' : 'Add your own carrier'}
+        foot={
+          <>
+            <Button variant="ghost" onClick={() => setOwnOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={saveOwn} disabled={saveOwnM.isPending}>
+              Save carrier
+            </Button>
+          </>
+        }
+      >
+        {ownErr && <Alert tone="danger">{ownErr}</Alert>}
+        <Field label="Carrier name" error={ownErrors.name}>
+          <TextInput id="sh-oc-name" value={ownDraft.name} error={!!ownErrors.name} placeholder="Speedy Local Courier" onChange={(e) => setOwnDraft({ ...ownDraft, name: e.target.value })} />
+        </Field>
+        <Field label="Tracking link" optional error={ownErrors.template} hint="The courier's tracking page with {n} where the number goes.">
+          <TextInput
+            id="sh-oc-link"
+            value={ownDraft.template}
+            error={!!ownErrors.template}
+            placeholder="https://courier.example/track/{n}"
+            onChange={(e) => setOwnDraft({ ...ownDraft, template: e.target.value })}
+          />
+        </Field>
+        <Field label="Number format" optional error={ownErrors.pattern} hint="A pattern to check your numbers against. Leave it empty to accept any number.">
+          <TextInput id="sh-oc-pattern" value={ownDraft.pattern} error={!!ownErrors.pattern} placeholder="^SP\d{6}$" onChange={(e) => setOwnDraft({ ...ownDraft, pattern: e.target.value })} />
+        </Field>
+        <span className="xs muted">Packages already sent with a carrier keep its name and tracking link, even after you change or remove it.</span>
       </Dialog>
     </>
   );

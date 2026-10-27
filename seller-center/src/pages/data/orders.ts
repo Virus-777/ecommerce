@@ -20,6 +20,7 @@ export type ShippingSettings = S['shipping.SellerShippingSettings'];
 export type ProfileMethod = S['shipping.ProfileMethod'];
 export type PlatformMethod = S['shipping.ShippingMethod'];
 export type Carrier = S['shipping.Carrier'];
+export type SellerCarrier = S['shipping.SellerCarrier'];
 export type ReturnTerms = S['returns.SellerReturnTerms'];
 export type Address = S['Address'];
 

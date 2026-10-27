@@ -24797,6 +24797,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/store/search/departments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The same query answered by every department: one section per department with matches
+         * @description Asks each department module in parallel and ranks the sections against each other (best hit first, then the number of matches, then the home rail's order). A department that is off, not built yet or too slow is left out and partial is true. Departments the query names but that have no matching record come back as shortcuts.
+         *
+         *     **Screens:** store/search
+         */
+        get: operations["search.searchDepartmentsAll"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/store/search/departments/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One department's results for the query, paged group by group
+         * @description The scoped list behind a department's chip. Each group pages on its own: send kind and that group's cursor. NOT_FOUND when the key is not a department or its module is off.
+         *
+         *     **Screens:** store/search
+         */
+        get: operations["search.searchDepartmentScope"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/store/search/popular-searches": {
         parameters: {
             query?: never;
@@ -28821,6 +28865,66 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/seller/shipping/carriers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The seller's own carriers
+         * @description **Permission:** `shipping.seller-settings.view`
+         *
+         *     **Screens:** seller/shipping
+         */
+        get: operations["shipping.listSellerCarriers"];
+        put?: never;
+        /**
+         * Add a carrier the seller ships with itself
+         * @description For a courier Marketly has no account with. It appears in the seller's record-shipment form only; tracking is manual, so numbers are checked against the pattern if one is given and never updated by a carrier feed.
+         *
+         *     **Permission:** `shipping.seller-settings.manage`
+         *
+         *     **Screens:** seller/shipping
+         */
+        post: operations["shipping.addSellerCarrier"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/seller/shipping/carriers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a carrier from the list
+         * @description Packages already sent with it keep its name and tracking link.
+         *
+         *     **Permission:** `shipping.seller-settings.manage`
+         *
+         *     **Screens:** seller/shipping
+         */
+        delete: operations["shipping.removeSellerCarrier"];
+        options?: never;
+        head?: never;
+        /**
+         * Rename a carrier or change its tracking link
+         * @description **Permission:** `shipping.seller-settings.manage`
+         *
+         *     **Screens:** seller/shipping
+         */
+        patch: operations["shipping.updateSellerCarrier"];
         trace?: never;
     };
     "/api/seller/shipping/profiles/{id}": {
@@ -34985,6 +35089,63 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        DeptSearchRequest: {
+            /** @description What the customer typed, trimmed; never empty */
+            q: string;
+            /** @description Hits per group at most */
+            limit: number;
+            /** @description Answer only for these kinds; a scoped list pages one kind */
+            kinds?: string[] | null;
+            /** @description Cursor of the one kind being paged (from that group's nextCursor) */
+            cursor?: string | null;
+            /**
+             * Format: uuid
+             * @description The signed-in customer: owned, saved and customer-only records
+             */
+            customerId?: string | null;
+            /** @description Answer only for these sections; the departments and services modules answer for several */
+            sections?: string[] | null;
+        };
+        DeptSearchHit: {
+            id: string;
+            /** @description What the record is: restaurant, dish, app, phone, post, company, game, … */
+            kind: string;
+            title: string;
+            /** @description The grey line under the title, e.g. 'Pizza · Italian · ★ 4.7 (1,204)' */
+            meta?: string | null;
+            /** @description A second grey line, shown only in a scoped list, e.g. 'Open until 11 PM · 1.2 mi' */
+            sub?: string | null;
+            image?: components["schemas"]["MediaRef"] | null;
+            /** @description Short mark on the row, e.g. Verified, Free delivery, −15% */
+            badge?: string | null;
+            /** @enum {string|null} */
+            badgeTone?: "brand" | "deal" | "info" | "neutral" | null;
+            /** @description Right side of the row: $12.00, Free, 150 points, ★ 4.6 */
+            priceLabel?: string | null;
+            /** @description Struck-through price under priceLabel */
+            wasLabel?: string | null;
+            /** @description Store path the app opens, e.g. /food/restaurants/napoli-pizza */
+            path: string;
+            /** @description 0–100 match strength, so sections of different departments can be ranked together */
+            score: number;
+        };
+        DeptSearchGroup: {
+            /** @description The kind every hit of this group has */
+            kind: string;
+            /** @description Heading of the group, e.g. Restaurants, Dishes, Apps, Posts */
+            title: string;
+            /** @description services only: os_install | post_sale | welfare | booking, so search knows which section the group belongs to */
+            area?: string | null;
+            /** @description Matching records of this kind, also when only a few are sent */
+            total: number;
+            items: components["schemas"]["DeptSearchHit"][];
+            /** @description More of this group; null when the last hit was sent */
+            nextCursor?: string | null;
+        };
+        DeptSearchResult: {
+            /** @description Only groups with at least one hit, the module's own order */
+            groups: components["schemas"]["DeptSearchGroup"][];
+        };
         Money: {
             /** @description Minor units (cents). 18900 = $189.00 */
             amount: number;
@@ -51653,6 +51814,47 @@ export interface components {
             /** @description Normalized keyword, e.g. 'wireless headphones' */
             query: string;
         };
+        "search.DepartmentSection": {
+            /** @enum {string} */
+            key: "phones" | "farm" | "software" | "welfare" | "booking" | "food" | "blogs" | "companies" | "play" | "rewards";
+            /** @description The department's name as the home rail shows it, e.g. Food delivery */
+            name: string;
+            /** @description Lucide icon name, the rail's icon for this department */
+            icon: string;
+            /** @description The department's own screen, e.g. /food (the 'Open department' link) */
+            path: string;
+            /** @description Matching records in every group of this section */
+            total: number;
+            groups: components["schemas"]["DeptSearchGroup"][];
+        };
+        "search.DepartmentShortcut": {
+            key: string;
+            name: string;
+            icon: string;
+            path: string;
+            /** @description One line under the name, e.g. Order from restaurants near you */
+            tagline: string;
+        };
+        "search.DepartmentSuggestGroup": {
+            key: string;
+            name: string;
+            icon: string;
+            /** @description The department's own screen */
+            path: string;
+            total: number;
+            items: components["schemas"]["DeptSearchHit"][];
+        };
+        "search.DepartmentResults": {
+            query: string;
+            /** @description Matching records in every section together */
+            total: number;
+            /** @description Only departments with matches, best match first */
+            sections: components["schemas"]["search.DepartmentSection"][];
+            /** @description Departments the query names that have no section of their own */
+            shortcuts: components["schemas"]["search.DepartmentShortcut"][];
+            /** @description A department could not answer in time or failed: its section is missing from this answer */
+            partial: boolean;
+        };
         "search.Suggestions": {
             query: string;
             queries: components["schemas"]["search.QuerySuggestion"][];
@@ -51662,6 +51864,8 @@ export interface components {
             products: components["schemas"]["search.ProductSuggestion"][];
             /** @description Only when a customer or guest session is present and recent searches are on */
             recent: components["schemas"]["search.RecentSearch"][];
+            /** @description Matching records of each department, one group per department with matches (at most departmentSuggestLimit hits each) */
+            departments: components["schemas"]["search.DepartmentSuggestGroup"][];
         };
         "search.RankingFactor": {
             key: string;
@@ -54409,6 +54613,27 @@ export interface components {
             services: components["schemas"]["shipping.CarrierService"][];
             /** @description Staff only (shipping.settings.view); always empty in seller-area responses */
             contacts: components["schemas"]["shipping.CarrierContact"][];
+        };
+        "shipping.SellerCarrier": {
+            /** Format: uuid */
+            id: string;
+            /** @description own-<hex>, unique across the platform so tracking numbers stay comparable */
+            code: string;
+            /** @description What the buyer sees, e.g. 'Speedy Local Courier' */
+            name: string;
+            /** @description Tracking page with {n} where the number goes; without one the buyer sees the number but no link */
+            trackingUrlTemplate?: string | null;
+            /** @description Regex the seller's own numbers match, checked like a platform carrier's */
+            trackingPattern?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        "shipping.SellerCarrierInput": {
+            name: string;
+            trackingUrlTemplate?: string | null;
+            trackingPattern?: string | null;
         };
         "shipping.CarrierContact": {
             /** @enum {string} */
@@ -134752,6 +134977,119 @@ export interface operations {
             };
         };
     };
+    "search.searchDepartmentsAll": {
+        parameters: {
+            query: {
+                q: string;
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["search.DepartmentResults"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "search.searchDepartmentScope": {
+        parameters: {
+            query: {
+                q: string;
+                kind?: string | null;
+                cursor?: string | null;
+                limit?: number | null;
+            };
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["search.DepartmentSection"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     "search.listPopularSearches": {
         parameters: {
             query?: {
@@ -146778,6 +147116,252 @@ export interface operations {
              *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
              */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "shipping.listSellerCarriers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["shipping.SellerCarrier"][];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "shipping.addSellerCarrier": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["shipping.SellerCarrierInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["shipping.SellerCarrier"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description CONFLICT: Concurrent change; reload and retry. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "shipping.removeSellerCarrier": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success, no content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "shipping.updateSellerCarrier": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["shipping.SellerCarrierInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["shipping.SellerCarrier"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description CONFLICT: Concurrent change; reload and retry. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
