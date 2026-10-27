@@ -227,3 +227,54 @@ export function moduleSql(ddl: ModuleDdl): string {
   if (triggers.length) out.push('-- append-only guards (§6.3)', ...triggers.map((t) => `${t}\n`));
   return `${out.join('\n').trimEnd()}\n`;
 }
+
+/**
+ * The module's tables as data: `src/modules/<m>/mysql-schema.ts` (§17.2).
+ *
+ * This is what `npm run migrate` and start-up bring the database up to, and it is generated for the same reason
+ * the Mongoose `schema.ts` beside it is: the server must not depend on the generator. The spec parser, the type
+ * rules and the index translation are `tools/` code — they are not shipped, they are read by a person reviewing a
+ * diff. So the decisions they make are written out here, once, and the server only ever reads them.
+ *
+ * `TableSchema` is plain data, so the file is its JSON with a type on it. That is deliberate: a generated file
+ * whose diff is readable is a generated file a change can be reviewed in, and `migrateMysql` compares these
+ * pieces against `information_schema` one by one (§17.3) — so what the reviewer reads is what is applied.
+ *
+ * Views (§9.2) and data migrations belong to the same unit and are added here when they exist.
+ */
+export function emitMysqlSchema(ddl: ModuleDdl, header: string): string {
+  const tables = ddl.tables.map((t) => t.schema);
+  const counts = [
+    `${tables.length} tables`,
+    `${tables.reduce((n, t) => n + t.columns.length, 0)} columns`,
+    `${tables.reduce((n, t) => n + t.keys.length, 0)} keys`,
+    `${tables.reduce((n, t) => n + t.foreignKeys.length, 0)} foreign keys`,
+  ];
+  // One line per column, key, check, foreign key and trigger. A generated file of this size is only reviewable if
+  // a spec change shows up as the one line it changed, and these are the pieces migrate compares one by one.
+  const list = (items: readonly unknown[], indent: string) =>
+    items.length ? `[\n${items.map((i) => `${indent}  ${JSON.stringify(i)},`).join('\n')}\n${indent}]` : '[]';
+  const table = (t: TableSchema) =>
+    [
+      `    {`,
+      `      name: ${JSON.stringify(t.name)},`,
+      `      columns: ${list(t.columns, '      ')},`,
+      `      primaryKey: ${JSON.stringify(t.primaryKey)},`,
+      `      keys: ${list(t.keys, '      ')},`,
+      `      checks: ${list(t.checks, '      ')},`,
+      `      foreignKeys: ${list(t.foreignKeys, '      ')},`,
+      `      triggers: ${list(t.triggers, '      ')},`,
+      `    },`,
+    ].join('\n');
+  return `${header}
+import type { MysqlUnit } from '../../kernel/mysql/schema.js';
+
+/** ${ddl.module}: ${counts.join(', ')}. The readable form of the same thing is docs/api/db/${ddl.module}.sql. */
+export const unit: MysqlUnit = {
+  module: ${JSON.stringify(ddl.module)},
+  tables: [
+${tables.map(table).join('\n')}
+  ],
+};
+`;
+}

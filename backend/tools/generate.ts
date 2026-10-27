@@ -20,6 +20,7 @@ import { parse, print, valueFromASTUntyped } from 'graphql';
 import { emitCommon, emitModule, GENERATED } from './lib/emit.js';
 import { collectionDefs } from './lib/mongo.js';
 import { emitMongooseSchemas } from './lib/mongoose.js';
+import { emitMysqlSchema, moduleDdl } from './lib/mysql.js';
 import { planTables } from './lib/tables.js';
 import { scaffoldFiles } from './lib/scaffold.js';
 import { apiDir, backendDir, camel, gqlDir, loadCommon, loadFragment, loadModules, readText, type ModuleSpec } from './lib/spec.js';
@@ -149,6 +150,9 @@ export const typeDefs = ${JSON.stringify(fragment)};
     // Mongoose schemas of the module's collections (problems are reported by the spec emitter)
     const plans = planTables(m, []);
     generated.set(join(dir, 'schema.ts'), emitMongooseSchemas(m, plans, collectionDefs(m, plans, []), GENERATED(`docs/api/spec/modules/${m.name}.json`)));
+    // and the same tables as MySQL DDL pieces, which is what npm run migrate applies (docs/10-mysql-migration.md §17.2).
+    // Problems are not collected here: check:ddl is where the translation is judged, by a real server
+    generated.set(join(dir, 'mysql-schema.ts'), emitMysqlSchema(moduleDdl(m), GENERATED(`docs/api/spec/modules/${m.name}.json`)));
   }
   const files = scaffoldFiles({ mod: m, common, types: new TypeContext(m, commonTypes, byName), hasFragment: Boolean(fragment), sourceFields: sourceFieldsOf(m, fragment) });
   for (const [rel, content] of Object.entries(files)) {
@@ -172,6 +176,7 @@ export const typeDefs = ${JSON.stringify(fragment)};
     join(modulesDir, 'index.ts'),
     `${GENERATED('the module folders in src/modules')}
 import type { ModuleDefinition } from '../kernel/module-system/index.js';
+import type { MysqlUnit } from '../kernel/mysql/schema.js';
 
 /** Every module folder present in the codebase. Which ones run is decided in src/modules.config.ts. */
 export const moduleLoaders: Record<string, () => Promise<{ default: ModuleDefinition }>> = {
@@ -186,6 +191,18 @@ export const graphqlFragments: Record<string, () => Promise<{ typeDefs: string }
 ${present
   .filter((n) => generated.has(join(modulesDir, n, 'graphql', 'schema.ts')))
   .map((n) => `  ${JSON.stringify(n)}: () => import('./${n}/graphql/schema.js'),`)
+  .join('\n')}
+};
+
+/**
+ * Every module's MySQL tables (docs/10-mysql-migration.md §17.2), loaded on demand: npm run migrate and start-up
+ * read the ones that are switched on and bring the database up to them. Lazily, because each is a few thousand
+ * lines of DDL pieces that no other part of the process has any use for.
+ */
+export const mysqlSchemas: Record<string, () => Promise<{ unit: MysqlUnit }>> = {
+${present
+  .filter((n) => generated.has(join(modulesDir, n, 'mysql-schema.ts')))
+  .map((n) => `  ${JSON.stringify(n)}: () => import('./${n}/mysql-schema.js'),`)
   .join('\n')}
 };
 `,

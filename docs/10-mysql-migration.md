@@ -722,7 +722,7 @@ Depth 9, cost 1,500, page size 100 and a 10 s timeout per field stay. The 10 s t
 ### 17.2 Generator (`npm run gen`)
 
 - `tools/lib/mysql.ts` replaces `tools/lib/mongo.ts` + `mongoose.ts`. It writes:
-  - per module `src/modules/<m>/schema.ts` (GENERATED): the tables' DDL objects, views and triggers;
+  - per module `src/modules/<m>/mysql-schema.ts` (GENERATED): the tables' DDL objects, keys, checks, foreign keys and triggers as one `MysqlUnit`, plus `mysqlSchemas` in the generated `src/modules/index.ts`, which loads them on demand the way `moduleLoaders` loads modules. **Built 2026-10-28**: 40 files, 828 KB, one line per column and per key so that a spec change reads as the line it changed. It sits beside the Mongoose `schema.ts` rather than replacing it, because until the cutover both databases are described; at the cutover the Mongoose one goes and this one keeps its name. Why generate it at all, when `docs/api/db/<module>.sql` says the same: the spec parser and the translation rules are `tools/` code, and the server must not depend on the generator — it reads the decisions, it does not make them;
   - `src/spec/<m>.ts`: row types (unchanged) and the Kysely table interfaces (`ColumnType<Select, Insert, Update>`);
   - `docs/api/db/<module>.sql`: readable DDL per module, for the maintainer.
 - `tools/lib/tables.ts` (the parser) stays and learns the §17.1 notation.
@@ -762,6 +762,18 @@ Two translations that Appendix A describes were also missing entirely and are no
 - The kernel's own tables are created if absent and not diffed: they are hand-written in `kernel-tables.ts` rather than generated from a spec, so a change to one of them is a change to the kernel and comes with its own migration.
 - The 28 existing MongoDB data migrations are **not ported**: they upgraded existing MongoDB installs. On MySQL the ETL (§18) moves data already upgraded, and a fresh install starts from the seeds in code (as M2 did). They were 14 at the first census and 28 on 2026-10-23, so they are being added at roughly seven a day while the Departments work lands. Under D10 this stops mattering at the cutover: nothing reads the old database, so no migration has to have run against it. What does matter is that a change a migration made on MongoDB must also exist in the spec, or the MySQL schema will simply not have it. The generator freshness check (`npm run gen:check`) is what proves that, because a column that only a migration knows about never reaches `schema.ts`.
 
+
+**The whole schema, through migrate, 2026-10-28** (`src/modules/mysql-schema.test.ts`). `check:ddl` proves the generated
+SQL is accepted by a server; this proves the other half, which is a different code path over the same spec and the only
+one that runs in production: the units the modules ship, applied by `migrateMysql` to an empty database, come to **471
+tables, 329 foreign keys, 161 CHECK constraints and 10 triggers** — the census exactly, and nothing in the database that
+is not in a unit. Then: a second start applies nothing and logs nothing (the per-module hash); a column added to one
+unit is added to that module and no other, as `ALGORITHM=INSTANT`; and with the column gone from the unit again it is
+reported as something the database has and the spec does not, never dropped.
+
+Both halves were sabotage-checked. With trigger creation removed from migrate the count test fails (10 → 0); with the
+`kernel_migrations` lookup made to answer "nothing", the second start re-applies all forty modules and the
+one-module test reports forty.
 ---
 
 ## 18. Starting empty (D10)
