@@ -6,13 +6,10 @@
  * with the work it guarded. None of that can be seen from one connection, so the tests that matter here run
  * two at once and check which of them is held up.
  */
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createConnection } from 'mysql2/promise';
 import { sql, type Generated } from 'kysely';
-import { connectMysql, ModuleStore, type MysqlStore } from './index.js';
-import { CLIENT_OPTIONS, startPortableMysql, type PortableMysql } from './portable.js';
+import { ModuleStore, type MysqlStore } from './index.js';
+import { testMysql } from '../../testing/mysql.js';
 import { toPageRequest } from '../lib/pagination.js';
 import type { TableDef } from '../spec/define.js';
 
@@ -45,19 +42,13 @@ interface DemoTables {
   demo_items: { id: Generated<number>; name: string; n: number };
 }
 
-let server: PortableMysql;
 let store: MysqlStore;
 let demo: ModuleStore<DemoTables>;
 
 beforeAll(async () => {
-  server = await startPortableMysql({ dataDir: join(tmpdir(), 'marketly-module-test'), port: 3392, forTests: true });
-  const root = await createConnection({ host: '127.0.0.1', port: server.port, user: 'root', ...CLIENT_OPTIONS });
-  await root.query('DROP DATABASE IF EXISTS modulecheck');
-  await root.query('CREATE DATABASE modulecheck DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin');
-  await root.end();
-
-  store = await connectMysql({ url: `mysql://root@127.0.0.1:${server.port}/modulecheck`, poolSize: 6 });
-  await store.createKernelTables();
+  store = await testMysql();
+  // the database is reused by the next test file in this worker slot, so make the table from nothing
+  await store.pool.query('DROP TABLE IF EXISTS `demo_items`');
   await store.pool.query(
     'CREATE TABLE `demo_items` (`id` BIGINT NOT NULL AUTO_INCREMENT, `name` VARCHAR(32) NOT NULL, `n` INT NOT NULL, ' +
       'PRIMARY KEY (`id`), UNIQUE KEY `uq_demo_items_name` (`name`)) ENGINE=InnoDB',
@@ -67,7 +58,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await store?.close();
-  await server?.stop();
 });
 
 beforeEach(async () => {

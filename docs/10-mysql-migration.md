@@ -506,8 +506,8 @@ InnoDB does the opposite: the second writer **waits** for the first to commit an
 | `kernel_idempotency_keys` | `(scope, \`key\`) PK`, request_hash, status, response_status, `response_body MEDIUMTEXT`, created_at, completed_at; index `(created_at)` | `begin` = `INSERT`, or on a duplicate `SELECT … FOR UPDATE` and compare, as today |
 | `kernel_webhook_events` | `(provider, event_id) PK`, received_at; index | purge after 90 days |
 | `kernel_rate_limits` | `(scope, \`key\`, window_start) PK`, window_end, count | `INSERT … ON DUPLICATE KEY UPDATE count = LAST_INSERT_ID(IF(count < ?, count + 1, count + 1000000))`: one statement that both counts and says "refused". The existing `kernel.purge-rate-limits` job deletes ended windows |
-| `kernel_jobs` | id, name, state, run_at, attempts, max_attempts, lease_until, started_at, finished_at, error, created_at; **`uq_queued ((IF(state='queued', name, NULL)))`**, **`uq_active ((IF(state='active', name, NULL)))`**, `ix (state, run_at)`, `ix (finished_at)` | same rules: one waiting and one running per job |
-| `kernel_job_schedules` | `schedule PK`, next_run_at | "once across instances": `UPDATE … SET next_run_at = ? WHERE schedule = ? AND next_run_at = ?`, and only the instance with `affectedRows = 1` enqueues |
+| `kernel_jobs` | id, name, state, run_at, attempts, max_attempts, lease_until, started_at, finished_at, error, created_at; **`uq_queued ((IF(state='queued', name, NULL)))`**, **`uq_active ((IF(state='active', name, NULL)))`**, `ix (state, run_at)`, `ix (finished_at)` | same rules: one waiting and one running per job. The states are `queued`, `active`, `completed`, `failed` — the words the MongoDB runner already writes. The CHECK first said `done`, which would have been a difference between the two runners for no reason |
+| `kernel_job_schedules` | `job PK`, `schedule`, next_run_at | "once across instances": `UPDATE … SET next_run_at = ? WHERE job = ? AND next_run_at = ?`, and only the instance with `affectedRows = 1` enqueues. **The `schedule` column was missing** from this row and from the DDL until the runner was written (2026-10-27): the key column was named `schedule` but held the job name, and the phrase from the spec had nowhere to live. The runner compares the stored phrase with the spec's to notice that a job's schedule has been edited — without it an edited job would keep firing on its old clock until something else happened to rewrite the row. There is a test that edits a schedule and waits for the new one |
 | `kernel_job_boots` | `job_deploy PK`, at | boot jobs once per deploy |
 
 **Job claim** (replaces `findOneAndUpdate`):
@@ -519,7 +519,9 @@ UPDATE kernel_jobs SET state='active', started_at=?, lease_until=?, attempts=att
 COMMIT;
 ```
 
-`SKIP LOCKED` lets many workers claim in parallel without waiting on each other. Backoff, leases, lost-run recovery, manual `runNow` and the in-process fallback are unchanged (kernel/jobs/mongo.ts → kernel/jobs/mysql.ts).
+`SKIP LOCKED` lets many workers claim in parallel without waiting on each other. Backoff, leases, lost-run recovery, manual `runNow` and the in-process fallback are unchanged (kernel/jobs/mongo.ts → kernel/jobs/mysql.ts), and mysql-jobs.test.ts mirrors mongo-jobs.test.ts test for test, so the two runners are held to one set of promises.
+
+Two tests are MySQL's own, because the MongoDB runner has nothing to compare them with. One holds a row with `FOR UPDATE` from another connection and insists the **next** job in the same pass still runs: without `SKIP LOCKED` the claim would wait on the held row for the full `innodb_lock_wait_timeout` and the whole queue would wait with it (checked by taking `SKIP LOCKED` out — the test then times out). The other has one instance already running a job and insists a second instance treats the 1062 on `uq_active` as "someone else has it" rather than as an error.
 
 **TTL indexes → one purge job.** `kernel.purge-expired` runs every 10 min and replaces MongoDB's TTL monitor. Each table is purged in batches (`DELETE … WHERE created_at < ? ORDER BY created_at LIMIT 5000`, repeated until fewer rows are deleted), so locks stay short and replication-friendly:
 - idempotency keys after 24 h;
@@ -806,6 +808,8 @@ Expected downtime: minutes, and bounded by `migrate` rather than by the size of 
 ---
 
 ## 19. Tests and development
+
+**One server for the whole run** (built 2026-10-27, `testing/mysql.ts` + `testing/global-setup.ts`). Each MySQL test file first started a `mysqld` of its own on a port of its own: seven servers for seven files, all running beside the MongoDB replica set and four hundred other test files, and two such files could never run at the same time. Now global setup starts one server for the run (or uses `TEST_MYSQL_URL`) and each file takes a database of its own from it, named after the vitest worker slot and reused by the next file in that slot — the same arrangement `testing/mongo.ts` has. The `kernel/mysql` folder went from 34 s to 13 s, and the run stopped reporting killed workers. A machine with no MySQL yet still runs the MongoDB tests: the failure is handed to `testing/mysql.ts` and only the MySQL tests fail, with the reason.
 
 - **Portable server (D9).** `kernel/mysql/portable.ts` looks for `mysqld` and starts a private one:
   - where it looks: `MYSQLD_PATH`; `C:\Program Files\MySQL\MySQL Server <version>\bin` (8.0, 8.4 or later; the newest found wins); `/usr/sbin/mysqld`; or an unzipped "ZIP Archive" build under `~/.cache/mysql` (offline: copy the zip once). Pointing `MYSQLD_PATH` at another unzipped version is how the 8.0 and 8.4 test runs of §20.1 are made;

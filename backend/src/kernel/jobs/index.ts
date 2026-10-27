@@ -17,6 +17,7 @@ import type { FastifyBaseLogger } from 'fastify';
 import { isNotImplemented } from '../errors/index.js';
 import { dateInZone, systemClock, zonedTimeToUtc, type Clock } from '../lib/clock.js';
 import type { MongoStore } from '../mongo/index.js';
+import type { MysqlStore } from '../mysql/index.js';
 
 export type Schedule =
   | { kind: 'interval'; ms: number }
@@ -59,7 +60,7 @@ export interface JobInfo extends JobDefinition {
 }
 
 export interface JobScheduler {
-  readonly backend: 'inprocess' | 'mongo';
+  readonly backend: 'inprocess' | 'mongo' | 'mysql';
   /** A job from a module spec (or the kernel's own); the schedule phrase is checked here */
   declare(def: JobDefinition): void;
   handle(module: string, name: string, run: () => Promise<unknown>): void;
@@ -212,22 +213,30 @@ export class InProcessScheduler extends JobRegistry implements JobScheduler {
 }
 
 export interface SchedulerOptions {
-  backend: 'inprocess' | 'mongo';
+  backend: 'inprocess' | 'mongo' | 'mysql';
   timeZone: string;
   /** mongo: the store whose kernel.jobs collection is the queue */
   mongo?: MongoStore;
+  /** mysql: the store whose kernel_jobs table is the queue */
+  mysql?: MysqlStore;
   clock?: Clock;
-  /** mongo: whether this instance works jobs (JOBS_ENABLED); otherwise it only enqueues */
+  /** mongo, mysql: whether this instance works jobs (JOBS_ENABLED); otherwise it only enqueues */
   workers?: boolean;
-  /** mongo: identifies the deployment, so "on boot" jobs run once per deploy */
+  /** mongo, mysql: identifies the deployment, so "on boot" jobs run once per deploy */
   deployId?: string;
 }
 
 /** The runner the config asks for */
 export async function createJobScheduler(log: FastifyBaseLogger, o: SchedulerOptions): Promise<JobScheduler> {
   if (o.backend === 'inprocess') return new InProcessScheduler(log, o.timeZone, o.clock);
+  const shared = { timeZone: o.timeZone, clock: o.clock, workers: o.workers ?? true, deployId: o.deployId ?? 'unversioned' };
+  // imported here, not at the top: both extend this file's JobRegistry
+  if (o.backend === 'mysql') {
+    if (!o.mysql) throw new Error('JOBS_BACKEND=mysql needs MySQL');
+    const { MysqlScheduler } = await import('./mysql.js');
+    return new MysqlScheduler(log, { store: o.mysql, ...shared });
+  }
   if (!o.mongo) throw new Error('JOBS_BACKEND=mongo needs MongoDB');
-  // imported here, not at the top: mongo.ts extends this file's JobRegistry
   const { MongoScheduler } = await import('./mongo.js');
-  return new MongoScheduler(log, { store: o.mongo, timeZone: o.timeZone, clock: o.clock, workers: o.workers ?? true, deployId: o.deployId ?? 'unversioned' });
+  return new MongoScheduler(log, { store: o.mongo, ...shared });
 }

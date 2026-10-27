@@ -234,10 +234,16 @@ export async function startPortableMysql(o: PortableOptions): Promise<PortableMy
       } catch {
         // already gone, or never came up
       }
-      const timeout = new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), 30_000));
-      if ((await Promise.race([exited.then(() => 'exited' as const), timeout])) === 'timeout') {
+      // The loser of each race below is a timer nobody clears, so both are unref'd. A pending 30 s timer
+      // holds the process open long after the work is done, which in the test run reads as "something
+      // prevents N Vite servers from exiting" — found by vitest's hanging-process reporter on 2026-10-27.
+      const after = <T>(ms: number, value: T) =>
+        new Promise<T>((r) => {
+          setTimeout(() => r(value), ms).unref();
+        });
+      if ((await Promise.race([exited.then(() => 'exited' as const), after(30_000, 'timeout' as const)])) === 'timeout') {
         child.kill();
-        await Promise.race([exited, new Promise((r) => setTimeout(r, 5_000))]);
+        await Promise.race([exited, after(5_000, undefined)]);
       }
       await new Promise((r) => setTimeout(r, 300));
     },

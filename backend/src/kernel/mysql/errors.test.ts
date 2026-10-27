@@ -6,10 +6,8 @@
  * It also pins the three behaviours the transaction wrapper is built on: a duplicate key costs only its
  * statement, a deadlock rolls one side back, and a lock wait timeout rolls the whole transaction back.
  */
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createConnection, type Connection } from 'mysql2/promise';
+import type { Connection, PoolConnection } from 'mysql2/promise';
 import {
   duplicateKeyName,
   isCheckViolation,
@@ -21,15 +19,12 @@ import {
   isRetryable,
   isValueTooLong,
 } from './errors.js';
-import { CONNECT_CHARSET, SESSION_COLLATION, startPortableMysql, type PortableMysql } from './portable.js';
+import { testMysql } from '../../testing/mysql.js';
+import type { MysqlStore } from './index.js';
 
-let server: PortableMysql;
-let conn: Connection;
-const open = async (): Promise<Connection> => {
-  const c = await createConnection({ host: '127.0.0.1', port: server.port, user: 'root', database: 'errcheck', charset: CONNECT_CHARSET });
-  await c.query(SESSION_COLLATION);
-  return c;
-};
+let store: MysqlStore;
+let conn: PoolConnection;
+const open = (): Promise<PoolConnection> => store.pool.getConnection();
 /** Runs sql and answers the error it raised, or undefined */
 const errorOf = async (c: Connection, sql: string): Promise<unknown> => {
   try {
@@ -41,12 +36,10 @@ const errorOf = async (c: Connection, sql: string): Promise<unknown> => {
 };
 
 beforeAll(async () => {
-  server = await startPortableMysql({ dataDir: join(tmpdir(), 'marketly-errors-test'), port: 3397, forTests: true });
-  const root = await createConnection({ host: '127.0.0.1', port: server.port, user: 'root', charset: CONNECT_CHARSET });
-  await root.query('DROP DATABASE IF EXISTS errcheck');
-  await root.query('CREATE DATABASE errcheck DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin');
-  await root.end();
+  store = await testMysql({ kernelTables: false });
   conn = await open();
+  // the database is reused by the next test file in this worker slot, so make the tables from nothing
+  for (const t of ['children', 'parents', 'narrow', 'named']) await conn.query(`DROP TABLE IF EXISTS \`${t}\``);
   await conn.query("CREATE TABLE parents (id CHAR(36) PRIMARY KEY, status VARCHAR(16) NOT NULL, CONSTRAINT ck CHECK (status IN ('a','b'))) ENGINE=InnoDB");
   await conn.query('CREATE TABLE children (id CHAR(36) PRIMARY KEY, parent_id CHAR(36) NOT NULL, CONSTRAINT fk FOREIGN KEY (parent_id) REFERENCES parents (id)) ENGINE=InnoDB');
   await conn.query("CREATE TABLE narrow (id INT PRIMARY KEY, code VARCHAR(4) NOT NULL) ENGINE=InnoDB");
@@ -54,8 +47,8 @@ beforeAll(async () => {
 }, 180_000);
 
 afterAll(async () => {
-  await conn?.end().catch(() => undefined);
-  await server?.stop();
+  conn?.release();
+  await store?.close();
 });
 
 describe('what the server actually sends', () => {
@@ -121,7 +114,7 @@ describe('the three behaviours the transaction wrapper rests on', () => {
     await other.query('ROLLBACK').catch(() => undefined);
     const [rows] = await conn.query<any[]>('SELECT id FROM named WHERE id = 21');
     expect(rows, 'innodb_rollback_on_timeout must discard the whole transaction').toHaveLength(0);
-    await other.end();
+    other.release();
   }, 60_000);
 
   it('a deadlock is reported to one side, and it is retryable', async () => {
@@ -140,7 +133,7 @@ describe('the three behaviours the transaction wrapper rests on', () => {
     expect(isRetryable(victim)).toBe(true);
     await a.query('ROLLBACK').catch(() => undefined);
     await b.query('ROLLBACK').catch(() => undefined);
-    await a.end();
-    await b.end();
+    a.release();
+    b.release();
   }, 60_000);
 });

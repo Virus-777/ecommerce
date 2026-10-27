@@ -6,13 +6,11 @@
  * duplicate key that takes the transaction down with it. So every test here writes rows and reads them back, and
  * the ones at the end do it from two connections at once, because that is the only way to see a lock.
  */
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createConnection, type PoolConnection } from 'mysql2/promise';
-import { connectMysql, type MysqlStore } from './index.js';
+import type { PoolConnection } from 'mysql2/promise';
+import type { MysqlStore } from './index.js';
 import { isLockTimeout } from './errors.js';
-import { CLIENT_OPTIONS, startPortableMysql, type PortableMysql } from './portable.js';
+import { testMysql } from '../../testing/mysql.js';
 import { Table, decToZero, inc, jsonAppend, raw, type TableContext } from './table.js';
 import type { TableDef } from '../spec/define.js';
 import { toPageRequest } from '../lib/pagination.js';
@@ -100,7 +98,6 @@ const PEOPLE: TableDef = {
   ],
 };
 
-let server: PortableMysql;
 let store: MysqlStore;
 let items: Table<Item>;
 let usage: Table<Usage>;
@@ -124,13 +121,9 @@ const SEED: Partial<Item>[] = [
 ];
 
 beforeAll(async () => {
-  server = await startPortableMysql({ dataDir: join(tmpdir(), 'marketly-table-test'), port: 3393, forTests: true });
-  const root = await createConnection({ host: '127.0.0.1', port: server.port, user: 'root', ...CLIENT_OPTIONS });
-  await root.query('DROP DATABASE IF EXISTS tablecheck');
-  await root.query('CREATE DATABASE tablecheck DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin');
-  await root.end();
-
-  store = await connectMysql({ url: `mysql://root@127.0.0.1:${server.port}/tablecheck`, poolSize: 6 });
+  store = await testMysql({ kernelTables: false });
+  // the database is reused by the next test file in this worker slot, so make the tables from nothing
+  for (const t of ['t_items', 't_usage', 't_people']) await store.pool.query(`DROP TABLE IF EXISTS \`${t}\``);
   await store.pool.query(
     'CREATE TABLE `t_items` (' +
       '`id` BIGINT NOT NULL AUTO_INCREMENT, `sku` VARCHAR(32) NOT NULL, `name` VARCHAR(64) NULL, ' +
@@ -154,7 +147,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await store?.close();
-  await server?.stop();
 });
 
 beforeEach(async () => {

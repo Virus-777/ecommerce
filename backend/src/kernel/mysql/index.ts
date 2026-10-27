@@ -82,7 +82,7 @@ export interface MysqlOptions {
   slowAcquireMs?: number;
 }
 
-export function mysqlStore(pool: Pool, o: { watch?: TransactionWatch; slowAcquireMs?: number } = {}): MysqlStore {
+export function mysqlStore(pool: Pool, o: { watch?: TransactionWatch; slowAcquireMs?: number; onClose?: () => Promise<void> } = {}): MysqlStore {
   const slowAcquireMs = o.slowAcquireMs ?? 5_000;
 
   const acquire = async (): Promise<PoolConnection> => {
@@ -190,6 +190,7 @@ export function mysqlStore(pool: Pool, o: { watch?: TransactionWatch; slowAcquir
     },
 
     async close() {
+      if (o.onClose) return o.onClose();
       await pool.end();
     },
   };

@@ -6,49 +6,44 @@
  * `kernel_jobs` must allow exactly one queued and one running row per job name while leaving finished rows
  * alone, and `kernel_rate_limits` must count and refuse in a single statement.
  */
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createConnection, type Connection } from 'mysql2/promise';
+import type { Pool } from 'mysql2/promise';
 import { isDuplicateKey } from './errors.js';
 import { kernelDdl, KERNEL_TABLES, PURGE_RULES } from './kernel-tables.js';
-import { CONNECT_CHARSET, SESSION_COLLATION, startPortableMysql, type PortableMysql } from './portable.js';
+import { testMysql } from '../../testing/mysql.js';
+import type { MysqlStore } from './index.js';
 
-let server: PortableMysql;
-let conn: Connection;
+let store: MysqlStore;
+let conn: Pool;
 const uuid = (n: number) => `0000000${n}`.slice(-8) + '-0000-7000-8000-000000000000';
 
 beforeAll(async () => {
-  server = await startPortableMysql({ dataDir: join(tmpdir(), 'marketly-kernel-tables-test'), port: 3396, forTests: true });
-  const root = await createConnection({ host: '127.0.0.1', port: server.port, user: 'root', charset: CONNECT_CHARSET });
-  await root.query('DROP DATABASE IF EXISTS kerncheck');
-  await root.query('CREATE DATABASE kerncheck DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin');
-  await root.end();
-  conn = await createConnection({ host: '127.0.0.1', port: server.port, user: 'root', database: 'kerncheck', charset: CONNECT_CHARSET });
-  await conn.query(SESSION_COLLATION);
+  // this file is the one that proves the DDL itself, so it drops whatever is there and applies it fresh
+  store = await testMysql({ kernelTables: false });
+  conn = store.pool;
+  for (const t of [...KERNEL_TABLES].reverse()) await conn.query(`DROP TABLE IF EXISTS \`${t}\``);
   for (const ddl of kernelDdl()) await conn.query(ddl);
 }, 180_000);
 
 afterAll(async () => {
-  await conn?.end().catch(() => undefined);
-  await server?.stop();
+  await store?.close();
 });
 
 describe('the kernel schema', () => {
   it('creates every table', async () => {
-    const [rows] = await conn.query<any[]>("SELECT TABLE_NAME n FROM information_schema.TABLES WHERE TABLE_SCHEMA = 'kerncheck' ORDER BY TABLE_NAME");
+    const [rows] = await conn.query<any[]>("SELECT TABLE_NAME n FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME LIKE 'kernel\_%' ORDER BY TABLE_NAME");
     expect(rows.map((r) => r.n)).toEqual([...KERNEL_TABLES].sort());
   });
 
   it('gives every purge rule a real column to work on', async () => {
     for (const rule of PURGE_RULES) {
       const [rows] = await conn.query<any[]>(
-        `SELECT COLUMN_NAME c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = 'kerncheck' AND TABLE_NAME = '${rule.table}' AND COLUMN_NAME = '${rule.column}'`,
+        `SELECT COLUMN_NAME c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '${rule.table}' AND COLUMN_NAME = '${rule.column}'`,
       );
       expect(rows, `${rule.table}.${rule.column} must exist for kernel.purge-expired`).toHaveLength(1);
       // and it must be indexed, or the purge scans the table it is meant to trim
       const [idx] = await conn.query<any[]>(
-        `SELECT INDEX_NAME i FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = 'kerncheck' AND TABLE_NAME = '${rule.table}' AND COLUMN_NAME = '${rule.column}' AND SEQ_IN_INDEX = 1`,
+        `SELECT INDEX_NAME i FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '${rule.table}' AND COLUMN_NAME = '${rule.column}' AND SEQ_IN_INDEX = 1`,
       );
       expect(idx.length, `${rule.table}.${rule.column} must lead an index`).toBeGreaterThan(0);
     }
@@ -71,8 +66,8 @@ describe('kernel_jobs: one queued and one running per name', () => {
 
   it('leaves finished rows out of both keys, however many there are', async () => {
     // this is the half a partial index is for: history must not block the next run
-    await insert(5, 'catalog.reindex', 'done');
-    await insert(6, 'catalog.reindex', 'done');
+    await insert(5, 'catalog.reindex', 'completed');
+    await insert(6, 'catalog.reindex', 'completed');
     await insert(7, 'catalog.reindex', 'failed');
     const [rows] = await conn.query<any[]>("SELECT COUNT(*) n FROM kernel_jobs WHERE name = 'catalog.reindex'");
     expect(Number(rows[0].n)).toBe(5);

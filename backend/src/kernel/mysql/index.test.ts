@@ -4,26 +4,17 @@
  * The retry is tested by causing a real deadlock through the wrapper and showing the work still lands, because
  * that is the whole reason the wrapper exists. A stubbed error would only prove the `if` is wired up.
  */
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createConnection } from 'mysql2/promise';
 import { connectMysql, MAX_ATTEMPTS, type MysqlStore } from './index.js';
 import { isDuplicateKey } from './errors.js';
-import { CONNECT_CHARSET, startPortableMysql, type PortableMysql } from './portable.js';
+import { testMysql } from '../../testing/mysql.js';
 
-let server: PortableMysql;
 let store: MysqlStore;
 
 beforeAll(async () => {
-  server = await startPortableMysql({ dataDir: join(tmpdir(), 'marketly-store-test'), port: 3395, forTests: true });
-  const root = await createConnection({ host: '127.0.0.1', port: server.port, user: 'root', charset: CONNECT_CHARSET });
-  await root.query('DROP DATABASE IF EXISTS storecheck');
-  await root.query('CREATE DATABASE storecheck DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin');
-  await root.end();
-  store = await connectMysql({ url: `mysql://root@127.0.0.1:${server.port}/storecheck`, poolSize: 8 });
-  await store.createKernelTables();
+  store = await testMysql();
   const conn = await store.pool.getConnection();
+  await conn.query('DROP TABLE IF EXISTS rows_t');
   await conn.query('CREATE TABLE rows_t (id INT PRIMARY KEY, n INT NOT NULL) ENGINE=InnoDB');
   await conn.query('INSERT INTO rows_t VALUES (1, 0), (2, 0)');
   conn.release();
@@ -31,7 +22,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await store?.close().catch(() => undefined);
-  await server?.stop();
 });
 
 describe('the connection', () => {
@@ -116,7 +106,7 @@ describe('transactions', () => {
   }, 60_000);
 
   it('gives up with SERVICE_BUSY after the last attempt, and says how many it made (D8)', async () => {
-    const blocker = await createConnection({ host: '127.0.0.1', port: server.port, user: 'root', database: 'storecheck', charset: CONNECT_CHARSET });
+    const blocker = await store.pool.getConnection();
     await blocker.query('START TRANSACTION');
     await blocker.query('SELECT * FROM rows_t WHERE id = 1 FOR UPDATE');
     try {
@@ -133,7 +123,7 @@ describe('transactions', () => {
       expect(err.details).toMatchObject({ attempts: MAX_ATTEMPTS });
     } finally {
       await blocker.query('ROLLBACK').catch(() => undefined);
-      await blocker.end();
+      blocker.release();
     }
   }, 120_000);
 
@@ -179,7 +169,7 @@ describe('counters (§11.2)', () => {
   it('creates the kernel tables idempotently', async () => {
     await store.createKernelTables(); // again: must not throw
     const conn = await store.pool.getConnection();
-    const [rows] = await conn.query<any[]>("SELECT COUNT(*) n FROM information_schema.TABLES WHERE TABLE_SCHEMA='storecheck' AND TABLE_NAME LIKE 'kernel_%'");
+    const [rows] = await conn.query<any[]>("SELECT COUNT(*) n FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME LIKE 'kernel_%'");
     conn.release();
     expect(Number(rows[0].n)).toBe(11);
   });

@@ -127,14 +127,16 @@ export const kernelTableDdl: Record<KernelTable, string> = {
   UNIQUE KEY \`uq_kernel_jobs_active\` ((IF(\`state\` = 'active', \`name\`, NULL))),
   KEY \`ix_kernel_jobs_due\` (\`state\`, \`run_at\`),
   KEY \`ix_kernel_jobs_finished_at\` (\`finished_at\`),
-  CONSTRAINT \`ck_kernel_jobs_state\` CHECK (\`state\` IN ('queued', 'active', 'done', 'failed'))
+  CONSTRAINT \`ck_kernel_jobs_state\` CHECK (\`state\` IN ('queued', 'active', 'completed', 'failed'))
 ) ${SUFFIX}`,
 
-  // "once across instances": only the instance whose UPDATE matched a row enqueues
+  // "once across instances": only the instance whose UPDATE matched a row enqueues. `schedule` holds the
+  // phrase from the spec ("every 10 min"), so an edited schedule is noticed and the next run recomputed.
   kernel_job_schedules: `CREATE TABLE \`kernel_job_schedules\` (
-  \`schedule\` ${ID},
+  \`job\` ${ID},
+  \`schedule\` VARCHAR(190) NOT NULL,
   \`next_run_at\` DATETIME(3) NOT NULL,
-  PRIMARY KEY (\`schedule\`)
+  PRIMARY KEY (\`job\`)
 ) ${SUFFIX}`,
 
   // boot jobs run once per deploy. Purged after 90 days

@@ -6,12 +6,11 @@
  * ways MySQL and MongoDB disagree are all silent — a wrong translation returns the wrong rows and raises
  * nothing. So the table below has a null in every column and each test says which ids should come back.
  */
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createConnection, type Connection } from 'mysql2/promise';
+import type { Pool } from 'mysql2/promise';
 import { allMembersOf, contains, equalsIgnoringCase, memberOf, startsWith, whereClause, whereSql, type Where } from './where.js';
-import { CONNECT_CHARSET, SESSION_COLLATION, startPortableMysql, type PortableMysql } from './portable.js';
+import { testMysql } from '../../testing/mysql.js';
+import type { MysqlStore } from './index.js';
 
 interface Row {
   id: number;
@@ -20,8 +19,8 @@ interface Row {
   name: string | null;
 }
 
-let server: PortableMysql;
-let conn: Connection;
+let store: MysqlStore;
+let conn: Pool;
 
 /** The ids a Where selects, in order */
 async function ids(where: Where<Row> & { or?: Where<Row>[] }): Promise<number[]> {
@@ -31,13 +30,10 @@ async function ids(where: Where<Row> & { or?: Where<Row>[] }): Promise<number[]>
 }
 
 beforeAll(async () => {
-  server = await startPortableMysql({ dataDir: join(tmpdir(), 'marketly-where-test'), port: 3394, forTests: true });
-  const root = await createConnection({ host: '127.0.0.1', port: server.port, user: 'root', charset: CONNECT_CHARSET });
-  await root.query('DROP DATABASE IF EXISTS wherecheck');
-  await root.query('CREATE DATABASE wherecheck DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin');
-  await root.end();
-  conn = await createConnection({ host: '127.0.0.1', port: server.port, user: 'root', database: 'wherecheck', charset: CONNECT_CHARSET });
-  await conn.query(SESSION_COLLATION);
+  store = await testMysql({ kernelTables: false });
+  conn = store.pool;
+  // the database is reused by the next test file in this worker slot, so make the table from nothing
+  await conn.query('DROP TABLE IF EXISTS t');
   await conn.query('CREATE TABLE t (id INT PRIMARY KEY, status VARCHAR(16) NULL, n INT NULL, name VARCHAR(64) NULL, tags JSON NULL) ENGINE=InnoDB');
   await conn.query(
     `INSERT INTO t (id, status, n, name, tags) VALUES
@@ -50,8 +46,7 @@ beforeAll(async () => {
 }, 180_000);
 
 afterAll(async () => {
-  await conn?.end().catch(() => undefined);
-  await server?.stop();
+  await store?.close();
 });
 
 describe('the SQL it writes', () => {
