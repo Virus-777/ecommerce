@@ -17,6 +17,7 @@ import { createConnection, type Connection } from 'mysql2/promise';
 import { apiDir, loadModules } from './lib/spec.js';
 import { moduleDdl, moduleSql, type ModuleDdl } from './lib/mysql.js';
 import { CONNECT_CHARSET, SESSION_COLLATION, startPortableMysql, type PortableMysql } from '../src/kernel/mysql/portable.js';
+import { parseColumnDdl } from '../src/kernel/mysql/schema.js';
 
 const keep = process.argv.includes('--keep');
 const DB = 'marketly_ddl_check';
@@ -64,6 +65,7 @@ if (!url) {
 
 const conn = await connect(url);
 const failures: { at: string; sql: string; error: string }[] = [];
+let misread: string[] = [];
 const apply = async (at: string, sql: string) => {
   try {
     await conn.query(sql);
@@ -94,14 +96,46 @@ try {
   console.log(`  checks       ${checks.n}`);
   console.log(`  triggers     ${trig.n} of ${triggers}`);
 
+  // What `npm run migrate` believes each column line says has to be what the server says the stored column
+  // is, for every column in the whole schema — otherwise the diff in kernel/mysql/schema.ts is worthless in
+  // both directions: it would refuse a schema that is already right, or accept one that is wrong. This is the
+  // same check the unit test makes over a handful of hand-picked columns, over all ~4,000 real ones.
+  const stored = new Map<string, { type: string; nullable: boolean; collation: string | undefined }>();
+  for (const r of (await conn.query(
+    `SELECT TABLE_NAME t, COLUMN_NAME c, COLUMN_TYPE ty, IS_NULLABLE nu, COLLATION_NAME co FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '${DB}'`,
+  ))[0] as any[]) {
+    stored.set(`${r.t}.${r.c}`, { type: String(r.ty).toLowerCase(), nullable: String(r.nu) === 'YES', collation: r.co ? String(r.co) : undefined });
+  }
+  misread = [];
+  let columnsChecked = 0;
+  for (const ddl of all) {
+    for (const t of ddl.tables) {
+      for (const c of t.schema.columns) {
+        const has = stored.get(`${t.name}.${c.name}`);
+        if (!has) continue; // the table itself was refused; that failure is reported above
+        columnsChecked++;
+        const want = parseColumnDdl(c.ddl, `${t.name}.${c.name}`);
+        if (want.type !== has.type) misread.push(`${t.name}.${c.name}: read type ${want.type}, server says ${has.type}`);
+        else if (want.nullable !== has.nullable) misread.push(`${t.name}.${c.name}: read nullable=${want.nullable}, server says ${has.nullable}`);
+        else if (want.collation !== has.collation) misread.push(`${t.name}.${c.name}: read collation ${want.collation}, server says ${has.collation}`);
+      }
+    }
+  }
+  console.log(`  columns      ${columnsChecked} read back and compared`);
+  if (misread.length) {
+    console.error(`\n${misread.length} column(s) migrate would read differently from the server:\n`);
+    for (const m of misread.slice(0, 25)) console.error(`  ${m}`);
+    if (misread.length > 25) console.error(`  … and ${misread.length - 25} more`);
+  }
+
   if (failures.length) {
     console.error(`\n${failures.length} statement(s) the server refused:\n`);
     for (const f of failures.slice(0, 25)) {
       console.error(`  ${f.at}\n    ${f.error}\n    ${f.sql.split('\n').slice(0, 3).join('\n    ')}\n`);
     }
     if (failures.length > 25) console.error(`  … and ${failures.length - 25} more`);
-  } else {
-    console.log('\nthe server accepted every statement');
+  } else if (!misread.length) {
+    console.log('\nthe server accepted every statement, and migrate reads every column as the server stores it');
   }
   if (!keep) await conn.query(`DROP DATABASE \`${DB}\``);
   else console.log(`\nkept: ${DB} on ${url}`);
@@ -110,4 +144,4 @@ try {
   await server?.stop();
 }
 
-process.exit(failures.length ? 1 : 0);
+process.exit(failures.length || misread.length ? 1 : 0);

@@ -6,6 +6,7 @@
  * order — a module where two tables point at each other is a problem for the ordering, not for the schema — and it
  * is the same order `npm run migrate` will use when it creates a module from nothing.
  */
+import { createTableSql, keyNameOf, type NamedDdl, type TableSchema } from '../../src/kernel/mysql/schema.js';
 import { planTables, type Column, type TablePlan } from './tables.js';
 import type { ModuleSpec, TableSpec } from './spec.js';
 import { q } from './mysql-where.js';
@@ -17,6 +18,13 @@ export const tableName = (module: string, table: string) => `${module.replace(/-
 
 export interface TableDdl {
   name: string;
+  /**
+   * The table in pieces, which is what `npm run migrate` needs: it has to know *which* part is missing,
+   * not just what the whole table should look like. `create` below is built from it by the same
+   * `createTableSql` the kernel uses, so the statement that is applied and the statement that is written
+   * to docs/api/db cannot drift apart.
+   */
+  schema: TableSchema;
   create: string;
   /** ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY, applied after every table exists */
   foreignKeys: string[];
@@ -62,17 +70,19 @@ export function tableDdl(module: ModuleSpec, plan: TablePlan): TableDdl {
   const byName = new Map(columns.map((c) => [c.name, c]));
   const indexed = indexedColumns(table);
   const notes: string[] = [];
-  const lines: string[] = [];
-  const checks: string[] = [];
+  const columnLines: string[] = [];
+  const keys: NamedDdl[] = [];
+  const checks: NamedDdl[] = [];
+  let primaryKey: string[] = [];
 
   const stored = columns.filter((c) => !c.sqlType.startsWith('tsvector'));
   for (const c of stored) {
     // a reference counts as indexed: MySQL puts an index on a foreign key column itself, and a TEXT column
     // cannot carry one without a prefix length (which would change what the key means)
-    lines.push(
+    columnLines.push(
       columnDdl(c, { indexed: indexed.has(c.name) || c.unique || c.pk || Boolean(c.ref), at: `${at}.${c.name}` }),
     );
-    for (const check of checksOf(c, name)) checks.push(`CONSTRAINT ${q(check.name)} CHECK (${check.sql})`);
+    for (const check of checksOf(c, name)) checks.push({ name: check.name, ddl: `CONSTRAINT ${q(check.name)} CHECK (${check.sql})` });
   }
   if (stored.length !== columns.length) notes.push('tsvector columns are not stored: the search engine owns them (§5.1)');
 
@@ -86,42 +96,40 @@ export function tableDdl(module: ModuleSpec, plan: TablePlan): TableDdl {
   const nullablePk = declaredPk.filter((n) => byName.get(n)?.nullable);
 
   if (!declaredPk.length) {
-    lines.unshift('`row_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT INVISIBLE');
-    lines.push('PRIMARY KEY (`row_id`)');
+    columnLines.unshift('`row_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT INVISIBLE');
+    primaryKey = ['row_id'];
     notes.push('no key in the spec: an invisible row_id is the primary key, so SELECT * keeps the spec shape (§5.3)');
   } else if (nullablePk.length) {
     // MySQL refuses a NULL in a PRIMARY KEY, and the spec uses one as a value: brand_stats keys on
     // (brand_id, category_id) where a null category_id means "all categories". So the surrogate of §5.3 becomes
     // the primary key and the declared key becomes a UNIQUE whose nullable parts are COALESCEd — which is the
     // "nulls not distinct" treatment of §6.1, and keeps the rollup row unique rather than unconstrained.
-    lines.unshift('`row_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT INVISIBLE');
-    lines.push('PRIMARY KEY (`row_id`)');
+    columnLines.unshift('`row_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT INVISIBLE');
+    primaryKey = ['row_id'];
     const parts = declaredPk.map((n) => (byName.get(n)?.nullable ? `(COALESCE(${q(n)}, ''))` : q(n)));
-    lines.push(`UNIQUE KEY ${q(`uq_${name}_pk`)} (${parts.join(', ')})`);
+    keys.push({ name: `uq_${name}_pk`, ddl: `UNIQUE KEY ${q(`uq_${name}_pk`)} (${parts.join(', ')})` });
     notes.push(
       `the spec's key (${declaredPk.join(', ')}) has a nullable part (${nullablePk.join(', ')}), which MySQL will not accept in a PRIMARY KEY. ` +
         `An invisible row_id is the primary key and the declared key is a UNIQUE with COALESCE on the nullable parts, so a null still counts as a value (§5.3, §6.1)`,
     );
   } else {
-    lines.push(`PRIMARY KEY (${declaredPk.map(q).join(', ')})`);
+    primaryKey = declaredPk;
   }
 
   // a `unique` flag on a column is its own key
-  for (const c of stored) if (c.unique) lines.push(`UNIQUE KEY ${q(`uq_${name}_${c.name}`)} (${q(c.name)})`);
+  for (const c of stored) if (c.unique) keys.push({ name: `uq_${name}_${c.name}`, ddl: `UNIQUE KEY ${q(`uq_${name}_${c.name}`)} (${q(c.name)})` });
 
   for (const p of parsed) {
     if (p.index.kind === 'pk') continue;
     const key = keyDdl(p.index, { table: table.name, qualified: name, columns: byName, at: `${at} index ${p.n}`, n: p.n });
-    if (key.sql) lines.push(key.sql);
+    if (key.sql) keys.push({ name: keyNameOf(key.sql, `${at} index ${p.n}`), ddl: key.sql });
     if (key.note) notes.push(key.note);
   }
-
-  const create = [`CREATE TABLE ${q(name)} (`, [...lines, ...checks].map((l) => `  ${l}`).join(',\n'), ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_bin;'].join('\n');
 
   // §6.2: foreign keys inside the module only. A cross-module id stays a plain indexed column, because modules
   // can be switched off and are kept consistent by events.
   const byTableName = new Map((module.tables ?? []).map((t) => [t.name, t]));
-  const foreignKeys: string[] = [];
+  const foreignKeyParts: NamedDdl[] = [];
   for (const c of stored) {
     if (!c.ref) continue;
     const target = c.ref.split('.').pop()!;
@@ -139,31 +147,47 @@ export function tableDdl(module: ModuleSpec, plan: TablePlan): TableDdl {
       continue;
     }
     const onDelete = c.refOption === 'cascade' ? 'CASCADE' : 'RESTRICT';
-    foreignKeys.push(
-      `ALTER TABLE ${q(name)} ADD CONSTRAINT ${q(`fk_${name}_${c.name}`)} FOREIGN KEY (${q(c.name)}) ` +
-        `REFERENCES ${q(tableName(module.name, target))} (${q(targetPk[0]!)}) ON DELETE ${onDelete} ON UPDATE RESTRICT;`,
-    );
+    foreignKeyParts.push({
+      name: `fk_${name}_${c.name}`,
+      ddl:
+        `ALTER TABLE ${q(name)} ADD CONSTRAINT ${q(`fk_${name}_${c.name}`)} FOREIGN KEY (${q(c.name)}) ` +
+        `REFERENCES ${q(tableName(module.name, target))} (${q(targetPk[0]!)}) ON DELETE ${onDelete} ON UPDATE RESTRICT`,
+    });
   }
 
   // §6.3: append-only means inserts only. The retention purge names itself in a session variable to delete.
-  const triggers: string[] = [];
+  const triggerParts: NamedDdl[] = [];
   if (table.appendOnly) {
-    triggers.push(
-      `CREATE TRIGGER ${q(`${name}_no_update`)} BEFORE UPDATE ON ${q(name)} FOR EACH ROW\n` +
-        `  SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '${name} is append-only';`,
-    );
-    triggers.push(
-      `CREATE TRIGGER ${q(`${name}_no_delete`)} BEFORE DELETE ON ${q(name)} FOR EACH ROW\n` +
+    triggerParts.push({
+      name: `${name}_no_update`,
+      ddl:
+        `CREATE TRIGGER ${q(`${name}_no_update`)} BEFORE UPDATE ON ${q(name)} FOR EACH ROW\n` +
+        `  SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '${name} is append-only'`,
+    });
+    triggerParts.push({
+      name: `${name}_no_delete`,
+      ddl:
+        `CREATE TRIGGER ${q(`${name}_no_delete`)} BEFORE DELETE ON ${q(name)} FOR EACH ROW\n` +
         `BEGIN\n` +
         `  IF COALESCE(@marketly_purge, '') <> '${name}' THEN\n` +
         `    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '${name} is append-only';\n` +
         `  END IF;\n` +
         `END`,
-    );
+    });
     notes.push(`append-only: UPDATE and DELETE are refused; a retention purge sets @marketly_purge = '${name}' in its own session (§6.3)`);
   }
 
-  return { name, create, foreignKeys, triggers, notes };
+  const schema: TableSchema = {
+    name,
+    columns: columnLines.map((ddl) => ({ name: /^`((?:[^`]|``)+)`/.exec(ddl)![1]!.replace(/``/g, '`'), ddl })),
+    primaryKey,
+    keys,
+    checks,
+    foreignKeys: foreignKeyParts,
+    triggers: triggerParts,
+  };
+  return { name, schema, create: `${createTableSql(schema)};`, foreignKeys: foreignKeyParts.map((f) => `${f.ddl};`), // the readable .sql file wants each statement terminated; a BEGIN … END body ends itself
+    triggers: triggerParts.map((t) => (t.ddl.endsWith(`END`) ? t.ddl : `${t.ddl};`)), notes };
 }
 
 export interface ModuleDdl {
