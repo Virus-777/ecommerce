@@ -24,6 +24,8 @@ export interface CarrierRec extends Omit<Db['carriers'], 'contacts'> {
   contacts: CarrierContact[];
 }
 export type ServiceRec = Db['carrier_services'];
+/** A carrier the seller ships with itself; never visible to another seller or to staff lists. */
+export type SellerCarrierRec = Db['seller_carriers'];
 export interface MethodRec extends Omit<Db['methods'], 'carrier_service_ids'> {
   carrier_service_ids: string[];
 }
@@ -96,6 +98,7 @@ export interface WebhookRec extends Omit<Db['webhook_events'], 'payload'> {
 export interface Recs {
   carriers: CarrierRec;
   carrier_services: ServiceRec;
+  seller_carriers: SellerCarrierRec;
   methods: MethodRec;
   zones: ZoneRec;
   profiles: ProfileRec;

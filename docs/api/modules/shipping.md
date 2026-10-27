@@ -48,6 +48,10 @@ How things get delivered: carriers and services, destinations and excluded areas
 | POST | `/api/seller/shipping/closures` | Add a holiday closure (estimates skip closed days) | seller<br>`shipping.seller-settings.manage` | `{ name: string, from: date, to: date }` → `Closure` |
 | DELETE | `/api/seller/shipping/closures/{id}` | Remove a closure | seller<br>`shipping.seller-settings.manage` | 204 No content |
 | GET | `/api/seller/shipping/profiles` | The seller's shipping profiles (chosen on each offer) | seller<br>`shipping.seller-settings.view` | `ShippingProfile[]` |
+| GET | `/api/seller/shipping/carriers` | The seller's own carriers | seller<br>`shipping.seller-settings.view` | `SellerCarrier[]` |
+| POST | `/api/seller/shipping/carriers` | Add a carrier the seller ships with itself | seller<br>`shipping.seller-settings.manage` | `SellerCarrierInput` → `SellerCarrier` |
+| PATCH | `/api/seller/shipping/carriers/{id}` | Rename a carrier or change its tracking link | seller<br>`shipping.seller-settings.manage` | `SellerCarrierInput` → `SellerCarrier` |
+| DELETE | `/api/seller/shipping/carriers/{id}` | Remove a carrier from the list | seller<br>`shipping.seller-settings.manage` | 204 No content |
 | POST | `/api/seller/shipping/profiles` | Create a shipping profile (e.g. Large items) _(audited)_ | seller<br>`shipping.seller-settings.manage` | `ProfileInput` → `ShippingProfile` |
 | PUT | `/api/seller/shipping/profiles/{id}` | Change methods, rates or the free-shipping threshold (new version, now or from a date) _(audited)_ | seller<br>`shipping.seller-settings.manage` | `ProfileInput` → `ShippingProfile` |
 | POST | `/api/seller/shipping/profiles/{id}/archive` | Archive a profile no offer uses _(audited)_ | seller<br>`shipping.seller-settings.manage` | `ShippingProfile` |
@@ -163,6 +167,26 @@ How things get delivered: carriers and services, destinations and excluded areas
 | onTimeRate30d | `number?` |
 | services | `CarrierService[]` |
 | contacts | `CarrierContact[]` Staff only (shipping.settings.view); always empty in seller-area responses |
+
+### SellerCarrier
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| code | `string` own-<hex>, unique across the platform so tracking numbers stay comparable |
+| name | `string` What the buyer sees, e.g. 'Speedy Local Courier' |
+| trackingUrlTemplate | `string?` Tracking page with {n} where the number goes; without one the buyer sees the number but no link |
+| trackingPattern | `string?` Regex the seller's own numbers match, checked like a platform carrier's |
+| createdAt | `datetime` |
+| updatedAt | `datetime` |
+
+### SellerCarrierInput
+
+| Field | Type |
+|---|---|
+| name | `string` |
+| trackingUrlTemplate | `string?` |
+| trackingPattern | `string?` |
 
 ### CarrierContact
 
@@ -1284,6 +1308,21 @@ Indexes: `(seller_id, status)`
 
 Indexes: `(seller_id, from_date)`
 
+**seller_carriers**: Carriers a seller uses that Marketly has no account with (own van, local courier): chosen when recording a shipment, never shown to other sellers
+
+| Column | Type |
+|---|---|
+| id | uuid pk |
+| seller_id | uuid |
+| code | text unique |
+| name | text |
+| tracking_url_template | text? |
+| tracking_pattern | text? |
+| created_at | timestamptz |
+| updated_at | timestamptz |
+
+Indexes: `(seller_id, name)`
+
 **dispatch_targets**
 
 | Column | Type |
@@ -1349,6 +1388,8 @@ Indexes: `(status, from_date)`
 | fulfilled_by | text (official_warehouse|seller|marketly_service) |
 | package_no | int |
 | carrier_code | text? |
+| carrier_name | text? (set when the carrier is the seller own one; views prefer it over the catalogue, so a deleted carrier still reads right) |
+| tracking_url | text? (resolved from the seller carrier template at record time) |
 | service_name | text? |
 | tracking_number | text? |
 | tracking_state | text |

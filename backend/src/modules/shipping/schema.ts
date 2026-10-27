@@ -145,6 +145,25 @@ const closures = new Schema(
 );
 closures.index({"seller_id":1,"from_date":1}, {"name":"closures_seller_id_from_date_b00495"});
 
+/** Carriers a seller uses that Marketly has no account with (own van, local courier): chosen when recording a shipment, never shown to other sellers */
+const seller_carriers = new Schema(
+  {
+    _id: { type: String, required: true }, // id
+    seller_id: { type: String, required: true },
+    code: { type: String, required: true },
+    name: { type: String, required: true },
+    tracking_url_template: { type: String, default: null },
+    tracking_pattern: { type: String, default: null },
+    created_at: { type: Date, required: true },
+    updated_at: { type: Date, required: true },
+    /** lock-by-write counter (kernel/mongo/table.ts) */
+    _lock: Number,
+  },
+  collectionOptions("shipping.seller_carriers"),
+);
+seller_carriers.index({"code":1}, {"name":"seller_carriers_code_0faf86","unique":true});
+seller_carriers.index({"seller_id":1,"name":1}, {"name":"seller_carriers_seller_id_name_7566c8"});
+
 const dispatch_targets = new Schema(
   {
     _id: { type: String, required: true }, // id
@@ -216,6 +235,8 @@ const shipments = new Schema(
     fulfilled_by: { type: String, required: true, enum: ["official_warehouse","seller","marketly_service"] },
     package_no: { type: Number, required: true, validate: integer },
     carrier_code: { type: String, default: null },
+    carrier_name: { type: String, default: null }, // set when the carrier is one the seller added; views prefer it over the catalog, so a removed carrier still reads right
+    tracking_url: { type: String, default: null }, // resolved from the seller carrier template at record time
     service_name: { type: String, default: null },
     tracking_number: { type: String, default: null },
     tracking_state: { type: String, required: true },
@@ -469,6 +490,7 @@ export const schemas = {
   profiles: profiles,
   seller_settings: seller_settings,
   closures: closures,
+  seller_carriers: seller_carriers,
   dispatch_targets: dispatch_targets,
   notices: notices,
   free_shipping_rules: free_shipping_rules,

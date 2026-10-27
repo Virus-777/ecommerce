@@ -149249,6 +149249,340 @@
         "x-phase": 1
       }
     },
+    "/api/seller/shipping/carriers": {
+      "get": {
+        "operationId": "shipping.listSellerCarriers",
+        "tags": [
+          "Seller API · Shipping"
+        ],
+        "summary": "The seller's own carriers",
+        "description": "**Permission:** `shipping.seller-settings.view`\n\n**Screens:** seller/shipping",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/shipping.SellerCarrier"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "shipping",
+        "x-area": "seller",
+        "x-auth": "seller",
+        "x-permission": "shipping.seller-settings.view",
+        "x-screens": [
+          "seller/shipping"
+        ],
+        "x-phase": 1
+      },
+      "post": {
+        "operationId": "shipping.addSellerCarrier",
+        "tags": [
+          "Seller API · Shipping"
+        ],
+        "summary": "Add a carrier the seller ships with itself",
+        "description": "For a courier Marketly has no account with. It appears in the seller's record-shipment form only; tracking is manual, so numbers are checked against the pattern if one is given and never updated by a carrier feed.\n\n**Permission:** `shipping.seller-settings.manage`\n\n**Screens:** seller/shipping",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/shipping.SellerCarrierInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/shipping.SellerCarrier"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFLICT: Concurrent change; reload and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "shipping",
+        "x-area": "seller",
+        "x-auth": "seller",
+        "x-permission": "shipping.seller-settings.manage",
+        "x-screens": [
+          "seller/shipping"
+        ],
+        "x-phase": 1
+      }
+    },
+    "/api/seller/shipping/carriers/{id}": {
+      "patch": {
+        "operationId": "shipping.updateSellerCarrier",
+        "tags": [
+          "Seller API · Shipping"
+        ],
+        "summary": "Rename a carrier or change its tracking link",
+        "description": "**Permission:** `shipping.seller-settings.manage`\n\n**Screens:** seller/shipping",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/shipping.SellerCarrierInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/shipping.SellerCarrier"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFLICT: Concurrent change; reload and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "shipping",
+        "x-area": "seller",
+        "x-auth": "seller",
+        "x-permission": "shipping.seller-settings.manage",
+        "x-screens": [
+          "seller/shipping"
+        ],
+        "x-phase": 1
+      },
+      "delete": {
+        "operationId": "shipping.removeSellerCarrier",
+        "tags": [
+          "Seller API · Shipping"
+        ],
+        "summary": "Remove a carrier from the list",
+        "description": "Packages already sent with it keep its name and tracking link.\n\n**Permission:** `shipping.seller-settings.manage`\n\n**Screens:** seller/shipping",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success, no content"
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "shipping",
+        "x-area": "seller",
+        "x-auth": "seller",
+        "x-permission": "shipping.seller-settings.manage",
+        "x-screens": [
+          "seller/shipping"
+        ],
+        "x-phase": 1
+      }
+    },
     "/api/seller/shipping/profiles/{id}": {
       "put": {
         "operationId": "shipping.updateSellerProfile",
@@ -256855,6 +257189,75 @@
           "trackingConnected",
           "services",
           "contacts"
+        ]
+      },
+      "shipping.SellerCarrier": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "code": {
+            "type": "string",
+            "description": "own-<hex>, unique across the platform so tracking numbers stay comparable"
+          },
+          "name": {
+            "type": "string",
+            "description": "What the buyer sees, e.g. 'Speedy Local Courier'"
+          },
+          "trackingUrlTemplate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Tracking page with {n} where the number goes; without one the buyer sees the number but no link"
+          },
+          "trackingPattern": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Regex the seller's own numbers match, checked like a platform carrier's"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "name",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "shipping.SellerCarrierInput": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "trackingUrlTemplate": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "trackingPattern": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "name"
         ]
       },
       "shipping.CarrierContact": {

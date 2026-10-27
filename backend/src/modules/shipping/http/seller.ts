@@ -20,6 +20,16 @@ export const sellerRoutes = (service: ShippingService) => {
     removeSellerClosure: async ({ sellerId, params, actor, requestId, principal }) => {
       await service.profiles.removeClosure(sellerId, params.id, { actor, requestId, principal });
     },
+    /** GET /carriers: The seller's own carriers */
+    listSellerCarriers: async ({ sellerId }) => service.ownCarriers.list(sellerId),
+    /** POST /carriers: Add a carrier the seller ships with itself */
+    addSellerCarrier: async ({ sellerId, body }) => service.ownCarriers.add(sellerId, body),
+    /** PATCH /carriers/{id}: Rename a carrier or change its tracking link */
+    updateSellerCarrier: async ({ sellerId, params, body }) => service.ownCarriers.update(sellerId, params.id, body),
+    /** DELETE /carriers/{id}: Remove a carrier from the list */
+    removeSellerCarrier: async ({ sellerId, params }) => {
+      await service.ownCarriers.remove(sellerId, params.id);
+    },
     /** GET /profiles: The seller's shipping profiles (chosen on each offer) */
     listSellerProfiles: async ({ sellerId }) => service.profiles.listProfiles(owner(sellerId)),
     /** POST /profiles: Create a shipping profile (e.g. Large items) */
@@ -33,7 +43,10 @@ export const sellerRoutes = (service: ShippingService) => {
     /** GET /methods: Platform shipping methods a seller can add to a profile, with their carrier services and transit */
     listMethodsForSeller: async () => service.setup.listMethods(true),
     /** GET /carrier-services: Carriers and services sellers can use, with label support and tracking formats */
-    listCarrierServicesForSeller: async () => service.setup.listCarriers({ staff: false, sellerFacing: true }),
+    listCarrierServicesForSeller: async ({ sellerId }) => {
+      const [platform, own] = await Promise.all([service.setup.listCarriers({ staff: false, sellerFacing: true }), service.ownCarriers.carriers(sellerId)]);
+      return [...platform, ...own];
+    },
     /** POST /shipments: Record a shipment for some or all items of one of the seller's orders */
     recordShipment: async ({ sellerId, body, actor, requestId, principal }) => service.shipments.record(owner(sellerId), body, { actor, requestId, principal }),
     /** GET /shipments: The seller's shipment records */
