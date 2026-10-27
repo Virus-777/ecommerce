@@ -190,9 +190,56 @@ export function tableDdl(module: ModuleSpec, plan: TablePlan): TableDdl {
     triggers: triggerParts.map((t) => (t.ddl.endsWith(`END`) ? t.ddl : `${t.ddl};`)), notes };
 }
 
+/** `<module>_v_<name>` (§9.2) */
+export const viewName = (module: string, view: string) => `${module.replace(/-/g, '_')}_v_${view}`;
+
+/**
+ * What a view may not do, checked before a server ever sees it. The server has the last word — migrate asks it
+ * whether it could merge the view and refuses one it could not (kernel/mysql/schema.ts) — but a generator that
+ * says "GROUP BY is not allowed in a view, §9.1" names the mistake, where the server says 1354.
+ */
+const NOT_MERGEABLE: [RegExp, string][] = [
+  [/\bGROUP\s+BY\b/i, 'GROUP BY'],
+  [/\bHAVING\b/i, 'HAVING'],
+  [/\bDISTINCT\b/i, 'DISTINCT'],
+  [/\bUNION\b/i, 'UNION'],
+  [/\bLIMIT\b/i, 'LIMIT'],
+  [/\bOVER\s*\(/i, 'a window function'],
+  [/\b(?:SUM|COUNT|AVG|MIN|MAX|GROUP_CONCAT|JSON_ARRAYAGG|JSON_OBJECTAGG|STD|STDDEV|VARIANCE|BIT_AND|BIT_OR|BIT_XOR)\s*\(/i, 'an aggregate'],
+];
+
+/** Every table a FROM or JOIN names, so a view that reaches into another module can be refused (§6.2, §9.2) */
+const tablesIn = (sql: string): string[] => [...sql.matchAll(/\b(?:FROM|JOIN)\s+\`?([a-z_][a-z0-9_]*)\`?/gi)].map((m) => m[1]!);
+
+/**
+ * The module's views (§9.2): join shapes its own code reads often, folded into the reading query by MySQL so the
+ * base tables' indexes still do the work. `CREATE OR REPLACE` because migrate applies the whole unit again
+ * whenever its hash changes, and a view's definition is expanded at create time — a column added to a base table
+ * only reaches a `t.*` view when the view is recreated.
+ */
+export function moduleViews(module: ModuleSpec): { views: NamedDdl[]; problems: string[] } {
+  const problems: string[] = [];
+  const views: NamedDdl[] = [];
+  const own = new Set((module.tables ?? []).map((t) => tableName(module.name, t.name)));
+  for (const v of module.views ?? []) {
+    const name = viewName(module.name, v.name);
+    const sql = v.sql.trim().replace(/;+\s*$/, '');
+    const at = `${module.name} view ${v.name}`;
+    for (const [pattern, what] of NOT_MERGEABLE) {
+      if (pattern.test(sql)) problems.push(`${at}: ${what} keeps MySQL from merging the view into the query that reads it; a view is a join shape only and anything aggregated belongs in a summary table (§9.1)`);
+    }
+    const outside = tablesIn(sql).filter((t) => !own.has(t));
+    if (outside.length) problems.push(`${at}: reads ${[...new Set(outside)].join(', ')}, which ${outside.length > 1 ? 'are' : 'is'} not this module's. A view joins the module's own tables; another module's rows come through its public API or an event (§6.2, §9.2)`);
+    views.push({ name, ddl: `CREATE OR REPLACE ALGORITHM=MERGE SQL SECURITY INVOKER VIEW ${q(name)} AS${sql.includes('\n') ? '\n' : ' '}${sql}` });
+  }
+  return { views, problems };
+}
+
 export interface ModuleDdl {
   module: string;
   tables: TableDdl[];
+  /** §9.2, applied after every table exists */
+  views: NamedDdl[];
   problems: string[];
 }
 
@@ -207,7 +254,9 @@ export function moduleDdl(module: ModuleSpec): ModuleDdl {
       problems.push((err as Error).message);
     }
   }
-  return { module: module.name, tables, problems };
+  const { views, problems: viewProblems } = moduleViews(module);
+  problems.push(...viewProblems);
+  return { module: module.name, tables, views, problems };
 }
 
 /** The readable per-module file of §17.2, for the maintainer: docs/api/db/<module>.sql */
@@ -223,6 +272,10 @@ export function moduleSql(ddl: ModuleDdl): string {
   }
   const keys = ddl.tables.flatMap((t) => t.foreignKeys);
   if (keys.length) out.push('-- foreign keys, inside this module only (§6.2)', ...keys, '');
+  if (ddl.views.length) {
+    out.push('-- views: join shapes, merged into the query that reads them (§9.2)');
+    for (const v of ddl.views) out.push(`${v.ddl};`, '');
+  }
   const triggers = ddl.tables.flatMap((t) => t.triggers);
   if (triggers.length) out.push('-- append-only guards (§6.3)', ...triggers.map((t) => `${t}\n`));
   return `${out.join('\n').trimEnd()}\n`;
@@ -266,6 +319,9 @@ export function emitMysqlSchema(ddl: ModuleDdl, header: string): string {
       `      triggers: ${list(t.triggers, '      ')},`,
       `    },`,
     ].join('\n');
+  const views = ddl.views.length
+    ? `\n  views: [\n${ddl.views.map((v) => `    ${JSON.stringify(v)},`).join('\n')}\n  ],`
+    : '';
   return `${header}
 import type { MysqlUnit } from '../../kernel/mysql/schema.js';
 
@@ -274,7 +330,7 @@ export const unit: MysqlUnit = {
   module: ${JSON.stringify(ddl.module)},
   tables: [
 ${tables.map(table).join('\n')}
-  ],
+  ],${views}
 };
 `;
 }

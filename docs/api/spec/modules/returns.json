@@ -618,6 +618,9 @@
     { "name": "replacements", "desc": "Replacement or exchange units with their own shipment; the original order is not changed. return_id is null for replacements decided on a support case without a return (case_id set)", "columns": { "id": "uuid pk", "return_id": "uuid? → returns", "case_id": "uuid?", "order_id": "uuid", "kind": "text", "status": "text", "order_item_id": "uuid", "variant_id": "uuid", "offer_id": "uuid", "quantity": "int", "reservation_id": "uuid? (inventory allocation from allocateForOrder; no expiry)", "shipping_shipment_id": "uuid?", "cancel_reason": "text?", "idempotency_key": "text? unique", "created_at": "timestamptz", "shipped_at": "timestamptz?", "delivered_at": "timestamptz?" }, "indexes": ["(return_id)", "(case_id)", "(order_id)", "(shipping_shipment_id)", "(status)"] },
     { "name": "return_events", "desc": "Timeline and action history per return (who, what, reason)", "columns": { "id": "uuid pk", "return_id": "uuid → returns", "kind": "text", "label": "text", "detail": "text?", "visibility": "text (customer|seller|staff)", "actor_kind": "text", "actor_id": "text?", "at": "timestamptz" }, "indexes": ["(return_id, at)"] }
   ],
+  "views": [
+    {"name":"return_items","desc":"A return item with its return: used quantities per order item, and open returns per product","sql":"SELECT ri.*,\n  r.ref AS return_ref, r.order_id, r.order_ref, r.status, r.owner_type, r.seller_id, r.fulfilled_by,\n  r.customer_id, r.remedy, r.requested_at, r.received_at, r.completed_at\nFROM returns_return_items ri\nJOIN returns_returns r ON r.id = ri.return_id"}
+  ],
   "stateMachines": [
     {
       "name": "Return", "field": "ReturnDetail.status", "initial": "requested",

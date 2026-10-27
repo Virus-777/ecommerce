@@ -198,6 +198,30 @@ before it, no waiting inside it), move the update of the busy document to the en
 conflict window is small, or take it out of the transaction as one conditional update
 (`updateOne({ _id, stock: { $gte: n } }, { $inc: { stock: -n } })`), which needs no transaction at all.
 
+## 6a. Views to ask the database a question (MySQL)
+
+Five views exist for exactly this: something looks wrong and the first move is a `SELECT`. They are read-only,
+they are created by `npm run migrate`, and they are there so that an answer does not depend on remembering which
+column joins `inventory_stock_levels` to `inventory_locations` while something is on fire.
+
+| View | One row is | Ask it |
+|---|---|---|
+| `ops_v_orders` | an order | `SELECT * FROM ops_v_orders WHERE ref = 'MK-260101-00001'` |
+| `ops_v_seller_money` | a seller's account | `SELECT * FROM ops_v_seller_money WHERE payouts_blocked_reason IS NOT NULL` |
+| `ops_v_stock` | one item at one location | `SELECT * FROM ops_v_stock WHERE sku = 'ABC-1'` |
+| `ops_v_jobs` | a job | `SELECT * FROM ops_v_jobs WHERE state = 'failed' ORDER BY run_at DESC` |
+| `ops_v_audit_recent` | an audit entry | `SELECT * FROM ops_v_audit_recent ORDER BY seq DESC LIMIT 50` |
+
+They are defined in `backend/src/kernel/mysql/ops-views.ts`, in one list with the tables each one reads. To add
+one, add it there: migrate creates the views whose tables exist and says in the log which it left out, so a view
+over a module that is switched off costs that view and nothing else.
+
+**Never write through them.** They are `SELECT` shapes; some are updatable as far as MySQL is concerned, and an
+UPDATE through one would skip every rule the API applies. Change data through the Admin Center or an endpoint.
+
+The other views, `<module>_v_<name>`, are not for this: they are join shapes the modules' own code reads, and the
+generator makes them from the spec (`docs/10-mysql-migration.md` §9.2).
+
 ## 7. Deploying
 
 Production is **one offline Ubuntu server** (owner decision 2026-10-15): MongoDB, the Marketly server (API,

@@ -482,6 +482,14 @@ Indexes: `(conversation_id, at)`
 
 Indexes: `(computed_at)`
 
+### Views
+
+Read-only join shapes over this module's own tables, created on MySQL as `<module>_v_<name>` (docs/10-mysql-migration.md §9.2).
+
+| View | Reads | SQL |
+|---|---|---|
+| `messaging_v_participant_conversations` | A participant with their conversation: inboxes, unread counts and the guest view | `SELECT p.*, c.kind AS conversation_kind, c.customer_id, c.guest_session_id, c.seller_id, c.order_id, c.order_item_id, c.return_id, c.case_id, c.subject, c.status, c.locked_reason, c.reply_state, c.reply_due_at, c.awaiting_since, c.created_at AS conversation_created_at, c.last_message_at, c.archive_after FROM messaging_participants p JOIN messaging_conversations c ON c.id = p.conversation_id` |
+
 ## Events
 
 | Publishes | When | Payload | Consumed by |

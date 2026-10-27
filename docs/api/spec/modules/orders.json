@@ -487,6 +487,10 @@
     { "name": "documents", "desc": "Issued receipt and invoice numbers; PDFs render from the frozen order on request", "columns": { "id": "uuid pk", "order_id": "uuid → orders", "group_id": "uuid?", "kind": "text", "number": "text unique", "issued_at": "timestamptz" }, "indexes": ["(order_id)"] },
     { "name": "saved_filters", "columns": { "id": "uuid pk", "owner_staff_id": "uuid", "name": "text", "query": "jsonb", "shared": "bool", "cached_count": "int?", "counted_at": "timestamptz?", "created_at": "timestamptz" } }
   ],
+  "views": [
+    {"name":"group_rows","desc":"A seller order group with the order it belongs to: what the seller order list reads, sorted by placed_at or dispatch_by","sql":"SELECT g.*,\n  o.ref AS order_ref, o.placed_at, o.lifecycle, o.display_status, o.channel, o.currency, o.hide_prices,\n  o.customer_id, o.contact_name, o.contact_email, o.contact_phone\nFROM orders_seller_groups g\nJOIN orders_orders o ON o.id = g.order_id"},
+    {"name":"item_rows","desc":"An order item with its order and seller group: the admin and seller order search, in place of seven EXISTS helpers","sql":"SELECT i.*,\n  o.ref AS order_ref, o.placed_at, o.lifecycle, o.display_status, o.currency, o.customer_id, o.contact_name,\n  g.owner_type, g.seller_id, g.seller_name, g.fulfilled_by, g.status AS group_status, g.dispatch_by\nFROM orders_order_items i\nJOIN orders_orders o ON o.id = i.order_id\nJOIN orders_seller_groups g ON g.id = i.group_id"}
+  ],
   "stateMachines": [
     {
       "name": "Order lifecycle", "field": "OrderDetail.lifecycle", "initial": "payment_pending",

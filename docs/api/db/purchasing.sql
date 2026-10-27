@@ -192,3 +192,17 @@ ALTER TABLE `purchasing_receipt_lines` ADD CONSTRAINT `fk_purchasing_receipt_lin
 ALTER TABLE `purchasing_supplier_claims` ADD CONSTRAINT `fk_purchasing_supplier_claims_supplier_id` FOREIGN KEY (`supplier_id`) REFERENCES `purchasing_suppliers` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT;
 ALTER TABLE `purchasing_supplier_claims` ADD CONSTRAINT `fk_purchasing_supplier_claims_purchase_order_id` FOREIGN KEY (`purchase_order_id`) REFERENCES `purchasing_purchase_orders` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT;
 ALTER TABLE `purchasing_supplier_claims` ADD CONSTRAINT `fk_purchasing_supplier_claims_receipt_id` FOREIGN KEY (`receipt_id`) REFERENCES `purchasing_receipts` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT;
+
+-- views: join shapes, merged into the query that reads them (§9.2)
+CREATE OR REPLACE ALGORITHM=MERGE SQL SECURITY INVOKER VIEW `purchasing_v_receipt_lines` AS
+SELECT rl.*,
+  rc.ref AS receipt_ref, rc.purchase_order_id, rc.delivery_id, rc.location_id, rc.status AS receipt_status,
+  rc.confirmed_at AS receipt_confirmed_at,
+  d.carrier, d.tracking_ref, d.window_from, d.window_to, d.arrived_at, d.status AS delivery_status, d.delay_reason,
+  pol.sku AS line_sku, pol.label AS line_label, pol.qty_ordered, pol.unit_cost_amount, pol.expected_date,
+  po.ref AS purchase_order_ref, po.supplier_id, po.status AS purchase_order_status
+FROM purchasing_receipt_lines rl
+JOIN purchasing_receipts rc ON rc.id = rl.receipt_id
+JOIN purchasing_deliveries d ON d.id = rc.delivery_id
+JOIN purchasing_purchase_order_lines pol ON pol.id = rl.purchase_order_line_id
+JOIN purchasing_purchase_orders po ON po.id = rc.purchase_order_id;

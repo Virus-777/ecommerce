@@ -267,3 +267,19 @@ ALTER TABLE `orders_shipment_refs` ADD CONSTRAINT `fk_orders_shipment_refs_group
 ALTER TABLE `orders_timeline` ADD CONSTRAINT `fk_orders_timeline_order_id` FOREIGN KEY (`order_id`) REFERENCES `orders_orders` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT;
 ALTER TABLE `orders_notes` ADD CONSTRAINT `fk_orders_notes_order_id` FOREIGN KEY (`order_id`) REFERENCES `orders_orders` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT;
 ALTER TABLE `orders_documents` ADD CONSTRAINT `fk_orders_documents_order_id` FOREIGN KEY (`order_id`) REFERENCES `orders_orders` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT;
+
+-- views: join shapes, merged into the query that reads them (§9.2)
+CREATE OR REPLACE ALGORITHM=MERGE SQL SECURITY INVOKER VIEW `orders_v_group_rows` AS
+SELECT g.*,
+  o.ref AS order_ref, o.placed_at, o.lifecycle, o.display_status, o.channel, o.currency, o.hide_prices,
+  o.customer_id, o.contact_name, o.contact_email, o.contact_phone
+FROM orders_seller_groups g
+JOIN orders_orders o ON o.id = g.order_id;
+
+CREATE OR REPLACE ALGORITHM=MERGE SQL SECURITY INVOKER VIEW `orders_v_item_rows` AS
+SELECT i.*,
+  o.ref AS order_ref, o.placed_at, o.lifecycle, o.display_status, o.currency, o.customer_id, o.contact_name,
+  g.owner_type, g.seller_id, g.seller_name, g.fulfilled_by, g.status AS group_status, g.dispatch_by
+FROM orders_order_items i
+JOIN orders_orders o ON o.id = i.order_id
+JOIN orders_seller_groups g ON g.id = i.group_id;

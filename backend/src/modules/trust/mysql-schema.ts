@@ -336,4 +336,7 @@ export const unit: MysqlUnit = {
       triggers: [],
     },
   ],
+  views: [
+    {"name":"trust_v_report_subjects","ddl":"CREATE OR REPLACE ALGORITHM=MERGE SQL SECURITY INVOKER VIEW `trust_v_report_subjects` AS\nSELECT s.*,\n  r.ref AS report_ref, r.type, r.title, r.status, r.source, r.risk_score, r.assignee_staff_id, r.due_at,\n  r.created_at AS report_created_at, r.updated_at AS report_updated_at\nFROM trust_report_subjects s\nJOIN trust_reports r ON r.id = s.report_id\nWHERE r.merged_into_id IS NULL"},
+  ],
 };

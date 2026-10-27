@@ -10,7 +10,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { RowDataPacket } from 'mysql2/promise';
 import { testMysql } from '../../testing/mysql.js';
 import type { MysqlStore } from './index.js';
-import { createTableSql, migrateMysql, parseColumnDdl, SchemaRewriteNeeded, type MysqlUnit, type TableSchema } from './schema.js';
+import { createTableSql, migrateMysql, parseColumnDdl, SchemaRewriteNeeded, ViewNotMergeable, type MysqlUnit, type TableSchema } from './schema.js';
 
 let store: MysqlStore;
 const logged: string[] = [];
@@ -119,7 +119,8 @@ describe('from nothing', () => {
 
   it('creates the tables and does nothing the second time', async () => {
     const result = await migrateMysql(store, [unit('shop', [ORDERS])], log);
-    expect(result.applied).toEqual(['shop/schema']);
+    // 'kernel/ops-views' comes last on any first run: the maintainer's views of §9.2, built once every table is in
+    expect(result.applied).toEqual(['shop/schema', 'kernel/ops-views']);
     expect(await rows('SELECT 1 FROM `shop_orders`')).toEqual([]);
 
     logged.length = 0;
@@ -152,6 +153,7 @@ describe('adding to a table that is already there', () => {
     await withRow();
     const v2 = table('shop_items', [...V1.columns.map((c) => c.ddl), '`note` VARCHAR(32) NULL']);
     const result = await migrateMysql(store, [unit('shop', [v2])], log);
+    // no 'kernel/ops-views': withRow() migrated once already, and nothing those views read has changed (§9.2)
     expect(result.applied).toEqual(['shop/schema']);
     expect(logged).toContain('schema shop: added shop_items.note');
     expect(await rows('SELECT `id`, `name`, `note` FROM `shop_items`')).toEqual([{ id: 'a', name: 'Alpha', note: null }]);
@@ -255,6 +257,23 @@ describe('views and data migrations', () => {
     expect(await rows('SELECT `id` FROM `shop_big` ORDER BY `id`')).toEqual([{ id: 1 }, { id: 2 }]);
   });
 
+  it('refuses a view MySQL could not merge, naming it', async () => {
+    // MySQL does not record which algorithm a view ended up with; it warns once, at CREATE, and carries on. So a
+    // view that would be rebuilt as a temporary table on every read (§9.1) would otherwise pass unnoticed.
+    const aggregate = unit('shop', [V1], {
+      views: [{ name: 'shop_totals', ddl: 'CREATE OR REPLACE ALGORITHM=MERGE SQL SECURITY INVOKER VIEW `shop_totals` AS SELECT SUM(`n`) `total` FROM `shop_rows`' }],
+    });
+    await expect(migrateMysql(store, [aggregate])).rejects.toThrow(ViewNotMergeable);
+    await expect(migrateMysql(store, [aggregate])).rejects.toThrow(/shop_totals cannot be merged/);
+
+    // the same shape without the aggregate is accepted, so it is the view being refused and not the mechanism
+    const plain = unit('shop', [V1], {
+      views: [{ name: 'shop_totals', ddl: 'CREATE OR REPLACE ALGORITHM=MERGE SQL SECURITY INVOKER VIEW `shop_totals` AS SELECT `n` `total` FROM `shop_rows`' }],
+    });
+    await store.pool.query('DELETE FROM `kernel_migrations`');
+    expect((await migrateMysql(store, [plain])).applied).toEqual(['shop/schema', 'kernel/ops-views']);
+  });
+
   it('runs each data migration once, in order', async () => {
     const ran: string[] = [];
     const migrations = [
@@ -262,7 +281,7 @@ describe('views and data migrations', () => {
       { id: '002-bump', up: async (s: MysqlStore) => void (ran.push('002'), await s.pool.query('UPDATE `shop_rows` SET `n` = 2')) },
     ];
     const result = await migrateMysql(store, [unit('shop', [V1], { migrations })], log);
-    expect(result.applied).toEqual(['shop/schema', 'shop/001-seed', 'shop/002-bump']);
+    expect(result.applied).toEqual(['shop/schema', 'shop/001-seed', 'shop/002-bump', 'kernel/ops-views']);
     expect(ran).toEqual(['001', '002']);
     expect(await rows('SELECT `n` FROM `shop_rows`')).toEqual([{ n: 2 }]);
 

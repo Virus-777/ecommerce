@@ -445,4 +445,7 @@ export const unit: MysqlUnit = {
       triggers: [],
     },
   ],
+  views: [
+    {"name":"returns_v_return_items","ddl":"CREATE OR REPLACE ALGORITHM=MERGE SQL SECURITY INVOKER VIEW `returns_v_return_items` AS\nSELECT ri.*,\n  r.ref AS return_ref, r.order_id, r.order_ref, r.status, r.owner_type, r.seller_id, r.fulfilled_by,\n  r.customer_id, r.remedy, r.requested_at, r.received_at, r.completed_at\nFROM returns_return_items ri\nJOIN returns_returns r ON r.id = ri.return_id"},
+  ],
 };

@@ -957,6 +957,14 @@ Indexes: `(status, scheduled_at)`
 
 Indexes: `(sent_at desc)`
 
+### Views
+
+Read-only join shapes over this module's own tables, created on MySQL as `<module>_v_<name>` (docs/10-mysql-migration.md §9.2).
+
+| View | Reads | SQL |
+|---|---|---|
+| `notifications_v_inbox` | A notice as one account sees it: the inbox list and its unread count | `SELECT nr.*, n.topic_key, n.audience, n.address_kind, n.address_id, n.seller_id, n.group_key, n.title, n.body, n.icon, n.tone, n.link, n.linked_ref, n.action_required, n.deadline_at, n.resolved_at, n.created_at AS notice_created_at, n.expires_at, n.expired_at FROM notifications_notice_recipients nr JOIN notifications_notices n ON n.id = nr.notice_id` |
+
 ## Events
 
 | Publishes | When | Payload | Consumed by |

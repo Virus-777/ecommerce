@@ -77,17 +77,27 @@ describe('MySQL job queue', () => {
     let running = 0;
     let most = 0;
     let runs = 0;
+    let release = () => {};
+    const held = new Promise<void>((r) => (release = r));
     s.declare(job('q.stately'));
     s.handle('test', 'q.stately', async () => {
       running++;
       most = Math.max(most, running);
-      await sleep(60);
+      await held;
       running--;
       runs++;
     });
-    await Promise.all([s.runNow('q.stately'), s.runNow('q.stately'), s.runNow('q.stately')]);
+    const calls = [s.runNow('q.stately'), s.runNow('q.stately'), s.runNow('q.stately')];
+
+    // The first run is held until the queue holds the two rows this is about — one running, one waiting — rather
+    // than for a fixed 60 ms. Under load the first run finished before the third call was even made, so all three
+    // ran and the test failed for the machine having been busy (found in a full-suite run, 2026-10-28). Waiting
+    // for the state makes the count exact instead of an upper bound: two rows run, the third caller joins.
+    await until(async () => (await rows('SELECT `state` FROM `kernel_jobs` WHERE `name` = ?', ['q.stately'])).length === 2);
+    release();
+    await Promise.all(calls);
     expect(most).toBe(1);
-    expect(runs).toBeLessThanOrEqual(2);
+    expect(runs).toBe(2);
   });
 
   it('runs each scheduled tick once across instances', async () => {

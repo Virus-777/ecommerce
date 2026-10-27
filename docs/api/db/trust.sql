@@ -243,3 +243,12 @@ ALTER TABLE `trust_appeals` ADD CONSTRAINT `fk_trust_appeals_report_id` FOREIGN 
 ALTER TABLE `trust_appeals` ADD CONSTRAINT `fk_trust_appeals_enforcement_id` FOREIGN KEY (`enforcement_id`) REFERENCES `trust_enforcements` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT;
 ALTER TABLE `trust_report_notes` ADD CONSTRAINT `fk_trust_report_notes_report_id` FOREIGN KEY (`report_id`) REFERENCES `trust_reports` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT;
 ALTER TABLE `trust_report_events` ADD CONSTRAINT `fk_trust_report_events_report_id` FOREIGN KEY (`report_id`) REFERENCES `trust_reports` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT;
+
+-- views: join shapes, merged into the query that reads them (§9.2)
+CREATE OR REPLACE ALGORITHM=MERGE SQL SECURITY INVOKER VIEW `trust_v_report_subjects` AS
+SELECT s.*,
+  r.ref AS report_ref, r.type, r.title, r.status, r.source, r.risk_score, r.assignee_staff_id, r.due_at,
+  r.created_at AS report_created_at, r.updated_at AS report_updated_at
+FROM trust_report_subjects s
+JOIN trust_reports r ON r.id = s.report_id
+WHERE r.merged_into_id IS NULL;

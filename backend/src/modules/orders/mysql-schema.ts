@@ -357,4 +357,8 @@ export const unit: MysqlUnit = {
       triggers: [],
     },
   ],
+  views: [
+    {"name":"orders_v_group_rows","ddl":"CREATE OR REPLACE ALGORITHM=MERGE SQL SECURITY INVOKER VIEW `orders_v_group_rows` AS\nSELECT g.*,\n  o.ref AS order_ref, o.placed_at, o.lifecycle, o.display_status, o.channel, o.currency, o.hide_prices,\n  o.customer_id, o.contact_name, o.contact_email, o.contact_phone\nFROM orders_seller_groups g\nJOIN orders_orders o ON o.id = g.order_id"},
+    {"name":"orders_v_item_rows","ddl":"CREATE OR REPLACE ALGORITHM=MERGE SQL SECURITY INVOKER VIEW `orders_v_item_rows` AS\nSELECT i.*,\n  o.ref AS order_ref, o.placed_at, o.lifecycle, o.display_status, o.currency, o.customer_id, o.contact_name,\n  g.owner_type, g.seller_id, g.seller_name, g.fulfilled_by, g.status AS group_status, g.dispatch_by\nFROM orders_order_items i\nJOIN orders_orders o ON o.id = i.order_id\nJOIN orders_seller_groups g ON g.id = i.group_id"},
+  ],
 };

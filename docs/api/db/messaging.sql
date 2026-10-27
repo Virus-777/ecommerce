@@ -147,3 +147,12 @@ ALTER TABLE `messaging_message_reports` ADD CONSTRAINT `fk_messaging_message_rep
 ALTER TABLE `messaging_message_reports` ADD CONSTRAINT `fk_messaging_message_reports_conversation_id` FOREIGN KEY (`conversation_id`) REFERENCES `messaging_conversations` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT;
 ALTER TABLE `messaging_conversation_aliases` ADD CONSTRAINT `fk_messaging_conversation_aliases_conversation_id` FOREIGN KEY (`conversation_id`) REFERENCES `messaging_conversations` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT;
 ALTER TABLE `messaging_staff_access_log` ADD CONSTRAINT `fk_messaging_staff_access_log_conversation_id` FOREIGN KEY (`conversation_id`) REFERENCES `messaging_conversations` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT;
+
+-- views: join shapes, merged into the query that reads them (§9.2)
+CREATE OR REPLACE ALGORITHM=MERGE SQL SECURITY INVOKER VIEW `messaging_v_participant_conversations` AS
+SELECT p.*,
+  c.kind AS conversation_kind, c.customer_id, c.guest_session_id, c.seller_id, c.order_id, c.order_item_id,
+  c.return_id, c.case_id, c.subject, c.status, c.locked_reason, c.reply_state, c.reply_due_at,
+  c.awaiting_since, c.created_at AS conversation_created_at, c.last_message_at, c.archive_after
+FROM messaging_participants p
+JOIN messaging_conversations c ON c.id = p.conversation_id;

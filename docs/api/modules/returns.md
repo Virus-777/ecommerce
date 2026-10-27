@@ -1390,6 +1390,14 @@ Indexes: `(return_id)`, `(case_id)`, `(order_id)`, `(shipping_shipment_id)`, `(s
 
 Indexes: `(return_id, at)`
 
+### Views
+
+Read-only join shapes over this module's own tables, created on MySQL as `<module>_v_<name>` (docs/10-mysql-migration.md §9.2).
+
+| View | Reads | SQL |
+|---|---|---|
+| `returns_v_return_items` | A return item with its return: used quantities per order item, and open returns per product | `SELECT ri.*, r.ref AS return_ref, r.order_id, r.order_ref, r.status, r.owner_type, r.seller_id, r.fulfilled_by, r.customer_id, r.remedy, r.requested_at, r.received_at, r.completed_at FROM returns_return_items ri JOIN returns_returns r ON r.id = ri.return_id` |
+
 ## Events
 
 | Publishes | When | Payload | Consumed by |

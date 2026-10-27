@@ -979,6 +979,14 @@ Indexes: `pk (snapshot_date, stock_group)`
 
 Indexes: `pk (count_id, stock_item_id)`
 
+### Views
+
+Read-only join shapes over this module's own tables, created on MySQL as `<module>_v_<name>` (docs/10-mysql-migration.md §9.2).
+
+| View | Reads | SQL |
+|---|---|---|
+| `inventory_v_stock_rows` | One stock item at one location, with the item and the location: the stock lists (the sums are summary columns, §9.3) | `SELECT sl.*, si.owner_type, si.seller_id, si.sku, si.offer_id, si.product_id, si.variant_id, si.`condition`, si.label, si.low_stock_threshold, si.reorder_quantity, si.unit_cost_amount, si.currency, si.primary_bin_code, si.low_since, si.archived, l.code AS location_code, l.name AS location_name, l.kind AS location_kind, l.owner_type AS location_owner_type, l.sellable, l.active AS location_active, l.is_default AS location_is_default FROM inventory_stock_levels sl JOIN inventory_stock_items si ON si.id = sl.stock_item_id JOIN inventory_locations l ON l.id = sl.location_id` |
+
 ## Events
 
 | Publishes | When | Payload | Consumed by |

@@ -54,7 +54,8 @@ async function createDatabase(u: URL, name: string): Promise<void> {
 
 /** Empties every table that has rows; the tables themselves stay, so the next file reuses them */
 async function empty(pool: Pool, database: string): Promise<void> {
-  const [tables] = await pool.query<RowDataPacket[]>('SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = ?', [database]);
+  // BASE TABLE only: a view has no rows of its own, and TRUNCATE on one answers "table doesn't exist"
+  const [tables] = await pool.query<RowDataPacket[]>("SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE'", [database]);
   if (!tables.length) return;
   const conn = await pool.getConnection();
   try {

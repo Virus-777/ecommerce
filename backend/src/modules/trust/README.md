@@ -777,6 +777,14 @@ Indexes: `(report_id, at)`
 
 Indexes: `(kind, at)`, `(subject_type, subject_id, at)`
 
+### Views
+
+Read-only join shapes over this module's own tables, created on MySQL as `<module>_v_<name>` (docs/10-mysql-migration.md §9.2).
+
+| View | Reads | SQL |
+|---|---|---|
+| `trust_v_report_subjects` | A report subject with its report, merged reports left out: the report lists by subject | `SELECT s.*, r.ref AS report_ref, r.type, r.title, r.status, r.source, r.risk_score, r.assignee_staff_id, r.due_at, r.created_at AS report_created_at, r.updated_at AS report_updated_at FROM trust_report_subjects s JOIN trust_reports r ON r.id = s.report_id WHERE r.merged_into_id IS NULL` |
+
 ## Events
 
 | Publishes | When | Payload | Consumed by |

@@ -48,6 +48,7 @@ const generatorProblems = all.flatMap((d) => d.problems);
 const tables = all.reduce((n, d) => n + d.tables.length, 0);
 const keys = all.reduce((n, d) => n + d.tables.flatMap((t) => t.foreignKeys).length, 0);
 const triggers = all.reduce((n, d) => n + d.tables.flatMap((t) => t.triggers).length, 0);
+const views = all.reduce((n, d) => n + d.views.length, 0);
 console.log(`generated ${tables} tables, ${keys} foreign keys, ${triggers} triggers in ${all.length} modules -> docs/api/db/`);
 if (generatorProblems.length) {
   console.error(`\n${generatorProblems.length} the generator could not translate:`);
@@ -65,6 +66,7 @@ if (!url) {
 
 const conn = await connect(url);
 const failures: { at: string; sql: string; error: string }[] = [];
+const notMerged: string[] = [];
 let misread: string[] = [];
 const apply = async (at: string, sql: string) => {
   try {
@@ -82,12 +84,25 @@ try {
   for (const ddl of all) for (const t of ddl.tables) await apply(`${ddl.module}.${t.name}`, t.create);
   for (const ddl of all) for (const t of ddl.tables) for (const fk of t.foreignKeys) await apply(`${ddl.module}.${t.name} fk`, fk);
   for (const ddl of all) for (const t of ddl.tables) for (const tr of t.triggers) await apply(`${ddl.module}.${t.name} trigger`, tr);
+  // views last: every table they read has to exist first. Each one is asked for ALGORITHM=MERGE and MySQL only
+  // warns (1354) when it cannot honour that, so the warning is read here rather than trusted away (§9.1).
+  for (const ddl of all) {
+    for (const v of ddl.views) {
+      await apply(`${ddl.module}.${v.name} view`, v.ddl);
+      const [warned] = (await conn.query('SHOW WARNINGS')) as any;
+      for (const w of warned as { Code: number; Message: string }[]) {
+        if (Number(w.Code) === 1354) notMerged.push(`${v.name}: ${w.Message}`);
+      }
+    }
+  }
 
-  const [[counted]] = (await conn.query(`SELECT COUNT(*) n FROM information_schema.TABLES WHERE TABLE_SCHEMA = '${DB}'`)) as any;
+  // BASE TABLE: information_schema.TABLES counts views too, which read as ten tables too many
+  const [[counted]] = (await conn.query(`SELECT COUNT(*) n FROM information_schema.TABLES WHERE TABLE_SCHEMA = '${DB}' AND TABLE_TYPE = 'BASE TABLE'`)) as any;
   const [[fks]] = (await conn.query(`SELECT COUNT(*) n FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_SCHEMA = '${DB}' AND CONSTRAINT_TYPE = 'FOREIGN KEY'`)) as any;
   const [[checks]] = (await conn.query(`SELECT COUNT(*) n FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_SCHEMA = '${DB}' AND CONSTRAINT_TYPE = 'CHECK'`)) as any;
   const [[indexes]] = (await conn.query(`SELECT COUNT(DISTINCT TABLE_NAME, INDEX_NAME) n FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = '${DB}'`)) as any;
   const [[trig]] = (await conn.query(`SELECT COUNT(*) n FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = '${DB}'`)) as any;
+  const [[vws]] = (await conn.query(`SELECT COUNT(*) n FROM information_schema.VIEWS WHERE TABLE_SCHEMA = '${DB}'`)) as any;
 
   console.log('\non the server:');
   console.log(`  tables       ${counted.n} of ${tables}`);
@@ -95,6 +110,7 @@ try {
   console.log(`  foreign keys ${fks.n} of ${keys}`);
   console.log(`  checks       ${checks.n}`);
   console.log(`  triggers     ${trig.n} of ${triggers}`);
+  console.log(`  views        ${vws.n} of ${views}${notMerged.length ? `, ${notMerged.length} NOT merged` : ", all merged"}`);
 
   // What `npm run migrate` believes each column line says has to be what the server says the stored column
   // is, for every column in the whole schema — otherwise the diff in kernel/mysql/schema.ts is worthless in

@@ -26,6 +26,7 @@
 import { createHash } from 'node:crypto';
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { kernelDdl } from './kernel-tables.js';
+import { createOpsViews, OPS_VIEWS } from './ops-views.js';
 import type { MysqlStore } from './index.js';
 import { q } from './where.js';
 
@@ -228,6 +229,33 @@ export interface MigrateResult {
   extra: string[];
 }
 
+/**
+ * Thrown for a view MySQL could not merge into the outer query (§9.1).
+ *
+ * This cannot be decided by reading the SQL: MySQL does not record which algorithm a view ended up with —
+ * `information_schema.VIEWS` has no such column, and `SHOW CREATE VIEW` echoes back what was asked for. What it
+ * does do is warn, once, at CREATE: 1354, "View merge algorithm can't be used here for now". So a view is created
+ * and the server is asked immediately afterwards, on the same connection, whether it meant it.
+ *
+ * It matters because a view that cannot be merged is a temporary table built on every read, which is the one thing
+ * §9.1 says views are not for. Measured on 8.4.13 (2026-10-28): GROUP BY, DISTINCT, an aggregate with no GROUP BY,
+ * UNION and a window function all warn; a plain join, a LEFT JOIN and a scalar subquery in the select list do not.
+ */
+export class ViewNotMergeable extends Error {
+  constructor(readonly view: string) {
+    super(`View ${view} cannot be merged into the query that reads it (MySQL warning 1354), so MySQL would build a temporary table on every read. Views are join shapes only (§9.1): no GROUP BY, DISTINCT, HAVING, LIMIT, UNION, aggregate or window function. Anything aggregated belongs in a summary table.`);
+    this.name = 'ViewNotMergeable';
+  }
+}
+
+const MERGE_REFUSED = 1354;
+
+/** Asks the server whether the view it has just created is the one it was asked for */
+async function refuseIfNotMerged(conn: PoolConnection, view: string): Promise<void> {
+  const [warnings] = await conn.query<RowDataPacket[]>('SHOW WARNINGS');
+  if (warnings.some((w) => Number(w.Code) === MERGE_REFUSED)) throw new ViewNotMergeable(view);
+}
+
 /** Thrown for a change that would rewrite a table: it needs a migration and a maintenance window, not a restart */
 export class SchemaRewriteNeeded extends Error {
   constructor(readonly changes: readonly string[]) {
@@ -235,6 +263,9 @@ export class SchemaRewriteNeeded extends Error {
     this.name = 'SchemaRewriteNeeded';
   }
 }
+
+/** The maintainer's views are recorded like a module, under this id (§9.2) */
+const OPS_VIEWS_ID = 'kernel/ops-views';
 
 const hashOf = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 16);
 
@@ -285,7 +316,10 @@ export async function migrateMysql(store: MysqlStore, units: readonly MysqlUnit[
         }
         if (rewrites.length) throw new SchemaRewriteNeeded(rewrites);
         for (const sql of deferred) await run(sql);
-        for (const view of unit.views ?? []) await run(view.ddl);
+        for (const view of unit.views ?? []) {
+          await run(view.ddl);
+          await refuseIfNotMerged(conn, view.name);
+        }
         // the tables this unit just made are there for the next unit's foreign keys to point at
         existing = await readExisting(conn);
         await record(`${unit.module}/schema`, hash);
@@ -301,6 +335,21 @@ export async function migrateMysql(store: MysqlStore, units: readonly MysqlUnit[
         applied.push(id);
         log(`migrated ${id}`);
       }
+    }
+
+    // The maintainer's views, once every module's tables exist: they cross modules, so they cannot be built until
+    // the end, and a switched-off module costs the views that read it rather than the whole migration.
+    //
+    // Hashed like a module, on the views and on which of the tables they need are there, because the alternative
+    // is replacing five views and logging about it on every single start. A restart that has nothing to do must
+    // do nothing and say nothing — that is what makes a line in the log worth reading.
+    const opsHash = hashOf([OPS_VIEWS, OPS_VIEWS.flatMap((v) => v.needs.filter((t) => existing.tables.has(t))).toSorted()]);
+    if ((await recorded(OPS_VIEWS_ID)) !== opsHash) {
+      const ops = await createOpsViews(conn, existing.tables);
+      for (const skipped of ops.skipped) log(`ops view skipped: ${skipped}`);
+      await record(OPS_VIEWS_ID, opsHash);
+      applied.push(OPS_VIEWS_ID);
+      log(`ops views: ${ops.created.length} of ${OPS_VIEWS.length}`);
     }
 
     // a table the spec does not describe is reported once, at the end, so the list reads as a list

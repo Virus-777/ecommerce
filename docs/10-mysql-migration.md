@@ -265,6 +265,32 @@ Views are written in the spec's new `views` section (`{ "name": "group_rows", "s
 
 ### 9.2 Views (replacing `$lookup` joins inside a module)
 
+**Written and applied, 2026-10-28.** All ten are in the specs, created by the generator and by migrate, and
+every one of them was merged by the server. What that took, and what it taught:
+
+- **MySQL does not tell you which algorithm a view got.** `information_schema.VIEWS` has no `ALGORITHM` column
+  (checked, not assumed), and `SHOW CREATE VIEW` echoes back whatever was asked for. What the server does is warn
+  **1354**, "View merge algorithm can't be used here for now", once, at `CREATE`, and then carry on. So migrate
+  reads `SHOW WARNINGS` after each view and throws `ViewNotMergeable` naming it, and `check:ddl` prints
+  `views 10 of 10, all merged`. Without that, a view that is rebuilt as a temporary table on every read — the one
+  thing §9.1 says views are not for — would have gone in unnoticed.
+- **What actually prevents merging**, measured on 8.4.13: `GROUP BY`, `HAVING`, `DISTINCT`, `UNION`, `LIMIT`, an
+  aggregate with no `GROUP BY`, and a window function. A plain join, a `LEFT JOIN` and a scalar subquery in the
+  select list all merge. The generator refuses the first list by name before a server sees it, because 1354 says
+  neither which view nor which word.
+- **Merged is not the same as "uses the base indexes".** Both are checked: the first for every view by migrate,
+  the second on `orders_v_group_rows` against the real plan — `EXPLAIN FORMAT=JSON` of a filter on `seller_id`
+  has to reach `orders_seller_groups` through `ix_orders_seller_groups_1`.
+- **A view reaching into another module is refused** (§6.2): a module can be switched off, and a view of its
+  tables inside another module's schema would make that a failed migration rather than a missing feature.
+- `SELECT g.*` is expanded by MySQL at `CREATE` time, so a column added to a base table reaches the view only
+  when the view is recreated. Migrate hashes the whole unit, tables and views together, so a column added to a
+  table replaces the views over it in the same run.
+
+Two things the views needed that had nothing to do with views: `information_schema.TABLES` counts views as tables
+(`check:ddl` read 481 of 471 until it asked for `BASE TABLE`), and the test harness emptied a database by
+`TRUNCATE`-ing everything `information_schema.TABLES` listed, which on a view answers "table doesn't exist".
+
 | View | Joins | Replaces | Read by |
 |---|---|---|---|
 | `orders_v_group_rows` | seller order groups + orders (placed_at, ref, contact) | `orders/repository.ts:225` `$lookup` | seller order list, sorted by placed_at or dispatch_by |
@@ -278,12 +304,25 @@ Views are written in the spec's new `views` section (`{ "name": "group_rows", "s
 | `notifications_v_inbox` | notice recipients + notices | `notifications:188` | inbox counts and lists |
 | `inventory_v_stock_rows` | stock items + levels + locations | `inventory:208` (nested lookup) | stock lists (sums: §9.3) |
 
-Maintainer views (`ops_v_*`, read-only, documented in MAINTAINING.md):
-- `ops_v_orders` (order with customer contact, totals, state);
-- `ops_v_seller_money` (accounts with available/pending/held);
-- `ops_v_stock` (item, location, on hand, reserved);
-- `ops_v_jobs` (queue state, last run, failures);
-- `ops_v_audit_recent`.
+Maintainer views (`ops_v_*`, read-only, documented in MAINTAINING.md §6a). **Built 2026-10-28**, in
+`kernel/mysql/ops-views.ts` rather than in a module spec, and created by migrate once every module unit is in:
+
+| View | One row is |
+|---|---|
+| `ops_v_orders` | an order: contact, totals, lifecycle, payment state |
+| `ops_v_seller_money` | a seller account: pending, available, held, and why payouts are stopped |
+| `ops_v_stock` | one item at one location: on hand, reserved, incoming, held |
+| `ops_v_jobs` | a job: state, due, attempts, last error, and its schedule |
+| `ops_v_audit_recent` | an audit entry: actor, action, target, reason |
+
+They differ from the module views on purpose, and each difference is a decision:
+
+- **they cross modules**, because no module reads them, so §6.2 does not apply;
+- **a missing table skips the view instead of failing the migration**, because a switched-off module has no
+  tables and `CREATE VIEW` over a missing one is an error. Each view declares every table it reads — kernel
+  tables included, and a test holds that list to exactly what the SQL reads, since a list that is almost right
+  keeps the one view that then stops the migration;
+- **they are not asked to merge**, because they answer one question for one person at a keyboard.
 
 ### 9.3 Summary columns and tables (replacing repeated aggregations)
 

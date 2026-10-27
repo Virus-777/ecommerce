@@ -273,4 +273,7 @@ export const unit: MysqlUnit = {
       triggers: [],
     },
   ],
+  views: [
+    {"name":"purchasing_v_receipt_lines","ddl":"CREATE OR REPLACE ALGORITHM=MERGE SQL SECURITY INVOKER VIEW `purchasing_v_receipt_lines` AS\nSELECT rl.*,\n  rc.ref AS receipt_ref, rc.purchase_order_id, rc.delivery_id, rc.location_id, rc.status AS receipt_status,\n  rc.confirmed_at AS receipt_confirmed_at,\n  d.carrier, d.tracking_ref, d.window_from, d.window_to, d.arrived_at, d.status AS delivery_status, d.delay_reason,\n  pol.sku AS line_sku, pol.label AS line_label, pol.qty_ordered, pol.unit_cost_amount, pol.expected_date,\n  po.ref AS purchase_order_ref, po.supplier_id, po.status AS purchase_order_status\nFROM purchasing_receipt_lines rl\nJOIN purchasing_receipts rc ON rc.id = rl.receipt_id\nJOIN purchasing_deliveries d ON d.id = rc.delivery_id\nJOIN purchasing_purchase_order_lines pol ON pol.id = rl.purchase_order_line_id\nJOIN purchasing_purchase_orders po ON po.id = rc.purchase_order_id"},
+  ],
 };

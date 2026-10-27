@@ -214,6 +214,9 @@
     { "name": "staff_access_log", "desc": "Each time staff open a private conversation, with the reason", "columns": { "id": "uuid pk", "conversation_id": "uuid → conversations", "staff_id": "uuid", "reason": "text", "case_id": "uuid?", "at": "timestamptz" }, "indexes": ["(conversation_id, at)"] },
     { "name": "seller_reply_stats", "desc": "30-day reply figures per seller, rolled up by messaging.response-stats (behind 'Usually replies within …' on conversations and Seller.replyStats); computed on first use for a seller without a row", "tenant": false, "columns": { "seller_id": "uuid pk", "period_from": "date", "period_to": "date", "average_reply_minutes": "int?", "median_reply_minutes": "int?", "replied": "int (reply rounds answered)", "replied_within_target": "int", "decided": "int (rounds answered or past the reply target)", "computed_at": "timestamptz" }, "indexes": ["(computed_at)"] }
   ],
+  "views": [
+    {"name":"participant_conversations","desc":"A participant with their conversation: inboxes, unread counts and the guest view","sql":"SELECT p.*,\n  c.kind AS conversation_kind, c.customer_id, c.guest_session_id, c.seller_id, c.order_id, c.order_item_id,\n  c.return_id, c.case_id, c.subject, c.status, c.locked_reason, c.reply_state, c.reply_due_at,\n  c.awaiting_since, c.created_at AS conversation_created_at, c.last_message_at, c.archive_after\nFROM messaging_participants p\nJOIN messaging_conversations c ON c.id = p.conversation_id"}
+  ],
   "stateMachines": [
     {
       "name": "Conversation", "field": "Conversation.status", "initial": "open",

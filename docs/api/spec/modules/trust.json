@@ -236,6 +236,9 @@
     { "name": "detection_rules", "columns": { "key": "text pk", "description": "text", "type": "text", "active": "bool", "thresholds": "jsonb", "base_score": "int", "updated_by": "text", "updated_at": "timestamptz", "last_run_at": "timestamptz?" } },
     { "name": "risk_signals", "desc": "Raw signals from events used by detection rules (sliding windows)", "columns": { "id": "uuid pk", "kind": "text", "subject_type": "text", "subject_id": "uuid", "features": "jsonb", "at": "timestamptz" }, "indexes": ["(kind, at)", "(subject_type, subject_id, at)"] }
   ],
+  "views": [
+    {"name":"report_subjects","desc":"A report subject with its report, merged reports left out: the report lists by subject","sql":"SELECT s.*,\n  r.ref AS report_ref, r.type, r.title, r.status, r.source, r.risk_score, r.assignee_staff_id, r.due_at,\n  r.created_at AS report_created_at, r.updated_at AS report_updated_at\nFROM trust_report_subjects s\nJOIN trust_reports r ON r.id = s.report_id\nWHERE r.merged_into_id IS NULL"}
+  ],
   "stateMachines": [
     {
       "name": "Trust report", "field": "TrustReport.status", "initial": "open",

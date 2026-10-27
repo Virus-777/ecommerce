@@ -345,3 +345,15 @@ ALTER TABLE `inventory_transfer_lines` ADD CONSTRAINT `fk_inventory_transfer_lin
 ALTER TABLE `inventory_stock_counts` ADD CONSTRAINT `fk_inventory_stock_counts_location_id` FOREIGN KEY (`location_id`) REFERENCES `inventory_locations` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT;
 ALTER TABLE `inventory_count_lines` ADD CONSTRAINT `fk_inventory_count_lines_count_id` FOREIGN KEY (`count_id`) REFERENCES `inventory_stock_counts` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT;
 ALTER TABLE `inventory_count_lines` ADD CONSTRAINT `fk_inventory_count_lines_stock_item_id` FOREIGN KEY (`stock_item_id`) REFERENCES `inventory_stock_items` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT;
+
+-- views: join shapes, merged into the query that reads them (§9.2)
+CREATE OR REPLACE ALGORITHM=MERGE SQL SECURITY INVOKER VIEW `inventory_v_stock_rows` AS
+SELECT sl.*,
+  si.owner_type, si.seller_id, si.sku, si.offer_id, si.product_id, si.variant_id, si.`condition`, si.label,
+  si.low_stock_threshold, si.reorder_quantity, si.unit_cost_amount, si.currency, si.primary_bin_code,
+  si.low_since, si.archived,
+  l.code AS location_code, l.name AS location_name, l.kind AS location_kind, l.owner_type AS location_owner_type,
+  l.sellable, l.active AS location_active, l.is_default AS location_is_default
+FROM inventory_stock_levels sl
+JOIN inventory_stock_items si ON si.id = sl.stock_item_id
+JOIN inventory_locations l ON l.id = sl.location_id;

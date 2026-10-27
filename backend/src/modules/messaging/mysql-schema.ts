@@ -211,4 +211,7 @@ export const unit: MysqlUnit = {
       triggers: [],
     },
   ],
+  views: [
+    {"name":"messaging_v_participant_conversations","ddl":"CREATE OR REPLACE ALGORITHM=MERGE SQL SECURITY INVOKER VIEW `messaging_v_participant_conversations` AS\nSELECT p.*,\n  c.kind AS conversation_kind, c.customer_id, c.guest_session_id, c.seller_id, c.order_id, c.order_item_id,\n  c.return_id, c.case_id, c.subject, c.status, c.locked_reason, c.reply_state, c.reply_due_at,\n  c.awaiting_since, c.created_at AS conversation_created_at, c.last_message_at, c.archive_after\nFROM messaging_participants p\nJOIN messaging_conversations c ON c.id = p.conversation_id"},
+  ],
 };

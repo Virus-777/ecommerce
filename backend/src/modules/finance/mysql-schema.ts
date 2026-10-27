@@ -654,4 +654,8 @@ export const unit: MysqlUnit = {
       triggers: [],
     },
   ],
+  views: [
+    {"name":"finance_v_statement_entries","ddl":"CREATE OR REPLACE ALGORITHM=MERGE SQL SECURITY INVOKER VIEW `finance_v_statement_entries` AS\nSELECT e.*,\n  l.state AS lot_state, l.order_id, l.order_item_id, l.gross AS lot_gross, l.fee AS lot_fee, l.net AS lot_net,\n  l.delivered_at AS lot_delivered_at, l.available_at AS lot_available_at,\n  p.ref AS payout_ref, p.status AS payout_status, p.paid_at AS payout_paid_at, p.run_id,\n  r.ref AS run_ref, r.status AS run_status, r.released_at AS run_released_at\nFROM finance_ledger_entries e\nLEFT JOIN finance_earnings_lots l ON l.id = e.lot_id\nLEFT JOIN finance_payouts p ON p.id = l.payout_id\nLEFT JOIN finance_payout_runs r ON r.id = p.run_id"},
+    {"name":"finance_v_lot_entries","ddl":"CREATE OR REPLACE ALGORITHM=MERGE SQL SECURITY INVOKER VIEW `finance_v_lot_entries` AS\nSELECT l.*,\n  e.id AS entry_id, e.at AS entry_at, e.type AS entry_type, e.amount AS entry_amount,\n  e.description AS entry_description, e.statement_id AS entry_statement_id\nFROM finance_earnings_lots l\nLEFT JOIN finance_ledger_entries e ON e.lot_id = l.id AND e.bucket = 'pending'"},
+  ],
 };

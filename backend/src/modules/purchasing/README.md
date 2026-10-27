@@ -711,6 +711,14 @@ Indexes: `pk (receipt_id, purchase_order_line_id)`
 
 Indexes: `(status, created_at)`, `(supplier_id)`
 
+### Views
+
+Read-only join shapes over this module's own tables, created on MySQL as `<module>_v_<name>` (docs/10-mysql-migration.md §9.2).
+
+| View | Reads | SQL |
+|---|---|---|
+| `purchasing_v_receipt_lines` | A received line with its receipt, delivery, ordered line and purchase order: supplier performance in one read | `SELECT rl.*, rc.ref AS receipt_ref, rc.purchase_order_id, rc.delivery_id, rc.location_id, rc.status AS receipt_status, rc.confirmed_at AS receipt_confirmed_at, d.carrier, d.tracking_ref, d.window_from, d.window_to, d.arrived_at, d.status AS delivery_status, d.delay_reason, pol.sku AS line_sku, pol.label AS line_label, pol.qty_ordered, pol.unit_cost_amount, pol.expected_date, po.ref AS purchase_order_ref, po.supplier_id, po.status AS purchase_order_status FROM purchasing_receipt_lines rl JOIN purchasing_receipts rc ON rc.id = rl.receipt_id JOIN purchasing_deliveries d ON d.id = rc.delivery_id JOIN purchasing_purchase_order_lines pol ON pol.id = rl.purchase_order_line_id JOIN purchasing_purchase_orders po ON po.id = rc.purchase_order_id` |
+
 ## Events
 
 | Publishes | When | Payload | Consumed by |

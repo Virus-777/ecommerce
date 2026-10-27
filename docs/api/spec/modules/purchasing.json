@@ -281,6 +281,9 @@
     { "name": "receipt_lines", "columns": { "receipt_id": "uuid → receipts", "purchase_order_line_id": "uuid → purchase_order_lines", "stock_item_id": "uuid", "expected": "int", "received": "int", "damaged": "int", "bin_code": "text?", "photo_media_ids": "jsonb", "note": "text?" }, "indexes": ["pk (receipt_id, purchase_order_line_id)"] },
     { "name": "supplier_claims", "columns": { "id": "uuid pk", "ref": "text unique", "supplier_id": "uuid → suppliers", "purchase_order_id": "uuid → purchase_orders", "receipt_id": "uuid? → receipts", "kind": "text", "lines": "jsonb", "amount": "bigint", "currency": "char(3)", "status": "text", "settlement": "text?", "settled_amount": "bigint?", "supplier_reference": "text?", "owner_id": "text", "notes": "text?", "created_at": "timestamptz", "decided_at": "timestamptz?" }, "indexes": ["(status, created_at)", "(supplier_id)"] }
   ],
+  "views": [
+    {"name":"receipt_lines","desc":"A received line with its receipt, delivery, ordered line and purchase order: supplier performance in one read","sql":"SELECT rl.*,\n  rc.ref AS receipt_ref, rc.purchase_order_id, rc.delivery_id, rc.location_id, rc.status AS receipt_status,\n  rc.confirmed_at AS receipt_confirmed_at,\n  d.carrier, d.tracking_ref, d.window_from, d.window_to, d.arrived_at, d.status AS delivery_status, d.delay_reason,\n  pol.sku AS line_sku, pol.label AS line_label, pol.qty_ordered, pol.unit_cost_amount, pol.expected_date,\n  po.ref AS purchase_order_ref, po.supplier_id, po.status AS purchase_order_status\nFROM purchasing_receipt_lines rl\nJOIN purchasing_receipts rc ON rc.id = rl.receipt_id\nJOIN purchasing_deliveries d ON d.id = rc.delivery_id\nJOIN purchasing_purchase_order_lines pol ON pol.id = rl.purchase_order_line_id\nJOIN purchasing_purchase_orders po ON po.id = rc.purchase_order_id"}
+  ],
   "stateMachines": [
     {
       "name": "Purchase order", "field": "PurchaseOrder.status", "initial": "draft",

@@ -330,3 +330,11 @@ ALTER TABLE `returns_refund_request_items` ADD CONSTRAINT `fk_returns_refund_req
 ALTER TABLE `returns_refund_request_events` ADD CONSTRAINT `fk_returns_refund_request_events_refund_request_id` FOREIGN KEY (`refund_request_id`) REFERENCES `returns_refund_requests` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT;
 ALTER TABLE `returns_replacements` ADD CONSTRAINT `fk_returns_replacements_return_id` FOREIGN KEY (`return_id`) REFERENCES `returns_returns` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT;
 ALTER TABLE `returns_return_events` ADD CONSTRAINT `fk_returns_return_events_return_id` FOREIGN KEY (`return_id`) REFERENCES `returns_returns` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT;
+
+-- views: join shapes, merged into the query that reads them (§9.2)
+CREATE OR REPLACE ALGORITHM=MERGE SQL SECURITY INVOKER VIEW `returns_v_return_items` AS
+SELECT ri.*,
+  r.ref AS return_ref, r.order_id, r.order_ref, r.status, r.owner_type, r.seller_id, r.fulfilled_by,
+  r.customer_id, r.remedy, r.requested_at, r.received_at, r.completed_at
+FROM returns_return_items ri
+JOIN returns_returns r ON r.id = ri.return_id;

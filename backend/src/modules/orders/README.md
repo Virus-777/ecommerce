@@ -1315,6 +1315,15 @@ Indexes: `(order_id)`
 | counted_at | timestamptz? |
 | created_at | timestamptz |
 
+### Views
+
+Read-only join shapes over this module's own tables, created on MySQL as `<module>_v_<name>` (docs/10-mysql-migration.md §9.2).
+
+| View | Reads | SQL |
+|---|---|---|
+| `orders_v_group_rows` | A seller order group with the order it belongs to: what the seller order list reads, sorted by placed_at or dispatch_by | `SELECT g.*, o.ref AS order_ref, o.placed_at, o.lifecycle, o.display_status, o.channel, o.currency, o.hide_prices, o.customer_id, o.contact_name, o.contact_email, o.contact_phone FROM orders_seller_groups g JOIN orders_orders o ON o.id = g.order_id` |
+| `orders_v_item_rows` | An order item with its order and seller group: the admin and seller order search, in place of seven EXISTS helpers | `SELECT i.*, o.ref AS order_ref, o.placed_at, o.lifecycle, o.display_status, o.currency, o.customer_id, o.contact_name, g.owner_type, g.seller_id, g.seller_name, g.fulfilled_by, g.status AS group_status, g.dispatch_by FROM orders_order_items i JOIN orders_orders o ON o.id = i.order_id JOIN orders_seller_groups g ON g.id = i.group_id` |
+
 ## Events
 
 | Publishes | When | Payload | Consumed by |

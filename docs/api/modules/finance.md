@@ -1468,6 +1468,15 @@ Indexes: `(at)`, `(kind, at)`
 
 Indexes: `(at)`
 
+### Views
+
+Read-only join shapes over this module's own tables, created on MySQL as `<module>_v_<name>` (docs/10-mysql-migration.md §9.2).
+
+| View | Reads | SQL |
+|---|---|---|
+| `finance_v_statement_entries` | A ledger entry with the earnings lot it came from and the payout and run that paid it: what a statement is built from | `SELECT e.*, l.state AS lot_state, l.order_id, l.order_item_id, l.gross AS lot_gross, l.fee AS lot_fee, l.net AS lot_net, l.delivered_at AS lot_delivered_at, l.available_at AS lot_available_at, p.ref AS payout_ref, p.status AS payout_status, p.paid_at AS payout_paid_at, p.run_id, r.ref AS run_ref, r.status AS run_status, r.released_at AS run_released_at FROM finance_ledger_entries e LEFT JOIN finance_earnings_lots l ON l.id = e.lot_id LEFT JOIN finance_payouts p ON p.id = l.payout_id LEFT JOIN finance_payout_runs r ON r.id = p.run_id` |
+| `finance_v_lot_entries` | An earnings lot with its pending ledger entry: pending totals and what a payout owes, without reading the ledger twice | `SELECT l.*, e.id AS entry_id, e.at AS entry_at, e.type AS entry_type, e.amount AS entry_amount, e.description AS entry_description, e.statement_id AS entry_statement_id FROM finance_earnings_lots l LEFT JOIN finance_ledger_entries e ON e.lot_id = l.id AND e.bucket = 'pending'` |
+
 ## Events
 
 | Publishes | When | Payload | Consumed by |

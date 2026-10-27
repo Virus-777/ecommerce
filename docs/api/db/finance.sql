@@ -469,6 +469,25 @@ ALTER TABLE `finance_payouts` ADD CONSTRAINT `fk_finance_payouts_destination_id`
 ALTER TABLE `finance_payouts` ADD CONSTRAINT `fk_finance_payouts_retry_of` FOREIGN KEY (`retry_of`) REFERENCES `finance_payouts` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT;
 ALTER TABLE `finance_recon_items` ADD CONSTRAINT `fk_finance_recon_items_date` FOREIGN KEY (`date`) REFERENCES `finance_recon_days` (`date`) ON DELETE RESTRICT ON UPDATE RESTRICT;
 
+-- views: join shapes, merged into the query that reads them (§9.2)
+CREATE OR REPLACE ALGORITHM=MERGE SQL SECURITY INVOKER VIEW `finance_v_statement_entries` AS
+SELECT e.*,
+  l.state AS lot_state, l.order_id, l.order_item_id, l.gross AS lot_gross, l.fee AS lot_fee, l.net AS lot_net,
+  l.delivered_at AS lot_delivered_at, l.available_at AS lot_available_at,
+  p.ref AS payout_ref, p.status AS payout_status, p.paid_at AS payout_paid_at, p.run_id,
+  r.ref AS run_ref, r.status AS run_status, r.released_at AS run_released_at
+FROM finance_ledger_entries e
+LEFT JOIN finance_earnings_lots l ON l.id = e.lot_id
+LEFT JOIN finance_payouts p ON p.id = l.payout_id
+LEFT JOIN finance_payout_runs r ON r.id = p.run_id;
+
+CREATE OR REPLACE ALGORITHM=MERGE SQL SECURITY INVOKER VIEW `finance_v_lot_entries` AS
+SELECT l.*,
+  e.id AS entry_id, e.at AS entry_at, e.type AS entry_type, e.amount AS entry_amount,
+  e.description AS entry_description, e.statement_id AS entry_statement_id
+FROM finance_earnings_lots l
+LEFT JOIN finance_ledger_entries e ON e.lot_id = l.id AND e.bucket = 'pending';
+
 -- append-only guards (§6.3)
 CREATE TRIGGER `finance_ledger_entries_no_update` BEFORE UPDATE ON `finance_ledger_entries` FOR EACH ROW
   SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'finance_ledger_entries is append-only';
