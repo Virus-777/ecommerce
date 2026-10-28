@@ -2854,6 +2854,330 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "sessions": {
+      "table": "checkout_sessions",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "source",
+        "cart_id",
+        "customer_id",
+        "guest_session_id",
+        "account",
+        "email",
+        "contact_name",
+        "visitor_key",
+        "personalization_allowed",
+        "address",
+        "address_id",
+        "status",
+        "quote_version",
+        "quote_total",
+        "currency",
+        "totals",
+        "coupon_codes",
+        "credit",
+        "payment_selection",
+        "payment_intent_id",
+        "payment_state",
+        "order_attempt",
+        "gift_note",
+        "promotion_evaluation_id",
+        "redemption_reservation_id",
+        "stock_reservation_id",
+        "credit_hold_id",
+        "hold_until",
+        "attempt_count",
+        "order_id",
+        "order_ref",
+        "channel",
+        "expires_at",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "cart_id",
+        "customer_id",
+        "guest_session_id",
+        "email",
+        "contact_name",
+        "visitor_key",
+        "address",
+        "address_id",
+        "credit",
+        "payment_selection",
+        "payment_intent_id",
+        "payment_state",
+        "order_attempt",
+        "gift_note",
+        "promotion_evaluation_id",
+        "redemption_reservation_id",
+        "stock_reservation_id",
+        "credit_hold_id",
+        "hold_until",
+        "order_id",
+        "order_ref",
+        "channel"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "hold_until",
+        "expires_at",
+        "created_at",
+        "updated_at"
+      ],
+      "json": [
+        "account",
+        "address",
+        "totals",
+        "coupon_codes",
+        "credit",
+        "payment_selection"
+      ],
+      "booleans": [
+        "personalization_allowed"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_checkout_sessions_4",
+          "columns": [
+            "order_id"
+          ]
+        }
+      ]
+    },
+    "session_lines": {
+      "table": "checkout_session_lines",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "session_id",
+        "cart_item_id",
+        "offer_id",
+        "owner_type",
+        "seller_id",
+        "product_id",
+        "variant_id",
+        "stock_item_id",
+        "profile_id",
+        "fulfilled_by",
+        "package_key",
+        "quantity",
+        "unit_price",
+        "terms_version",
+        "discounts",
+        "tax",
+        "status"
+      ],
+      "nullable": [
+        "cart_item_id",
+        "seller_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [
+        "discounts"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "session_packages": {
+      "table": "checkout_session_packages",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "session_id",
+        "package_key",
+        "owner_type",
+        "seller_id",
+        "fulfilled_by",
+        "ships_from",
+        "options",
+        "selected_option_id",
+        "selected_option",
+        "return_terms"
+      ],
+      "nullable": [
+        "seller_id",
+        "selected_option_id",
+        "selected_option"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [
+        "options",
+        "selected_option"
+      ],
+      "booleans": [],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        },
+        {
+          "name": "uq_checkout_session_packages_1",
+          "columns": [
+            "session_id",
+            "package_key"
+          ]
+        }
+      ]
+    },
+    "change_sets": {
+      "table": "checkout_change_sets",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "session_id",
+        "status",
+        "changes",
+        "previous_total",
+        "new_total",
+        "decisions",
+        "created_at",
+        "decided_at"
+      ],
+      "nullable": [
+        "decisions",
+        "decided_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "decided_at"
+      ],
+      "json": [
+        "changes",
+        "decisions"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "place_requests": {
+      "table": "checkout_place_requests",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "session_id",
+        "idempotency_key",
+        "request_hash",
+        "kind",
+        "outcome",
+        "response",
+        "payment_intent_id",
+        "created_at",
+        "completed_at"
+      ],
+      "nullable": [
+        "outcome",
+        "response",
+        "payment_intent_id",
+        "completed_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "completed_at"
+      ],
+      "json": [
+        "response"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_checkout_place_requests_1",
+          "columns": [
+            "session_id",
+            "idempotency_key"
+          ]
+        }
+      ]
+    },
+    "session_log": {
+      "table": "checkout_session_log",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "session_id",
+        "label",
+        "detail",
+        "at"
+      ],
+      "nullable": [
+        "detail"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

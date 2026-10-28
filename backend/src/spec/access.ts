@@ -3879,6 +3879,582 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "roles": {
+      "table": "access_roles",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "key",
+        "name",
+        "kind",
+        "work_area",
+        "description",
+        "system",
+        "escalation_role_id",
+        "archived_at",
+        "created_at",
+        "updated_at",
+        "version"
+      ],
+      "nullable": [
+        "description",
+        "escalation_role_id",
+        "archived_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "archived_at",
+        "created_at",
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [
+        "system"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_access_roles_key",
+          "columns": [
+            "key"
+          ]
+        }
+      ]
+    },
+    "permissions": {
+      "table": "access_permissions",
+      "key": [
+        "key"
+      ],
+      "idColumn": "key",
+      "columns": [
+        "key",
+        "module",
+        "area",
+        "label",
+        "description",
+        "sensitive",
+        "registered_at",
+        "unavailable_since"
+      ],
+      "nullable": [
+        "unavailable_since"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "registered_at",
+        "unavailable_since"
+      ],
+      "json": [],
+      "booleans": [
+        "sensitive"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "key"
+          ]
+        }
+      ]
+    },
+    "role_permissions": {
+      "table": "access_role_permissions",
+      "key": [
+        "role_id",
+        "permission_key"
+      ],
+      "idColumn": null,
+      "columns": [
+        "role_id",
+        "permission_key",
+        "granted_by",
+        "granted_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "granted_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "role_id",
+            "permission_key"
+          ]
+        }
+      ]
+    },
+    "role_assignments": {
+      "table": "access_role_assignments",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "account_id",
+        "role_id",
+        "status",
+        "granted_by_kind",
+        "granted_by_id",
+        "reason",
+        "granted_at",
+        "expires_at",
+        "revoked_at",
+        "revoked_by",
+        "revoke_reason",
+        "approval_request_id"
+      ],
+      "nullable": [
+        "expires_at",
+        "revoked_at",
+        "revoked_by",
+        "revoke_reason",
+        "approval_request_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "granted_at",
+        "expires_at",
+        "revoked_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_access_role_assignments_3",
+          "columns": [
+            "account_id",
+            "role_id"
+          ],
+          "partial": true
+        }
+      ]
+    },
+    "role_coverage": {
+      "table": "access_role_coverage",
+      "key": [
+        "role_id"
+      ],
+      "idColumn": "role_id",
+      "columns": [
+        "role_id",
+        "lead_account_id",
+        "backup_account_ids",
+        "updated_by",
+        "updated_at"
+      ],
+      "nullable": [
+        "lead_account_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "json": [
+        "backup_account_ids"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "role_id"
+          ]
+        }
+      ]
+    },
+    "approval_actions": {
+      "table": "access_approval_actions",
+      "key": [
+        "key"
+      ],
+      "idColumn": "key",
+      "columns": [
+        "key",
+        "module",
+        "label",
+        "limit_kind",
+        "second_reviewer",
+        "approvers",
+        "default_eligible_role_keys",
+        "unavailable_since"
+      ],
+      "nullable": [
+        "approvers",
+        "unavailable_since"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "unavailable_since"
+      ],
+      "json": [
+        "default_eligible_role_keys"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "key"
+          ]
+        }
+      ]
+    },
+    "approval_limits": {
+      "table": "access_approval_limits",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "role_id",
+        "action_key",
+        "authority",
+        "limit_amount_minor",
+        "limit_currency",
+        "limit_number",
+        "second_above_amount_minor",
+        "second_above_number",
+        "second_reviewer_role_keys",
+        "effective_from",
+        "effective_to",
+        "limit_change_id"
+      ],
+      "nullable": [
+        "limit_amount_minor",
+        "limit_currency",
+        "limit_number",
+        "second_above_amount_minor",
+        "second_above_number",
+        "effective_to",
+        "limit_change_id"
+      ],
+      "decimal": [
+        "limit_number",
+        "second_above_number"
+      ],
+      "binary": [],
+      "dates": [
+        "effective_from",
+        "effective_to"
+      ],
+      "json": [
+        "second_reviewer_role_keys"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "limit_changes": {
+      "table": "access_limit_changes",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "role_id",
+        "changes",
+        "reason",
+        "effective_from",
+        "status",
+        "proposed_by_kind",
+        "proposed_by_id",
+        "approval_request_id",
+        "created_at",
+        "applied_at",
+        "cancel_reason"
+      ],
+      "nullable": [
+        "approval_request_id",
+        "applied_at",
+        "cancel_reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "effective_from",
+        "created_at",
+        "applied_at"
+      ],
+      "json": [
+        "changes"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "approval_requests": {
+      "table": "access_approval_requests",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "action_key",
+        "module",
+        "target_type",
+        "target_id",
+        "target_ref",
+        "target_label",
+        "target_screen",
+        "seller_id",
+        "amount_minor",
+        "currency",
+        "quantity",
+        "summary",
+        "details",
+        "reason",
+        "requested_by_kind",
+        "requested_by_id",
+        "requester_roles",
+        "requester_counts_as_first",
+        "required_approvals",
+        "status",
+        "eligible_role_keys",
+        "nominated_reviewer_id",
+        "limit_snapshot",
+        "due_at",
+        "expires_at",
+        "created_at",
+        "decided_at",
+        "outcome_reason",
+        "last_reminded_at",
+        "version"
+      ],
+      "nullable": [
+        "target_ref",
+        "target_label",
+        "target_screen",
+        "seller_id",
+        "amount_minor",
+        "currency",
+        "quantity",
+        "nominated_reviewer_id",
+        "due_at",
+        "decided_at",
+        "outcome_reason",
+        "last_reminded_at"
+      ],
+      "decimal": [
+        "quantity"
+      ],
+      "binary": [],
+      "dates": [
+        "due_at",
+        "expires_at",
+        "created_at",
+        "decided_at",
+        "last_reminded_at"
+      ],
+      "json": [
+        "details",
+        "requester_roles",
+        "eligible_role_keys",
+        "limit_snapshot"
+      ],
+      "booleans": [
+        "requester_counts_as_first"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_access_approval_requests_ref",
+          "columns": [
+            "ref"
+          ]
+        },
+        {
+          "name": "uq_access_approval_requests_4",
+          "columns": [
+            "action_key",
+            "target_type",
+            "target_id"
+          ],
+          "partial": true
+        }
+      ]
+    },
+    "approval_decisions": {
+      "table": "access_approval_decisions",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "request_id",
+        "step",
+        "decision",
+        "by_account_id",
+        "roles",
+        "note",
+        "via_delegation_from",
+        "at"
+      ],
+      "nullable": [
+        "note",
+        "via_delegation_from"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [
+        "roles"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_access_approval_decisions_2",
+          "columns": [
+            "request_id",
+            "by_account_id"
+          ],
+          "partial": true
+        }
+      ]
+    },
+    "away_periods": {
+      "table": "access_away_periods",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "account_id",
+        "starts_at",
+        "ends_at",
+        "status",
+        "delegate_approvals",
+        "reason",
+        "approval_request_id",
+        "created_by_kind",
+        "created_by_id",
+        "created_at",
+        "ended_at"
+      ],
+      "nullable": [
+        "reason",
+        "approval_request_id",
+        "ended_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "starts_at",
+        "ends_at",
+        "created_at",
+        "ended_at"
+      ],
+      "json": [],
+      "booleans": [
+        "delegate_approvals"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "away_coverage": {
+      "table": "access_away_coverage",
+      "key": [
+        "away_period_id",
+        "role_id"
+      ],
+      "idColumn": null,
+      "columns": [
+        "away_period_id",
+        "role_id",
+        "covered_by_account_id"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "away_period_id",
+            "role_id"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

@@ -2,6 +2,7 @@
  * Emits src/spec/common.ts and src/spec/<module>.ts (generated, never edited by hand) from the spec.
  */
 import { collectionDefs } from './mongo.js';
+import { mysqlTableDefs } from './mysql.js';
 import { planTables, tsOfColumn } from './tables.js';
 import { camel, doc, mergeConsumes, pascal, pascalWords, SETTING_APPROVALS, SETTING_TYPES, type CommonSpec, type EndpointScope, type EndpointSpec, type ModuleSpec, type ObjectExpr, type SettingSpec } from './spec.js';
 import { translateSignature, TypeContext, type Parsed } from './types.js';
@@ -191,6 +192,7 @@ export function emitModule(mod: ModuleSpec, common: CommonSpec, byName: Map<stri
   settings: ${json(settings)},
   errorCodes: ${json(mod.errorCodes ?? {})},
   collections: ${json(collectionDefs(mod, plans, ctx.problems))},
+  tables: ${json(mysqlTableDefs(mod, plans))},
   endpoints,
 });
 `);

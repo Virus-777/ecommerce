@@ -5325,6 +5325,549 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "offers": {
+      "table": "offers_offers",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "owner_type",
+        "seller_id",
+        "product_id",
+        "variant_id",
+        "title",
+        "condition",
+        "condition_notes",
+        "included_items",
+        "missing_items",
+        "missing_items_stale",
+        "seller_sku",
+        "stock_item_id",
+        "price_amount",
+        "currency",
+        "compare_at_amount",
+        "compare_at_basis",
+        "compare_at_verified",
+        "sale_ends_at",
+        "purchase_limit",
+        "dispatch_business_days",
+        "same_day_cutoff",
+        "ships_from",
+        "shipping_profile_id",
+        "fulfilled_by",
+        "return_kind",
+        "return_window_days",
+        "free_return_shipping",
+        "return_policy_version",
+        "return_category_exception",
+        "warranty_kind",
+        "warranty_months",
+        "warranty_handled_by",
+        "status",
+        "status_before_ineligible",
+        "ineligible_source",
+        "status_reason",
+        "publish_on_approval",
+        "content_gaps",
+        "terms_version",
+        "published_at",
+        "removed_at",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "seller_id",
+        "condition_notes",
+        "compare_at_amount",
+        "compare_at_basis",
+        "sale_ends_at",
+        "purchase_limit",
+        "same_day_cutoff",
+        "return_policy_version",
+        "return_category_exception",
+        "warranty_months",
+        "warranty_handled_by",
+        "status_before_ineligible",
+        "ineligible_source",
+        "status_reason",
+        "published_at",
+        "removed_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "sale_ends_at",
+        "published_at",
+        "removed_at",
+        "created_at",
+        "updated_at"
+      ],
+      "json": [
+        "included_items",
+        "missing_items",
+        "ineligible_source",
+        "status_reason",
+        "content_gaps"
+      ],
+      "booleans": [
+        "missing_items_stale",
+        "compare_at_verified",
+        "free_return_shipping",
+        "publish_on_approval"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_offers_offers_1",
+          "columns": [
+            "owner_type",
+            "seller_id",
+            "seller_sku"
+          ]
+        },
+        {
+          "name": "uq_offers_offers_2",
+          "columns": [
+            "owner_type",
+            "seller_id",
+            "variant_id"
+          ],
+          "partial": true
+        },
+        {
+          "name": "uq_offers_offers_3",
+          "columns": [
+            "stock_item_id"
+          ],
+          "partial": true
+        }
+      ]
+    },
+    "offer_price_history": {
+      "table": "offers_offer_price_history",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "offer_id",
+        "price_amount",
+        "compare_at_amount",
+        "valid_from",
+        "valid_to",
+        "price_change_id",
+        "actor_kind",
+        "actor_id"
+      ],
+      "nullable": [
+        "compare_at_amount",
+        "valid_to",
+        "price_change_id",
+        "actor_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "valid_from",
+        "valid_to"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "price_changes": {
+      "table": "offers_price_changes",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "offer_id",
+        "from_amount",
+        "to_amount",
+        "change_pct",
+        "compare_at_amount",
+        "compare_at_basis",
+        "starts_at",
+        "ends_at",
+        "revert_to_amount",
+        "reason",
+        "source",
+        "bulk_job_id",
+        "state",
+        "approval_request_id",
+        "requested_by_kind",
+        "requested_by_id",
+        "decided_at",
+        "applied_at",
+        "created_at"
+      ],
+      "nullable": [
+        "compare_at_amount",
+        "compare_at_basis",
+        "starts_at",
+        "ends_at",
+        "revert_to_amount",
+        "reason",
+        "bulk_job_id",
+        "approval_request_id",
+        "requested_by_id",
+        "decided_at",
+        "applied_at"
+      ],
+      "decimal": [
+        "change_pct"
+      ],
+      "binary": [],
+      "dates": [
+        "starts_at",
+        "ends_at",
+        "decided_at",
+        "applied_at",
+        "created_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "offer_status_log": {
+      "table": "offers_offer_status_log",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "offer_id",
+        "from_status",
+        "to_status",
+        "event",
+        "reason_code",
+        "reason",
+        "affected_activity",
+        "appeal_route",
+        "review_date",
+        "actor_kind",
+        "actor_id",
+        "at"
+      ],
+      "nullable": [
+        "from_status",
+        "reason_code",
+        "reason",
+        "affected_activity",
+        "appeal_route",
+        "review_date",
+        "actor_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "offer_eligibility": {
+      "table": "offers_offer_eligibility",
+      "key": [
+        "offer_id"
+      ],
+      "idColumn": "offer_id",
+      "columns": [
+        "offer_id",
+        "eligible",
+        "reasons",
+        "seller_on_time_pct",
+        "seller_restriction_ref",
+        "evaluated_at"
+      ],
+      "nullable": [
+        "seller_on_time_pct",
+        "seller_restriction_ref"
+      ],
+      "decimal": [
+        "seller_on_time_pct"
+      ],
+      "binary": [],
+      "dates": [
+        "evaluated_at"
+      ],
+      "json": [
+        "reasons"
+      ],
+      "booleans": [
+        "eligible"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "offer_id"
+          ]
+        }
+      ]
+    },
+    "featured_offers": {
+      "table": "offers_featured_offers",
+      "key": [
+        "variant_id",
+        "condition_group",
+        "zone_key"
+      ],
+      "idColumn": null,
+      "columns": [
+        "variant_id",
+        "condition_group",
+        "zone_key",
+        "product_id",
+        "offer_id",
+        "rule_version",
+        "candidates",
+        "dirty",
+        "computed_at"
+      ],
+      "nullable": [
+        "offer_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "computed_at"
+      ],
+      "json": [
+        "candidates"
+      ],
+      "booleans": [
+        "dirty"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "variant_id",
+            "condition_group",
+            "zone_key"
+          ]
+        }
+      ]
+    },
+    "featured_rules": {
+      "table": "offers_featured_rules",
+      "key": [
+        "version"
+      ],
+      "idColumn": "version",
+      "columns": [
+        "version",
+        "text",
+        "steps",
+        "parameters",
+        "effective_from",
+        "reason",
+        "published_by",
+        "published_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "effective_from",
+        "published_at"
+      ],
+      "json": [
+        "steps",
+        "parameters"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "version"
+          ]
+        }
+      ]
+    },
+    "bulk_update_jobs": {
+      "table": "offers_bulk_update_jobs",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "owner_type",
+        "seller_id",
+        "file_media_id",
+        "file_name",
+        "state",
+        "totals",
+        "report_media_id",
+        "uploaded_by",
+        "uploaded_at",
+        "applied_by",
+        "applied_at",
+        "expires_at",
+        "failure"
+      ],
+      "nullable": [
+        "seller_id",
+        "report_media_id",
+        "applied_by",
+        "applied_at",
+        "failure"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "uploaded_at",
+        "applied_at",
+        "expires_at"
+      ],
+      "json": [
+        "totals"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "bulk_update_rows": {
+      "table": "offers_bulk_update_rows",
+      "key": [
+        "job_id",
+        "row_no"
+      ],
+      "idColumn": null,
+      "columns": [
+        "job_id",
+        "row_no",
+        "seller_sku",
+        "offer_id",
+        "price_from",
+        "price_to",
+        "qty_from",
+        "qty_to",
+        "cost_from",
+        "cost_to",
+        "result",
+        "error_code",
+        "error_message"
+      ],
+      "nullable": [
+        "offer_id",
+        "price_from",
+        "price_to",
+        "qty_from",
+        "qty_to",
+        "cost_from",
+        "cost_to",
+        "error_code",
+        "error_message"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "job_id",
+            "row_no"
+          ]
+        }
+      ]
+    },
+    "offer_costs": {
+      "table": "offers_offer_costs",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "offer_id",
+        "seller_id",
+        "product_id",
+        "unit_cost_minor",
+        "currency",
+        "effective_from",
+        "note",
+        "set_by_id",
+        "set_by_name",
+        "created_at"
+      ],
+      "nullable": [
+        "note",
+        "set_by_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

@@ -4849,6 +4849,775 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "accounts": {
+      "table": "identity_accounts",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "realm",
+        "email",
+        "email_normalized",
+        "email_verified_at",
+        "display_name",
+        "status",
+        "password_hash",
+        "password_changed_at",
+        "must_reset_password",
+        "failed_sign_ins",
+        "failed_window_started_at",
+        "locked_until",
+        "lock_reason",
+        "locked_by",
+        "closed_at",
+        "accepted_terms_version",
+        "created_at",
+        "last_sign_in_at",
+        "last_active_at",
+        "version",
+        "tokens_valid_after"
+      ],
+      "nullable": [
+        "email_verified_at",
+        "password_hash",
+        "password_changed_at",
+        "failed_window_started_at",
+        "locked_until",
+        "lock_reason",
+        "locked_by",
+        "closed_at",
+        "accepted_terms_version",
+        "last_sign_in_at",
+        "last_active_at",
+        "tokens_valid_after"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "email_verified_at",
+        "password_changed_at",
+        "failed_window_started_at",
+        "locked_until",
+        "closed_at",
+        "created_at",
+        "last_sign_in_at",
+        "last_active_at",
+        "tokens_valid_after"
+      ],
+      "json": [],
+      "booleans": [
+        "must_reset_password"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_identity_accounts_1",
+          "columns": [
+            "realm",
+            "email_normalized"
+          ]
+        }
+      ]
+    },
+    "password_history": {
+      "table": "identity_password_history",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "account_id",
+        "password_hash",
+        "created_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "two_step_methods": {
+      "table": "identity_two_step_methods",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "account_id",
+        "method",
+        "secret_encrypted",
+        "phone_e164_encrypted",
+        "phone_masked",
+        "confirmed_at",
+        "last_used_at",
+        "last_used_step",
+        "removed_at"
+      ],
+      "nullable": [
+        "secret_encrypted",
+        "phone_e164_encrypted",
+        "phone_masked",
+        "confirmed_at",
+        "last_used_at",
+        "last_used_step",
+        "removed_at"
+      ],
+      "decimal": [],
+      "binary": [
+        "secret_encrypted",
+        "phone_e164_encrypted"
+      ],
+      "dates": [
+        "confirmed_at",
+        "last_used_at",
+        "removed_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "recovery_codes": {
+      "table": "identity_recovery_codes",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "account_id",
+        "code_hash",
+        "batch_id",
+        "used_at"
+      ],
+      "nullable": [
+        "used_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "used_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "challenges": {
+      "table": "identity_challenges",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "account_id",
+        "purpose",
+        "target_email",
+        "code_hash",
+        "payload",
+        "attempts",
+        "max_attempts",
+        "status",
+        "expires_at",
+        "resend_available_at",
+        "created_at",
+        "completed_at",
+        "target_phone_encrypted"
+      ],
+      "nullable": [
+        "account_id",
+        "target_email",
+        "code_hash",
+        "resend_available_at",
+        "completed_at",
+        "target_phone_encrypted"
+      ],
+      "decimal": [],
+      "binary": [
+        "target_phone_encrypted"
+      ],
+      "dates": [
+        "expires_at",
+        "resend_available_at",
+        "created_at",
+        "completed_at"
+      ],
+      "json": [
+        "payload"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "password_resets": {
+      "table": "identity_password_resets",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "account_id",
+        "token_hash",
+        "forced_by",
+        "forced_reason",
+        "expires_at",
+        "used_at",
+        "requested_ip",
+        "created_at"
+      ],
+      "nullable": [
+        "forced_by",
+        "forced_reason",
+        "used_at",
+        "requested_ip"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "expires_at",
+        "used_at",
+        "created_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_identity_password_resets_token_hash",
+          "columns": [
+            "token_hash"
+          ]
+        }
+      ]
+    },
+    "devices": {
+      "table": "identity_devices",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "account_id",
+        "kind",
+        "label",
+        "installation_id",
+        "user_agent",
+        "app_version",
+        "last_ip",
+        "last_location",
+        "two_step_trusted_until",
+        "first_seen_at",
+        "last_active_at"
+      ],
+      "nullable": [
+        "installation_id",
+        "user_agent",
+        "app_version",
+        "last_ip",
+        "last_location",
+        "two_step_trusted_until"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "two_step_trusted_until",
+        "first_seen_at",
+        "last_active_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_identity_devices_2",
+          "columns": [
+            "account_id",
+            "installation_id"
+          ],
+          "partial": true
+        }
+      ]
+    },
+    "sessions": {
+      "table": "identity_sessions",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "account_id",
+        "device_id",
+        "audience",
+        "seller_id",
+        "seller_member_id",
+        "refresh_token_hash",
+        "previous_token_hash",
+        "keep_signed_in",
+        "two_step_verified_at",
+        "created_at",
+        "last_refreshed_at",
+        "last_active_at",
+        "expires_at",
+        "absolute_expires_at",
+        "revoked_at",
+        "revoke_reason"
+      ],
+      "nullable": [
+        "seller_id",
+        "seller_member_id",
+        "previous_token_hash",
+        "two_step_verified_at",
+        "revoked_at",
+        "revoke_reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "two_step_verified_at",
+        "created_at",
+        "last_refreshed_at",
+        "last_active_at",
+        "expires_at",
+        "absolute_expires_at",
+        "revoked_at"
+      ],
+      "json": [],
+      "booleans": [
+        "keep_signed_in"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_identity_sessions_refresh_token_hash",
+          "columns": [
+            "refresh_token_hash"
+          ]
+        }
+      ]
+    },
+    "seller_access": {
+      "table": "identity_seller_access",
+      "key": [
+        "account_id",
+        "seller_id"
+      ],
+      "idColumn": null,
+      "columns": [
+        "account_id",
+        "seller_id",
+        "seller_member_id",
+        "seller_name",
+        "role_label",
+        "is_owner",
+        "granted_at",
+        "revoked_at",
+        "last_used_at"
+      ],
+      "nullable": [
+        "revoked_at",
+        "last_used_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "granted_at",
+        "revoked_at",
+        "last_used_at"
+      ],
+      "json": [],
+      "booleans": [
+        "is_owner"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "account_id",
+            "seller_id"
+          ]
+        }
+      ]
+    },
+    "invitations": {
+      "table": "identity_invitations",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "realm",
+        "purpose",
+        "email",
+        "name",
+        "account_id",
+        "context_ref",
+        "context_label",
+        "token_hash",
+        "pass_code_hash",
+        "pass_code_attempts",
+        "invited_by_kind",
+        "invited_by_id",
+        "status",
+        "sent_at",
+        "expires_at",
+        "accepted_at",
+        "revoked_at",
+        "revoke_reason"
+      ],
+      "nullable": [
+        "account_id",
+        "context_ref",
+        "context_label",
+        "pass_code_hash",
+        "accepted_at",
+        "revoked_at",
+        "revoke_reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "sent_at",
+        "expires_at",
+        "accepted_at",
+        "revoked_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_identity_invitations_token_hash",
+          "columns": [
+            "token_hash"
+          ]
+        }
+      ]
+    },
+    "guest_sessions": {
+      "table": "identity_guest_sessions",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "device_kind",
+        "created_at",
+        "last_seen_at",
+        "expires_at",
+        "claimed_by_account_id",
+        "claimed_at",
+        "audience",
+        "refresh_token_hash",
+        "previous_token_hash",
+        "rotated_at"
+      ],
+      "nullable": [
+        "claimed_by_account_id",
+        "claimed_at",
+        "previous_token_hash",
+        "rotated_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "last_seen_at",
+        "expires_at",
+        "claimed_at",
+        "rotated_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_identity_guest_sessions_refresh_token_hash",
+          "columns": [
+            "refresh_token_hash"
+          ]
+        }
+      ]
+    },
+    "guest_order_grants": {
+      "table": "identity_guest_order_grants",
+      "key": [
+        "guest_session_id",
+        "order_id"
+      ],
+      "idColumn": null,
+      "columns": [
+        "guest_session_id",
+        "order_id",
+        "email_normalized",
+        "via",
+        "granted_at",
+        "expires_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "granted_at",
+        "expires_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "guest_session_id",
+            "order_id"
+          ]
+        }
+      ]
+    },
+    "order_links": {
+      "table": "identity_order_links",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "token_hash",
+        "order_id",
+        "order_ref",
+        "email_normalized",
+        "expires_at",
+        "last_redeemed_at",
+        "redeem_count"
+      ],
+      "nullable": [
+        "order_ref",
+        "last_redeemed_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "expires_at",
+        "last_redeemed_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_identity_order_links_token_hash",
+          "columns": [
+            "token_hash"
+          ]
+        }
+      ]
+    },
+    "security_events": {
+      "table": "identity_security_events",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "account_id",
+        "kind",
+        "result",
+        "audience",
+        "device_id",
+        "device_label",
+        "ip",
+        "location",
+        "actor_kind",
+        "actor_id",
+        "reason",
+        "detail",
+        "at"
+      ],
+      "nullable": [
+        "audience",
+        "device_id",
+        "device_label",
+        "ip",
+        "location",
+        "actor_kind",
+        "actor_id",
+        "reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [
+        "detail"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "sign_in_attempts": {
+      "table": "identity_sign_in_attempts",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "email_normalized",
+        "ip",
+        "succeeded",
+        "at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [
+        "succeeded"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "reauth_tokens": {
+      "table": "identity_reauth_tokens",
+      "key": [
+        "token_hash"
+      ],
+      "idColumn": "token_hash",
+      "columns": [
+        "token_hash",
+        "account_id",
+        "session_id",
+        "purpose",
+        "expires_at",
+        "used_at"
+      ],
+      "nullable": [
+        "used_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "expires_at",
+        "used_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "token_hash"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

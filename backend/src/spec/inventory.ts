@@ -5000,6 +5000,813 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "locations": {
+      "table": "inventory_locations",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "code",
+        "name",
+        "kind",
+        "owner_type",
+        "seller_id",
+        "address",
+        "time_zone",
+        "sellable",
+        "active",
+        "is_default"
+      ],
+      "nullable": [
+        "seller_id",
+        "address"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [
+        "address"
+      ],
+      "booleans": [
+        "sellable",
+        "active",
+        "is_default"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_inventory_locations_code",
+          "columns": [
+            "code"
+          ]
+        }
+      ]
+    },
+    "stock_items": {
+      "table": "inventory_stock_items",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "owner_type",
+        "seller_id",
+        "sku",
+        "offer_id",
+        "product_id",
+        "variant_id",
+        "condition",
+        "label",
+        "low_stock_threshold",
+        "reorder_quantity",
+        "unit_cost_amount",
+        "currency",
+        "primary_bin_code",
+        "low_since",
+        "service_location_id",
+        "archived",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "seller_id",
+        "offer_id",
+        "low_stock_threshold",
+        "reorder_quantity",
+        "unit_cost_amount",
+        "primary_bin_code",
+        "low_since",
+        "service_location_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "low_since",
+        "created_at",
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [
+        "archived"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_inventory_stock_items_1",
+          "columns": [
+            "owner_type",
+            "seller_id",
+            "sku"
+          ]
+        }
+      ]
+    },
+    "stock_levels": {
+      "table": "inventory_stock_levels",
+      "key": [
+        "stock_item_id",
+        "location_id"
+      ],
+      "idColumn": null,
+      "columns": [
+        "stock_item_id",
+        "location_id",
+        "available",
+        "reserved",
+        "incoming",
+        "damaged_held",
+        "returned",
+        "version",
+        "updated_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "stock_item_id",
+            "location_id"
+          ]
+        }
+      ]
+    },
+    "stock_movements": {
+      "table": "inventory_stock_movements",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "stock_item_id",
+        "location_id",
+        "from_group",
+        "to_group",
+        "quantity",
+        "reason_code",
+        "note",
+        "ref_kind",
+        "ref_id",
+        "ref_label",
+        "actor_kind",
+        "actor_id",
+        "actor_name",
+        "approved_by",
+        "after",
+        "at"
+      ],
+      "nullable": [
+        "note",
+        "ref_kind",
+        "ref_id",
+        "ref_label",
+        "actor_id",
+        "actor_name",
+        "approved_by"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [
+        "after"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "incoming_expectations": {
+      "table": "inventory_incoming_expectations",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "stock_item_id",
+        "location_id",
+        "source_kind",
+        "source_id",
+        "source_ref",
+        "quantity_open",
+        "expected_date"
+      ],
+      "nullable": [
+        "expected_date"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "reservations": {
+      "table": "inventory_reservations",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "source",
+        "key",
+        "order_id",
+        "order_ref",
+        "state",
+        "expires_at",
+        "released_reason",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "order_id",
+        "order_ref",
+        "expires_at",
+        "released_reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "expires_at",
+        "created_at",
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_inventory_reservations_1",
+          "columns": [
+            "source",
+            "key"
+          ]
+        }
+      ]
+    },
+    "reservation_lines": {
+      "table": "inventory_reservation_lines",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "reservation_id",
+        "stock_item_id",
+        "location_id",
+        "order_item_id",
+        "quantity",
+        "fulfilled_qty",
+        "released_qty",
+        "state"
+      ],
+      "nullable": [
+        "order_item_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "adjustments": {
+      "table": "inventory_adjustments",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "stock_item_id",
+        "location_id",
+        "from_group",
+        "to_group",
+        "quantity",
+        "reason_code",
+        "note",
+        "review_date",
+        "state",
+        "approval_request_id",
+        "requested_by",
+        "decided_by",
+        "movement_id",
+        "created_at",
+        "applied_at"
+      ],
+      "nullable": [
+        "note",
+        "review_date",
+        "approval_request_id",
+        "decided_by",
+        "movement_id",
+        "applied_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "applied_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "held_stock": {
+      "table": "inventory_held_stock",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "stock_item_id",
+        "location_id",
+        "quantity",
+        "reason_code",
+        "reason",
+        "review_date",
+        "source_ref",
+        "released_at"
+      ],
+      "nullable": [
+        "reason",
+        "source_ref",
+        "released_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "released_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "inbound_receipts": {
+      "table": "inventory_inbound_receipts",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "receipt_id",
+        "receipt_ref",
+        "source_kind",
+        "source_id",
+        "source_ref",
+        "owner_type",
+        "seller_id",
+        "purchase_order_id",
+        "purchase_order_ref",
+        "supplier_name",
+        "location_id",
+        "received_by",
+        "received_at",
+        "state",
+        "confirmed_by",
+        "confirmed_at",
+        "note"
+      ],
+      "nullable": [
+        "source_id",
+        "source_ref",
+        "seller_id",
+        "purchase_order_id",
+        "purchase_order_ref",
+        "confirmed_by",
+        "confirmed_at",
+        "note"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "received_at",
+        "confirmed_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_inventory_inbound_receipts_receipt_id",
+          "columns": [
+            "receipt_id"
+          ]
+        }
+      ]
+    },
+    "inbound_lines": {
+      "table": "inventory_inbound_lines",
+      "key": [
+        "inbound_id",
+        "stock_item_id"
+      ],
+      "idColumn": null,
+      "columns": [
+        "inbound_id",
+        "stock_item_id",
+        "expected",
+        "received",
+        "damaged",
+        "bin_code",
+        "unit_cost_amount",
+        "sellable",
+        "reason"
+      ],
+      "nullable": [
+        "bin_code",
+        "unit_cost_amount",
+        "sellable",
+        "reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "inbound_id",
+            "stock_item_id"
+          ]
+        }
+      ]
+    },
+    "return_outcomes": {
+      "table": "inventory_return_outcomes",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "return_id",
+        "return_ref",
+        "order_ref",
+        "stock_item_id",
+        "quantity",
+        "inspected_condition",
+        "proposed_outcome",
+        "proposed_target_sku",
+        "state",
+        "recorded_outcome",
+        "target_stock_item_id",
+        "recorded_by",
+        "recorded_at",
+        "inspected_at"
+      ],
+      "nullable": [
+        "proposed_target_sku",
+        "recorded_outcome",
+        "target_stock_item_id",
+        "recorded_by",
+        "recorded_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "recorded_at",
+        "inspected_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_inventory_return_outcomes_1",
+          "columns": [
+            "return_id",
+            "stock_item_id"
+          ]
+        }
+      ]
+    },
+    "discrepancies": {
+      "table": "inventory_discrepancies",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "kind",
+        "stock_item_id",
+        "location_id",
+        "bin_code",
+        "quantity",
+        "order_id",
+        "order_ref",
+        "note",
+        "photo_media_ids",
+        "state",
+        "resolution",
+        "resolution_note",
+        "reported_by",
+        "reported_at",
+        "resolved_by",
+        "resolved_at"
+      ],
+      "nullable": [
+        "bin_code",
+        "order_id",
+        "order_ref",
+        "note",
+        "resolution",
+        "resolution_note",
+        "resolved_by",
+        "resolved_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "reported_at",
+        "resolved_at"
+      ],
+      "json": [
+        "photo_media_ids"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "transfers": {
+      "table": "inventory_transfers",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "from_location_id",
+        "to_location_id",
+        "state",
+        "created_by",
+        "note",
+        "shipped_at",
+        "received_at"
+      ],
+      "nullable": [
+        "note",
+        "shipped_at",
+        "received_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "shipped_at",
+        "received_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_inventory_transfers_ref",
+          "columns": [
+            "ref"
+          ]
+        }
+      ]
+    },
+    "transfer_lines": {
+      "table": "inventory_transfer_lines",
+      "key": [
+        "transfer_id",
+        "stock_item_id"
+      ],
+      "idColumn": null,
+      "columns": [
+        "transfer_id",
+        "stock_item_id",
+        "quantity",
+        "received_quantity"
+      ],
+      "nullable": [
+        "received_quantity"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "transfer_id",
+            "stock_item_id"
+          ]
+        }
+      ]
+    },
+    "valuation_snapshots": {
+      "table": "inventory_valuation_snapshots",
+      "key": [
+        "snapshot_date",
+        "stock_group"
+      ],
+      "idColumn": null,
+      "columns": [
+        "snapshot_date",
+        "stock_group",
+        "units",
+        "value_at_cost_amount",
+        "currency",
+        "sku_count",
+        "taken_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "taken_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "snapshot_date",
+            "stock_group"
+          ]
+        }
+      ]
+    },
+    "stock_counts": {
+      "table": "inventory_stock_counts",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "location_id",
+        "scope",
+        "state",
+        "created_by",
+        "submitted_at"
+      ],
+      "nullable": [
+        "submitted_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "submitted_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "count_lines": {
+      "table": "inventory_count_lines",
+      "key": [
+        "count_id",
+        "stock_item_id"
+      ],
+      "idColumn": null,
+      "columns": [
+        "count_id",
+        "stock_item_id",
+        "bin_code",
+        "expected",
+        "counted"
+      ],
+      "nullable": [
+        "bin_code",
+        "counted"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "count_id",
+            "stock_item_id"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

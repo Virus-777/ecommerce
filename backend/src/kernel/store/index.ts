@@ -1,0 +1,85 @@
+/**
+ * The store a module's repository is written against, in the one vocabulary both stores understand
+ * (docs/10-mysql-migration.md §10.5, §23 Y1: "during the transition a module chooses store: 'mongo' | 'mysql'").
+ *
+ * A repository that takes a `Store` instead of a `ModuleStore` runs on MongoDB and on MySQL without a line of
+ * difference, and the contract suite proves it by running the same tests twice. The vocabulary is:
+ *
+ *   - **filters**: `WhereWithOr<R>` — `{ column: value | list | null | { op, value }, or: [...] }`. It was
+ *     defined with SQL's reading of null in the first place (kernel/mongo/filters.ts), which is why there is
+ *     one type and not two;
+ *   - **patches**: `Patch<R>` — a value per column, or one of the portable expressions `inc` and `jsonAppend`,
+ *     which the server computes. `decToZero` and a hand-written `expr` are SQL and the MongoDB side refuses
+ *     them by name (see mongo.ts): better a compile-time-looking failure in one place than two writes that do
+ *     not mean the same thing.
+ *
+ * What is deliberately **not** here: `aggregate` and `pageAggregate` (MongoDB pipelines) and `db`/`pageQuery`
+ * (Kysely and SQL). A repository needing either is not store-neutral, and says so by taking the store it needs.
+ */
+import type { KeysetOrder, PageRequest } from '../lib/pagination.js';
+import type { Page } from '../../spec/common.js';
+import type { Patch } from '../mysql/table.js';
+
+export type { Cond, Where, WhereWithOr } from '../mongo/filters.js';
+export type { Expr, Intent, Patch } from '../mysql/table.js';
+export { decToZero, expr, inc, isExpr, jsonAppend } from '../mysql/table.js';
+
+import type { WhereWithOr } from '../mongo/filters.js';
+
+/** How strings are read back: both stores take the same options object, and ignore what does not apply */
+export interface StoreReadOptions {
+  limit?: number;
+}
+
+export interface StoreFindOptions extends StoreReadOptions {
+  sort?: Readonly<Record<string, 1 | -1>>;
+  skip?: number;
+  forUpdate?: boolean;
+}
+
+/**
+ * One of a module's spec tables. The methods are the ones both `kernel/mongo/table.ts` and
+ * `kernel/mysql/table.ts` already have, with the same meanings, so this interface adds no behaviour of its own.
+ */
+export interface StoreTable<R extends object> {
+  get(id: unknown, o?: { forUpdate?: boolean }): Promise<R | undefined>;
+  findOne(where: WhereWithOr<R>, o?: { sort?: Readonly<Record<string, 1 | -1>>; forUpdate?: boolean }): Promise<R | undefined>;
+  find(where?: WhereWithOr<R>, o?: StoreFindOptions): Promise<R[]>;
+  getMany(ids: readonly unknown[], o?: { forUpdate?: boolean; sort?: Readonly<Record<string, 1 | -1>> }): Promise<R[]>;
+  count(where?: WhereWithOr<R>): Promise<number>;
+  exists(where: WhereWithOr<R>): Promise<boolean>;
+  distinct<T = unknown>(column: string, where?: WhereWithOr<R>): Promise<T[]>;
+  page(where: WhereWithOr<R>, req: PageRequest, order: KeysetOrder): Promise<Page<R>>;
+  insert(row: Partial<R> | Record<string, unknown>): Promise<R>;
+  insertMany(rows: readonly (Partial<R> | Record<string, unknown>)[]): Promise<void>;
+  insertIfAbsent(row: Partial<R> | Record<string, unknown>, key?: readonly string[]): Promise<R | undefined>;
+  insertManyIfAbsent(rows: readonly (Partial<R> | Record<string, unknown>)[], key?: readonly string[]): Promise<number>;
+  upsert(row: Partial<R> | Record<string, unknown>, o?: { key?: readonly string[]; update?: Patch<R> }): Promise<R>;
+  upsertMany(rows: readonly (Partial<R> | Record<string, unknown>)[], o?: { key?: readonly string[]; update?: (row: Record<string, unknown>) => Patch<R> }): Promise<void>;
+  increment(key: Record<string, unknown>, fields: Record<string, number>): Promise<R>;
+  update(id: unknown, patch: Patch<R>): Promise<R | undefined>;
+  updateOne(where: WhereWithOr<R>, patch: Patch<R>, o?: { sort?: Readonly<Record<string, 1 | -1>> }): Promise<R | undefined>;
+  updateMany(where: WhereWithOr<R>, patch: Patch<R>): Promise<number>;
+  delete(id: unknown): Promise<boolean>;
+  deleteMany(where: WhereWithOr<R>): Promise<number>;
+}
+
+/** A module's data, whichever database holds it */
+export interface Store {
+  /** The module whose tables this store reaches; a table of another module is not reachable (§10.6) */
+  readonly module: string;
+  readonly inTransaction: boolean;
+  table<R extends object>(name: string): StoreTable<R>;
+  /** fn with a store bound to a transaction — this one, when already inside it */
+  transaction<T>(fn: (tx: Store) => Promise<T>): Promise<T>;
+  /** Serialises transactions on a name (§11.2 rule 5). Only inside a transaction */
+  lock(name: string): Promise<void>;
+  /** The event inbox: true the first time this module claims the key */
+  claim(key: string): Promise<boolean>;
+  seen(key: string): Promise<boolean>;
+  nextValue(counter: string): Promise<number>;
+  nextValues(counter: string, n: number): Promise<number[]>;
+}
+
+/** Which database a module's data lives in while the migration is under way */
+export type StoreKind = 'mongo' | 'mysql';

@@ -4676,6 +4676,705 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "topics": {
+      "table": "notifications_topics",
+      "key": [
+        "key"
+      ],
+      "idColumn": "key",
+      "columns": [
+        "key",
+        "audience",
+        "category",
+        "group_key",
+        "label",
+        "description",
+        "triggers",
+        "opens",
+        "channels",
+        "action_required",
+        "staff_role_keys",
+        "seller_permission",
+        "owner_only",
+        "frequency_label",
+        "variables",
+        "phase",
+        "updated_by",
+        "updated_at"
+      ],
+      "nullable": [
+        "seller_permission",
+        "frequency_label",
+        "updated_by",
+        "updated_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "json": [
+        "triggers",
+        "channels",
+        "staff_role_keys",
+        "variables"
+      ],
+      "booleans": [
+        "action_required",
+        "owner_only"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "key"
+          ]
+        }
+      ]
+    },
+    "templates": {
+      "table": "notifications_templates",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "topic_key",
+        "channel",
+        "language",
+        "live_version_id",
+        "updated_at"
+      ],
+      "nullable": [
+        "live_version_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_notifications_templates_1",
+          "columns": [
+            "topic_key",
+            "channel",
+            "language"
+          ]
+        }
+      ]
+    },
+    "template_versions": {
+      "table": "notifications_template_versions",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "template_id",
+        "version",
+        "status",
+        "content",
+        "note",
+        "created_by",
+        "created_at",
+        "published_by",
+        "published_at"
+      ],
+      "nullable": [
+        "note",
+        "published_by",
+        "published_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "published_at"
+      ],
+      "json": [
+        "content"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_notifications_template_versions_1",
+          "columns": [
+            "template_id",
+            "version"
+          ]
+        }
+      ]
+    },
+    "notices": {
+      "table": "notifications_notices",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "topic_key",
+        "audience",
+        "address_kind",
+        "address_id",
+        "seller_id",
+        "group_key",
+        "title",
+        "body",
+        "icon",
+        "tone",
+        "link",
+        "linked_ref",
+        "action_required",
+        "deadline_at",
+        "dedupe_key",
+        "resolved_at",
+        "resolve_note",
+        "expired_at",
+        "created_at",
+        "expires_at"
+      ],
+      "nullable": [
+        "seller_id",
+        "icon",
+        "linked_ref",
+        "deadline_at",
+        "dedupe_key",
+        "resolved_at",
+        "resolve_note",
+        "expired_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "deadline_at",
+        "resolved_at",
+        "expired_at",
+        "created_at",
+        "expires_at"
+      ],
+      "json": [
+        "link"
+      ],
+      "booleans": [
+        "action_required"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "notice_recipients": {
+      "table": "notifications_notice_recipients",
+      "key": [
+        "notice_id",
+        "account_id"
+      ],
+      "idColumn": null,
+      "columns": [
+        "notice_id",
+        "account_id",
+        "reason",
+        "covering_for",
+        "read_at",
+        "archived_at",
+        "created_at"
+      ],
+      "nullable": [
+        "covering_for",
+        "read_at",
+        "archived_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "read_at",
+        "archived_at",
+        "created_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "notice_id",
+            "account_id"
+          ]
+        }
+      ]
+    },
+    "scheduled_notifications": {
+      "table": "notifications_scheduled_notifications",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "dedupe_key",
+        "send_at",
+        "input",
+        "status",
+        "created_by_module",
+        "created_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "send_at",
+        "created_at"
+      ],
+      "json": [
+        "input"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "deliveries": {
+      "table": "notifications_deliveries",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "notice_id",
+        "topic_key",
+        "channel",
+        "recipient_kind",
+        "account_id",
+        "address_hash",
+        "address_masked",
+        "status",
+        "skip_reason",
+        "attempts",
+        "last_error",
+        "provider_message_id",
+        "template_version_id",
+        "subject",
+        "linked_ref",
+        "dedupe_key",
+        "broadcast_id",
+        "created_at",
+        "sent_at",
+        "delivered_at",
+        "next_attempt_at"
+      ],
+      "nullable": [
+        "notice_id",
+        "account_id",
+        "skip_reason",
+        "last_error",
+        "provider_message_id",
+        "template_version_id",
+        "subject",
+        "linked_ref",
+        "dedupe_key",
+        "broadcast_id",
+        "sent_at",
+        "delivered_at",
+        "next_attempt_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "sent_at",
+        "delivered_at",
+        "next_attempt_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "delivery_events": {
+      "table": "notifications_delivery_events",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "delivery_id",
+        "type",
+        "provider_event_id",
+        "detail",
+        "at"
+      ],
+      "nullable": [
+        "provider_event_id",
+        "detail"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_notifications_delivery_events_provider_event_id",
+          "columns": [
+            "provider_event_id"
+          ],
+          "partial": true
+        }
+      ]
+    },
+    "member_preferences": {
+      "table": "notifications_member_preferences",
+      "key": [
+        "seller_id",
+        "member_id"
+      ],
+      "idColumn": null,
+      "columns": [
+        "seller_id",
+        "member_id",
+        "account_id",
+        "groups",
+        "channel",
+        "updated_by",
+        "updated_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "json": [
+        "groups"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "seller_id",
+            "member_id"
+          ]
+        }
+      ]
+    },
+    "invited_members": {
+      "table": "notifications_invited_members",
+      "key": [
+        "seller_id",
+        "member_id"
+      ],
+      "idColumn": null,
+      "columns": [
+        "seller_id",
+        "member_id",
+        "email",
+        "invited_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "invited_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "seller_id",
+            "member_id"
+          ]
+        }
+      ]
+    },
+    "staff_preferences": {
+      "table": "notifications_staff_preferences",
+      "key": [
+        "account_id"
+      ],
+      "idColumn": "account_id",
+      "columns": [
+        "account_id",
+        "email_by_area",
+        "email_for_mentions",
+        "daily_digest",
+        "updated_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "json": [
+        "email_by_area"
+      ],
+      "booleans": [
+        "email_for_mentions",
+        "daily_digest"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "account_id"
+          ]
+        }
+      ]
+    },
+    "push_devices": {
+      "table": "notifications_push_devices",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "account_id",
+        "audience",
+        "seller_id",
+        "platform",
+        "token_encrypted",
+        "token_hash",
+        "app_version",
+        "installation_id",
+        "enabled",
+        "created_at",
+        "last_seen_at",
+        "invalidated_at"
+      ],
+      "nullable": [
+        "seller_id",
+        "installation_id",
+        "invalidated_at"
+      ],
+      "decimal": [],
+      "binary": [
+        "token_encrypted"
+      ],
+      "dates": [
+        "created_at",
+        "last_seen_at",
+        "invalidated_at"
+      ],
+      "json": [],
+      "booleans": [
+        "enabled"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_notifications_push_devices_token_hash",
+          "columns": [
+            "token_hash"
+          ]
+        }
+      ]
+    },
+    "suppressions": {
+      "table": "notifications_suppressions",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "channel",
+        "address_hash",
+        "address_masked",
+        "account_id",
+        "reason",
+        "source",
+        "created_at",
+        "removed_at",
+        "removed_by",
+        "remove_reason"
+      ],
+      "nullable": [
+        "account_id",
+        "removed_at",
+        "removed_by",
+        "remove_reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "removed_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_notifications_suppressions_1",
+          "columns": [
+            "channel",
+            "address_hash"
+          ],
+          "partial": true
+        }
+      ]
+    },
+    "broadcasts": {
+      "table": "notifications_broadcasts",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "name",
+        "audience",
+        "topic_key",
+        "template_version_id",
+        "segment",
+        "status",
+        "scheduled_at",
+        "sent_at",
+        "recipient_estimate",
+        "stats",
+        "campaign_id",
+        "created_by",
+        "created_at"
+      ],
+      "nullable": [
+        "scheduled_at",
+        "sent_at",
+        "campaign_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "scheduled_at",
+        "sent_at",
+        "created_at"
+      ],
+      "json": [
+        "segment",
+        "stats"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "announcements": {
+      "table": "notifications_announcements",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "title",
+        "body",
+        "audience",
+        "seller_ids",
+        "seller_count",
+        "link",
+        "sent_by",
+        "sent_at"
+      ],
+      "nullable": [
+        "link"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "sent_at"
+      ],
+      "json": [
+        "seller_ids",
+        "link"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

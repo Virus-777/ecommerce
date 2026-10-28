@@ -2544,6 +2544,381 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "conversations": {
+      "table": "messaging_conversations",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "kind",
+        "customer_id",
+        "guest_session_id",
+        "seller_id",
+        "order_id",
+        "order_item_id",
+        "return_id",
+        "case_id",
+        "application_id",
+        "product_id",
+        "started_by_staff_id",
+        "subject",
+        "status",
+        "locked_reason",
+        "locked_by_enforcement_id",
+        "reply_state",
+        "reply_due_at",
+        "awaiting_since",
+        "created_at",
+        "last_message_at",
+        "archive_after"
+      ],
+      "nullable": [
+        "customer_id",
+        "guest_session_id",
+        "seller_id",
+        "order_id",
+        "order_item_id",
+        "return_id",
+        "case_id",
+        "application_id",
+        "product_id",
+        "started_by_staff_id",
+        "locked_reason",
+        "locked_by_enforcement_id",
+        "reply_due_at",
+        "awaiting_since",
+        "archive_after"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "reply_due_at",
+        "awaiting_since",
+        "created_at",
+        "last_message_at",
+        "archive_after"
+      ],
+      "json": [
+        "subject"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_messaging_conversations_10",
+          "columns": [
+            "kind",
+            "customer_id",
+            "seller_id",
+            "application_id",
+            "order_id",
+            "order_item_id",
+            "return_id",
+            "product_id"
+          ],
+          "partial": true
+        },
+        {
+          "name": "uq_messaging_conversations_11",
+          "columns": [
+            "kind",
+            "customer_id",
+            "order_id",
+            "case_id"
+          ],
+          "partial": true
+        }
+      ]
+    },
+    "participants": {
+      "table": "messaging_participants",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "conversation_id",
+        "kind",
+        "participant_id",
+        "name",
+        "label",
+        "joined_at",
+        "joined_from_case_id",
+        "last_read_message_id",
+        "unread_count"
+      ],
+      "nullable": [
+        "joined_from_case_id",
+        "last_read_message_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "joined_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        },
+        {
+          "name": "uq_messaging_participants_1",
+          "columns": [
+            "conversation_id",
+            "kind",
+            "participant_id"
+          ]
+        }
+      ]
+    },
+    "messages": {
+      "table": "messaging_messages",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "conversation_id",
+        "kind",
+        "author_kind",
+        "author_id",
+        "author_label",
+        "body",
+        "original_body",
+        "media_ids",
+        "redactions",
+        "hidden",
+        "hidden_reason",
+        "client_message_id",
+        "at"
+      ],
+      "nullable": [
+        "author_kind",
+        "author_id",
+        "original_body",
+        "hidden_reason",
+        "client_message_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [
+        "media_ids",
+        "redactions"
+      ],
+      "booleans": [
+        "hidden"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_messaging_messages_2",
+          "columns": [
+            "conversation_id",
+            "author_id",
+            "client_message_id"
+          ]
+        }
+      ]
+    },
+    "message_reports": {
+      "table": "messaging_message_reports",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "message_id",
+        "conversation_id",
+        "reporter_kind",
+        "reporter_id",
+        "reason",
+        "note",
+        "status",
+        "outcome",
+        "decided_by",
+        "decided_at",
+        "created_at"
+      ],
+      "nullable": [
+        "note",
+        "outcome",
+        "decided_by",
+        "decided_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "decided_at",
+        "created_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "reply_templates": {
+      "table": "messaging_reply_templates",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "seller_id",
+        "name",
+        "body",
+        "updated_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "conversation_aliases": {
+      "table": "messaging_conversation_aliases",
+      "key": [
+        "old_id"
+      ],
+      "idColumn": "old_id",
+      "columns": [
+        "old_id",
+        "conversation_id",
+        "merged_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "merged_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "old_id"
+          ]
+        }
+      ]
+    },
+    "staff_access_log": {
+      "table": "messaging_staff_access_log",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "conversation_id",
+        "staff_id",
+        "reason",
+        "case_id",
+        "at"
+      ],
+      "nullable": [
+        "case_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "seller_reply_stats": {
+      "table": "messaging_seller_reply_stats",
+      "key": [
+        "seller_id"
+      ],
+      "idColumn": "seller_id",
+      "columns": [
+        "seller_id",
+        "period_from",
+        "period_to",
+        "average_reply_minutes",
+        "median_reply_minutes",
+        "replied",
+        "replied_within_target",
+        "decided",
+        "computed_at"
+      ],
+      "nullable": [
+        "average_reply_minutes",
+        "median_reply_minutes"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "computed_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "seller_id"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

@@ -12,6 +12,7 @@ import type { ModuleSpec, TableSpec } from './spec.js';
 import { q } from './mysql-where.js';
 import { columnDdl, checksOf } from './mysql-types.js';
 import { keyDdl, parseIndex } from './mysql-indexes.js';
+import type { TableDef, UniqueKeyDef } from '../../src/kernel/spec/define.js';
 
 /** `<module>_<table>`, with `-` replaced by `_` (§4) */
 export const tableName = (module: string, table: string) => `${module.replace(/-/g, '_')}_${table}`;
@@ -32,6 +33,44 @@ export interface TableDdl {
   triggers: string[];
   /** Translation decisions a reader (and Y2's EXPLAIN review) should see */
   notes: string[];
+  /**
+   * What `kernel/mysql/table.ts` needs at run time to turn rows into parameters and back: which columns are of
+   * which type, and every unique key by the name MySQL reports in a 1062. It is built here, beside the DDL, and
+   * **from** the DDL lines rather than from the spec a second time, so the def cannot come to disagree with the
+   * table that was created.
+   */
+  def: TableDef;
+}
+
+/** The MySQL type a generated column line declares, e.g. `DATETIME(3)` -> 'DATETIME' */
+const typeOf = (ddl: string): string => /^`(?:[^`]|``)+`\s+([A-Z]+)/.exec(ddl)?.[1] ?? '';
+
+/** The runtime def, from the column lines that were just generated */
+function defOf(o: {
+  name: string;
+  columnLines: readonly { name: string; ddl: string }[];
+  stored: readonly Column[];
+  declaredPk: readonly string[];
+  primaryKey: readonly string[];
+  uniqueKeys: readonly UniqueKeyDef[];
+}): TableDef {
+  const of = (...types: string[]) => o.columnLines.filter((c) => types.includes(typeOf(c.ddl))).map((c) => c.name);
+  const surrogate = o.primaryKey.length === 1 && o.primaryKey[0] === 'row_id';
+  return {
+    table: o.name,
+    key: [...o.declaredPk],
+    idColumn: o.declaredPk.length === 1 ? o.declaredPk[0]! : null,
+    columns: o.stored.map((c) => c.name),
+    nullable: o.stored.filter((c) => c.nullable).map((c) => c.name),
+    decimal: of('DECIMAL'),
+    binary: of('BINARY', 'BLOB', 'VARBINARY'),
+    // a DATE column is a 'YYYY-MM-DD' string in JS and is deliberately not here (dateStrings: ['DATE'])
+    dates: of('DATETIME'),
+    json: of('JSON'),
+    booleans: o.columnLines.filter((c) => /^`(?:[^`]|``)+`\s+TINYINT\(1\)/.test(c.ddl)).map((c) => c.name),
+    identity: o.stored.find((c) => c.identity)?.name ?? (surrogate ? 'row_id' : null),
+    uniqueKeys: [...o.uniqueKeys],
+  };
 }
 
 /**
@@ -73,6 +112,9 @@ export function tableDdl(module: ModuleSpec, plan: TablePlan): TableDdl {
   const columnLines: string[] = [];
   const keys: NamedDdl[] = [];
   const checks: NamedDdl[] = [];
+  // every unique key, by the name a duplicate-key error reports (§10.4). Collected where each key is made,
+  // so a key that is added to the DDL and not here cannot slip through.
+  const uniqueKeys: UniqueKeyDef[] = [];
   let primaryKey: string[] = [];
 
   const stored = columns.filter((c) => !c.sqlType.startsWith('tsvector'));
@@ -108,6 +150,7 @@ export function tableDdl(module: ModuleSpec, plan: TablePlan): TableDdl {
     primaryKey = ['row_id'];
     const parts = declaredPk.map((n) => (byName.get(n)?.nullable ? `(COALESCE(${q(n)}, ''))` : q(n)));
     keys.push({ name: `uq_${name}_pk`, ddl: `UNIQUE KEY ${q(`uq_${name}_pk`)} (${parts.join(', ')})` });
+    uniqueKeys.push({ name: `uq_${name}_pk`, columns: declaredPk });
     notes.push(
       `the spec's key (${declaredPk.join(', ')}) has a nullable part (${nullablePk.join(', ')}), which MySQL will not accept in a PRIMARY KEY. ` +
         `An invisible row_id is the primary key and the declared key is a UNIQUE with COALESCE on the nullable parts, so a null still counts as a value (§5.3, §6.1)`,
@@ -115,14 +158,29 @@ export function tableDdl(module: ModuleSpec, plan: TablePlan): TableDdl {
   } else {
     primaryKey = declaredPk;
   }
+  // MySQL reports the primary key as PRIMARY; the surrogate row_id is AUTO_INCREMENT and never at risk
+  uniqueKeys.unshift({ name: 'PRIMARY', columns: [...primaryKey] });
 
   // a `unique` flag on a column is its own key
-  for (const c of stored) if (c.unique) keys.push({ name: `uq_${name}_${c.name}`, ddl: `UNIQUE KEY ${q(`uq_${name}_${c.name}`)} (${q(c.name)})` });
+  for (const c of stored) {
+    if (!c.unique) continue;
+    keys.push({ name: `uq_${name}_${c.name}`, ddl: `UNIQUE KEY ${q(`uq_${name}_${c.name}`)} (${q(c.name)})` });
+    // a UNIQUE on a nullable column refuses nothing among the null rows: MySQL never compares two nulls
+    uniqueKeys.push({ name: `uq_${name}_${c.name}`, columns: [c.name], ...(c.nullable ? { partial: true } : {}) });
+  }
 
   for (const p of parsed) {
     if (p.index.kind === 'pk') continue;
     const key = keyDdl(p.index, { table: table.name, qualified: name, columns: byName, at: `${at} index ${p.n}`, n: p.n });
     if (key.sql) keys.push({ name: keyNameOf(key.sql, `${at} index ${p.n}`), ddl: key.sql });
+    if (key.sql && p.index.kind === 'index' && p.index.unique) {
+      uniqueKeys.push({
+        name: keyNameOf(key.sql, `${at} index ${p.n}`),
+        columns: p.index.columns.map((c) => c.name),
+        // a partial unique (§6.1) is a functional key part: it only refuses the rows its condition covers
+        ...(p.index.where ? { partial: true } : {}),
+      });
+    }
     if (key.note) notes.push(key.note);
   }
 
@@ -186,8 +244,19 @@ export function tableDdl(module: ModuleSpec, plan: TablePlan): TableDdl {
     foreignKeys: foreignKeyParts,
     triggers: triggerParts,
   };
+  const def = defOf({ name, columnLines: schema.columns, stored, declaredPk, primaryKey, uniqueKeys });
   return { name, schema, create: `${createTableSql(schema)};`, foreignKeys: foreignKeyParts.map((f) => `${f.ddl};`), // the readable .sql file wants each statement terminated; a BEGIN … END body ends itself
-    triggers: triggerParts.map((t) => (t.ddl.endsWith(`END`) ? t.ddl : `${t.ddl};`)), notes };
+    triggers: triggerParts.map((t) => (t.ddl.endsWith(`END`) ? t.ddl : `${t.ddl};`)), notes, def };
+}
+
+/**
+ * The runtime defs of a module's tables, keyed by spec table name: what `src/spec/<module>.ts` exports as
+ * `tables`, and what `ctx.store` hands `Table` for a module whose data lives in MySQL.
+ */
+export function mysqlTableDefs(module: ModuleSpec, plans: readonly TablePlan[]): Record<string, TableDef> {
+  const out: Record<string, TableDef> = {};
+  for (const plan of plans) out[plan.table.name] = tableDdl(module, plan).def;
+  return out;
 }
 
 /** `<module>_v_<name>` (§9.2) */

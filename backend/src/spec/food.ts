@@ -3651,6 +3651,455 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "categories": {
+      "table": "food_categories",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "slug",
+        "name",
+        "icon",
+        "image_id",
+        "position",
+        "visible",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "icon",
+        "image_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [
+        "visible"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_food_categories_slug",
+          "columns": [
+            "slug"
+          ]
+        }
+      ]
+    },
+    "restaurants": {
+      "table": "food_restaurants",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "slug",
+        "name",
+        "cuisine",
+        "category_ids",
+        "image_id",
+        "logo_id",
+        "photo_ids",
+        "address",
+        "city",
+        "region",
+        "postal_code",
+        "lat",
+        "lng",
+        "point_source",
+        "phone",
+        "hours",
+        "time_zone",
+        "delivery_min",
+        "delivery_max",
+        "delivery_fee",
+        "free_delivery_over",
+        "min_order",
+        "currency",
+        "promo_text",
+        "promo_badge",
+        "status",
+        "position",
+        "rating_sum",
+        "rating_count",
+        "rating_stars",
+        "search_text",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "image_id",
+        "logo_id",
+        "address",
+        "city",
+        "region",
+        "postal_code",
+        "lat",
+        "lng",
+        "point_source",
+        "phone",
+        "free_delivery_over",
+        "min_order",
+        "promo_text",
+        "promo_badge"
+      ],
+      "decimal": [
+        "lat",
+        "lng"
+      ],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "updated_at"
+      ],
+      "json": [
+        "category_ids",
+        "photo_ids",
+        "hours",
+        "rating_stars"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_food_restaurants_slug",
+          "columns": [
+            "slug"
+          ]
+        }
+      ]
+    },
+    "sections": {
+      "table": "food_sections",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "restaurant_id",
+        "name",
+        "position"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "items": {
+      "table": "food_items",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "restaurant_id",
+        "section_id",
+        "name",
+        "description",
+        "photo_ids",
+        "price",
+        "was_price",
+        "currency",
+        "tag",
+        "diet_tags",
+        "popular",
+        "recommended",
+        "option_groups",
+        "available",
+        "position",
+        "rating_sum",
+        "rating_count",
+        "rating_stars",
+        "search_text",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "description",
+        "was_price",
+        "tag"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "updated_at"
+      ],
+      "json": [
+        "photo_ids",
+        "diet_tags",
+        "option_groups",
+        "rating_stars"
+      ],
+      "booleans": [
+        "popular",
+        "recommended",
+        "available"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "baskets": {
+      "table": "food_baskets",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "customer_id",
+        "restaurant_id",
+        "lines",
+        "updated_at"
+      ],
+      "nullable": [
+        "restaurant_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "json": [
+        "lines"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_food_baskets_customer_id",
+          "columns": [
+            "customer_id"
+          ]
+        }
+      ]
+    },
+    "orders": {
+      "table": "food_orders",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "customer_id",
+        "restaurant_id",
+        "restaurant",
+        "lines",
+        "subtotal",
+        "delivery_fee",
+        "total",
+        "currency",
+        "address",
+        "courier_note",
+        "contact_phone",
+        "status",
+        "history",
+        "restaurant_note",
+        "staff_note",
+        "intent_id",
+        "attempts",
+        "method_label",
+        "eta_from",
+        "eta_to",
+        "placed_at",
+        "accepted_at",
+        "delivered_at",
+        "reviewed",
+        "idempotency_key",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "courier_note",
+        "contact_phone",
+        "restaurant_note",
+        "staff_note",
+        "intent_id",
+        "method_label",
+        "eta_from",
+        "eta_to",
+        "placed_at",
+        "accepted_at",
+        "delivered_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "eta_from",
+        "eta_to",
+        "placed_at",
+        "accepted_at",
+        "delivered_at",
+        "created_at",
+        "updated_at"
+      ],
+      "json": [
+        "restaurant",
+        "lines",
+        "address",
+        "history"
+      ],
+      "booleans": [
+        "reviewed"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_food_orders_ref",
+          "columns": [
+            "ref"
+          ]
+        },
+        {
+          "name": "uq_food_orders_idempotency_key",
+          "columns": [
+            "idempotency_key"
+          ]
+        }
+      ]
+    },
+    "saved_restaurants": {
+      "table": "food_saved_restaurants",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "customer_id",
+        "restaurant_id",
+        "created_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_food_saved_restaurants_1",
+          "columns": [
+            "customer_id",
+            "restaurant_id"
+          ]
+        }
+      ]
+    },
+    "reviews": {
+      "table": "food_reviews",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "order_id",
+        "restaurant_id",
+        "item_ids",
+        "customer_id",
+        "name",
+        "stars",
+        "text",
+        "hidden",
+        "hidden_reason",
+        "created_at"
+      ],
+      "nullable": [
+        "text",
+        "hidden_reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "json": [
+        "item_ids"
+      ],
+      "booleans": [
+        "hidden"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_food_reviews_order_id",
+          "columns": [
+            "order_id"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

@@ -4085,6 +4085,699 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "enrollments": {
+      "table": "fulfillment_service_enrollments",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "seller_id",
+        "state",
+        "terms_version",
+        "fee_schedule_version",
+        "accepted_at",
+        "accepted_by",
+        "max_cubic_feet",
+        "max_skus",
+        "expected_skus",
+        "expected_monthly_units",
+        "categories",
+        "contact_note",
+        "reason",
+        "seller_suspension_id",
+        "reviewer_id",
+        "created_at",
+        "decided_at"
+      ],
+      "nullable": [
+        "accepted_at",
+        "accepted_by",
+        "contact_note",
+        "reason",
+        "seller_suspension_id",
+        "reviewer_id",
+        "decided_at"
+      ],
+      "decimal": [
+        "max_cubic_feet"
+      ],
+      "binary": [],
+      "dates": [
+        "accepted_at",
+        "created_at",
+        "decided_at"
+      ],
+      "json": [
+        "categories"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_fulfillment_service_enrollments_seller_id",
+          "columns": [
+            "seller_id"
+          ]
+        }
+      ]
+    },
+    "sku_enrollments": {
+      "table": "fulfillment_service_sku_enrollments",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "seller_id",
+        "offer_id",
+        "product_id",
+        "sku",
+        "dimensions",
+        "weight_grams",
+        "size_tier",
+        "barcode",
+        "label_required",
+        "restricted",
+        "restriction_reason",
+        "hazmat",
+        "notes",
+        "state",
+        "inventory_item_id"
+      ],
+      "nullable": [
+        "barcode",
+        "restriction_reason",
+        "notes",
+        "inventory_item_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [
+        "dimensions"
+      ],
+      "booleans": [
+        "label_required",
+        "restricted",
+        "hazmat"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_fulfillment_service_sku_enrollments_offer_id",
+          "columns": [
+            "offer_id"
+          ]
+        }
+      ]
+    },
+    "inbound_shipments": {
+      "table": "fulfillment_service_inbound_shipments",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "seller_id",
+        "state",
+        "ship_from",
+        "destination",
+        "boxes",
+        "carrier",
+        "tracking",
+        "expected_arrival",
+        "arrived_at",
+        "received_at",
+        "created_at"
+      ],
+      "nullable": [
+        "carrier",
+        "tracking",
+        "expected_arrival",
+        "arrived_at",
+        "received_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "arrived_at",
+        "received_at",
+        "created_at"
+      ],
+      "json": [
+        "ship_from",
+        "destination"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_fulfillment_service_inbound_shipments_ref",
+          "columns": [
+            "ref"
+          ]
+        }
+      ]
+    },
+    "inbound_lines": {
+      "table": "fulfillment_service_inbound_lines",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "inbound_id",
+        "sku_enrollment_id",
+        "expected",
+        "received",
+        "damaged"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        }
+      ]
+    },
+    "inbound_receipts": {
+      "table": "fulfillment_service_inbound_receipts",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "inbound_id",
+        "seq",
+        "inventory_receipt_id",
+        "lines",
+        "state",
+        "counted_by",
+        "counted_at",
+        "confirmed_by",
+        "confirmed_at"
+      ],
+      "nullable": [
+        "inventory_receipt_id",
+        "confirmed_by",
+        "confirmed_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "counted_at",
+        "confirmed_at"
+      ],
+      "json": [
+        "lines"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_fulfillment_service_inbound_receipts_1",
+          "columns": [
+            "inbound_id",
+            "seq"
+          ]
+        }
+      ]
+    },
+    "discrepancies": {
+      "table": "fulfillment_service_discrepancies",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "inbound_id",
+        "summary",
+        "evidence_media_ids",
+        "seller_response",
+        "claim_note",
+        "decision",
+        "decided_by",
+        "decided_at"
+      ],
+      "nullable": [
+        "claim_note",
+        "decision",
+        "decided_by",
+        "decided_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "decided_at"
+      ],
+      "json": [
+        "evidence_media_ids"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "ownership_ledger": {
+      "table": "fulfillment_service_ownership_ledger",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "seller_id",
+        "sku_enrollment_id",
+        "movement",
+        "quantity",
+        "from_group",
+        "to_group",
+        "reference",
+        "actor_kind",
+        "actor_id",
+        "reason",
+        "at"
+      ],
+      "nullable": [
+        "from_group",
+        "to_group",
+        "reference",
+        "actor_id",
+        "reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "fulfillment_requests": {
+      "table": "fulfillment_service_fulfillment_requests",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "order_id",
+        "order_ref",
+        "seller_group_id",
+        "seller_id",
+        "state",
+        "items",
+        "warehouse_task_id",
+        "shipment_id",
+        "dispatch_by",
+        "short_reported_at",
+        "created_at"
+      ],
+      "nullable": [
+        "warehouse_task_id",
+        "shipment_id",
+        "short_reported_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "dispatch_by",
+        "short_reported_at",
+        "created_at"
+      ],
+      "json": [
+        "items"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_fulfillment_service_fulfillment_requests_seller_group_id",
+          "columns": [
+            "seller_group_id"
+          ]
+        }
+      ]
+    },
+    "service_returns": {
+      "table": "fulfillment_service_service_returns",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "return_id",
+        "return_ref",
+        "order_item_id",
+        "seller_id",
+        "sku_enrollment_id",
+        "quantity",
+        "outcome",
+        "proposed_outcome",
+        "inspection_note",
+        "evidence_media_ids",
+        "inspected_at"
+      ],
+      "nullable": [
+        "proposed_outcome",
+        "inspection_note",
+        "inspected_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "inspected_at"
+      ],
+      "json": [
+        "evidence_media_ids"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_fulfillment_service_service_returns_1",
+          "columns": [
+            "return_id",
+            "order_item_id"
+          ]
+        }
+      ]
+    },
+    "removal_orders": {
+      "table": "fulfillment_service_removal_orders",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "seller_id",
+        "kind",
+        "state",
+        "lines",
+        "ship_to",
+        "tracking",
+        "reason",
+        "fee_amount",
+        "created_at",
+        "approved_at",
+        "completed_at"
+      ],
+      "nullable": [
+        "ship_to",
+        "tracking",
+        "reason",
+        "fee_amount",
+        "approved_at",
+        "completed_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "approved_at",
+        "completed_at"
+      ],
+      "json": [
+        "lines",
+        "ship_to"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_fulfillment_service_removal_orders_ref",
+          "columns": [
+            "ref"
+          ]
+        }
+      ]
+    },
+    "stock_differences": {
+      "table": "fulfillment_service_stock_differences",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "seller_id",
+        "sku_enrollment_id",
+        "day",
+        "ledger",
+        "inventory",
+        "state",
+        "decision",
+        "reason",
+        "amount",
+        "approval_request_id",
+        "decided_by",
+        "decided_at"
+      ],
+      "nullable": [
+        "decision",
+        "reason",
+        "amount",
+        "approval_request_id",
+        "decided_by",
+        "decided_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "decided_at"
+      ],
+      "json": [
+        "ledger",
+        "inventory"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_fulfillment_service_stock_differences_1",
+          "columns": [
+            "sku_enrollment_id",
+            "day"
+          ]
+        }
+      ]
+    },
+    "fee_schedules": {
+      "table": "fulfillment_service_fee_schedules",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "version",
+        "effective_at",
+        "rates",
+        "state",
+        "approval_request_id"
+      ],
+      "nullable": [
+        "approval_request_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "effective_at"
+      ],
+      "json": [
+        "rates"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_fulfillment_service_fee_schedules_version",
+          "columns": [
+            "version"
+          ]
+        }
+      ]
+    },
+    "fee_charges": {
+      "table": "fulfillment_service_fee_charges",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "seller_id",
+        "type",
+        "period",
+        "reference",
+        "units",
+        "rate",
+        "amount",
+        "currency",
+        "state",
+        "posted_at",
+        "ledger_entry_id",
+        "reason",
+        "idempotency_key"
+      ],
+      "nullable": [
+        "period",
+        "reference",
+        "posted_at",
+        "ledger_entry_id",
+        "reason"
+      ],
+      "decimal": [
+        "units"
+      ],
+      "binary": [],
+      "dates": [
+        "posted_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_fulfillment_service_fee_charges_idempotency_key",
+          "columns": [
+            "idempotency_key"
+          ]
+        }
+      ]
+    },
+    "storage_snapshots": {
+      "table": "fulfillment_service_storage_snapshots",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "day",
+        "seller_id",
+        "sku_enrollment_id",
+        "units",
+        "cubic_feet",
+        "aged_units"
+      ],
+      "nullable": [],
+      "decimal": [
+        "cubic_feet"
+      ],
+      "binary": [],
+      "dates": [],
+      "json": [
+        "aged_units"
+      ],
+      "booleans": [],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        },
+        {
+          "name": "uq_fulfillment_service_storage_snapshots_1",
+          "columns": [
+            "day",
+            "sku_enrollment_id"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

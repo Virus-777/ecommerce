@@ -7298,6 +7298,1047 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "carriers": {
+      "table": "shipping_carriers",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "code",
+        "name",
+        "account_label",
+        "status",
+        "tracking_mode",
+        "credentials_ref",
+        "contacts",
+        "last_event_at",
+        "on_time_rate_30d"
+      ],
+      "nullable": [
+        "account_label",
+        "credentials_ref",
+        "last_event_at",
+        "on_time_rate_30d"
+      ],
+      "decimal": [
+        "on_time_rate_30d"
+      ],
+      "binary": [],
+      "dates": [
+        "last_event_at"
+      ],
+      "json": [
+        "contacts"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_shipping_carriers_code",
+          "columns": [
+            "code"
+          ]
+        }
+      ]
+    },
+    "carrier_services": {
+      "table": "shipping_carrier_services",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "carrier_id",
+        "code",
+        "name",
+        "transit_min",
+        "transit_max",
+        "enabled",
+        "label_supported",
+        "tracking_pattern"
+      ],
+      "nullable": [
+        "tracking_pattern"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [
+        "enabled",
+        "label_supported"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_shipping_carrier_services_1",
+          "columns": [
+            "carrier_id",
+            "code"
+          ]
+        }
+      ]
+    },
+    "methods": {
+      "table": "shipping_methods",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "code",
+        "name",
+        "customer_label",
+        "transit_min",
+        "transit_max",
+        "carrier_service_ids",
+        "active",
+        "position"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [
+        "carrier_service_ids"
+      ],
+      "booleans": [
+        "active"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_shipping_methods_code",
+          "columns": [
+            "code"
+          ]
+        }
+      ]
+    },
+    "zones": {
+      "table": "shipping_zones",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "name",
+        "kind",
+        "regions",
+        "postal_prefixes",
+        "address_kinds",
+        "transit_by_method",
+        "status",
+        "customer_message"
+      ],
+      "nullable": [
+        "customer_message"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [
+        "regions",
+        "postal_prefixes",
+        "address_kinds",
+        "transit_by_method"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "profiles": {
+      "table": "shipping_profiles",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "lineage_id",
+        "owner_type",
+        "seller_id",
+        "name",
+        "is_default",
+        "methods",
+        "free_threshold",
+        "free_method_code",
+        "currency",
+        "version",
+        "status",
+        "effective_from",
+        "updated_by",
+        "updated_at"
+      ],
+      "nullable": [
+        "seller_id",
+        "free_threshold",
+        "free_method_code"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "effective_from",
+        "updated_at"
+      ],
+      "json": [
+        "methods",
+        "updated_by"
+      ],
+      "booleans": [
+        "is_default"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "seller_settings": {
+      "table": "shipping_seller_settings",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "owner_type",
+        "seller_id",
+        "coverage",
+        "handling_days",
+        "same_day_cutoff",
+        "business_days",
+        "buy_labels",
+        "status",
+        "effective_from",
+        "updated_by",
+        "updated_at",
+        "default_parcel",
+        "ships_from"
+      ],
+      "nullable": [
+        "seller_id",
+        "default_parcel",
+        "ships_from"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "effective_from",
+        "updated_at"
+      ],
+      "json": [
+        "coverage",
+        "business_days",
+        "updated_by",
+        "default_parcel"
+      ],
+      "booleans": [
+        "buy_labels"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "closures": {
+      "table": "shipping_closures",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "owner_type",
+        "seller_id",
+        "name",
+        "from_date",
+        "to_date"
+      ],
+      "nullable": [
+        "seller_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "seller_carriers": {
+      "table": "shipping_seller_carriers",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "seller_id",
+        "code",
+        "name",
+        "tracking_url_template",
+        "tracking_pattern",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "tracking_url_template",
+        "tracking_pattern"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_shipping_seller_carriers_code",
+          "columns": [
+            "code"
+          ]
+        }
+      ]
+    },
+    "dispatch_targets": {
+      "table": "shipping_dispatch_targets",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "official",
+        "seller_default",
+        "effective_from",
+        "set_by",
+        "reason"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "effective_from"
+      ],
+      "json": [
+        "official",
+        "seller_default",
+        "set_by"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "notices": {
+      "table": "shipping_notices",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "title",
+        "kind",
+        "from_date",
+        "to_date",
+        "carrier_codes",
+        "carrier_service_ids",
+        "regions",
+        "postal_prefixes",
+        "zone_ids",
+        "seller_scope",
+        "effect",
+        "customer_message",
+        "show_from",
+        "surfaces",
+        "status",
+        "created_by",
+        "updated_at"
+      ],
+      "nullable": [
+        "show_from"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "show_from",
+        "updated_at"
+      ],
+      "json": [
+        "carrier_codes",
+        "carrier_service_ids",
+        "regions",
+        "postal_prefixes",
+        "zone_ids",
+        "effect",
+        "surfaces",
+        "created_by"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "free_shipping_rules": {
+      "table": "shipping_free_shipping_rules",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "name",
+        "scope",
+        "min_order_value",
+        "method_code",
+        "funded_by",
+        "starts_on",
+        "ends_on",
+        "status"
+      ],
+      "nullable": [
+        "min_order_value",
+        "starts_on",
+        "ends_on"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "shipments": {
+      "table": "shipping_shipments",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "kind",
+        "order_id",
+        "order_ref",
+        "group_id",
+        "return_id",
+        "owner_type",
+        "seller_id",
+        "fulfilled_by",
+        "package_no",
+        "carrier_code",
+        "carrier_name",
+        "tracking_url",
+        "service_name",
+        "tracking_number",
+        "tracking_state",
+        "status",
+        "ship_from",
+        "to_address",
+        "shipped_at",
+        "dispatch_due_at",
+        "dispatched_on_time",
+        "estimated_arrival",
+        "delivered_at",
+        "failed_delivery",
+        "recorded_by",
+        "created_at"
+      ],
+      "nullable": [
+        "return_id",
+        "seller_id",
+        "carrier_code",
+        "carrier_name",
+        "tracking_url",
+        "service_name",
+        "tracking_number",
+        "shipped_at",
+        "dispatch_due_at",
+        "dispatched_on_time",
+        "estimated_arrival",
+        "delivered_at",
+        "failed_delivery"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "shipped_at",
+        "dispatch_due_at",
+        "delivered_at",
+        "created_at"
+      ],
+      "json": [
+        "to_address",
+        "estimated_arrival",
+        "failed_delivery",
+        "recorded_by"
+      ],
+      "booleans": [
+        "dispatched_on_time"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "shipment_lines": {
+      "table": "shipping_shipment_lines",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "shipment_id",
+        "order_item_id",
+        "title",
+        "variant_label",
+        "quantity"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        }
+      ]
+    },
+    "tracking_events": {
+      "table": "shipping_tracking_events",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "shipment_id",
+        "code",
+        "label",
+        "detail",
+        "location",
+        "source",
+        "carrier_event_id",
+        "at"
+      ],
+      "nullable": [
+        "detail",
+        "location",
+        "carrier_event_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_shipping_tracking_events_2",
+          "columns": [
+            "shipment_id",
+            "carrier_event_id"
+          ]
+        }
+      ]
+    },
+    "tracking_corrections": {
+      "table": "shipping_tracking_corrections",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "shipment_id",
+        "from_value",
+        "to_value",
+        "reason",
+        "by",
+        "customer_notified",
+        "at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [
+        "by"
+      ],
+      "booleans": [
+        "customer_notified"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "labels": {
+      "table": "shipping_labels",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "shipment_id",
+        "group_id",
+        "carrier_service_id",
+        "cost",
+        "currency",
+        "billed_to",
+        "tracking_number",
+        "storage_key",
+        "kind",
+        "return_id",
+        "qr_code",
+        "format",
+        "drop_off_by",
+        "status",
+        "idempotency_key",
+        "purchased_by",
+        "purchased_at",
+        "voided_at"
+      ],
+      "nullable": [
+        "shipment_id",
+        "storage_key",
+        "return_id",
+        "qr_code",
+        "drop_off_by",
+        "voided_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "drop_off_by",
+        "purchased_at",
+        "voided_at"
+      ],
+      "json": [
+        "purchased_by"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_shipping_labels_idempotency_key",
+          "columns": [
+            "idempotency_key"
+          ]
+        }
+      ]
+    },
+    "label_quotes": {
+      "table": "shipping_label_quotes",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "group_id",
+        "carrier_service_id",
+        "cost",
+        "parcel",
+        "estimated_arrival",
+        "keeps_promise",
+        "expires_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "expires_at"
+      ],
+      "json": [
+        "parcel",
+        "estimated_arrival"
+      ],
+      "booleans": [
+        "keeps_promise"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "dispatch_watch": {
+      "table": "shipping_dispatch_watch",
+      "key": [
+        "group_id"
+      ],
+      "idColumn": "group_id",
+      "columns": [
+        "group_id",
+        "order_id",
+        "owner_type",
+        "seller_id",
+        "fulfilled_by",
+        "due_at",
+        "open_item_ids",
+        "overdue_since"
+      ],
+      "nullable": [
+        "seller_id",
+        "overdue_since"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "due_at",
+        "overdue_since"
+      ],
+      "json": [
+        "open_item_ids"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "group_id"
+          ]
+        }
+      ]
+    },
+    "exceptions": {
+      "table": "shipping_exceptions",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "kind",
+        "order_id",
+        "order_ref",
+        "group_id",
+        "shipment_id",
+        "owner_type",
+        "seller_id",
+        "fulfilled_by",
+        "items_summary",
+        "order_item_ids",
+        "item_quantities",
+        "situation",
+        "next_step",
+        "status",
+        "owner_staff_id",
+        "owner_name",
+        "owner_role",
+        "due_at",
+        "customer_notified_at",
+        "seller_notified_at",
+        "escalated_to",
+        "seller_response",
+        "resolution",
+        "claim_id",
+        "case_ref",
+        "opened_by",
+        "opened_at"
+      ],
+      "nullable": [
+        "shipment_id",
+        "seller_id",
+        "item_quantities",
+        "owner_staff_id",
+        "owner_name",
+        "owner_role",
+        "customer_notified_at",
+        "seller_notified_at",
+        "escalated_to",
+        "seller_response",
+        "resolution",
+        "claim_id",
+        "case_ref"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "due_at",
+        "customer_notified_at",
+        "seller_notified_at",
+        "opened_at"
+      ],
+      "json": [
+        "order_item_ids",
+        "item_quantities",
+        "seller_response",
+        "resolution",
+        "opened_by"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_shipping_exceptions_6",
+          "columns": [
+            "group_id",
+            "kind",
+            "shipment_id"
+          ],
+          "partial": true
+        }
+      ]
+    },
+    "exception_log": {
+      "table": "shipping_exception_log",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "exception_id",
+        "action",
+        "detail",
+        "actor",
+        "at"
+      ],
+      "nullable": [
+        "detail"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [
+        "actor"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "claims": {
+      "table": "shipping_claims",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "claim_number",
+        "carrier_code",
+        "order_id",
+        "shipment_id",
+        "exception_id",
+        "amount",
+        "currency",
+        "filed_by",
+        "seller_id",
+        "filed_at",
+        "status",
+        "owner",
+        "evidence_ids",
+        "approval_request_id",
+        "paid_amount",
+        "decided_at",
+        "note"
+      ],
+      "nullable": [
+        "claim_number",
+        "exception_id",
+        "seller_id",
+        "filed_at",
+        "approval_request_id",
+        "paid_amount",
+        "decided_at",
+        "note"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "decided_at"
+      ],
+      "json": [
+        "evidence_ids"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "webhook_events": {
+      "table": "shipping_webhook_events",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "carrier_code",
+        "external_id",
+        "payload",
+        "received_at",
+        "processed_at",
+        "error"
+      ],
+      "nullable": [
+        "processed_at",
+        "error"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "received_at",
+        "processed_at"
+      ],
+      "json": [
+        "payload"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_shipping_webhook_events_1",
+          "columns": [
+            "carrier_code",
+            "external_id"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

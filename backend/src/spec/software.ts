@@ -3460,6 +3460,435 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "categories": {
+      "table": "software_categories",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "slug",
+        "name",
+        "icon",
+        "position",
+        "visible",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "icon"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [
+        "visible"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_software_categories_slug",
+          "columns": [
+            "slug"
+          ]
+        }
+      ]
+    },
+    "apps": {
+      "table": "software_apps",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "slug",
+        "title",
+        "company",
+        "category_id",
+        "subcategory",
+        "brief",
+        "icon_id",
+        "screenshot_ids",
+        "description",
+        "more_description",
+        "what_you_get",
+        "free",
+        "price",
+        "sale_price",
+        "sale_ends_at",
+        "currency",
+        "licence_label",
+        "licence_devices",
+        "package",
+        "databases",
+        "databases_note",
+        "size_bytes",
+        "version",
+        "released_at",
+        "whats_new",
+        "version_history",
+        "platforms",
+        "platform_labels",
+        "min_requirements",
+        "notice",
+        "permissions",
+        "status",
+        "show_in_department",
+        "allow_reviews",
+        "position",
+        "views",
+        "downloads",
+        "owners",
+        "rating_sum",
+        "rating_count",
+        "rating_stars",
+        "search_text",
+        "created_at",
+        "updated_at",
+        "updated_by"
+      ],
+      "nullable": [
+        "subcategory",
+        "icon_id",
+        "more_description",
+        "price",
+        "sale_price",
+        "sale_ends_at",
+        "licence_label",
+        "licence_devices",
+        "package",
+        "databases_note",
+        "version",
+        "released_at",
+        "whats_new",
+        "min_requirements",
+        "notice",
+        "updated_by"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "sale_ends_at",
+        "created_at",
+        "updated_at"
+      ],
+      "json": [
+        "company",
+        "screenshot_ids",
+        "what_you_get",
+        "package",
+        "databases",
+        "version_history",
+        "platforms",
+        "platform_labels",
+        "permissions",
+        "rating_stars"
+      ],
+      "booleans": [
+        "free",
+        "show_in_department",
+        "allow_reviews"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_software_apps_slug",
+          "columns": [
+            "slug"
+          ]
+        }
+      ]
+    },
+    "packs": {
+      "table": "software_packs",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "slug",
+        "name",
+        "summary",
+        "app_ids",
+        "price",
+        "currency",
+        "licence_label",
+        "visible",
+        "position",
+        "sold",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "summary",
+        "licence_label"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "updated_at"
+      ],
+      "json": [
+        "app_ids"
+      ],
+      "booleans": [
+        "visible"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_software_packs_slug",
+          "columns": [
+            "slug"
+          ]
+        }
+      ]
+    },
+    "rails": {
+      "table": "software_rails",
+      "key": [
+        "key"
+      ],
+      "idColumn": "key",
+      "columns": [
+        "key",
+        "title",
+        "source",
+        "style",
+        "category_id",
+        "platform",
+        "app_ids",
+        "limit",
+        "visible",
+        "position",
+        "updated_at"
+      ],
+      "nullable": [
+        "category_id",
+        "platform"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "json": [
+        "app_ids"
+      ],
+      "booleans": [
+        "visible"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "key"
+          ]
+        }
+      ]
+    },
+    "purchases": {
+      "table": "software_purchases",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "customer_id",
+        "app_id",
+        "pack_id",
+        "title",
+        "items",
+        "amount",
+        "currency",
+        "status",
+        "intent_id",
+        "attempts",
+        "method_label",
+        "decline_message",
+        "idempotency_key",
+        "created_at",
+        "updated_at",
+        "paid_at"
+      ],
+      "nullable": [
+        "app_id",
+        "pack_id",
+        "intent_id",
+        "method_label",
+        "decline_message",
+        "paid_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "updated_at",
+        "paid_at"
+      ],
+      "json": [
+        "items"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_software_purchases_ref",
+          "columns": [
+            "ref"
+          ]
+        },
+        {
+          "name": "uq_software_purchases_idempotency_key",
+          "columns": [
+            "idempotency_key"
+          ]
+        }
+      ]
+    },
+    "entitlements": {
+      "table": "software_entitlements",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "customer_id",
+        "app_id",
+        "source",
+        "purchase_id",
+        "granted_by",
+        "licence_key",
+        "licence_issued_at",
+        "licence_reissues",
+        "created_at"
+      ],
+      "nullable": [
+        "purchase_id",
+        "granted_by",
+        "licence_key",
+        "licence_issued_at",
+        "licence_reissues"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "licence_issued_at",
+        "created_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_software_entitlements_licence_key",
+          "columns": [
+            "licence_key"
+          ],
+          "partial": true
+        },
+        {
+          "name": "uq_software_entitlements_1",
+          "columns": [
+            "customer_id",
+            "app_id"
+          ]
+        }
+      ]
+    },
+    "reviews": {
+      "table": "software_reviews",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "app_id",
+        "customer_id",
+        "name",
+        "stars",
+        "text",
+        "hidden",
+        "hidden_reason",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "text",
+        "hidden_reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [
+        "hidden"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_software_reviews_1",
+          "columns": [
+            "app_id",
+            "customer_id"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

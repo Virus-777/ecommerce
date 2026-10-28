@@ -5902,6 +5902,743 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "campaigns": {
+      "table": "promotions_campaigns",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "name",
+        "description",
+        "internal_note",
+        "owner_kind",
+        "seller_id",
+        "kind",
+        "discount",
+        "auto_apply",
+        "starts_at",
+        "ends_at",
+        "time_zone",
+        "scope_mode",
+        "eligibility",
+        "budget_amount",
+        "budget_used",
+        "usage_cap",
+        "usage_count",
+        "per_customer",
+        "per_order",
+        "per_customer_units",
+        "funding_owner",
+        "platform_share_bps",
+        "cost_center",
+        "funding_note",
+        "stacking",
+        "exclusive_group",
+        "participation",
+        "deals",
+        "terms",
+        "status",
+        "ended_reason",
+        "approval_request_id",
+        "currency",
+        "created_by",
+        "created_at",
+        "updated_at",
+        "version"
+      ],
+      "nullable": [
+        "description",
+        "internal_note",
+        "seller_id",
+        "budget_amount",
+        "usage_cap",
+        "per_customer",
+        "per_order",
+        "per_customer_units",
+        "platform_share_bps",
+        "cost_center",
+        "funding_note",
+        "exclusive_group",
+        "participation",
+        "deals",
+        "terms",
+        "ended_reason",
+        "approval_request_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "starts_at",
+        "ends_at",
+        "created_at",
+        "updated_at"
+      ],
+      "json": [
+        "discount",
+        "eligibility",
+        "stacking",
+        "participation",
+        "deals"
+      ],
+      "booleans": [
+        "auto_apply"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_promotions_campaigns_ref",
+          "columns": [
+            "ref"
+          ]
+        }
+      ]
+    },
+    "campaign_targets": {
+      "table": "promotions_campaign_targets",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "campaign_id",
+        "kind",
+        "target_id",
+        "excluded",
+        "label"
+      ],
+      "nullable": [
+        "label"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [
+        "excluded"
+      ],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        },
+        {
+          "name": "uq_promotions_campaign_targets_1",
+          "columns": [
+            "campaign_id",
+            "kind",
+            "target_id"
+          ]
+        }
+      ]
+    },
+    "eligible_offers": {
+      "table": "promotions_eligible_offers",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "campaign_id",
+        "offer_id",
+        "seller_id",
+        "official_store",
+        "eligible",
+        "reason",
+        "refreshed_at"
+      ],
+      "nullable": [
+        "reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "refreshed_at"
+      ],
+      "json": [],
+      "booleans": [
+        "official_store",
+        "eligible"
+      ],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        }
+      ]
+    },
+    "funding_reviews": {
+      "table": "promotions_funding_reviews",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "campaign_id",
+        "state",
+        "sent_at",
+        "reviewer_id",
+        "decided_at",
+        "checks",
+        "platform_max",
+        "sellers_max",
+        "expected_sales",
+        "margin_impact_pts",
+        "comment",
+        "approval_request_id"
+      ],
+      "nullable": [
+        "reviewer_id",
+        "decided_at",
+        "expected_sales",
+        "margin_impact_pts",
+        "comment",
+        "approval_request_id"
+      ],
+      "decimal": [
+        "margin_impact_pts"
+      ],
+      "binary": [],
+      "dates": [
+        "sent_at",
+        "decided_at"
+      ],
+      "json": [
+        "checks"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "participations": {
+      "table": "promotions_participations",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "campaign_id",
+        "seller_id",
+        "state",
+        "seller_share_bps",
+        "platform_share_bps",
+        "respond_by",
+        "consented_at",
+        "consented_by",
+        "consent_text",
+        "reason",
+        "updated_at"
+      ],
+      "nullable": [
+        "respond_by",
+        "consented_at",
+        "consented_by",
+        "consent_text",
+        "reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "respond_by",
+        "consented_at",
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_promotions_participations_1",
+          "columns": [
+            "campaign_id",
+            "seller_id"
+          ]
+        }
+      ]
+    },
+    "participation_offers": {
+      "table": "promotions_participation_offers",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "participation_id",
+        "offer_id",
+        "eligible",
+        "ineligible_reasons",
+        "included"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [
+        "ineligible_reasons"
+      ],
+      "booleans": [
+        "eligible",
+        "included"
+      ],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        },
+        {
+          "name": "uq_promotions_participation_offers_1",
+          "columns": [
+            "participation_id",
+            "offer_id"
+          ]
+        }
+      ]
+    },
+    "flash_items": {
+      "table": "promotions_flash_items",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "campaign_id",
+        "offer_id",
+        "deal_price",
+        "regular_price",
+        "deal_stock",
+        "claimed",
+        "reserved",
+        "purchase_limit",
+        "state",
+        "sold_out_at",
+        "approved_deal_price",
+        "approved_deal_stock",
+        "approved_purchase_limit"
+      ],
+      "nullable": [
+        "sold_out_at",
+        "approved_deal_price",
+        "approved_deal_stock",
+        "approved_purchase_limit"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "sold_out_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_promotions_flash_items_1",
+          "columns": [
+            "campaign_id",
+            "offer_id"
+          ]
+        }
+      ]
+    },
+    "coupon_codes": {
+      "table": "promotions_coupon_codes",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "campaign_id",
+        "code",
+        "kind",
+        "max_redemptions",
+        "redemptions",
+        "assigned_customer_id",
+        "issue_key",
+        "active",
+        "created_at"
+      ],
+      "nullable": [
+        "max_redemptions",
+        "assigned_customer_id",
+        "issue_key"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "json": [],
+      "booleans": [
+        "active"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_promotions_coupon_codes_1",
+          "columns": [
+            "code"
+          ],
+          "partial": true
+        },
+        {
+          "name": "uq_promotions_coupon_codes_4",
+          "columns": [
+            "issue_key"
+          ]
+        }
+      ]
+    },
+    "coupon_clips": {
+      "table": "promotions_coupon_clips",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "customer_id",
+        "campaign_id",
+        "code_id",
+        "clipped_at"
+      ],
+      "nullable": [
+        "code_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "clipped_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        },
+        {
+          "name": "uq_promotions_coupon_clips_1",
+          "columns": [
+            "customer_id",
+            "campaign_id"
+          ]
+        }
+      ]
+    },
+    "evaluations": {
+      "table": "promotions_evaluations",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "input_hash",
+        "result",
+        "valid_until"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "valid_until"
+      ],
+      "json": [
+        "result"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "redemptions": {
+      "table": "promotions_redemptions",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "campaign_id",
+        "code_id",
+        "reservation_id",
+        "idempotency_key",
+        "evaluation_id",
+        "order_id",
+        "customer_id",
+        "guest_key",
+        "state",
+        "amount",
+        "platform_part",
+        "seller_part",
+        "reversed",
+        "currency",
+        "expires_at",
+        "created_at"
+      ],
+      "nullable": [
+        "code_id",
+        "order_id",
+        "customer_id",
+        "guest_key",
+        "expires_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "expires_at",
+        "created_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_promotions_redemptions_1",
+          "columns": [
+            "reservation_id",
+            "campaign_id"
+          ]
+        }
+      ]
+    },
+    "redemption_lines": {
+      "table": "promotions_redemption_lines",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "redemption_id",
+        "line_id",
+        "order_item_id",
+        "offer_id",
+        "seller_id",
+        "quantity",
+        "amount",
+        "platform_part",
+        "seller_part",
+        "reversed"
+      ],
+      "nullable": [
+        "order_item_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        }
+      ]
+    },
+    "usage_counters": {
+      "table": "promotions_usage_counters",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "campaign_id",
+        "customer_key",
+        "uses",
+        "units"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        },
+        {
+          "name": "uq_promotions_usage_counters_1",
+          "columns": [
+            "campaign_id",
+            "customer_key"
+          ]
+        }
+      ]
+    },
+    "event_reminders": {
+      "table": "promotions_event_reminders",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "customer_id",
+        "campaign_id",
+        "created_at",
+        "sent_at"
+      ],
+      "nullable": [
+        "sent_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "sent_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        },
+        {
+          "name": "uq_promotions_event_reminders_1",
+          "columns": [
+            "customer_id",
+            "campaign_id"
+          ]
+        }
+      ]
+    },
+    "campaign_log": {
+      "table": "promotions_campaign_log",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "campaign_id",
+        "action",
+        "reason",
+        "detail",
+        "actor_kind",
+        "actor_id",
+        "at"
+      ],
+      "nullable": [
+        "reason",
+        "detail",
+        "actor_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [
+        "detail"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "campaign_results_daily": {
+      "table": "promotions_campaign_results_daily",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "campaign_id",
+        "day",
+        "sales",
+        "orders",
+        "cost_platform",
+        "cost_seller",
+        "redemptions",
+        "returned_items",
+        "official_cost_basis",
+        "official_revenue"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        },
+        {
+          "name": "uq_promotions_campaign_results_daily_1",
+          "columns": [
+            "campaign_id",
+            "day"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

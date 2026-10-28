@@ -4506,6 +4506,639 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "intents": {
+      "table": "payments_intents",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "purpose",
+        "purchase_module",
+        "purchase_ref_id",
+        "purchase_ref",
+        "checkout_session_id",
+        "attempt_no",
+        "order_id",
+        "customer_id",
+        "guest_email",
+        "amount",
+        "currency",
+        "tenders",
+        "method",
+        "provider",
+        "provider_ref",
+        "status",
+        "decline",
+        "next_action",
+        "authorized_amount",
+        "captured_amount",
+        "refunded_amount",
+        "authorized_at",
+        "captured_at",
+        "authorization_expires_at",
+        "last_checked_at",
+        "next_check_at",
+        "check_attempts",
+        "orphan",
+        "idempotency_key",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "purchase_module",
+        "purchase_ref_id",
+        "purchase_ref",
+        "checkout_session_id",
+        "order_id",
+        "customer_id",
+        "guest_email",
+        "provider_ref",
+        "decline",
+        "next_action",
+        "authorized_at",
+        "captured_at",
+        "authorization_expires_at",
+        "last_checked_at",
+        "next_check_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "authorized_at",
+        "captured_at",
+        "authorization_expires_at",
+        "last_checked_at",
+        "next_check_at",
+        "created_at",
+        "updated_at"
+      ],
+      "json": [
+        "tenders",
+        "method",
+        "decline",
+        "next_action"
+      ],
+      "booleans": [
+        "orphan"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_payments_intents_ref",
+          "columns": [
+            "ref"
+          ]
+        },
+        {
+          "name": "uq_payments_intents_idempotency_key",
+          "columns": [
+            "idempotency_key"
+          ]
+        },
+        {
+          "name": "uq_payments_intents_2",
+          "columns": [
+            "checkout_session_id"
+          ],
+          "partial": true
+        },
+        {
+          "name": "uq_payments_intents_10",
+          "columns": [
+            "purchase_module",
+            "purchase_ref_id"
+          ],
+          "partial": true
+        }
+      ]
+    },
+    "allocations": {
+      "table": "payments_allocations",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "intent_id",
+        "group_id",
+        "owner_type",
+        "seller_id",
+        "amount"
+      ],
+      "nullable": [
+        "seller_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        }
+      ]
+    },
+    "captures": {
+      "table": "payments_captures",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "intent_id",
+        "group_id",
+        "amount",
+        "credit_amount",
+        "status",
+        "provider_ref",
+        "idempotency_key",
+        "at"
+      ],
+      "nullable": [
+        "group_id",
+        "provider_ref"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_payments_captures_idempotency_key",
+          "columns": [
+            "idempotency_key"
+          ]
+        }
+      ]
+    },
+    "provider_calls": {
+      "table": "payments_provider_calls",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "intent_id",
+        "refund_id",
+        "operation",
+        "outcome",
+        "provider_ref",
+        "message",
+        "latency_ms",
+        "at"
+      ],
+      "nullable": [
+        "intent_id",
+        "refund_id",
+        "provider_ref",
+        "message",
+        "latency_ms"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "refunds": {
+      "table": "payments_refunds",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "order_id",
+        "checkout_session_id",
+        "intent_id",
+        "origin",
+        "origin_id",
+        "origin_ref",
+        "amount",
+        "currency",
+        "destination",
+        "destination_label",
+        "status",
+        "attempts",
+        "outcome_unknown",
+        "failure_code",
+        "failure_reason",
+        "provider_ref",
+        "reason",
+        "requested_by",
+        "idempotency_key",
+        "destination_ref",
+        "attempt_key",
+        "sent_at",
+        "last_attempt_at",
+        "next_attempt_at",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "order_id",
+        "origin_id",
+        "origin_ref",
+        "failure_code",
+        "failure_reason",
+        "provider_ref",
+        "destination_ref",
+        "attempt_key",
+        "sent_at",
+        "last_attempt_at",
+        "next_attempt_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "sent_at",
+        "last_attempt_at",
+        "next_attempt_at",
+        "created_at",
+        "updated_at"
+      ],
+      "json": [
+        "requested_by"
+      ],
+      "booleans": [
+        "outcome_unknown"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_payments_refunds_ref",
+          "columns": [
+            "ref"
+          ]
+        },
+        {
+          "name": "uq_payments_refunds_idempotency_key",
+          "columns": [
+            "idempotency_key"
+          ]
+        },
+        {
+          "name": "uq_payments_refunds_4",
+          "columns": [
+            "origin",
+            "origin_id"
+          ],
+          "partial": true
+        }
+      ]
+    },
+    "refund_items": {
+      "table": "payments_refund_items",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "refund_id",
+        "order_item_id",
+        "group_id",
+        "seller_id",
+        "amount"
+      ],
+      "nullable": [
+        "seller_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        }
+      ]
+    },
+    "refund_log": {
+      "table": "payments_refund_log",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "refund_id",
+        "from_status",
+        "to_status",
+        "detail",
+        "actor",
+        "at"
+      ],
+      "nullable": [
+        "from_status",
+        "detail"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [
+        "actor"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "disputes": {
+      "table": "payments_disputes",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "kind",
+        "provider",
+        "provider_case_id",
+        "intent_id",
+        "order_id",
+        "group_id",
+        "seller_id",
+        "reason_code",
+        "reason",
+        "amount",
+        "currency",
+        "evidence_due_at",
+        "due_soon_flagged_at",
+        "status",
+        "evidence",
+        "approval_request_id",
+        "concession_reason",
+        "owner_staff_id",
+        "opened_at",
+        "decided_at"
+      ],
+      "nullable": [
+        "group_id",
+        "seller_id",
+        "evidence_due_at",
+        "due_soon_flagged_at",
+        "approval_request_id",
+        "concession_reason",
+        "owner_staff_id",
+        "decided_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "evidence_due_at",
+        "due_soon_flagged_at",
+        "opened_at",
+        "decided_at"
+      ],
+      "json": [
+        "evidence"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_payments_disputes_ref",
+          "columns": [
+            "ref"
+          ]
+        },
+        {
+          "name": "uq_payments_disputes_1",
+          "columns": [
+            "provider",
+            "provider_case_id"
+          ]
+        }
+      ]
+    },
+    "dispute_log": {
+      "table": "payments_dispute_log",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "dispute_id",
+        "label",
+        "detail",
+        "actor",
+        "at"
+      ],
+      "nullable": [
+        "detail"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [
+        "actor"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "saved_methods": {
+      "table": "payments_saved_methods",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "customer_id",
+        "provider",
+        "provider_method_id",
+        "kind",
+        "brand",
+        "last4",
+        "exp_month",
+        "exp_year",
+        "label",
+        "billing_address",
+        "is_default",
+        "removed_at",
+        "created_at"
+      ],
+      "nullable": [
+        "removed_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "removed_at",
+        "created_at"
+      ],
+      "json": [
+        "billing_address"
+      ],
+      "booleans": [
+        "is_default"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "webhook_events": {
+      "table": "payments_webhook_events",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "provider",
+        "external_id",
+        "type",
+        "payload",
+        "intent_id",
+        "refund_id",
+        "received_at",
+        "processed_at",
+        "outcome"
+      ],
+      "nullable": [
+        "intent_id",
+        "refund_id",
+        "processed_at",
+        "outcome"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "received_at",
+        "processed_at"
+      ],
+      "json": [
+        "payload"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_payments_webhook_events_1",
+          "columns": [
+            "provider",
+            "external_id"
+          ]
+        }
+      ]
+    },
+    "ref_sequences": {
+      "table": "payments_ref_sequences",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "kind",
+        "day",
+        "last_value"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        },
+        {
+          "name": "uq_payments_ref_sequences_1",
+          "columns": [
+            "kind",
+            "day"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

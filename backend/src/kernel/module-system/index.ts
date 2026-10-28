@@ -22,6 +22,7 @@ import type { WebhookVerifier } from '../http/register.js';
 import type { Clock } from '../lib/clock.js';
 import type { RefGenerator } from '../lib/refs.js';
 import type { ModuleSchemas, ModuleStore } from '../mongo/index.js';
+import type { Store } from '../store/index.js';
 import type { MongoMigration } from '../mongo/schema.js';
 import type { ModuleSpecDef } from '../spec/define.js';
 import type { PublicApiMap } from './public-apis.js';
@@ -53,6 +54,15 @@ export interface ModuleContext<N extends ModuleName> {
    * collections are off limits. Transactions, named locks and the event inbox (claim, seen) are on it too.
    */
   readonly mongo: ModuleStore;
+  /**
+   * This module's data, in whichever database holds it (`MYSQL_MODULES`, docs/10 §23 Y1). A repository written
+   * against `Store` instead of `ctx.mongo` runs on either, which is how a module is moved: the repository changes
+   * to the neutral vocabulary once, and the database it talks to becomes a deployment setting.
+   *
+   * While a module's data is still in MongoDB this is that same MongoDB store behind the neutral facade, so
+   * `ctx.store` is always usable and `ctx.mongo` stays for the modules that have not moved.
+   */
+  readonly store: Store;
   readonly clock: Clock;
   /** Publish this module's events, subscribe to the events its spec consumes */
   readonly events: ModuleEvents<OwnEventsOf<N>, ConsumedEventsOf<N>>;

@@ -3377,6 +3377,509 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "search_documents": {
+      "table": "search_search_documents",
+      "key": [
+        "product_id"
+      ],
+      "idColumn": "product_id",
+      "columns": [
+        "product_id",
+        "slug",
+        "title",
+        "brand_id",
+        "brand_name",
+        "category_id",
+        "category_path_ids",
+        "attributes",
+        "variant_count",
+        "variant_options",
+        "image",
+        "seller_ids",
+        "has_official",
+        "conditions",
+        "offer_count",
+        "featured_offer_id",
+        "featured_price",
+        "featured_seller_name",
+        "featured_official",
+        "min_price",
+        "max_price",
+        "currency",
+        "was_price",
+        "deal_ends_at",
+        "on_sale",
+        "gtins",
+        "variant_gtins",
+        "badges",
+        "in_stock",
+        "low_stock",
+        "free_delivery",
+        "fastest_dispatch_days",
+        "same_day_cutoff",
+        "rating",
+        "rating_count",
+        "sales_30d",
+        "first_listed_at",
+        "popularity",
+        "terms",
+        "title_norm",
+        "version",
+        "indexed_at",
+        "offers",
+        "card_all",
+        "card_all_n",
+        "card_in_stock",
+        "card_in_stock_n",
+        "rank_all",
+        "rank_in_stock",
+        "rank_key",
+        "best_seller_rank",
+        "best_seller_category_id"
+      ],
+      "nullable": [
+        "brand_id",
+        "brand_name",
+        "category_id",
+        "image",
+        "featured_offer_id",
+        "featured_price",
+        "featured_seller_name",
+        "min_price",
+        "max_price",
+        "was_price",
+        "deal_ends_at",
+        "fastest_dispatch_days",
+        "same_day_cutoff",
+        "rating",
+        "terms",
+        "offers",
+        "card_all",
+        "card_all_n",
+        "card_in_stock",
+        "card_in_stock_n",
+        "rank_all",
+        "rank_in_stock",
+        "rank_key",
+        "best_seller_rank",
+        "best_seller_category_id"
+      ],
+      "decimal": [
+        "rating",
+        "popularity"
+      ],
+      "binary": [],
+      "dates": [
+        "deal_ends_at",
+        "first_listed_at",
+        "indexed_at"
+      ],
+      "json": [
+        "category_path_ids",
+        "attributes",
+        "variant_options",
+        "image",
+        "seller_ids",
+        "conditions",
+        "gtins",
+        "variant_gtins",
+        "badges",
+        "terms",
+        "offers",
+        "card_all",
+        "card_in_stock",
+        "rank_all",
+        "rank_in_stock"
+      ],
+      "booleans": [
+        "has_official",
+        "featured_official",
+        "on_sale",
+        "in_stock",
+        "low_stock",
+        "free_delivery"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "product_id"
+          ]
+        }
+      ]
+    },
+    "search_offers": {
+      "table": "search_search_offers",
+      "key": [
+        "offer_id"
+      ],
+      "idColumn": "offer_id",
+      "columns": [
+        "offer_id",
+        "product_id",
+        "variant_id",
+        "seller_id",
+        "official",
+        "condition",
+        "price",
+        "in_stock",
+        "free_delivery",
+        "dispatch_days",
+        "featured_eligible"
+      ],
+      "nullable": [
+        "seller_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [
+        "official",
+        "in_stock",
+        "free_delivery",
+        "featured_eligible"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "offer_id"
+          ]
+        }
+      ]
+    },
+    "suggestion_terms": {
+      "table": "search_suggestion_terms",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "term",
+        "kind",
+        "target_id",
+        "weight",
+        "updated_at"
+      ],
+      "nullable": [
+        "target_id"
+      ],
+      "decimal": [
+        "weight"
+      ],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "synonyms": {
+      "table": "search_synonyms",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "terms",
+        "kind",
+        "from_term",
+        "active",
+        "note",
+        "updated_by",
+        "updated_at"
+      ],
+      "nullable": [
+        "from_term",
+        "note"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "json": [
+        "terms"
+      ],
+      "booleans": [
+        "active"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "recent_searches": {
+      "table": "search_recent_searches",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "owner_kind",
+        "owner_id",
+        "query",
+        "filters",
+        "searched_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "searched_at"
+      ],
+      "json": [
+        "filters"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "query_log": {
+      "table": "search_query_log",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "search_id",
+        "raw",
+        "normalized",
+        "filters",
+        "sort",
+        "results",
+        "corrected_to",
+        "session_key",
+        "at"
+      ],
+      "nullable": [
+        "raw",
+        "normalized",
+        "corrected_to",
+        "session_key"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [
+        "filters"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "click_log": {
+      "table": "search_click_log",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "search_id",
+        "product_id",
+        "position",
+        "sponsored",
+        "at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [
+        "sponsored"
+      ],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        }
+      ]
+    },
+    "product_sales_daily": {
+      "table": "search_product_sales_daily",
+      "key": [
+        "product_id",
+        "day"
+      ],
+      "idColumn": null,
+      "columns": [
+        "product_id",
+        "day",
+        "units",
+        "orders",
+        "updated_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "product_id",
+            "day"
+          ]
+        }
+      ]
+    },
+    "dirty_documents": {
+      "table": "search_dirty_documents",
+      "key": [
+        "product_id"
+      ],
+      "idColumn": "product_id",
+      "columns": [
+        "product_id",
+        "reason",
+        "queued_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "queued_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "product_id"
+          ]
+        }
+      ]
+    },
+    "reindex_jobs": {
+      "table": "search_reindex_jobs",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "scope",
+        "ids",
+        "state",
+        "total",
+        "processed",
+        "requested_by",
+        "reason",
+        "started_at",
+        "finished_at",
+        "error"
+      ],
+      "nullable": [
+        "started_at",
+        "finished_at",
+        "error"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "started_at",
+        "finished_at"
+      ],
+      "json": [
+        "ids"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "ranking_policies": {
+      "table": "search_ranking_policies",
+      "key": [
+        "version"
+      ],
+      "idColumn": "version",
+      "columns": [
+        "version",
+        "text",
+        "factors",
+        "effective_from",
+        "reason",
+        "published_by",
+        "published_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "effective_from",
+        "published_at"
+      ],
+      "json": [
+        "factors"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "version"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

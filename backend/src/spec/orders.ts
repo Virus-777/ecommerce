@@ -5571,6 +5571,600 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "orders": {
+      "table": "orders_orders",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "checkout_session_id",
+        "attempt_no",
+        "reservation_id",
+        "delivery_address_id",
+        "customer_id",
+        "contact_email",
+        "contact_phone",
+        "contact_name",
+        "channel",
+        "lifecycle",
+        "display_status",
+        "flag_kinds",
+        "currency",
+        "items_total",
+        "discount_total",
+        "shipping_total",
+        "tax_total",
+        "total",
+        "delivery_address",
+        "gift_note",
+        "hide_prices",
+        "policy_versions",
+        "coupon_codes",
+        "payment_intent_id",
+        "payment_state",
+        "payment_method_label",
+        "captured_total",
+        "refunded_total",
+        "placed_at",
+        "accepted_at",
+        "completed_at"
+      ],
+      "nullable": [
+        "reservation_id",
+        "delivery_address_id",
+        "customer_id",
+        "contact_phone",
+        "gift_note",
+        "accepted_at",
+        "completed_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "placed_at",
+        "accepted_at",
+        "completed_at"
+      ],
+      "json": [
+        "flag_kinds",
+        "delivery_address",
+        "policy_versions",
+        "coupon_codes"
+      ],
+      "booleans": [
+        "hide_prices"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_orders_orders_ref",
+          "columns": [
+            "ref"
+          ]
+        },
+        {
+          "name": "uq_orders_orders_1",
+          "columns": [
+            "checkout_session_id",
+            "attempt_no"
+          ]
+        }
+      ]
+    },
+    "order_facts": {
+      "table": "orders_order_facts",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "order_id",
+        "kind",
+        "source_id",
+        "group_id",
+        "shipment_id",
+        "ref",
+        "status",
+        "subkind",
+        "customer_action",
+        "amount",
+        "item_ids",
+        "due_at",
+        "at"
+      ],
+      "nullable": [
+        "group_id",
+        "shipment_id",
+        "ref",
+        "status",
+        "subkind",
+        "customer_action",
+        "amount",
+        "item_ids",
+        "due_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "due_at",
+        "at"
+      ],
+      "json": [
+        "item_ids"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_orders_order_facts_1",
+          "columns": [
+            "order_id",
+            "kind",
+            "source_id"
+          ]
+        }
+      ]
+    },
+    "seller_groups": {
+      "table": "orders_seller_groups",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "order_id",
+        "position",
+        "owner_type",
+        "seller_id",
+        "seller_name",
+        "ships_from",
+        "fulfilled_by",
+        "delivery",
+        "dispatch_by",
+        "dispatch_by_history",
+        "status",
+        "return_terms_summary",
+        "items_total",
+        "discount_total",
+        "shipping_total",
+        "tax_total",
+        "total",
+        "shipped_at",
+        "delivered_at"
+      ],
+      "nullable": [
+        "seller_id",
+        "shipped_at",
+        "delivered_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "dispatch_by",
+        "shipped_at",
+        "delivered_at"
+      ],
+      "json": [
+        "delivery",
+        "dispatch_by_history"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "order_items": {
+      "table": "orders_order_items",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "order_id",
+        "group_id",
+        "offer_id",
+        "product_id",
+        "variant_id",
+        "stock_item_id",
+        "category_id",
+        "product_snapshot",
+        "offer_snapshot",
+        "return_terms",
+        "quantity",
+        "unit_price",
+        "discounts",
+        "shipping_share",
+        "tax_share",
+        "paid_amount",
+        "refunded_amount",
+        "refund_status",
+        "state",
+        "state_before_request",
+        "shipment_id",
+        "return_id",
+        "return_ref",
+        "delivered_at",
+        "return_window_ends_at",
+        "split_from_item_id",
+        "replacement_of_item_id",
+        "checkout_line_id"
+      ],
+      "nullable": [
+        "category_id",
+        "state_before_request",
+        "shipment_id",
+        "return_id",
+        "return_ref",
+        "delivered_at",
+        "return_window_ends_at",
+        "split_from_item_id",
+        "replacement_of_item_id",
+        "checkout_line_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "delivered_at",
+        "return_window_ends_at"
+      ],
+      "json": [
+        "product_snapshot",
+        "offer_snapshot",
+        "return_terms",
+        "discounts"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "item_state_log": {
+      "table": "orders_item_state_log",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "item_id",
+        "from_state",
+        "to_state",
+        "event",
+        "reason",
+        "actor_kind",
+        "actor_id",
+        "at"
+      ],
+      "nullable": [
+        "reason",
+        "actor_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "cancellations": {
+      "table": "orders_cancellations",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "order_id",
+        "group_id",
+        "initiated_by",
+        "reason_code",
+        "reason",
+        "items",
+        "status",
+        "respond_by",
+        "decided_by",
+        "decided_at",
+        "decline_reason",
+        "refund_preview",
+        "refund_status",
+        "payment_refund_id",
+        "idempotency_key",
+        "created_at"
+      ],
+      "nullable": [
+        "reason",
+        "respond_by",
+        "decided_by",
+        "decided_at",
+        "decline_reason",
+        "payment_refund_id",
+        "idempotency_key"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "respond_by",
+        "decided_at",
+        "created_at"
+      ],
+      "json": [
+        "items",
+        "decided_by",
+        "refund_preview"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_orders_cancellations_3",
+          "columns": [
+            "order_id",
+            "idempotency_key"
+          ]
+        }
+      ]
+    },
+    "shipment_refs": {
+      "table": "orders_shipment_refs",
+      "key": [
+        "shipment_id"
+      ],
+      "idColumn": "shipment_id",
+      "columns": [
+        "shipment_id",
+        "order_id",
+        "group_id",
+        "package_label",
+        "carrier",
+        "service",
+        "tracking_number",
+        "tracking_url",
+        "status",
+        "estimated_arrival",
+        "shipped_at",
+        "delivered_at",
+        "item_ids",
+        "lines"
+      ],
+      "nullable": [
+        "carrier",
+        "service",
+        "tracking_number",
+        "tracking_url",
+        "estimated_arrival",
+        "shipped_at",
+        "delivered_at",
+        "lines"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "shipped_at",
+        "delivered_at"
+      ],
+      "json": [
+        "estimated_arrival",
+        "item_ids",
+        "lines"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "shipment_id"
+          ]
+        }
+      ]
+    },
+    "timeline": {
+      "table": "orders_timeline",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "order_id",
+        "group_id",
+        "item_id",
+        "visibility",
+        "label",
+        "detail",
+        "reason",
+        "actor_kind",
+        "actor_id",
+        "actor_name",
+        "at"
+      ],
+      "nullable": [
+        "group_id",
+        "item_id",
+        "detail",
+        "reason",
+        "actor_id",
+        "actor_name"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "notes": {
+      "table": "orders_notes",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "order_id",
+        "text",
+        "author_id",
+        "author_name",
+        "at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "documents": {
+      "table": "orders_documents",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "order_id",
+        "group_id",
+        "kind",
+        "number",
+        "issued_at"
+      ],
+      "nullable": [
+        "group_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "issued_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_orders_documents_number",
+          "columns": [
+            "number"
+          ]
+        }
+      ]
+    },
+    "saved_filters": {
+      "table": "orders_saved_filters",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "owner_staff_id",
+        "name",
+        "query",
+        "shared",
+        "cached_count",
+        "counted_at",
+        "created_at"
+      ],
+      "nullable": [
+        "cached_count",
+        "counted_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "counted_at",
+        "created_at"
+      ],
+      "json": [
+        "query"
+      ],
+      "booleans": [
+        "shared"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

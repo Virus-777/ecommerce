@@ -3366,6 +3366,523 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "bins": {
+      "table": "warehouse_bins",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "location_id",
+        "code",
+        "zone",
+        "kind",
+        "barcode",
+        "active"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [
+        "active"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_warehouse_bins_1",
+          "columns": [
+            "location_id",
+            "code"
+          ]
+        },
+        {
+          "name": "uq_warehouse_bins_2",
+          "columns": [
+            "barcode"
+          ]
+        }
+      ]
+    },
+    "bin_assignments": {
+      "table": "warehouse_bin_assignments",
+      "key": [
+        "stock_item_id",
+        "bin_id"
+      ],
+      "idColumn": null,
+      "columns": [
+        "stock_item_id",
+        "bin_id",
+        "primary_bin",
+        "assigned_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "assigned_at"
+      ],
+      "json": [],
+      "booleans": [
+        "primary_bin"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "stock_item_id",
+            "bin_id"
+          ]
+        },
+        {
+          "name": "uq_warehouse_bin_assignments_2",
+          "columns": [
+            "stock_item_id"
+          ],
+          "partial": true
+        }
+      ]
+    },
+    "fulfillments": {
+      "table": "warehouse_fulfillments",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "order_id",
+        "order_ref",
+        "seller_group_id",
+        "fulfilled_by",
+        "seller_id",
+        "seller_name",
+        "location_id",
+        "status",
+        "ship_by",
+        "delivery_choice",
+        "ship_to",
+        "wave_id",
+        "hold_reason",
+        "dispatch_overdue_at",
+        "discrepancy_ids",
+        "total_packages_in_order",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "seller_id",
+        "seller_name",
+        "wave_id",
+        "hold_reason",
+        "dispatch_overdue_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "ship_by",
+        "dispatch_overdue_at",
+        "created_at",
+        "updated_at"
+      ],
+      "json": [
+        "ship_to",
+        "discrepancy_ids"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_warehouse_fulfillments_seller_group_id",
+          "columns": [
+            "seller_group_id"
+          ]
+        }
+      ]
+    },
+    "fulfillment_lines": {
+      "table": "warehouse_fulfillment_lines",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "fulfillment_id",
+        "order_item_id",
+        "stock_item_id",
+        "sku",
+        "label",
+        "quantity",
+        "bin_code",
+        "picked",
+        "short",
+        "state",
+        "picked_by",
+        "picked_at"
+      ],
+      "nullable": [
+        "bin_code",
+        "picked_by",
+        "picked_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "picked_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "waves": {
+      "table": "warehouse_waves",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "location_id",
+        "status",
+        "carrier_pickup_at",
+        "created_by",
+        "created_at",
+        "completed_at"
+      ],
+      "nullable": [
+        "carrier_pickup_at",
+        "completed_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "carrier_pickup_at",
+        "created_at",
+        "completed_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "scan_log": {
+      "table": "warehouse_scan_log",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "context",
+        "context_id",
+        "code",
+        "result",
+        "actor_id",
+        "station",
+        "at"
+      ],
+      "nullable": [
+        "context_id",
+        "station"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "box_types": {
+      "table": "warehouse_box_types",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "name",
+        "kind",
+        "dimensions",
+        "max_weight",
+        "active"
+      ],
+      "nullable": [
+        "max_weight"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [
+        "dimensions",
+        "max_weight"
+      ],
+      "booleans": [
+        "active"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "packages": {
+      "table": "warehouse_packages",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "fulfillment_id",
+        "index_in_order",
+        "of_in_order",
+        "status",
+        "box_type_id",
+        "dimensions",
+        "weight",
+        "fragile",
+        "handling_note",
+        "carrier",
+        "service",
+        "carrier_service_id",
+        "tracking_number",
+        "label_media_id",
+        "label_idempotency_key",
+        "shipment_id",
+        "packed_by",
+        "packed_at",
+        "station"
+      ],
+      "nullable": [
+        "box_type_id",
+        "dimensions",
+        "weight",
+        "handling_note",
+        "carrier",
+        "service",
+        "carrier_service_id",
+        "tracking_number",
+        "label_media_id",
+        "label_idempotency_key",
+        "shipment_id",
+        "packed_by",
+        "packed_at",
+        "station"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "packed_at"
+      ],
+      "json": [
+        "dimensions",
+        "weight"
+      ],
+      "booleans": [
+        "fragile"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_warehouse_packages_2",
+          "columns": [
+            "tracking_number"
+          ]
+        }
+      ]
+    },
+    "package_items": {
+      "table": "warehouse_package_items",
+      "key": [
+        "package_id",
+        "order_item_id"
+      ],
+      "idColumn": null,
+      "columns": [
+        "package_id",
+        "order_item_id",
+        "stock_item_id",
+        "quantity",
+        "scanned",
+        "serial_numbers"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [
+        "serial_numbers"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "package_id",
+            "order_item_id"
+          ]
+        }
+      ]
+    },
+    "putaway_tasks": {
+      "table": "warehouse_putaway_tasks",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "receipt_id",
+        "receipt_ref",
+        "location_id",
+        "stock_item_id",
+        "quantity",
+        "suggested_bin_code",
+        "bin_code",
+        "status",
+        "done_by",
+        "done_at"
+      ],
+      "nullable": [
+        "suggested_bin_code",
+        "bin_code",
+        "done_by",
+        "done_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "done_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "return_parcels": {
+      "table": "warehouse_return_parcels",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "location_id",
+        "return_id",
+        "return_ref",
+        "order_ref",
+        "tracking_number",
+        "status",
+        "expected_by",
+        "expected_items",
+        "unexpected",
+        "parcel_condition",
+        "photo_media_ids",
+        "note",
+        "received_by",
+        "received_at",
+        "handed_over_to",
+        "handed_over_at"
+      ],
+      "nullable": [
+        "return_id",
+        "return_ref",
+        "order_ref",
+        "tracking_number",
+        "expected_by",
+        "parcel_condition",
+        "note",
+        "received_by",
+        "received_at",
+        "handed_over_to",
+        "handed_over_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "received_at",
+        "handed_over_at"
+      ],
+      "json": [
+        "expected_items",
+        "photo_media_ids"
+      ],
+      "booleans": [
+        "unexpected"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

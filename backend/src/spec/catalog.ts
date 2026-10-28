@@ -4681,6 +4681,783 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "categories": {
+      "table": "catalog_categories",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "parent_id",
+        "name",
+        "slug",
+        "position",
+        "visible",
+        "coming_soon",
+        "image_media_id"
+      ],
+      "nullable": [
+        "parent_id",
+        "image_media_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [
+        "visible",
+        "coming_soon"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_catalog_categories_slug",
+          "columns": [
+            "slug"
+          ]
+        }
+      ]
+    },
+    "attributes": {
+      "table": "catalog_attributes",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "category_id",
+        "name",
+        "kind",
+        "unit",
+        "options",
+        "required",
+        "filterable",
+        "variant_defining",
+        "position"
+      ],
+      "nullable": [
+        "unit"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [
+        "options"
+      ],
+      "booleans": [
+        "required",
+        "filterable",
+        "variant_defining"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "image_standards": {
+      "table": "catalog_image_standards",
+      "key": [
+        "category_id"
+      ],
+      "idColumn": "category_id",
+      "columns": [
+        "category_id",
+        "min_width",
+        "min_count",
+        "rules"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [
+        "rules"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "category_id"
+          ]
+        }
+      ]
+    },
+    "brands": {
+      "table": "catalog_brands",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "name",
+        "slug",
+        "logo_media_id",
+        "description",
+        "banner_media_id",
+        "status",
+        "status_reason",
+        "flag_note",
+        "trust_report_id",
+        "selling_policy",
+        "requested_by_seller_id",
+        "requested_for_product_id",
+        "requested_change_request_id",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "logo_media_id",
+        "description",
+        "banner_media_id",
+        "status_reason",
+        "flag_note",
+        "trust_report_id",
+        "requested_by_seller_id",
+        "requested_for_product_id",
+        "requested_change_request_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_catalog_brands_slug",
+          "columns": [
+            "slug"
+          ]
+        }
+      ]
+    },
+    "products": {
+      "table": "catalog_products",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "title",
+        "slug",
+        "brand_id",
+        "category_id",
+        "description",
+        "key_features",
+        "specs",
+        "included_items",
+        "media_ids",
+        "video_media_id",
+        "model_number",
+        "mpn",
+        "no_gtin",
+        "requested_brand",
+        "content_score",
+        "owner_type",
+        "owner_seller_id",
+        "review_state",
+        "publication",
+        "version",
+        "merged_into_id",
+        "created_at",
+        "updated_at",
+        "listed_at",
+        "recrop_media_ids"
+      ],
+      "nullable": [
+        "brand_id",
+        "category_id",
+        "video_media_id",
+        "model_number",
+        "mpn",
+        "requested_brand",
+        "owner_seller_id",
+        "merged_into_id",
+        "listed_at",
+        "recrop_media_ids"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "updated_at",
+        "listed_at"
+      ],
+      "json": [
+        "key_features",
+        "specs",
+        "included_items",
+        "media_ids",
+        "requested_brand",
+        "recrop_media_ids"
+      ],
+      "booleans": [
+        "no_gtin"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_catalog_products_ref",
+          "columns": [
+            "ref"
+          ]
+        }
+      ]
+    },
+    "variants": {
+      "table": "catalog_variants",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "product_id",
+        "options",
+        "gtin",
+        "media_ids",
+        "position",
+        "weight_grams",
+        "length_cm",
+        "width_cm",
+        "height_cm",
+        "list_price_amount",
+        "list_price_currency"
+      ],
+      "nullable": [
+        "gtin",
+        "weight_grams",
+        "length_cm",
+        "width_cm",
+        "height_cm",
+        "list_price_amount",
+        "list_price_currency"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [
+        "options",
+        "media_ids"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_catalog_variants_gtin",
+          "columns": [
+            "gtin"
+          ],
+          "partial": true
+        }
+      ]
+    },
+    "review_log": {
+      "table": "catalog_review_log",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "product_id",
+        "action",
+        "reason",
+        "fields",
+        "actor_kind",
+        "actor_id",
+        "at"
+      ],
+      "nullable": [
+        "reason",
+        "actor_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [
+        "fields"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "correction_suggestions": {
+      "table": "catalog_correction_suggestions",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "product_id",
+        "seller_id",
+        "field",
+        "current",
+        "proposed",
+        "evidence_media_ids",
+        "state",
+        "decision_reason",
+        "decided_by",
+        "created_at"
+      ],
+      "nullable": [
+        "current",
+        "decision_reason",
+        "decided_by"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "json": [
+        "evidence_media_ids"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "submissions": {
+      "table": "catalog_submissions",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "product_id",
+        "kind",
+        "state",
+        "product_version",
+        "submitted_at",
+        "submitted_by",
+        "last_saved_at",
+        "last_saved_by",
+        "expected_review_by",
+        "review_due_at",
+        "paused_at",
+        "assignee_staff_id",
+        "assignee_name",
+        "decided_at",
+        "note"
+      ],
+      "nullable": [
+        "last_saved_at",
+        "last_saved_by",
+        "expected_review_by",
+        "review_due_at",
+        "paused_at",
+        "assignee_staff_id",
+        "assignee_name",
+        "decided_at",
+        "note"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "submitted_at",
+        "last_saved_at",
+        "expected_review_by",
+        "review_due_at",
+        "paused_at",
+        "decided_at"
+      ],
+      "json": [
+        "submitted_by",
+        "last_saved_by"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_catalog_submissions_ref",
+          "columns": [
+            "ref"
+          ]
+        }
+      ]
+    },
+    "submission_checks": {
+      "table": "catalog_submission_checks",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "submission_id",
+        "kind",
+        "result",
+        "message",
+        "details",
+        "evidence",
+        "ran_at",
+        "dismissed_at",
+        "dismissed_by",
+        "dismiss_reason",
+        "dismissed_matched_product_id"
+      ],
+      "nullable": [
+        "dismissed_at",
+        "dismissed_by",
+        "dismiss_reason",
+        "dismissed_matched_product_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "ran_at",
+        "dismissed_at"
+      ],
+      "json": [
+        "details",
+        "evidence",
+        "dismissed_by"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "check_dismissals": {
+      "table": "catalog_check_dismissals",
+      "key": [
+        "check_id",
+        "matched_product_id"
+      ],
+      "idColumn": null,
+      "columns": [
+        "check_id",
+        "matched_product_id",
+        "dismissed_at",
+        "dismissed_by",
+        "reason"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "dismissed_at"
+      ],
+      "json": [
+        "dismissed_by"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "check_id",
+            "matched_product_id"
+          ]
+        }
+      ]
+    },
+    "review_drafts": {
+      "table": "catalog_review_drafts",
+      "key": [
+        "submission_id",
+        "staff_id"
+      ],
+      "idColumn": null,
+      "columns": [
+        "submission_id",
+        "staff_id",
+        "decision",
+        "reason",
+        "fields",
+        "saved_at"
+      ],
+      "nullable": [
+        "decision",
+        "reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "saved_at"
+      ],
+      "json": [
+        "fields"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "submission_id",
+            "staff_id"
+          ]
+        }
+      ]
+    },
+    "brand_authorized_sellers": {
+      "table": "catalog_brand_authorized_sellers",
+      "key": [
+        "brand_id",
+        "seller_id"
+      ],
+      "idColumn": null,
+      "columns": [
+        "brand_id",
+        "seller_id",
+        "source",
+        "added_by",
+        "added_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "added_at"
+      ],
+      "json": [
+        "added_by"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "brand_id",
+            "seller_id"
+          ]
+        }
+      ]
+    },
+    "offer_index": {
+      "table": "catalog_offer_index",
+      "key": [
+        "offer_id"
+      ],
+      "idColumn": "offer_id",
+      "columns": [
+        "offer_id",
+        "product_id",
+        "variant_id",
+        "owner_type",
+        "seller_id",
+        "seller_name",
+        "condition",
+        "status",
+        "eligible",
+        "in_stock",
+        "price",
+        "updated_at"
+      ],
+      "nullable": [
+        "seller_id",
+        "seller_name",
+        "price"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "json": [
+        "price"
+      ],
+      "booleans": [
+        "eligible",
+        "in_stock"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "offer_id"
+          ]
+        }
+      ]
+    },
+    "listing_stats": {
+      "table": "catalog_listing_stats",
+      "key": [
+        "product_id"
+      ],
+      "idColumn": "product_id",
+      "columns": [
+        "product_id",
+        "offer_count",
+        "live_offer_count",
+        "in_stock",
+        "best_price",
+        "offer_note",
+        "refreshed_at"
+      ],
+      "nullable": [
+        "best_price",
+        "offer_note"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "refreshed_at"
+      ],
+      "json": [
+        "best_price"
+      ],
+      "booleans": [
+        "in_stock"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "product_id"
+          ]
+        }
+      ]
+    },
+    "category_stats": {
+      "table": "catalog_category_stats",
+      "key": [
+        "category_id"
+      ],
+      "idColumn": "category_id",
+      "columns": [
+        "category_id",
+        "product_count",
+        "offer_count",
+        "refreshed_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "refreshed_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "category_id"
+          ]
+        }
+      ]
+    },
+    "brand_stats": {
+      "table": "catalog_brand_stats",
+      "key": [
+        "brand_id",
+        "category_id"
+      ],
+      "idColumn": null,
+      "columns": [
+        "brand_id",
+        "category_id",
+        "product_count",
+        "offer_count",
+        "seller_count",
+        "refreshed_at"
+      ],
+      "nullable": [
+        "category_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "refreshed_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        },
+        {
+          "name": "uq_catalog_brand_stats_pk",
+          "columns": [
+            "brand_id",
+            "category_id"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

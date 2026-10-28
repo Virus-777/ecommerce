@@ -6213,6 +6213,1053 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "phone_picks": {
+      "table": "departments_phone_picks",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "product_ids",
+        "updated_by",
+        "updated_at"
+      ],
+      "nullable": [
+        "updated_by"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "json": [
+        "product_ids"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "phones": {
+      "table": "departments_phones",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "slug",
+        "brand",
+        "name",
+        "overview",
+        "storage",
+        "colors",
+        "photos",
+        "ad_images",
+        "spec_groups",
+        "show_services",
+        "search_term",
+        "status",
+        "position",
+        "created_at",
+        "updated_at",
+        "updated_by"
+      ],
+      "nullable": [
+        "overview",
+        "search_term",
+        "updated_by"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "updated_at"
+      ],
+      "json": [
+        "storage",
+        "colors",
+        "photos",
+        "ad_images",
+        "spec_groups"
+      ],
+      "booleans": [
+        "show_services"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_departments_phones_slug",
+          "columns": [
+            "slug"
+          ]
+        }
+      ]
+    },
+    "blog_topics": {
+      "table": "departments_blog_topics",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "slug",
+        "name",
+        "position",
+        "visible"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [
+        "visible"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_departments_blog_topics_slug",
+          "columns": [
+            "slug"
+          ]
+        }
+      ]
+    },
+    "blog_authors": {
+      "table": "departments_blog_authors",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "slug",
+        "name",
+        "email",
+        "avatar",
+        "bio",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "email",
+        "avatar",
+        "bio"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "updated_at"
+      ],
+      "json": [
+        "avatar"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_departments_blog_authors_slug",
+          "columns": [
+            "slug"
+          ]
+        }
+      ]
+    },
+    "blog_posts": {
+      "table": "departments_blog_posts",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "slug",
+        "title",
+        "summary",
+        "body",
+        "cover",
+        "topic_id",
+        "author_id",
+        "status",
+        "featured",
+        "published_at",
+        "read_minutes",
+        "like_count",
+        "dislike_count",
+        "reply_count",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "summary",
+        "cover",
+        "topic_id",
+        "published_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "published_at",
+        "created_at",
+        "updated_at"
+      ],
+      "json": [
+        "cover"
+      ],
+      "booleans": [
+        "featured"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_departments_blog_posts_slug",
+          "columns": [
+            "slug"
+          ]
+        }
+      ]
+    },
+    "blog_reactions": {
+      "table": "departments_blog_reactions",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "post_id",
+        "customer_id",
+        "reaction",
+        "at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_departments_blog_reactions_1",
+          "columns": [
+            "post_id",
+            "customer_id"
+          ]
+        }
+      ]
+    },
+    "blog_replies": {
+      "table": "departments_blog_replies",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "post_id",
+        "parent_id",
+        "customer_id",
+        "author_name",
+        "text",
+        "status",
+        "like_count",
+        "created_at"
+      ],
+      "nullable": [
+        "parent_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "blog_reports": {
+      "table": "departments_blog_reports",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "target_type",
+        "target_id",
+        "reporter_id",
+        "reason",
+        "note",
+        "status",
+        "created_at",
+        "decided_at",
+        "decided_by"
+      ],
+      "nullable": [
+        "note",
+        "decided_at",
+        "decided_by"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "decided_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_departments_blog_reports_1",
+          "columns": [
+            "target_type",
+            "target_id",
+            "reporter_id"
+          ]
+        }
+      ]
+    },
+    "industries": {
+      "table": "departments_industries",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "slug",
+        "name",
+        "position",
+        "visible"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [
+        "visible"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_departments_industries_slug",
+          "columns": [
+            "slug"
+          ]
+        }
+      ]
+    },
+    "companies": {
+      "table": "departments_companies",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "slug",
+        "name",
+        "logo",
+        "industry_id",
+        "city",
+        "tagline",
+        "verified",
+        "description",
+        "photos",
+        "founded",
+        "employees",
+        "contacts",
+        "location",
+        "status",
+        "position",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "logo",
+        "industry_id",
+        "city",
+        "tagline",
+        "description",
+        "founded",
+        "employees",
+        "location"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "updated_at"
+      ],
+      "json": [
+        "logo",
+        "photos",
+        "contacts",
+        "location"
+      ],
+      "booleans": [
+        "verified"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_departments_companies_slug",
+          "columns": [
+            "slug"
+          ]
+        }
+      ]
+    },
+    "inquiries": {
+      "table": "departments_inquiries",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "company_id",
+        "customer_id",
+        "name",
+        "email",
+        "phone",
+        "message",
+        "status",
+        "staff_note",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "customer_id",
+        "phone",
+        "staff_note"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "games": {
+      "table": "departments_games",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "slug",
+        "title",
+        "genre",
+        "icon",
+        "cover",
+        "players_label",
+        "featured",
+        "description",
+        "how_to_play",
+        "prizes",
+        "prize_note",
+        "status",
+        "position",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "icon",
+        "cover",
+        "players_label",
+        "description",
+        "prize_note"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "updated_at"
+      ],
+      "json": [
+        "icon",
+        "cover",
+        "how_to_play",
+        "prizes"
+      ],
+      "booleans": [
+        "featured"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_departments_games_slug",
+          "columns": [
+            "slug"
+          ]
+        }
+      ]
+    },
+    "rankings": {
+      "table": "departments_rankings",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "game_id",
+        "period",
+        "entries",
+        "updated_by",
+        "updated_at"
+      ],
+      "nullable": [
+        "updated_by"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "json": [
+        "entries"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_departments_rankings_1",
+          "columns": [
+            "game_id",
+            "period"
+          ]
+        }
+      ]
+    },
+    "blog_saves": {
+      "table": "departments_blog_saves",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "post_id",
+        "customer_id",
+        "saved_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "saved_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_departments_blog_saves_1",
+          "columns": [
+            "customer_id",
+            "post_id"
+          ]
+        }
+      ]
+    },
+    "blog_follows": {
+      "table": "departments_blog_follows",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "author_id",
+        "customer_id",
+        "followed_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "followed_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_departments_blog_follows_1",
+          "columns": [
+            "author_id",
+            "customer_id"
+          ]
+        }
+      ]
+    },
+    "blog_reply_likes": {
+      "table": "departments_blog_reply_likes",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "reply_id",
+        "post_id",
+        "customer_id",
+        "at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_departments_blog_reply_likes_1",
+          "columns": [
+            "reply_id",
+            "customer_id"
+          ]
+        }
+      ]
+    },
+    "reviews": {
+      "table": "departments_reviews",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "target_type",
+        "target_id",
+        "customer_id",
+        "name",
+        "stars",
+        "text",
+        "hidden",
+        "hidden_reason",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "text",
+        "hidden_reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [
+        "hidden"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_departments_reviews_1",
+          "columns": [
+            "target_type",
+            "target_id",
+            "customer_id"
+          ]
+        }
+      ]
+    },
+    "players": {
+      "table": "departments_players",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "code",
+        "customer_id",
+        "name",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_departments_players_code",
+          "columns": [
+            "code"
+          ]
+        },
+        {
+          "name": "uq_departments_players_customer_id",
+          "columns": [
+            "customer_id"
+          ]
+        }
+      ]
+    },
+    "game_keys": {
+      "table": "departments_game_keys",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "game_id",
+        "key_hash",
+        "hint",
+        "status",
+        "created_by",
+        "created_at",
+        "last_used_at",
+        "revoked_at",
+        "revoked_by"
+      ],
+      "nullable": [
+        "created_by",
+        "last_used_at",
+        "revoked_at",
+        "revoked_by"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "last_used_at",
+        "revoked_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_departments_game_keys_key_hash",
+          "columns": [
+            "key_hash"
+          ]
+        }
+      ]
+    },
+    "scores": {
+      "table": "departments_scores",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "game_id",
+        "partner_score_id",
+        "player_id",
+        "customer_id",
+        "score",
+        "played_at",
+        "day",
+        "week",
+        "received_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "played_at",
+        "received_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_departments_scores_1",
+          "columns": [
+            "game_id",
+            "partner_score_id"
+          ]
+        }
+      ]
+    },
+    "prize_weeks": {
+      "table": "departments_prize_weeks",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "game_id",
+        "week",
+        "state",
+        "winners",
+        "updated_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_departments_prize_weeks_1",
+          "columns": [
+            "game_id",
+            "week"
+          ]
+        }
+      ]
+    },
+    "prize_awards": {
+      "table": "departments_prize_awards",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "game_id",
+        "week",
+        "customer_id",
+        "name",
+        "rank",
+        "score",
+        "reward",
+        "campaign_id",
+        "code",
+        "code_id",
+        "state",
+        "error",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "code",
+        "code_id",
+        "error"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_departments_prize_awards_1",
+          "columns": [
+            "game_id",
+            "week",
+            "customer_id"
+          ]
+        }
+      ]
+    },
+    "farm_setup": {
+      "table": "departments_farm_setup",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "types",
+        "machines",
+        "updated_by",
+        "updated_at"
+      ],
+      "nullable": [
+        "updated_by"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "json": [
+        "types",
+        "machines"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

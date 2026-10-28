@@ -1269,6 +1269,165 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "lists": {
+      "table": "wishlist_lists",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "customer_id",
+        "name",
+        "is_default",
+        "share_token",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "share_token"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [
+        "is_default"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_wishlist_lists_share_token",
+          "columns": [
+            "share_token"
+          ],
+          "partial": true
+        },
+        {
+          "name": "uq_wishlist_lists_2",
+          "columns": [
+            "customer_id"
+          ],
+          "partial": true
+        }
+      ]
+    },
+    "items": {
+      "table": "wishlist_items",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "list_id",
+        "customer_id",
+        "product_id",
+        "variant_id",
+        "offer_id",
+        "price_when_saved",
+        "currency",
+        "note",
+        "added_at"
+      ],
+      "nullable": [
+        "variant_id",
+        "offer_id",
+        "price_when_saved",
+        "note"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "added_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_wishlist_items_1",
+          "columns": [
+            "list_id",
+            "product_id",
+            "variant_id"
+          ]
+        }
+      ]
+    },
+    "alerts": {
+      "table": "wishlist_alerts",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "customer_id",
+        "item_id",
+        "product_id",
+        "variant_id",
+        "seller_id",
+        "kind",
+        "target_price",
+        "reference_price",
+        "state",
+        "triggered_at",
+        "triggered_price",
+        "paused_reason",
+        "last_notified_at",
+        "armed_at",
+        "created_at"
+      ],
+      "nullable": [
+        "item_id",
+        "variant_id",
+        "seller_id",
+        "target_price",
+        "reference_price",
+        "triggered_at",
+        "triggered_price",
+        "paused_reason",
+        "last_notified_at",
+        "armed_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "triggered_at",
+        "last_notified_at",
+        "armed_at",
+        "created_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

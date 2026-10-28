@@ -903,6 +903,109 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "operations": {
+      "table": "backups_operations",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "kind",
+        "state",
+        "backup_id",
+        "upload_id",
+        "safety_backup_id",
+        "note",
+        "reason",
+        "message",
+        "params",
+        "requested_by",
+        "requested_at",
+        "approval_request_id",
+        "started_at",
+        "finished_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "backup_id",
+        "upload_id",
+        "safety_backup_id",
+        "note",
+        "reason",
+        "message",
+        "params",
+        "approval_request_id",
+        "started_at",
+        "finished_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "requested_at",
+        "started_at",
+        "finished_at",
+        "updated_at"
+      ],
+      "json": [
+        "params",
+        "requested_by"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "uploads": {
+      "table": "backups_uploads",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "label",
+        "state",
+        "database_bytes",
+        "files_bytes",
+        "uploaded_by",
+        "error",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "database_bytes",
+        "files_bytes",
+        "error"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "updated_at"
+      ],
+      "json": [
+        "uploaded_by"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

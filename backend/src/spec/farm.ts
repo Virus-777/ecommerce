@@ -2068,6 +2068,163 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "dealers": {
+      "table": "farm_dealers",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "name",
+        "line1",
+        "line2",
+        "city",
+        "region",
+        "postal_code",
+        "country",
+        "point",
+        "pinned",
+        "hours",
+        "phone",
+        "message_phone",
+        "message_email",
+        "lead_days",
+        "active",
+        "position",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "line2",
+        "postal_code",
+        "point",
+        "message_phone",
+        "message_email",
+        "lead_days"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "updated_at"
+      ],
+      "json": [
+        "point"
+      ],
+      "booleans": [
+        "pinned",
+        "active"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "orders": {
+      "table": "farm_orders",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "customer_id",
+        "dealer_id",
+        "dealer",
+        "machine",
+        "attachments",
+        "machine_price",
+        "attachments_total",
+        "total",
+        "card_amount",
+        "currency",
+        "payment_option",
+        "requested_date",
+        "delivery_date",
+        "date_confirmed",
+        "location",
+        "contact_name",
+        "contact_phone",
+        "notes",
+        "status",
+        "history",
+        "dealer_note",
+        "staff_note",
+        "intent_id",
+        "attempts",
+        "method_label",
+        "captured",
+        "placed_at",
+        "confirmed_at",
+        "dispatched_at",
+        "delivered_at",
+        "idempotency_key",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "notes",
+        "dealer_note",
+        "staff_note",
+        "intent_id",
+        "method_label",
+        "placed_at",
+        "confirmed_at",
+        "dispatched_at",
+        "delivered_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "placed_at",
+        "confirmed_at",
+        "dispatched_at",
+        "delivered_at",
+        "created_at",
+        "updated_at"
+      ],
+      "json": [
+        "dealer",
+        "machine",
+        "attachments",
+        "location",
+        "history"
+      ],
+      "booleans": [
+        "date_confirmed",
+        "captured"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_farm_orders_ref",
+          "columns": [
+            "ref"
+          ]
+        },
+        {
+          "name": "uq_farm_orders_idempotency_key",
+          "columns": [
+            "idempotency_key"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

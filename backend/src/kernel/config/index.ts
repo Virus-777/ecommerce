@@ -36,6 +36,16 @@ const schema = z.object({
   MONGO_PORT: z.coerce.number().int().min(1).max(65535).default(27018),
   /** A transaction slower than this (ms), or run more than once, logs a warning with its module, duration and attempts */
   TX_SLOW_MS: z.coerce.number().int().min(1).default(200),
+  /** mysql://user:pass`host:port/marketly — the MySQL of docs/10; unset = no MySQL in this process */
+  MYSQL_URL: z.string().optional(),
+  /**
+   * The modules whose data lives in MySQL while the migration is under way (docs/10 §23 Y1), comma-separated:
+   * `MYSQL_MODULES=settings,access`. A module not named here keeps its data in MongoDB, which is why the two can
+   * run side by side for as long as the migration takes. Needs MYSQL_URL.
+   */
+  MYSQL_MODULES: z.string().optional(),
+  /** §10.2: every pool in every process together must stay under the server's max_connections */
+  MYSQL_POOL_SIZE: z.coerce.number().int().min(1).max(500).optional(),
   /** Apply the MongoDB schema and pending data migrations when the server starts (production runs `npm run migrate` instead) */
   MIGRATE_ON_START: flag,
   /** Plan ch. 20: endpoints of a later phase answer NOT_IMPLEMENTED. Phases 1–2 are designed for launch. */
@@ -129,6 +139,10 @@ export interface Config {
   logLevel: string;
   /** MongoDB: the server (undefined = embedded replica set) and, for the embedded one, its data folder; slowTransactionMs: see TX_SLOW_MS */
   mongo: { uri: string | undefined; dataDir: string | undefined; port: number; slowTransactionMs: number };
+  /** MySQL (docs/10); null where this process has none, which is every process until a module moves */
+  mysql: { url: string; poolSize: number | undefined; slowTransactionMs: number } | null;
+  /** The modules whose data is in MySQL rather than MongoDB; empty while nothing has moved */
+  mysqlModules: readonly string[];
   migrateOnStart: boolean;
   launchPhase: number;
   market: { timeZone: string; currency: string; defaultLocation: { postalCode: string; label: string } };
@@ -204,6 +218,11 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     adminAppDir: e.ADMIN_APP_DIR || undefined,
     logLevel: e.NODE_ENV === 'test' ? 'silent' : e.LOG_LEVEL,
     mongo: { uri: e.MONGODB_URI || undefined, dataDir: e.MONGO_DATA_DIR || undefined, port: e.MONGO_PORT, slowTransactionMs: e.TX_SLOW_MS },
+    mysql: e.MYSQL_URL ? { url: e.MYSQL_URL, poolSize: e.MYSQL_POOL_SIZE, slowTransactionMs: e.TX_SLOW_MS } : null,
+    mysqlModules: (e.MYSQL_MODULES ?? '')
+      .split(',')
+      .map((m) => m.trim())
+      .filter(Boolean),
     migrateOnStart: e.MIGRATE_ON_START ?? !prod,
     launchPhase: e.LAUNCH_PHASE,
     market: {

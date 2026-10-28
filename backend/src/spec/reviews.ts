@@ -4862,6 +4862,658 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "product_reviews": {
+      "table": "reviews_product_reviews",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "product_id",
+        "variant_id",
+        "order_item_id",
+        "order_id",
+        "seller_id",
+        "customer_id",
+        "display_name",
+        "show_name",
+        "verified",
+        "rating",
+        "headline",
+        "body",
+        "media_ids",
+        "status",
+        "visible",
+        "helpful_count",
+        "created_at",
+        "published_at",
+        "edited_at"
+      ],
+      "nullable": [
+        "variant_id",
+        "published_at",
+        "edited_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "published_at",
+        "edited_at"
+      ],
+      "json": [
+        "media_ids"
+      ],
+      "booleans": [
+        "show_name",
+        "verified",
+        "visible"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_reviews_product_reviews_1",
+          "columns": [
+            "customer_id",
+            "product_id"
+          ]
+        }
+      ]
+    },
+    "seller_feedback": {
+      "table": "reviews_seller_feedback",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "seller_id",
+        "order_id",
+        "customer_id",
+        "display_name",
+        "as_described",
+        "dispatch_rating",
+        "communication_rating",
+        "overall",
+        "sentiment",
+        "comment",
+        "status",
+        "visible",
+        "refunded",
+        "created_at",
+        "edited_at"
+      ],
+      "nullable": [
+        "communication_rating",
+        "comment",
+        "refunded",
+        "edited_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "edited_at"
+      ],
+      "json": [],
+      "booleans": [
+        "as_described",
+        "visible",
+        "refunded"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_reviews_seller_feedback_1",
+          "columns": [
+            "order_id",
+            "seller_id",
+            "customer_id"
+          ]
+        }
+      ]
+    },
+    "seller_responses": {
+      "table": "reviews_seller_responses",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "target_type",
+        "target_id",
+        "seller_id",
+        "text",
+        "status",
+        "rule_check",
+        "created_by",
+        "created_at",
+        "published_at",
+        "editable_until"
+      ],
+      "nullable": [
+        "published_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "published_at",
+        "editable_until"
+      ],
+      "json": [
+        "rule_check"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_reviews_seller_responses_1",
+          "columns": [
+            "target_type",
+            "target_id"
+          ]
+        }
+      ]
+    },
+    "questions": {
+      "table": "reviews_questions",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "product_id",
+        "customer_id",
+        "display_name",
+        "text",
+        "status",
+        "answer_count",
+        "created_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "answers": {
+      "table": "reviews_answers",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "question_id",
+        "author_kind",
+        "author_id",
+        "seller_id",
+        "display_name",
+        "text",
+        "status",
+        "rule_check",
+        "helpful_count",
+        "created_at",
+        "published_at"
+      ],
+      "nullable": [
+        "seller_id",
+        "published_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "published_at"
+      ],
+      "json": [
+        "rule_check"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "question_skips": {
+      "table": "reviews_question_skips",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "seller_id",
+        "question_id",
+        "skipped_by",
+        "created_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_reviews_question_skips_1",
+          "columns": [
+            "seller_id",
+            "question_id"
+          ]
+        }
+      ]
+    },
+    "helpful_votes": {
+      "table": "reviews_helpful_votes",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "target_type",
+        "target_id",
+        "customer_id",
+        "helpful",
+        "at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [
+        "helpful"
+      ],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        },
+        {
+          "name": "uq_reviews_helpful_votes_1",
+          "columns": [
+            "target_type",
+            "target_id",
+            "customer_id"
+          ]
+        }
+      ]
+    },
+    "reports": {
+      "table": "reviews_reports",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "target_type",
+        "target_id",
+        "moderation_item_id",
+        "reporter_kind",
+        "reporter_id",
+        "reason",
+        "note",
+        "status",
+        "outcome_text",
+        "created_at",
+        "decided_at"
+      ],
+      "nullable": [
+        "reporter_id",
+        "note",
+        "outcome_text",
+        "decided_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "decided_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "moderation_items": {
+      "table": "reviews_moderation_items",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "content_type",
+        "content_id",
+        "queue",
+        "status",
+        "visibility",
+        "reasons",
+        "report_count",
+        "first_reported_at",
+        "decided_at"
+      ],
+      "nullable": [
+        "decided_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "first_reported_at",
+        "decided_at"
+      ],
+      "json": [
+        "reasons"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "moderation_decisions": {
+      "table": "reviews_moderation_decisions",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "moderation_item_id",
+        "decision",
+        "reason_code",
+        "message_to_reporter",
+        "message_to_author",
+        "edit_request",
+        "moderator_id",
+        "decided_at",
+        "appeal_by",
+        "trust_enforcement_id"
+      ],
+      "nullable": [
+        "message_to_reporter",
+        "message_to_author",
+        "edit_request",
+        "appeal_by",
+        "trust_enforcement_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "decided_at",
+        "appeal_by"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "referrals": {
+      "table": "reviews_referrals",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "moderation_item_id",
+        "content_type",
+        "content_id",
+        "author_id",
+        "note",
+        "referred_by",
+        "referred_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "referred_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "appeals": {
+      "table": "reviews_appeals",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "decision_id",
+        "content_type",
+        "content_id",
+        "by_kind",
+        "by_id",
+        "reason",
+        "status",
+        "reviewer_id",
+        "outcome",
+        "submitted_at",
+        "decided_at"
+      ],
+      "nullable": [
+        "reviewer_id",
+        "outcome",
+        "decided_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "submitted_at",
+        "decided_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "product_rating_summaries": {
+      "table": "reviews_product_rating_summaries",
+      "key": [
+        "product_id"
+      ],
+      "idColumn": "product_id",
+      "columns": [
+        "product_id",
+        "rating_count",
+        "written_count",
+        "sum_ratings",
+        "distribution",
+        "with_photos",
+        "answered_questions",
+        "updated_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "json": [
+        "distribution"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "product_id"
+          ]
+        }
+      ]
+    },
+    "review_invites": {
+      "table": "reviews_review_invites",
+      "key": [
+        "order_item_id"
+      ],
+      "idColumn": "order_item_id",
+      "columns": [
+        "order_item_id",
+        "order_id",
+        "customer_id",
+        "product_id",
+        "seller_id",
+        "delivered_at",
+        "due_at",
+        "state",
+        "sent_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "sent_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "delivered_at",
+        "due_at",
+        "sent_at",
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "order_item_id"
+          ]
+        }
+      ]
+    },
+    "seller_feedback_summaries": {
+      "table": "reviews_seller_feedback_summaries",
+      "key": [
+        "seller_id"
+      ],
+      "idColumn": "seller_id",
+      "columns": [
+        "seller_id",
+        "count",
+        "positive",
+        "neutral",
+        "negative",
+        "as_described_yes",
+        "dispatch_sum",
+        "communication_sum",
+        "communication_count",
+        "overall_sum",
+        "updated_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "seller_id"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

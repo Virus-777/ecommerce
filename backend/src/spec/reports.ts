@@ -5075,6 +5075,1042 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "metric_definitions": {
+      "table": "reports_metric_definitions",
+      "key": [
+        "key"
+      ],
+      "idColumn": "key",
+      "columns": [
+        "key",
+        "name",
+        "group_key",
+        "definition",
+        "formula",
+        "unit",
+        "includes",
+        "excludes",
+        "date_basis_options",
+        "default_date_basis",
+        "currency_rule",
+        "time_zone",
+        "related_keys",
+        "audience",
+        "launch_measure",
+        "owner_staff_id",
+        "status",
+        "version",
+        "effective_from",
+        "reviewed_at",
+        "change_note"
+      ],
+      "nullable": [
+        "owner_staff_id",
+        "reviewed_at",
+        "change_note"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [
+        "includes",
+        "excludes",
+        "date_basis_options",
+        "related_keys"
+      ],
+      "booleans": [
+        "launch_measure"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "key"
+          ]
+        }
+      ]
+    },
+    "metric_owner_changes": {
+      "table": "reports_metric_owner_changes",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "metric_key",
+        "from_staff_id",
+        "to_staff_id",
+        "reason",
+        "changed_by",
+        "changed_at"
+      ],
+      "nullable": [
+        "from_staff_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "changed_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "metric_versions": {
+      "table": "reports_metric_versions",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "metric_key",
+        "version",
+        "snapshot",
+        "change_note",
+        "changed_by",
+        "effective_from",
+        "created_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "json": [
+        "snapshot"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_reports_metric_versions_1",
+          "columns": [
+            "metric_key",
+            "version"
+          ]
+        }
+      ]
+    },
+    "metric_suggestions": {
+      "table": "reports_metric_suggestions",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "metric_key",
+        "proposed",
+        "reason",
+        "suggested_by",
+        "state",
+        "decision_note",
+        "decided_by",
+        "created_at"
+      ],
+      "nullable": [
+        "decision_note",
+        "decided_by"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "report_definitions": {
+      "table": "reports_report_definitions",
+      "key": [
+        "key"
+      ],
+      "idColumn": "key",
+      "columns": [
+        "key",
+        "group_key",
+        "title",
+        "description",
+        "metrics",
+        "dimensions",
+        "filters",
+        "permission",
+        "audience",
+        "layout",
+        "phase",
+        "active"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [
+        "metrics",
+        "dimensions",
+        "filters",
+        "layout"
+      ],
+      "booleans": [
+        "active"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "key"
+          ]
+        }
+      ]
+    },
+    "report_groups": {
+      "table": "reports_report_groups",
+      "key": [
+        "key"
+      ],
+      "idColumn": "key",
+      "columns": [
+        "key",
+        "label",
+        "owner_staff_id",
+        "position"
+      ],
+      "nullable": [
+        "owner_staff_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "key"
+          ]
+        }
+      ]
+    },
+    "saved_views": {
+      "table": "reports_saved_views",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "report_key",
+        "name",
+        "query",
+        "owner_staff_id",
+        "shared",
+        "created_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "json": [
+        "query"
+      ],
+      "booleans": [
+        "shared"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "report_schedules": {
+      "table": "reports_report_schedules",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "report_key",
+        "saved_view_id",
+        "recipients",
+        "frequency",
+        "day_of_week",
+        "time",
+        "format",
+        "next_run_at",
+        "owner_staff_id",
+        "active"
+      ],
+      "nullable": [
+        "saved_view_id",
+        "day_of_week"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "next_run_at"
+      ],
+      "json": [
+        "recipients"
+      ],
+      "booleans": [
+        "active"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "export_datasets": {
+      "table": "reports_export_datasets",
+      "key": [
+        "key"
+      ],
+      "idColumn": "key",
+      "columns": [
+        "key",
+        "owner_module",
+        "title",
+        "permission",
+        "audience",
+        "columns",
+        "screens",
+        "available",
+        "phase",
+        "registered_at"
+      ],
+      "nullable": [
+        "registered_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "registered_at"
+      ],
+      "json": [
+        "columns",
+        "screens"
+      ],
+      "booleans": [
+        "available"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "key"
+          ]
+        }
+      ]
+    },
+    "export_jobs": {
+      "table": "reports_export_jobs",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "dataset",
+        "report_key",
+        "format",
+        "filters",
+        "requested_by_kind",
+        "requested_by_id",
+        "seller_id",
+        "state",
+        "row_count",
+        "columns_excluded",
+        "file_media_id",
+        "sha256",
+        "expires_at",
+        "error",
+        "created_at",
+        "finished_at"
+      ],
+      "nullable": [
+        "report_key",
+        "seller_id",
+        "row_count",
+        "file_media_id",
+        "sha256",
+        "expires_at",
+        "error",
+        "finished_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "expires_at",
+        "created_at",
+        "finished_at"
+      ],
+      "json": [
+        "filters",
+        "columns_excluded"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_reports_export_jobs_ref",
+          "columns": [
+            "ref"
+          ]
+        }
+      ]
+    },
+    "fact_order_items": {
+      "table": "reports_fact_order_items",
+      "key": [
+        "order_item_id"
+      ],
+      "idColumn": "order_item_id",
+      "columns": [
+        "order_item_id",
+        "order_id",
+        "owner_type",
+        "seller_id",
+        "customer_key",
+        "category_id",
+        "product_id",
+        "offer_id",
+        "quantity",
+        "item_minor",
+        "shipping_minor",
+        "discount_platform_minor",
+        "discount_seller_minor",
+        "tax_minor",
+        "currency",
+        "placed_at",
+        "paid_at",
+        "shipped_at",
+        "delivered_at",
+        "completed_at",
+        "cancelled_at",
+        "cancelled_by",
+        "cancelled_minor",
+        "refunded_minor",
+        "last_refund_at",
+        "buying_cost_minor",
+        "fee_minor",
+        "accepted_at",
+        "group_id",
+        "fulfilled_by"
+      ],
+      "nullable": [
+        "seller_id",
+        "category_id",
+        "paid_at",
+        "shipped_at",
+        "delivered_at",
+        "completed_at",
+        "cancelled_at",
+        "cancelled_by",
+        "last_refund_at",
+        "buying_cost_minor",
+        "fee_minor",
+        "accepted_at",
+        "group_id",
+        "fulfilled_by"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "placed_at",
+        "paid_at",
+        "shipped_at",
+        "delivered_at",
+        "completed_at",
+        "cancelled_at",
+        "last_refund_at",
+        "accepted_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "order_item_id"
+          ]
+        }
+      ]
+    },
+    "fact_refunds": {
+      "table": "reports_fact_refunds",
+      "key": [
+        "refund_id",
+        "seller_id"
+      ],
+      "idColumn": null,
+      "columns": [
+        "refund_id",
+        "seller_id",
+        "order_id",
+        "owner_type",
+        "amount_minor",
+        "currency",
+        "reason",
+        "after_payout",
+        "sent_at"
+      ],
+      "nullable": [
+        "reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "sent_at"
+      ],
+      "json": [],
+      "booleans": [
+        "after_payout"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "refund_id",
+            "seller_id"
+          ]
+        }
+      ]
+    },
+    "fact_returns": {
+      "table": "reports_fact_returns",
+      "key": [
+        "return_id"
+      ],
+      "idColumn": "return_id",
+      "columns": [
+        "return_id",
+        "seller_id",
+        "product_id",
+        "category_id",
+        "units",
+        "reason",
+        "requested_at",
+        "outcome",
+        "stock_outcome"
+      ],
+      "nullable": [
+        "category_id",
+        "outcome",
+        "stock_outcome"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "requested_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "return_id"
+          ]
+        }
+      ]
+    },
+    "fact_marketplace_finance_daily": {
+      "table": "reports_fact_marketplace_finance_daily",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "seller_id",
+        "day",
+        "seller_sales_minor",
+        "fee_income_minor",
+        "platform_discount_minor",
+        "seller_discount_minor",
+        "held_minor",
+        "payouts_paid_minor",
+        "payouts_failed",
+        "owed_minor",
+        "ad_charges_minor",
+        "service_fees_minor",
+        "fee_gross_minor",
+        "fee_refunds_minor",
+        "refunds_minor",
+        "shipping_charged_minor",
+        "label_charges_minor",
+        "adjustments_minor",
+        "chargebacks_minor"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        },
+        {
+          "name": "uq_reports_fact_marketplace_finance_daily_1",
+          "columns": [
+            "seller_id",
+            "day"
+          ]
+        }
+      ]
+    },
+    "fact_company_daily": {
+      "table": "reports_fact_company_daily",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "day",
+        "source",
+        "kind",
+        "amount_minor"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        },
+        {
+          "name": "uq_reports_fact_company_daily_1",
+          "columns": [
+            "day",
+            "source",
+            "kind"
+          ]
+        }
+      ]
+    },
+    "fact_seller_balances_daily": {
+      "table": "reports_fact_seller_balances_daily",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "seller_id",
+        "day",
+        "pending_minor",
+        "available_minor",
+        "held_minor",
+        "owed_minor"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        },
+        {
+          "name": "uq_reports_fact_seller_balances_daily_1",
+          "columns": [
+            "seller_id",
+            "day"
+          ]
+        }
+      ]
+    },
+    "fact_service_daily": {
+      "table": "reports_fact_service_daily",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "seller_id",
+        "day",
+        "dispatched",
+        "dispatched_on_time",
+        "overdue",
+        "valid_tracking",
+        "seller_cancellations",
+        "delivery_exceptions",
+        "messages_received",
+        "first_reply_minutes_p50",
+        "cases_opened",
+        "cases_open_eod",
+        "complaints_by_category"
+      ],
+      "nullable": [
+        "first_reply_minutes_p50"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [
+        "complaints_by_category"
+      ],
+      "booleans": [],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        },
+        {
+          "name": "uq_reports_fact_service_daily_1",
+          "columns": [
+            "seller_id",
+            "day"
+          ]
+        }
+      ]
+    },
+    "fact_marketly_fulfillment_daily": {
+      "table": "reports_fact_marketly_fulfillment_daily",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "seller_id",
+        "day",
+        "dispatched",
+        "dispatched_on_time",
+        "overdue",
+        "delivery_exceptions"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        },
+        {
+          "name": "uq_reports_fact_marketly_fulfillment_daily_1",
+          "columns": [
+            "seller_id",
+            "day"
+          ]
+        }
+      ]
+    },
+    "fact_discovery_daily": {
+      "table": "reports_fact_discovery_daily",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "product_id",
+        "day",
+        "views",
+        "cart_adds",
+        "purchases",
+        "stockout_minutes"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        },
+        {
+          "name": "uq_reports_fact_discovery_daily_1",
+          "columns": [
+            "product_id",
+            "day"
+          ]
+        }
+      ]
+    },
+    "fact_search_misses_daily": {
+      "table": "reports_fact_search_misses_daily",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "day",
+        "query_norm",
+        "count",
+        "had_unavailable_match"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [
+        "had_unavailable_match"
+      ],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        },
+        {
+          "name": "uq_reports_fact_search_misses_daily_1",
+          "columns": [
+            "day",
+            "query_norm"
+          ]
+        }
+      ]
+    },
+    "fact_customers": {
+      "table": "reports_fact_customers",
+      "key": [
+        "customer_key"
+      ],
+      "idColumn": "customer_key",
+      "columns": [
+        "customer_key",
+        "first_order_at",
+        "last_order_at",
+        "orders",
+        "net_spend_minor"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "first_order_at",
+        "last_order_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "customer_key"
+          ]
+        }
+      ]
+    },
+    "fact_campaigns_daily": {
+      "table": "reports_fact_campaigns_daily",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "campaign_kind",
+        "campaign_id",
+        "day",
+        "sales_minor",
+        "discount_cost_minor",
+        "funded_by",
+        "redemptions",
+        "displays",
+        "clicks",
+        "dismissals",
+        "spend_minor",
+        "attributed_purchases"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [
+        "funded_by"
+      ],
+      "booleans": [],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        },
+        {
+          "name": "uq_reports_fact_campaigns_daily_1",
+          "columns": [
+            "campaign_kind",
+            "campaign_id",
+            "day"
+          ]
+        }
+      ]
+    },
+    "open_stockouts": {
+      "table": "reports_open_stockouts",
+      "key": [
+        "stock_item_id"
+      ],
+      "idColumn": "stock_item_id",
+      "columns": [
+        "stock_item_id",
+        "product_id",
+        "since"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "since"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "stock_item_id"
+          ]
+        }
+      ]
+    },
+    "campaign_refs": {
+      "table": "reports_campaign_refs",
+      "key": [
+        "kind",
+        "ref_id"
+      ],
+      "idColumn": null,
+      "columns": [
+        "kind",
+        "ref_id",
+        "campaign_id",
+        "created_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "kind",
+            "ref_id"
+          ]
+        }
+      ]
+    },
+    "read_model_checkpoints": {
+      "table": "reports_read_model_checkpoints",
+      "key": [
+        "key"
+      ],
+      "idColumn": "key",
+      "columns": [
+        "key",
+        "last_event_id",
+        "last_event_at",
+        "state",
+        "rebuild_started_at",
+        "rebuild_progress"
+      ],
+      "nullable": [
+        "last_event_id",
+        "last_event_at",
+        "rebuild_started_at",
+        "rebuild_progress"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "last_event_at",
+        "rebuild_started_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "key"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

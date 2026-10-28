@@ -2622,6 +2622,451 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "accounts": {
+      "table": "wallet_accounts",
+      "key": [
+        "customer_id"
+      ],
+      "idColumn": "customer_id",
+      "columns": [
+        "customer_id",
+        "currency",
+        "available",
+        "held",
+        "updated_at",
+        "version"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "customer_id"
+          ]
+        }
+      ]
+    },
+    "lots": {
+      "table": "wallet_lots",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "customer_id",
+        "source",
+        "original",
+        "remaining",
+        "expires_at",
+        "reference",
+        "state",
+        "created_at"
+      ],
+      "nullable": [
+        "expires_at",
+        "reference"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "expires_at",
+        "created_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "ledger": {
+      "table": "wallet_ledger",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "customer_id",
+        "kind",
+        "amount",
+        "balance_after",
+        "lot_allocations",
+        "order_id",
+        "refund_id",
+        "case_id",
+        "hold_id",
+        "idempotency_key",
+        "actor_kind",
+        "actor_id",
+        "reason",
+        "at"
+      ],
+      "nullable": [
+        "order_id",
+        "refund_id",
+        "case_id",
+        "hold_id",
+        "idempotency_key",
+        "actor_id",
+        "reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [
+        "lot_allocations"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_wallet_ledger_2",
+          "columns": [
+            "idempotency_key"
+          ]
+        },
+        {
+          "name": "uq_wallet_ledger_3",
+          "columns": [
+            "refund_id",
+            "kind"
+          ],
+          "partial": true
+        }
+      ]
+    },
+    "holds": {
+      "table": "wallet_holds",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "customer_id",
+        "quote_id",
+        "order_id",
+        "amount",
+        "state",
+        "expires_at",
+        "idempotency_key"
+      ],
+      "nullable": [
+        "order_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "expires_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_wallet_holds_idempotency_key",
+          "columns": [
+            "idempotency_key"
+          ]
+        },
+        {
+          "name": "uq_wallet_holds_1",
+          "columns": [
+            "quote_id"
+          ],
+          "partial": true
+        }
+      ]
+    },
+    "gift_card_batches": {
+      "table": "wallet_gift_card_batches",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "count",
+        "amount",
+        "currency",
+        "purpose",
+        "expires_at",
+        "reason",
+        "cost_center",
+        "status",
+        "approval_request_id",
+        "codes_ciphertext",
+        "codes_file_id",
+        "codes_delivered_at",
+        "codes_expire_at",
+        "created_by",
+        "idempotency_key",
+        "created_at"
+      ],
+      "nullable": [
+        "expires_at",
+        "cost_center",
+        "approval_request_id",
+        "codes_ciphertext",
+        "codes_file_id",
+        "codes_delivered_at",
+        "codes_expire_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "expires_at",
+        "codes_delivered_at",
+        "codes_expire_at",
+        "created_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_wallet_gift_card_batches_idempotency_key",
+          "columns": [
+            "idempotency_key"
+          ]
+        }
+      ]
+    },
+    "goodwill_grants": {
+      "table": "wallet_goodwill_grants",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "customer_id",
+        "amount",
+        "currency",
+        "reason",
+        "reason_code",
+        "case_id",
+        "order_id",
+        "charged_to",
+        "seller_id",
+        "state",
+        "approval_request_id",
+        "requested_by",
+        "decided_by",
+        "ledger_entry_id",
+        "idempotency_key",
+        "created_at"
+      ],
+      "nullable": [
+        "case_id",
+        "order_id",
+        "seller_id",
+        "approval_request_id",
+        "decided_by",
+        "ledger_entry_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_wallet_goodwill_grants_idempotency_key",
+          "columns": [
+            "idempotency_key"
+          ]
+        }
+      ]
+    },
+    "gift_cards": {
+      "table": "wallet_gift_cards",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "code_hash",
+        "code_last4",
+        "batch_id",
+        "initial",
+        "remaining",
+        "currency",
+        "state",
+        "purpose",
+        "expires_at",
+        "redeemed_by",
+        "redeemed_at",
+        "created_by",
+        "created_at"
+      ],
+      "nullable": [
+        "batch_id",
+        "expires_at",
+        "redeemed_by",
+        "redeemed_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "expires_at",
+        "redeemed_at",
+        "created_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_wallet_gift_cards_code_hash",
+          "columns": [
+            "code_hash"
+          ]
+        }
+      ]
+    },
+    "credit_corrections": {
+      "table": "wallet_credit_corrections",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "customer_id",
+        "amount",
+        "currency",
+        "reason",
+        "reference",
+        "state",
+        "approval_request_id",
+        "requested_by",
+        "decided_by",
+        "decided_at",
+        "ledger_entry_id",
+        "failure",
+        "idempotency_key",
+        "created_at"
+      ],
+      "nullable": [
+        "reference",
+        "approval_request_id",
+        "decided_by",
+        "decided_at",
+        "ledger_entry_id",
+        "failure"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "decided_at",
+        "created_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_wallet_credit_corrections_idempotency_key",
+          "columns": [
+            "idempotency_key"
+          ]
+        }
+      ]
+    },
+    "loyalty_entries": {
+      "table": "wallet_loyalty_entries",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "customer_id",
+        "points",
+        "kind",
+        "order_id",
+        "at"
+      ],
+      "nullable": [
+        "order_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

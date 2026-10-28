@@ -4165,6 +4165,583 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "reports": {
+      "table": "trust_reports",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "type",
+        "title",
+        "description",
+        "source",
+        "reporter_kind",
+        "reporter_id",
+        "reporter_name",
+        "reporter_org",
+        "reporter_contact",
+        "reporter_count",
+        "detector",
+        "dedupe_key",
+        "status",
+        "risk_score",
+        "risk_factors",
+        "risk_override",
+        "assignee_staff_id",
+        "due_at",
+        "resolution",
+        "reporter_outcome",
+        "assessment",
+        "merged_into_id",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "reporter_id",
+        "reporter_name",
+        "reporter_org",
+        "reporter_contact",
+        "detector",
+        "dedupe_key",
+        "risk_override",
+        "assignee_staff_id",
+        "due_at",
+        "resolution",
+        "reporter_outcome",
+        "assessment",
+        "merged_into_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "due_at",
+        "created_at",
+        "updated_at"
+      ],
+      "json": [
+        "risk_factors",
+        "risk_override",
+        "resolution",
+        "assessment"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_trust_reports_ref",
+          "columns": [
+            "ref"
+          ]
+        },
+        {
+          "name": "uq_trust_reports_5",
+          "columns": [
+            "dedupe_key"
+          ],
+          "partial": true
+        }
+      ]
+    },
+    "report_subjects": {
+      "table": "trust_report_subjects",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "report_id",
+        "subject_type",
+        "subject_id",
+        "ref",
+        "label"
+      ],
+      "nullable": [
+        "ref"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        },
+        {
+          "name": "uq_trust_report_subjects_2",
+          "columns": [
+            "report_id",
+            "subject_type",
+            "subject_id"
+          ]
+        }
+      ]
+    },
+    "evidence": {
+      "table": "trust_evidence",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "report_id",
+        "kind",
+        "result",
+        "text",
+        "media_ids",
+        "source",
+        "visibility",
+        "added_by_kind",
+        "added_by_id",
+        "added_at"
+      ],
+      "nullable": [
+        "result",
+        "added_by_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "added_at"
+      ],
+      "json": [
+        "media_ids"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "evidence_requests": {
+      "table": "trust_evidence_requests",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "report_id",
+        "to_type",
+        "to_id",
+        "question",
+        "due_at",
+        "state",
+        "answer",
+        "answer_media_ids",
+        "answered_at"
+      ],
+      "nullable": [
+        "answer",
+        "answered_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "due_at",
+        "answered_at"
+      ],
+      "json": [
+        "answer_media_ids"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "recommendations": {
+      "table": "trust_recommendations",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "report_id",
+        "action",
+        "label",
+        "owner_team",
+        "owner_role",
+        "owner_staff_id",
+        "targets",
+        "params",
+        "rationale",
+        "state",
+        "created_by",
+        "routed_at",
+        "routed_by",
+        "decided_at",
+        "decided_by",
+        "decision_reason",
+        "enforcement_id",
+        "approval_request_id"
+      ],
+      "nullable": [
+        "owner_staff_id",
+        "created_by",
+        "routed_at",
+        "routed_by",
+        "decided_at",
+        "decided_by",
+        "decision_reason",
+        "enforcement_id",
+        "approval_request_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "routed_at",
+        "decided_at"
+      ],
+      "json": [
+        "targets",
+        "params"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "enforcements": {
+      "table": "trust_enforcements",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "report_id",
+        "recommendation_id",
+        "action",
+        "owner_team",
+        "targets",
+        "reason",
+        "params",
+        "effects",
+        "recorded_by",
+        "recorded_at",
+        "execution_state",
+        "applied_ref",
+        "applied_at",
+        "failure",
+        "appealable",
+        "appeal_deadline",
+        "reversed_at",
+        "reversal_reason",
+        "reversal_request_id"
+      ],
+      "nullable": [
+        "recommendation_id",
+        "applied_ref",
+        "applied_at",
+        "failure",
+        "appeal_deadline",
+        "reversed_at",
+        "reversal_reason",
+        "reversal_request_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "recorded_at",
+        "applied_at",
+        "appeal_deadline",
+        "reversed_at"
+      ],
+      "json": [
+        "targets",
+        "params",
+        "effects"
+      ],
+      "booleans": [
+        "appealable"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_trust_enforcements_ref",
+          "columns": [
+            "ref"
+          ]
+        }
+      ]
+    },
+    "enforcement_targets": {
+      "table": "trust_enforcement_targets",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "enforcement_id",
+        "target_type",
+        "target_id"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        }
+      ]
+    },
+    "appeals": {
+      "table": "trust_appeals",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "source",
+        "external_appeal_id",
+        "report_id",
+        "enforcement_id",
+        "appellant_kind",
+        "appellant_id",
+        "appellant_name",
+        "decision_appealed",
+        "argument",
+        "evidence_media_ids",
+        "reviewer_staff_id",
+        "original_decider_id",
+        "decide_by",
+        "state",
+        "decision",
+        "filed_at"
+      ],
+      "nullable": [
+        "external_appeal_id",
+        "report_id",
+        "enforcement_id",
+        "reviewer_staff_id",
+        "decision"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "decide_by",
+        "filed_at"
+      ],
+      "json": [
+        "evidence_media_ids",
+        "decision"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_trust_appeals_ref",
+          "columns": [
+            "ref"
+          ]
+        },
+        {
+          "name": "uq_trust_appeals_3",
+          "columns": [
+            "source",
+            "external_appeal_id"
+          ],
+          "partial": true
+        }
+      ]
+    },
+    "report_notes": {
+      "table": "trust_report_notes",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "report_id",
+        "body",
+        "author_id",
+        "author_name",
+        "at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "report_events": {
+      "table": "trust_report_events",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "report_id",
+        "kind",
+        "detail",
+        "actor_kind",
+        "actor_id",
+        "at"
+      ],
+      "nullable": [
+        "actor_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [
+        "detail"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "detection_rules": {
+      "table": "trust_detection_rules",
+      "key": [
+        "key"
+      ],
+      "idColumn": "key",
+      "columns": [
+        "key",
+        "description",
+        "type",
+        "active",
+        "thresholds",
+        "base_score",
+        "updated_by",
+        "updated_at",
+        "last_run_at"
+      ],
+      "nullable": [
+        "last_run_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at",
+        "last_run_at"
+      ],
+      "json": [
+        "thresholds"
+      ],
+      "booleans": [
+        "active"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "key"
+          ]
+        }
+      ]
+    },
+    "risk_signals": {
+      "table": "trust_risk_signals",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "kind",
+        "subject_type",
+        "subject_id",
+        "features",
+        "at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [
+        "features"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

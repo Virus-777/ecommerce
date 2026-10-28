@@ -6934,6 +6934,770 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "policy_versions": {
+      "table": "returns_policy_versions",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "version",
+        "status",
+        "window_days",
+        "seller_response_business_days",
+        "info_reply_days",
+        "drop_off_days",
+        "inspection_target_business_days",
+        "refund_target_business_days",
+        "responsibilities",
+        "effective_from",
+        "change_reason",
+        "approval_request_id",
+        "created_by",
+        "created_at"
+      ],
+      "nullable": [
+        "effective_from",
+        "change_reason",
+        "approval_request_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "effective_from",
+        "created_at"
+      ],
+      "json": [
+        "responsibilities"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "category_exceptions": {
+      "table": "returns_category_exceptions",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "category_id",
+        "window_days",
+        "change_of_mind_allowed",
+        "condition",
+        "fault_returns_window_days",
+        "shown_on",
+        "effective_from",
+        "effective_to",
+        "apply_scope",
+        "status",
+        "approval_request_id",
+        "reason",
+        "created_by",
+        "created_at"
+      ],
+      "nullable": [
+        "window_days",
+        "effective_to",
+        "approval_request_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "effective_from",
+        "effective_to",
+        "created_at"
+      ],
+      "json": [
+        "shown_on"
+      ],
+      "booleans": [
+        "change_of_mind_allowed"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "seller_terms": {
+      "table": "returns_seller_terms",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "seller_id",
+        "version",
+        "window_days",
+        "change_of_mind_paid_by",
+        "free_returns",
+        "remedies",
+        "return_address",
+        "return_contact_email",
+        "receiving_hours",
+        "response_target_business_days",
+        "refund_target_days",
+        "effective_from",
+        "superseded_at",
+        "created_by"
+      ],
+      "nullable": [
+        "return_contact_email",
+        "receiving_hours",
+        "superseded_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "effective_from",
+        "superseded_at"
+      ],
+      "json": [
+        "remedies",
+        "return_address"
+      ],
+      "booleans": [
+        "free_returns"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "returns": {
+      "table": "returns_returns",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "order_id",
+        "order_ref",
+        "customer_id",
+        "guest_session_id",
+        "owner_type",
+        "seller_id",
+        "fulfilled_by",
+        "status",
+        "reason",
+        "details",
+        "media_ids",
+        "remedy",
+        "exchange_variant_id",
+        "handled_by",
+        "terms_snapshot",
+        "shipping_paid_by",
+        "response_due_at",
+        "info_request",
+        "decision",
+        "platform_handling",
+        "escalation",
+        "owner_staff_id",
+        "case_id",
+        "conversation_id",
+        "exception",
+        "inspector",
+        "inspection_started_at",
+        "requested_at",
+        "received_at",
+        "completed_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "customer_id",
+        "guest_session_id",
+        "seller_id",
+        "exchange_variant_id",
+        "response_due_at",
+        "info_request",
+        "decision",
+        "escalation",
+        "owner_staff_id",
+        "case_id",
+        "conversation_id",
+        "exception",
+        "inspector",
+        "inspection_started_at",
+        "received_at",
+        "completed_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "response_due_at",
+        "inspection_started_at",
+        "requested_at",
+        "received_at",
+        "completed_at",
+        "updated_at"
+      ],
+      "json": [
+        "media_ids",
+        "terms_snapshot",
+        "info_request",
+        "decision",
+        "escalation",
+        "exception",
+        "inspector"
+      ],
+      "booleans": [
+        "platform_handling"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_returns_returns_ref",
+          "columns": [
+            "ref"
+          ]
+        }
+      ]
+    },
+    "return_items": {
+      "table": "returns_return_items",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "return_id",
+        "order_item_id",
+        "product_id",
+        "variant_id",
+        "title",
+        "options",
+        "sku",
+        "quantity",
+        "unit_price",
+        "currency"
+      ],
+      "nullable": [
+        "sku"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [
+        "options"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "return_shipments": {
+      "table": "returns_return_shipments",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "return_id",
+        "status",
+        "method",
+        "carrier",
+        "service",
+        "tracking_number",
+        "label_url",
+        "qr_code_url",
+        "drop_off_code",
+        "drop_off_by",
+        "from_address",
+        "to_address",
+        "cost",
+        "paid_by",
+        "shipping_shipment_id",
+        "label_id",
+        "carrier_service_id",
+        "created_at",
+        "delivered_at"
+      ],
+      "nullable": [
+        "carrier",
+        "service",
+        "tracking_number",
+        "label_url",
+        "qr_code_url",
+        "drop_off_code",
+        "drop_off_by",
+        "from_address",
+        "cost",
+        "shipping_shipment_id",
+        "label_id",
+        "carrier_service_id",
+        "delivered_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "drop_off_by",
+        "created_at",
+        "delivered_at"
+      ],
+      "json": [
+        "from_address",
+        "to_address"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "inspection_drafts": {
+      "table": "returns_inspection_drafts",
+      "key": [
+        "return_id"
+      ],
+      "idColumn": "return_id",
+      "columns": [
+        "return_id",
+        "inspection",
+        "remedy",
+        "saved_by",
+        "saved_at"
+      ],
+      "nullable": [
+        "remedy"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "saved_at"
+      ],
+      "json": [
+        "inspection",
+        "remedy",
+        "saved_by"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "return_id"
+          ]
+        }
+      ]
+    },
+    "return_evidence": {
+      "table": "returns_return_evidence",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "return_id",
+        "kind",
+        "media_ids",
+        "note",
+        "party",
+        "added_by",
+        "added_at",
+        "case_id"
+      ],
+      "nullable": [
+        "note",
+        "case_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "added_at"
+      ],
+      "json": [
+        "media_ids",
+        "added_by"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "inspections": {
+      "table": "returns_inspections",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "return_id",
+        "inspected_by",
+        "inspected_at",
+        "condition_outcome",
+        "grade",
+        "checks",
+        "missing_parts",
+        "notes",
+        "media_ids",
+        "proposed_stock_outcome",
+        "regrade_condition",
+        "stock_outcome_recorded_by",
+        "stock_outcome_recorded_at"
+      ],
+      "nullable": [
+        "notes",
+        "regrade_condition",
+        "stock_outcome_recorded_by",
+        "stock_outcome_recorded_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "inspected_at",
+        "stock_outcome_recorded_at"
+      ],
+      "json": [
+        "checks",
+        "missing_parts",
+        "media_ids"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "refund_requests": {
+      "table": "returns_refund_requests",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "source",
+        "return_id",
+        "case_id",
+        "order_id",
+        "owner_type",
+        "seller_id",
+        "customer_id",
+        "contact_email",
+        "customer_name",
+        "seller_name",
+        "order_ref",
+        "status",
+        "item_amount",
+        "discount_share",
+        "shipping_refund",
+        "return_shipping_deduction",
+        "deductions",
+        "tax_refund",
+        "max_refundable",
+        "destination",
+        "destination_label",
+        "remedy_kind",
+        "total",
+        "currency",
+        "funded_by",
+        "seller_share",
+        "platform_share",
+        "reason_code",
+        "reason",
+        "trust_report_id",
+        "approval_request_id",
+        "proposed_by",
+        "approved_by",
+        "approved_at",
+        "decline_reason",
+        "payment_refund_id",
+        "failed_reason",
+        "sent_at",
+        "note",
+        "idempotency_key",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "return_id",
+        "case_id",
+        "seller_id",
+        "customer_id",
+        "contact_email",
+        "customer_name",
+        "seller_name",
+        "order_ref",
+        "tax_refund",
+        "seller_share",
+        "platform_share",
+        "reason_code",
+        "reason",
+        "trust_report_id",
+        "approval_request_id",
+        "approved_by",
+        "approved_at",
+        "decline_reason",
+        "payment_refund_id",
+        "failed_reason",
+        "sent_at",
+        "note",
+        "idempotency_key"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "approved_at",
+        "sent_at",
+        "created_at",
+        "updated_at"
+      ],
+      "json": [
+        "deductions"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_returns_refund_requests_ref",
+          "columns": [
+            "ref"
+          ]
+        },
+        {
+          "name": "uq_returns_refund_requests_idempotency_key",
+          "columns": [
+            "idempotency_key"
+          ],
+          "partial": true
+        }
+      ]
+    },
+    "refund_request_items": {
+      "table": "returns_refund_request_items",
+      "key": [
+        "refund_request_id",
+        "order_item_id"
+      ],
+      "idColumn": null,
+      "columns": [
+        "refund_request_id",
+        "order_item_id",
+        "position",
+        "quantity",
+        "amount"
+      ],
+      "nullable": [
+        "quantity"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "refund_request_id",
+            "order_item_id"
+          ]
+        }
+      ]
+    },
+    "refund_request_events": {
+      "table": "returns_refund_request_events",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "refund_request_id",
+        "at",
+        "label",
+        "detail",
+        "actor_kind",
+        "actor_id",
+        "actor_name"
+      ],
+      "nullable": [
+        "detail",
+        "actor_kind",
+        "actor_id",
+        "actor_name"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "replacements": {
+      "table": "returns_replacements",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "return_id",
+        "case_id",
+        "order_id",
+        "kind",
+        "status",
+        "order_item_id",
+        "variant_id",
+        "offer_id",
+        "quantity",
+        "reservation_id",
+        "shipping_shipment_id",
+        "cancel_reason",
+        "idempotency_key",
+        "created_at",
+        "shipped_at",
+        "delivered_at"
+      ],
+      "nullable": [
+        "return_id",
+        "case_id",
+        "reservation_id",
+        "shipping_shipment_id",
+        "cancel_reason",
+        "idempotency_key",
+        "shipped_at",
+        "delivered_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "shipped_at",
+        "delivered_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_returns_replacements_idempotency_key",
+          "columns": [
+            "idempotency_key"
+          ],
+          "partial": true
+        }
+      ]
+    },
+    "return_events": {
+      "table": "returns_return_events",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "return_id",
+        "kind",
+        "label",
+        "detail",
+        "visibility",
+        "actor_kind",
+        "actor_id",
+        "at"
+      ],
+      "nullable": [
+        "detail",
+        "actor_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

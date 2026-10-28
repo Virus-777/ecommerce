@@ -2125,6 +2125,290 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "carts": {
+      "table": "cart_carts",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "owner_kind",
+        "customer_id",
+        "guest_session_id",
+        "status",
+        "currency",
+        "destination",
+        "coupon_codes",
+        "merged_into_id",
+        "checked_at",
+        "created_at",
+        "updated_at",
+        "expires_at"
+      ],
+      "nullable": [
+        "customer_id",
+        "guest_session_id",
+        "destination",
+        "merged_into_id",
+        "checked_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "checked_at",
+        "created_at",
+        "updated_at",
+        "expires_at"
+      ],
+      "json": [
+        "destination",
+        "coupon_codes"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_cart_carts_1",
+          "columns": [
+            "customer_id"
+          ],
+          "partial": true
+        },
+        {
+          "name": "uq_cart_carts_2",
+          "columns": [
+            "guest_session_id"
+          ],
+          "partial": true
+        }
+      ]
+    },
+    "cart_items": {
+      "table": "cart_cart_items",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "cart_id",
+        "offer_id",
+        "owner_type",
+        "seller_id",
+        "product_id",
+        "variant_id",
+        "stock_item_id",
+        "ships_from",
+        "fulfilled_by",
+        "condition",
+        "quantity",
+        "price_at_add",
+        "accepted_price",
+        "accepted_terms_version",
+        "currency",
+        "source",
+        "added_at",
+        "updated_at",
+        "last_checked_at"
+      ],
+      "nullable": [
+        "seller_id",
+        "fulfilled_by",
+        "condition",
+        "source",
+        "last_checked_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "added_at",
+        "updated_at",
+        "last_checked_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_cart_cart_items_1",
+          "columns": [
+            "cart_id",
+            "offer_id"
+          ]
+        }
+      ]
+    },
+    "cart_item_notices": {
+      "table": "cart_cart_item_notices",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "item_id",
+        "kind",
+        "severity",
+        "previous",
+        "current",
+        "detected_at",
+        "accepted_at",
+        "resolved_at"
+      ],
+      "nullable": [
+        "accepted_at",
+        "resolved_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "detected_at",
+        "accepted_at",
+        "resolved_at"
+      ],
+      "json": [
+        "previous",
+        "current"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "saved_items": {
+      "table": "cart_saved_items",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "owner_kind",
+        "customer_id",
+        "guest_session_id",
+        "offer_id",
+        "product_id",
+        "variant_id",
+        "saved_at"
+      ],
+      "nullable": [
+        "customer_id",
+        "guest_session_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "saved_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_cart_saved_items_1",
+          "columns": [
+            "customer_id",
+            "offer_id"
+          ]
+        },
+        {
+          "name": "uq_cart_saved_items_2",
+          "columns": [
+            "guest_session_id",
+            "offer_id"
+          ]
+        }
+      ]
+    },
+    "cart_merges": {
+      "table": "cart_cart_merges",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "from_cart_id",
+        "into_cart_id",
+        "report",
+        "at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [
+        "report"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "recheck_queue": {
+      "table": "cart_recheck_queue",
+      "key": [
+        "item_id"
+      ],
+      "idColumn": "item_id",
+      "columns": [
+        "item_id",
+        "reason",
+        "queued_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "queued_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "item_id"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

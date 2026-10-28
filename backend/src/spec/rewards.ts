@@ -1610,6 +1610,297 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "program": {
+      "table": "rewards_program",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "check_in_points",
+        "enabled",
+        "updated_at",
+        "updated_by"
+      ],
+      "nullable": [
+        "updated_by"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "json": [
+        "check_in_points"
+      ],
+      "booleans": [
+        "enabled"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "tasks": {
+      "table": "rewards_tasks",
+      "key": [
+        "key"
+      ],
+      "idColumn": "key",
+      "columns": [
+        "key",
+        "kind",
+        "title",
+        "points",
+        "target",
+        "path",
+        "visible",
+        "position",
+        "updated_at"
+      ],
+      "nullable": [
+        "path"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [
+        "visible"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "key"
+          ]
+        }
+      ]
+    },
+    "accounts": {
+      "table": "rewards_accounts",
+      "key": [
+        "customer_id"
+      ],
+      "idColumn": "customer_id",
+      "columns": [
+        "customer_id",
+        "balance",
+        "streak",
+        "last_check_in",
+        "updated_at"
+      ],
+      "nullable": [
+        "last_check_in"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "customer_id"
+          ]
+        }
+      ]
+    },
+    "entries": {
+      "table": "rewards_entries",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "customer_id",
+        "points",
+        "kind",
+        "title",
+        "ref",
+        "dedupe_key",
+        "balance_after",
+        "by",
+        "at"
+      ],
+      "nullable": [
+        "ref",
+        "by"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_rewards_entries_dedupe_key",
+          "columns": [
+            "dedupe_key"
+          ]
+        }
+      ]
+    },
+    "progress": {
+      "table": "rewards_progress",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "customer_id",
+        "task_key",
+        "day",
+        "count",
+        "refs",
+        "claimed",
+        "updated_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "json": [
+        "refs"
+      ],
+      "booleans": [
+        "claimed"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_rewards_progress_1",
+          "columns": [
+            "customer_id",
+            "task_key",
+            "day"
+          ]
+        }
+      ]
+    },
+    "rewards": {
+      "table": "rewards_rewards",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "title",
+        "condition",
+        "cost",
+        "tint",
+        "campaign_id",
+        "stock",
+        "redeemed",
+        "visible",
+        "position",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "stock"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [
+        "visible"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "redemptions": {
+      "table": "rewards_redemptions",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "customer_id",
+        "reward_id",
+        "title",
+        "condition",
+        "cost",
+        "code_id",
+        "code",
+        "ends_at",
+        "idempotency_key",
+        "at"
+      ],
+      "nullable": [
+        "ends_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "ends_at",
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_rewards_redemptions_idempotency_key",
+          "columns": [
+            "idempotency_key"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

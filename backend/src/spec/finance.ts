@@ -7669,6 +7669,1165 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "seller_accounts": {
+      "table": "finance_seller_accounts",
+      "key": [
+        "seller_id"
+      ],
+      "idColumn": "seller_id",
+      "columns": [
+        "seller_id",
+        "pending",
+        "available",
+        "held",
+        "currency",
+        "negative_since",
+        "payouts_blocked_reason",
+        "fee_override_set_id",
+        "new_seller_until",
+        "new_seller_extra_days",
+        "updated_at"
+      ],
+      "nullable": [
+        "negative_since",
+        "payouts_blocked_reason",
+        "fee_override_set_id",
+        "new_seller_until",
+        "new_seller_extra_days"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "negative_since",
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "seller_id"
+          ]
+        }
+      ]
+    },
+    "ledger_entries": {
+      "table": "finance_ledger_entries",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "seller_id",
+        "at",
+        "type",
+        "ref_kind",
+        "ref_id",
+        "ref_label",
+        "description",
+        "amount",
+        "currency",
+        "bucket",
+        "balance_after",
+        "lot_id",
+        "statement_id",
+        "recorded_by",
+        "source_event_id"
+      ],
+      "nullable": [
+        "ref_label",
+        "lot_id",
+        "statement_id",
+        "recorded_by",
+        "source_event_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_finance_ledger_entries_source_event_id",
+          "columns": [
+            "source_event_id"
+          ],
+          "partial": true
+        }
+      ]
+    },
+    "earnings_lots": {
+      "table": "finance_earnings_lots",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "seller_id",
+        "order_id",
+        "order_item_id",
+        "state",
+        "gross",
+        "fee",
+        "net",
+        "delivered_at",
+        "available_at",
+        "payout_id",
+        "left_pending_at"
+      ],
+      "nullable": [
+        "delivered_at",
+        "available_at",
+        "payout_id",
+        "left_pending_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "delivered_at",
+        "available_at",
+        "left_pending_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_finance_earnings_lots_order_item_id",
+          "columns": [
+            "order_item_id"
+          ]
+        }
+      ]
+    },
+    "fee_rule_sets": {
+      "table": "finance_fee_rule_sets",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "version",
+        "status",
+        "basis",
+        "include_shipping",
+        "platform_discounts_reduce_fee",
+        "default_rate_bps",
+        "treatment",
+        "agreement_version",
+        "effective_from",
+        "reason",
+        "approval_request_id",
+        "created_by",
+        "created_at"
+      ],
+      "nullable": [
+        "effective_from",
+        "reason",
+        "approval_request_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "effective_from",
+        "created_at"
+      ],
+      "json": [
+        "treatment"
+      ],
+      "booleans": [
+        "include_shipping",
+        "platform_discounts_reduce_fee"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "fee_category_rates": {
+      "table": "finance_fee_category_rates",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "rule_set_id",
+        "category_id",
+        "category_name",
+        "rate_bps"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        },
+        {
+          "name": "uq_finance_fee_category_rates_1",
+          "columns": [
+            "rule_set_id",
+            "category_id"
+          ]
+        }
+      ]
+    },
+    "fee_charges": {
+      "table": "finance_fee_charges",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "order_item_id",
+        "seller_id",
+        "rule_set_id",
+        "basis_amount",
+        "rate_bps",
+        "fee",
+        "refunded_fee",
+        "status",
+        "created_at",
+        "changed_at"
+      ],
+      "nullable": [
+        "changed_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "changed_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_finance_fee_charges_order_item_id",
+          "columns": [
+            "order_item_id"
+          ]
+        }
+      ]
+    },
+    "refund_allocations": {
+      "table": "finance_refund_allocations",
+      "key": [
+        "refund_request_id"
+      ],
+      "idColumn": "refund_request_id",
+      "columns": [
+        "refund_request_id",
+        "payment_refund_id",
+        "order_id",
+        "owner_type",
+        "seller_id",
+        "funded_by",
+        "seller_share",
+        "platform_share",
+        "breakdown",
+        "applied_at"
+      ],
+      "nullable": [
+        "payment_refund_id",
+        "seller_id",
+        "applied_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "applied_at"
+      ],
+      "json": [
+        "breakdown"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "refund_request_id"
+          ]
+        }
+      ]
+    },
+    "holds": {
+      "table": "finance_holds",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "seller_id",
+        "amount",
+        "released_amount",
+        "currency",
+        "reason_code",
+        "reason",
+        "review_date",
+        "ref_kind",
+        "ref_id",
+        "status",
+        "placed_by",
+        "placed_at",
+        "released_at",
+        "release_reason",
+        "approval_request_id",
+        "trust_report_id"
+      ],
+      "nullable": [
+        "ref_kind",
+        "ref_id",
+        "released_at",
+        "release_reason",
+        "approval_request_id",
+        "trust_report_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "placed_at",
+        "released_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "adjustments": {
+      "table": "finance_adjustments",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "seller_id",
+        "direction",
+        "amount",
+        "currency",
+        "reason_code",
+        "reason",
+        "ref_kind",
+        "ref_id",
+        "status",
+        "recorded_by",
+        "approval_request_id",
+        "idempotency_key",
+        "created_at"
+      ],
+      "nullable": [
+        "ref_kind",
+        "ref_id",
+        "approval_request_id",
+        "idempotency_key"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_finance_adjustments_ref",
+          "columns": [
+            "ref"
+          ]
+        },
+        {
+          "name": "uq_finance_adjustments_idempotency_key",
+          "columns": [
+            "idempotency_key"
+          ],
+          "partial": true
+        }
+      ]
+    },
+    "seller_credits": {
+      "table": "finance_seller_credits",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "seller_id",
+        "amount",
+        "currency",
+        "reason",
+        "ref_kind",
+        "ref_id",
+        "ref_label",
+        "status",
+        "idempotency_key",
+        "requested_by",
+        "approval_request_id",
+        "ledger_entry_id",
+        "created_at",
+        "decided_at"
+      ],
+      "nullable": [
+        "ref_label",
+        "approval_request_id",
+        "ledger_entry_id",
+        "decided_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "decided_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_finance_seller_credits_idempotency_key",
+          "columns": [
+            "idempotency_key"
+          ]
+        }
+      ]
+    },
+    "amounts_owed": {
+      "table": "finance_amounts_owed",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "seller_id",
+        "amount",
+        "remaining",
+        "currency",
+        "since",
+        "due_by",
+        "status",
+        "origin",
+        "note",
+        "write_off_amount",
+        "write_off_reason",
+        "approval_request_id"
+      ],
+      "nullable": [
+        "due_by",
+        "note",
+        "write_off_amount",
+        "write_off_reason",
+        "approval_request_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [
+        "origin"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "payout_destinations": {
+      "table": "finance_payout_destinations",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "seller_id",
+        "sellers_account_id",
+        "label",
+        "provider_destination_id",
+        "status",
+        "verified_at",
+        "active",
+        "pause_until",
+        "deposits_sent_at",
+        "deposit_attempts"
+      ],
+      "nullable": [
+        "provider_destination_id",
+        "verified_at",
+        "pause_until",
+        "deposits_sent_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "verified_at",
+        "pause_until",
+        "deposits_sent_at"
+      ],
+      "json": [],
+      "booleans": [
+        "active"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "destination_reviews": {
+      "table": "finance_destination_reviews",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "seller_id",
+        "destination_id",
+        "from_label",
+        "to_label",
+        "requested_by",
+        "requested_at",
+        "status",
+        "checks",
+        "decided_by",
+        "decided_at",
+        "reason"
+      ],
+      "nullable": [
+        "from_label",
+        "decided_by",
+        "decided_at",
+        "reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "requested_at",
+        "decided_at"
+      ],
+      "json": [
+        "checks"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "payout_runs": {
+      "table": "finance_payout_runs",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "status",
+        "scheduled_release",
+        "cutoff_at",
+        "total",
+        "paying_now",
+        "held",
+        "negative_offset",
+        "currency",
+        "approvals",
+        "approval_request_id",
+        "created_at",
+        "released_at",
+        "completed_at"
+      ],
+      "nullable": [
+        "approval_request_id",
+        "released_at",
+        "completed_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "scheduled_release",
+        "cutoff_at",
+        "created_at",
+        "released_at",
+        "completed_at"
+      ],
+      "json": [
+        "approvals"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_finance_payout_runs_ref",
+          "columns": [
+            "ref"
+          ]
+        },
+        {
+          "name": "uq_finance_payout_runs_2",
+          "columns": [
+            "cutoff_at"
+          ],
+          "partial": true
+        }
+      ]
+    },
+    "payouts": {
+      "table": "finance_payouts",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "seller_id",
+        "run_id",
+        "amount",
+        "currency",
+        "status",
+        "destination_id",
+        "requested_on",
+        "released_at",
+        "paid_at",
+        "failed_at",
+        "failure_code",
+        "failure_reason",
+        "retry_of",
+        "provider_payout_id",
+        "bank_reference",
+        "statement_id",
+        "holds_withheld",
+        "negative_offset",
+        "idempotency_key"
+      ],
+      "nullable": [
+        "run_id",
+        "released_at",
+        "paid_at",
+        "failed_at",
+        "failure_code",
+        "failure_reason",
+        "retry_of",
+        "provider_payout_id",
+        "bank_reference",
+        "statement_id",
+        "idempotency_key"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "released_at",
+        "paid_at",
+        "failed_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_finance_payouts_ref",
+          "columns": [
+            "ref"
+          ]
+        },
+        {
+          "name": "uq_finance_payouts_provider_payout_id",
+          "columns": [
+            "provider_payout_id"
+          ],
+          "partial": true
+        },
+        {
+          "name": "uq_finance_payouts_idempotency_key",
+          "columns": [
+            "idempotency_key"
+          ],
+          "partial": true
+        }
+      ]
+    },
+    "statements": {
+      "table": "finance_statements",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "seller_id",
+        "period_from",
+        "period_to",
+        "status",
+        "issued_at",
+        "payout_id",
+        "sections",
+        "reconciliation",
+        "rule_version",
+        "pdf_media_id",
+        "csv_media_id"
+      ],
+      "nullable": [
+        "issued_at",
+        "payout_id",
+        "pdf_media_id",
+        "csv_media_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "issued_at"
+      ],
+      "json": [
+        "sections",
+        "reconciliation"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_finance_statements_ref",
+          "columns": [
+            "ref"
+          ]
+        }
+      ]
+    },
+    "trading_entries": {
+      "table": "finance_trading_entries",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "at",
+        "kind",
+        "amount",
+        "currency",
+        "order_id",
+        "order_item_id",
+        "variant_id",
+        "ref_kind",
+        "ref_id"
+      ],
+      "nullable": [
+        "order_id",
+        "order_item_id",
+        "variant_id",
+        "ref_kind",
+        "ref_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "trading_targets": {
+      "table": "finance_trading_targets",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "period",
+        "category_id",
+        "sales_target",
+        "currency",
+        "margin_target_bps",
+        "note",
+        "set_by",
+        "set_at"
+      ],
+      "nullable": [
+        "category_id",
+        "margin_target_bps",
+        "note"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "set_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_finance_trading_targets_1",
+          "columns": [
+            "period",
+            "category_id"
+          ]
+        }
+      ]
+    },
+    "recon_days": {
+      "table": "finance_recon_days",
+      "key": [
+        "date"
+      ],
+      "idColumn": "date",
+      "columns": [
+        "date",
+        "status",
+        "owner_staff_id",
+        "backup_staff_id",
+        "due_at",
+        "checklist",
+        "completed_by",
+        "completed_at"
+      ],
+      "nullable": [
+        "backup_staff_id",
+        "completed_by",
+        "completed_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "due_at",
+        "completed_at"
+      ],
+      "json": [
+        "checklist"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "date"
+          ]
+        }
+      ]
+    },
+    "recon_items": {
+      "table": "finance_recon_items",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "date",
+        "check",
+        "ref_kind",
+        "ref_id",
+        "subject",
+        "description",
+        "expected",
+        "actual",
+        "credit",
+        "difference",
+        "currency",
+        "detected_at",
+        "status",
+        "note",
+        "owner_staff_id",
+        "correction",
+        "approval_request_id"
+      ],
+      "nullable": [
+        "ref_kind",
+        "ref_id",
+        "note",
+        "owner_staff_id",
+        "correction",
+        "approval_request_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "detected_at"
+      ],
+      "json": [
+        "correction"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "captures": {
+      "table": "finance_captures",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "intent_id",
+        "order_id",
+        "group_id",
+        "card_amount",
+        "credit_amount",
+        "currency",
+        "provider_ref",
+        "captured_at",
+        "recon_item_id"
+      ],
+      "nullable": [
+        "intent_id",
+        "order_id",
+        "group_id",
+        "provider_ref",
+        "recon_item_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "captured_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "discount_funding": {
+      "table": "finance_discount_funding",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "at",
+        "redemption_id",
+        "funded_by",
+        "kind",
+        "amount",
+        "currency",
+        "order_id",
+        "order_item_id"
+      ],
+      "nullable": [
+        "order_id",
+        "order_item_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "platform_costs": {
+      "table": "finance_platform_costs",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "at",
+        "kind",
+        "amount",
+        "currency",
+        "order_id",
+        "order_item_id",
+        "ref_kind",
+        "ref_id"
+      ],
+      "nullable": [
+        "order_id",
+        "order_item_id",
+        "ref_kind",
+        "ref_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "store_credit_liability": {
+      "table": "finance_store_credit_liability",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "at",
+        "kind",
+        "amount",
+        "currency",
+        "wallet_entry_id",
+        "order_id"
+      ],
+      "nullable": [
+        "wallet_entry_id",
+        "order_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

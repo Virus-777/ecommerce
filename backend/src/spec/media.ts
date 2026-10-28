@@ -2513,6 +2513,305 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "assets": {
+      "table": "media_assets",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "kind",
+        "purpose",
+        "status",
+        "file_name",
+        "content_type",
+        "size_bytes",
+        "sha256",
+        "phash",
+        "width",
+        "height",
+        "duration_seconds",
+        "page_count",
+        "alt",
+        "title",
+        "owner_kind",
+        "owner_id",
+        "owner_label",
+        "visibility",
+        "storage_bucket",
+        "storage_key",
+        "check_result",
+        "rejection_reason",
+        "removed_reason",
+        "removed_by",
+        "removed_at",
+        "show_placeholder",
+        "retain_until",
+        "expires_at",
+        "created_at",
+        "ready_at",
+        "deleted_at",
+        "processing_spec"
+      ],
+      "nullable": [
+        "sha256",
+        "phash",
+        "width",
+        "height",
+        "duration_seconds",
+        "page_count",
+        "alt",
+        "title",
+        "owner_id",
+        "owner_label",
+        "check_result",
+        "rejection_reason",
+        "removed_reason",
+        "removed_by",
+        "removed_at",
+        "show_placeholder",
+        "retain_until",
+        "expires_at",
+        "ready_at",
+        "deleted_at",
+        "processing_spec"
+      ],
+      "decimal": [
+        "duration_seconds"
+      ],
+      "binary": [],
+      "dates": [
+        "removed_at",
+        "retain_until",
+        "expires_at",
+        "created_at",
+        "ready_at",
+        "deleted_at"
+      ],
+      "json": [
+        "check_result",
+        "processing_spec"
+      ],
+      "booleans": [
+        "show_placeholder"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "renditions": {
+      "table": "media_renditions",
+      "key": [
+        "asset_id",
+        "size",
+        "format"
+      ],
+      "idColumn": null,
+      "columns": [
+        "asset_id",
+        "size",
+        "storage_key",
+        "url",
+        "width",
+        "height",
+        "format",
+        "bytes"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "asset_id",
+            "size",
+            "format"
+          ]
+        }
+      ]
+    },
+    "uploads": {
+      "table": "media_uploads",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "asset_id",
+        "expected_bytes",
+        "expected_sha256",
+        "url_expires_at",
+        "completed_at",
+        "client_ip",
+        "created_by_kind",
+        "created_by_id"
+      ],
+      "nullable": [
+        "expected_sha256",
+        "completed_at",
+        "client_ip",
+        "created_by_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "url_expires_at",
+        "completed_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "usages": {
+      "table": "media_usages",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "asset_id",
+        "module",
+        "kind",
+        "ref_id",
+        "ref_label",
+        "evidence",
+        "attached_at",
+        "detached_at"
+      ],
+      "nullable": [
+        "ref_label",
+        "detached_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "attached_at",
+        "detached_at"
+      ],
+      "json": [],
+      "booleans": [
+        "evidence"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_media_usages_2",
+          "columns": [
+            "asset_id",
+            "module",
+            "kind",
+            "ref_id"
+          ],
+          "partial": true
+        }
+      ]
+    },
+    "processing_jobs": {
+      "table": "media_processing_jobs",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "asset_id",
+        "step",
+        "status",
+        "attempts",
+        "provider_ref",
+        "error",
+        "next_attempt_at",
+        "created_at",
+        "finished_at"
+      ],
+      "nullable": [
+        "provider_ref",
+        "error",
+        "next_attempt_at",
+        "finished_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "next_attempt_at",
+        "created_at",
+        "finished_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "upload_counters": {
+      "table": "media_upload_counters",
+      "key": [
+        "owner_kind",
+        "owner_id",
+        "day"
+      ],
+      "idColumn": null,
+      "columns": [
+        "owner_kind",
+        "owner_id",
+        "day",
+        "count",
+        "bytes"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "owner_kind",
+            "owner_id",
+            "day"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

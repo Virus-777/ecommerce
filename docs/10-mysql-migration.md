@@ -437,6 +437,9 @@ Each trigger is written in the spec, owned by its module, and covered by the mod
 | `ops-views.ts` | the five `ops_v_*` views one person reads the database with, and the rule that a missing table skips a view rather than failing the migration (§9.2, MAINTAINING.md §6a) | |
 | `purge.ts` | `kernel.purge-expired`: what MongoDB expired by itself, deleted in batches (§12) | MongoDB TTL indexes |
 | `detect.ts` | the unlocked read-modify-write detector of §11.2 rule 2, on in tests and development | |
+| `../store/index.ts` | `Store` and `StoreTable<R>`: the one vocabulary a repository is written in to run on either database, and what is deliberately not in it (§10.5a) | |
+| `../store/mongo.ts` | a MongoDB module store seen as a `Store`, so a module that has not moved still has `ctx.store` | |
+| `../store/store.test.ts` | the store contract: one spec, one set of tests, run on MongoDB and on MySQL | |
 | `errors.ts` | `isDuplicateKey` (1062) with the key name, `isDeadlock` (1213), `isLockTimeout` (1205), `isConnectionLost` | |
 | *(not in this folder)* | the three kernel services that are not data access — `mysqlRateLimitStore`, `mysqlIdempotencyStore`, `mysqlWebhookEventLog` — are written **beside their MongoDB twins** in `kernel/auth/rate-limit.ts`, `kernel/http/idempotency.ts` and `kernel/auth/chain.ts`, under the interface both implement. The contract tests then run over both stores with `describe.each`, which is what holds them to the same promises, and Y4 deletes one function per file rather than a folder | |
 | `portable.ts` | finds and starts a private `mysqld` (dev/tests, D9) | `binary.ts` + mongodb-memory-server |
@@ -495,6 +498,41 @@ Repositories pass MongoDB filter objects today (`{ status: { $in: [...] }, $or: 
 
 - **simple filters**: the kernel's `Where<R>` (it already exists in `filters.ts`, with SQL meanings: `null` = IS NULL, a list = IN, `{op:'<>'}` skips NULL, `not in`, `between`, `like`), plus `or: Where<R>[]`. It is typed by the row type, so a misspelt column fails to compile;
 - **joins, aggregates, JSON paths, CASE expressions**: Kysely directly (`tx.db.selectFrom('orders_orders')…`). Raw SQL uses the `sql` tag with bound parameters only; string concatenation of values is never allowed (`check:boundaries` flags it).
+
+### 10.5a How a module chooses its database (built 2026-10-28)
+
+A module's data is in MySQL or in MongoDB, and the answer is a deployment setting, not a code change:
+`MYSQL_MODULES=settings,access` with `MYSQL_URL`. `bootModules` decides once per module at start-up and hands it
+`ctx.store`; naming a module with no MySQL in the process, or with no generated table defs, is refused there
+rather than discovered on its first query. `ctx.mongo` stays exactly as it is for the modules that have not
+moved, so nothing about them changes on the day a pilot moves.
+
+**One vocabulary, both stores** (`kernel/store/`). A repository takes `Store` instead of `ModuleStore` and is
+written in the neutral form: `WhereWithOr<R>` filters (`{ column: value | list | null | { op, value }, or: [...] }`)
+and `Patch<R>` writes (a value per column, or `inc`/`jsonAppend`, which the server computes). `Where` was
+defined with SQL's reading of null in the first place, so there is one type and not two — `kernel/mysql/where.ts`
+and `kernel/mongo/filters.ts` both consume it, and `whereFilter` learned `or` to match.
+
+Three decisions worth keeping:
+
+- **The MongoDB side is a facade, not a second mode on `Table`.** A MongoDB filter and a neutral Where are both
+  plain objects, and telling them apart by looking would be guesswork on a value a module controls. The
+  thirty-eight modules still passing MongoDB filters are untouched by the new file.
+- **`decToZero` and a hand-written `expr` are refused on MongoDB, by name.** Both have MongoDB spellings, but a
+  pipeline's field names are *document* fields and the column-to-field mapping lives inside `Table`: written
+  from outside it would be right until a column were renamed. A refusal names the column and what to do instead.
+- **The write methods reject rather than throw.** They are typed to return a Promise, so a caller's
+  `try/catch` around an `await` sees a refusal either way.
+
+**What the contract suite proves, and what it does not.** `store.test.ts` builds both stores from one demo spec
+with the generator's own libraries, then runs the same forty tests over each. Every test was checked by breaking
+the thing it tests, including each field of the generated `TableDef` one at a time. Six of the nine fields fail a
+test when they are wrong: `json`, `booleans`, `binary`, `identity`, `uniqueKeys` and `idColumn`. The other three
+are belt-and-braces on MySQL today and no test here can tell: `decimal` (mysql2 already returns DECIMAL as a
+string under `decimalNumbers: false`), `dates` (used only to turn a page cursor back into an instant, and MySQL
+coerces the ISO string anyway) and `nullable` (fills in columns a read left out, and `SELECT *` leaves none out).
+They are kept because each becomes load-bearing the moment those conditions change, but nobody should believe
+they are covered.
 
 ### 10.6 Boundaries
 
@@ -791,6 +829,15 @@ Depth 9, cost 1,500, page size 100 and a 10 s timeout per field stay. The 10 s t
   - `docs/api/db/<module>.sql`: readable DDL per module, for the maintainer.
 - `tools/lib/tables.ts` (the parser) stays and learns the §17.1 notation.
 - Checks: index key length; reserved words (quoted); functional key parts; partial-unique translation; index redundancy; foreign-key indexes; view mergeability; table name collisions.
+
+**The runtime defs, 2026-10-28.** The generator also writes `tables` into each `src/spec/<module>.ts`: the
+`TableDef` per spec table that `Table` needs at run time (which columns are DECIMAL, BINARY, DATETIME, JSON or
+boolean, the identity column, and every unique key by the name MySQL reports in a 1062). It is built in
+`tools/lib/mysql.ts` beside the DDL and **from the generated column lines**, not from the spec a second time, so
+a def cannot come to disagree with the table it describes. The totals are a check in themselves: 472 tables, of
+which exactly **37 have no key in the spec** — §5.3's figure, arrived at independently — 28 composite keys, 39
+identity columns (38 of them the invisible `row_id`; the one real one is `audit.entries.seq`), and `PRIMARY`
+first in the unique keys of all 472.
 
 **Applied to a real server, 2026-10-27.** `npm run check:ddl` generates the whole schema from the spec and creates it on a throwaway database, because a generated string can look perfect and still be refused. The result: **471 of 471 tables, 1,568 indexes, 329 foreign keys, 161 CHECK constraints and 10 append-only triggers, every statement accepted** by MySQL 8.4.13. (Re-run after `main` was merged on 2026-10-28: **472 of 472 tables, 1,571 indexes, 329 foreign keys, 161 checks, 10 triggers, 10 views all merged, and 5,652 columns read back and compared**.)
 

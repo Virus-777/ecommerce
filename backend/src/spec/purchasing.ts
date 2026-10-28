@@ -3388,6 +3388,486 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "suppliers": {
+      "table": "purchasing_suppliers",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "name",
+        "location",
+        "contact_name",
+        "email",
+        "phone",
+        "address",
+        "payment_terms",
+        "lead_time_days",
+        "return_authorization_required",
+        "active",
+        "notes",
+        "created_at"
+      ],
+      "nullable": [
+        "location",
+        "contact_name",
+        "email",
+        "phone",
+        "address",
+        "notes"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "json": [
+        "address"
+      ],
+      "booleans": [
+        "return_authorization_required",
+        "active"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "supplier_items": {
+      "table": "purchasing_supplier_items",
+      "key": [
+        "supplier_id",
+        "stock_item_id"
+      ],
+      "idColumn": null,
+      "columns": [
+        "supplier_id",
+        "stock_item_id",
+        "supplier_sku",
+        "unit_cost_amount",
+        "currency",
+        "min_order_qty",
+        "lead_time_days",
+        "preferred",
+        "updated_at"
+      ],
+      "nullable": [
+        "supplier_sku",
+        "min_order_qty",
+        "lead_time_days"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [
+        "preferred"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "supplier_id",
+            "stock_item_id"
+          ]
+        }
+      ]
+    },
+    "supplier_performance": {
+      "table": "purchasing_supplier_performance",
+      "key": [
+        "supplier_id"
+      ],
+      "idColumn": "supplier_id",
+      "columns": [
+        "supplier_id",
+        "window_days",
+        "on_time_pct",
+        "avg_lead_time_days",
+        "shortage_rate_pct",
+        "damage_rate_pct",
+        "deliveries",
+        "computed_at"
+      ],
+      "nullable": [
+        "on_time_pct",
+        "avg_lead_time_days",
+        "shortage_rate_pct",
+        "damage_rate_pct"
+      ],
+      "decimal": [
+        "on_time_pct",
+        "avg_lead_time_days",
+        "shortage_rate_pct",
+        "damage_rate_pct"
+      ],
+      "binary": [],
+      "dates": [
+        "computed_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "supplier_id"
+          ]
+        }
+      ]
+    },
+    "purchase_orders": {
+      "table": "purchasing_purchase_orders",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "supplier_id",
+        "ship_to_location_id",
+        "status",
+        "payment_terms",
+        "expected_date",
+        "freight_amount",
+        "currency",
+        "total_amount",
+        "approval_request_id",
+        "approval_state",
+        "notes",
+        "attachment_media_ids",
+        "created_by",
+        "created_at",
+        "sent_at",
+        "closed_at",
+        "close_reason"
+      ],
+      "nullable": [
+        "expected_date",
+        "approval_request_id",
+        "approval_state",
+        "notes",
+        "sent_at",
+        "closed_at",
+        "close_reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "sent_at",
+        "closed_at"
+      ],
+      "json": [
+        "attachment_media_ids"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_purchasing_purchase_orders_ref",
+          "columns": [
+            "ref"
+          ]
+        }
+      ]
+    },
+    "purchase_order_lines": {
+      "table": "purchasing_purchase_order_lines",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "purchase_order_id",
+        "stock_item_id",
+        "sku",
+        "label",
+        "qty_ordered",
+        "qty_received",
+        "qty_damaged",
+        "qty_closed",
+        "unit_cost_amount",
+        "expected_date"
+      ],
+      "nullable": [
+        "expected_date"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "purchase_order_events": {
+      "table": "purchasing_purchase_order_events",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "purchase_order_id",
+        "label",
+        "detail",
+        "actor_kind",
+        "actor_id",
+        "at"
+      ],
+      "nullable": [
+        "detail",
+        "actor_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "deliveries": {
+      "table": "purchasing_deliveries",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "purchase_order_id",
+        "carrier",
+        "tracking_ref",
+        "window_from",
+        "window_to",
+        "units",
+        "status",
+        "delay_reason",
+        "arrived_at",
+        "dock"
+      ],
+      "nullable": [
+        "carrier",
+        "tracking_ref",
+        "delay_reason",
+        "arrived_at",
+        "dock"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "window_from",
+        "window_to",
+        "arrived_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "receipts": {
+      "table": "purchasing_receipts",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "purchase_order_id",
+        "delivery_id",
+        "location_id",
+        "status",
+        "note",
+        "received_by",
+        "started_at",
+        "submitted_at",
+        "confirmed_by",
+        "confirmed_at",
+        "inbound_id"
+      ],
+      "nullable": [
+        "note",
+        "submitted_at",
+        "confirmed_by",
+        "confirmed_at",
+        "inbound_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "started_at",
+        "submitted_at",
+        "confirmed_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_purchasing_receipts_ref",
+          "columns": [
+            "ref"
+          ]
+        },
+        {
+          "name": "uq_purchasing_receipts_2",
+          "columns": [
+            "delivery_id"
+          ],
+          "partial": true
+        }
+      ]
+    },
+    "receipt_lines": {
+      "table": "purchasing_receipt_lines",
+      "key": [
+        "receipt_id",
+        "purchase_order_line_id"
+      ],
+      "idColumn": null,
+      "columns": [
+        "receipt_id",
+        "purchase_order_line_id",
+        "stock_item_id",
+        "expected",
+        "received",
+        "damaged",
+        "bin_code",
+        "photo_media_ids",
+        "note"
+      ],
+      "nullable": [
+        "bin_code",
+        "note"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [
+        "photo_media_ids"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "receipt_id",
+            "purchase_order_line_id"
+          ]
+        }
+      ]
+    },
+    "supplier_claims": {
+      "table": "purchasing_supplier_claims",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "supplier_id",
+        "purchase_order_id",
+        "receipt_id",
+        "kind",
+        "lines",
+        "amount",
+        "currency",
+        "status",
+        "settlement",
+        "settled_amount",
+        "supplier_reference",
+        "owner_id",
+        "notes",
+        "created_at",
+        "decided_at"
+      ],
+      "nullable": [
+        "receipt_id",
+        "settlement",
+        "settled_amount",
+        "supplier_reference",
+        "notes",
+        "decided_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "decided_at"
+      ],
+      "json": [
+        "lines"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_purchasing_supplier_claims_ref",
+          "columns": [
+            "ref"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

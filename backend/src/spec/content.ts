@@ -6129,6 +6129,689 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "home_sections": {
+      "table": "content_home_sections",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "kind",
+        "heading",
+        "subheading",
+        "config",
+        "linked_promotion_id",
+        "linked_page_id",
+        "ad_placement_key",
+        "show_from",
+        "remove_at",
+        "time_zone",
+        "owner_staff_id",
+        "owner_role",
+        "status",
+        "draft_position",
+        "removed_reason",
+        "updated_by",
+        "updated_at"
+      ],
+      "nullable": [
+        "heading",
+        "subheading",
+        "linked_promotion_id",
+        "linked_page_id",
+        "ad_placement_key",
+        "show_from",
+        "remove_at",
+        "owner_staff_id",
+        "owner_role",
+        "removed_reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "show_from",
+        "remove_at",
+        "updated_at"
+      ],
+      "json": [
+        "config"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "pages": {
+      "table": "content_pages",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "kind",
+        "collection_kind",
+        "slug",
+        "title",
+        "brand_id",
+        "owner_staff_id",
+        "linked_promotion_id",
+        "status",
+        "publish_at",
+        "unpublish_at",
+        "time_zone",
+        "live_version_id",
+        "draft_version_id",
+        "removal",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "collection_kind",
+        "brand_id",
+        "owner_staff_id",
+        "linked_promotion_id",
+        "publish_at",
+        "unpublish_at",
+        "live_version_id",
+        "draft_version_id",
+        "removal"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "publish_at",
+        "unpublish_at",
+        "created_at",
+        "updated_at"
+      ],
+      "json": [
+        "removal"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_content_pages_slug",
+          "columns": [
+            "slug"
+          ]
+        }
+      ]
+    },
+    "versions": {
+      "table": "content_versions",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "entity",
+        "entity_id",
+        "number",
+        "state",
+        "snapshot",
+        "summary",
+        "author_kind",
+        "author_id",
+        "restored_from",
+        "review_state",
+        "submitted_by",
+        "submitted_at",
+        "reviewed_by",
+        "reviewed_at",
+        "review_note",
+        "created_at",
+        "published_at"
+      ],
+      "nullable": [
+        "summary",
+        "author_id",
+        "restored_from",
+        "review_state",
+        "submitted_by",
+        "submitted_at",
+        "reviewed_by",
+        "reviewed_at",
+        "review_note",
+        "published_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "submitted_at",
+        "reviewed_at",
+        "created_at",
+        "published_at"
+      ],
+      "json": [
+        "snapshot"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_content_versions_1",
+          "columns": [
+            "entity",
+            "entity_id",
+            "number"
+          ]
+        }
+      ]
+    },
+    "help_categories": {
+      "table": "content_help_categories",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "slug",
+        "name",
+        "icon",
+        "description",
+        "position",
+        "visible",
+        "audience"
+      ],
+      "nullable": [
+        "icon",
+        "description"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [
+        "visible"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_content_help_categories_slug",
+          "columns": [
+            "slug"
+          ]
+        }
+      ]
+    },
+    "help_articles": {
+      "table": "content_help_articles",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "slug",
+        "category_id",
+        "title",
+        "summary",
+        "audience",
+        "topics",
+        "related_ids",
+        "policy_keys",
+        "featured",
+        "popular_search",
+        "owner_staff_id",
+        "status",
+        "publish_at",
+        "unpublish_at",
+        "effective_at",
+        "review_due_at",
+        "live_version_id",
+        "draft_version_id",
+        "views",
+        "search",
+        "updated_at"
+      ],
+      "nullable": [
+        "summary",
+        "popular_search",
+        "owner_staff_id",
+        "publish_at",
+        "unpublish_at",
+        "effective_at",
+        "review_due_at",
+        "live_version_id",
+        "draft_version_id",
+        "search"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "publish_at",
+        "unpublish_at",
+        "effective_at",
+        "review_due_at",
+        "updated_at"
+      ],
+      "json": [
+        "topics",
+        "related_ids",
+        "policy_keys"
+      ],
+      "booleans": [
+        "featured"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_content_help_articles_slug",
+          "columns": [
+            "slug"
+          ]
+        }
+      ]
+    },
+    "article_feedback": {
+      "table": "content_article_feedback",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "article_id",
+        "helpful",
+        "comment",
+        "visitor_key",
+        "customer_id",
+        "at"
+      ],
+      "nullable": [
+        "comment",
+        "customer_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [
+        "helpful"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_content_article_feedback_1",
+          "columns": [
+            "article_id",
+            "visitor_key"
+          ]
+        }
+      ]
+    },
+    "policies": {
+      "table": "content_policies",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "key",
+        "kind",
+        "title",
+        "owner_staff_id",
+        "editor_staff_id",
+        "audience"
+      ],
+      "nullable": [
+        "editor_staff_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_content_policies_key",
+          "columns": [
+            "key"
+          ]
+        }
+      ]
+    },
+    "policy_versions": {
+      "table": "content_policy_versions",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "policy_id",
+        "version",
+        "state",
+        "title",
+        "body",
+        "tables",
+        "effective_at",
+        "change_summary",
+        "impact",
+        "notify_customers",
+        "notify_sellers",
+        "approval_request_id",
+        "created_by",
+        "created_at",
+        "published_at"
+      ],
+      "nullable": [
+        "tables",
+        "effective_at",
+        "change_summary",
+        "approval_request_id",
+        "published_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "effective_at",
+        "created_at",
+        "published_at"
+      ],
+      "json": [
+        "tables"
+      ],
+      "booleans": [
+        "notify_customers",
+        "notify_sellers"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_content_policy_versions_1",
+          "columns": [
+            "policy_id",
+            "version"
+          ]
+        }
+      ]
+    },
+    "policy_approvals": {
+      "table": "content_policy_approvals",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "policy_version_id",
+        "role",
+        "reviewer_id",
+        "state",
+        "note",
+        "at"
+      ],
+      "nullable": [
+        "reviewer_id",
+        "note",
+        "at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "navigation": {
+      "table": "content_navigation",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "area",
+        "group_title",
+        "position",
+        "label",
+        "url",
+        "kind",
+        "text",
+        "active_from",
+        "active_until"
+      ],
+      "nullable": [
+        "group_title",
+        "text",
+        "active_from",
+        "active_until"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "active_from",
+        "active_until"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "news_categories": {
+      "table": "content_news_categories",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "slug",
+        "name",
+        "icon",
+        "position",
+        "visible",
+        "previous_slugs"
+      ],
+      "nullable": [
+        "icon"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [
+        "previous_slugs"
+      ],
+      "booleans": [
+        "visible"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_content_news_categories_slug",
+          "columns": [
+            "slug"
+          ]
+        }
+      ]
+    },
+    "news_posts": {
+      "table": "content_news_posts",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "slug",
+        "previous_slugs",
+        "category_id",
+        "title",
+        "summary",
+        "owner_staff_id",
+        "status",
+        "pinned",
+        "pinned_at",
+        "publish_at",
+        "unpublish_at",
+        "archive_at",
+        "published_at",
+        "live_version_id",
+        "draft_version_id",
+        "updated_at"
+      ],
+      "nullable": [
+        "owner_staff_id",
+        "pinned_at",
+        "publish_at",
+        "unpublish_at",
+        "archive_at",
+        "published_at",
+        "live_version_id",
+        "draft_version_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "pinned_at",
+        "publish_at",
+        "unpublish_at",
+        "archive_at",
+        "published_at",
+        "updated_at"
+      ],
+      "json": [
+        "previous_slugs"
+      ],
+      "booleans": [
+        "pinned"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_content_news_posts_slug",
+          "columns": [
+            "slug"
+          ]
+        }
+      ]
+    },
+    "content_log": {
+      "table": "content_content_log",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "entity",
+        "entity_id",
+        "action",
+        "reason",
+        "actor_kind",
+        "actor_id",
+        "at"
+      ],
+      "nullable": [
+        "reason",
+        "actor_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

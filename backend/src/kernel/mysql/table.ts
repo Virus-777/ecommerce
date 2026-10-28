@@ -56,34 +56,48 @@ export const INSERT_CHUNK = 500;
  */
 const EXPRESSION = Symbol('sql expression');
 
+/**
+ * What a portable expression *means*, apart from the SQL it compiles to. `inc`, `decToZero` and `jsonAppend`
+ * all had a MongoDB spelling (`$inc`, a `$max(x - n, 0)` pipeline, `$push`), so a repository that uses only
+ * those runs on either store (kernel/store). A hand-written `expr` has no intent and is MySQL-only, which is
+ * what lets the MongoDB side refuse it by name instead of writing something that does not mean the same.
+ */
+export type Intent =
+  | { readonly kind: 'inc'; readonly column: string; readonly n: number }
+  | { readonly kind: 'decToZero'; readonly column: string; readonly n: number }
+  | { readonly kind: 'jsonAppend'; readonly column: string; readonly value: unknown };
+
 export interface Expr {
   readonly [EXPRESSION]: true;
   /** `table` is the quoted table name, e.g. \`orders_orders\` */
   sql(table: string): string;
   readonly params: readonly unknown[];
+  /** Set by the portable helpers below; absent on a hand-written `expr` */
+  readonly intent?: Intent;
 }
 
 /**
  * An expression with bound parameters. Give it a function to name the table it reads from:
  * `expr((t) => \`LEAST(\${t}.\${q('cap')}, ?)\`, [n])`. The SQL text never holds a value (§10.5).
  */
-export const expr = (sql: string | ((table: string) => string), params: readonly unknown[] = []): Expr => ({
+export const expr = (sql: string | ((table: string) => string), params: readonly unknown[] = [], intent?: Intent): Expr => ({
   [EXPRESSION]: true,
   sql: typeof sql === 'function' ? sql : () => sql,
   params: [...params],
+  ...(intent ? { intent } : {}),
 });
 
 export const isExpr = (v: unknown): v is Expr => typeof v === 'object' && v !== null && EXPRESSION in v;
 
 /** `col = col + n` — what `$inc` was. The server adds, so two callers at once both count (§11.2) */
-export const inc = (column: string, n: number): Expr => expr((t) => `${t}.${q(column)} + ?`, [n]);
+export const inc = (column: string, n: number): Expr => expr((t) => `${t}.${q(column)} + ?`, [n], { kind: 'inc', column, n });
 
 /** `col = GREATEST(col - n, 0)`: take n away without going below zero (the `$max(x - n, 0)` pipelines) */
-export const decToZero = (column: string, n: number): Expr => expr((t) => `GREATEST(${t}.${q(column)} - ?, 0)`, [n]);
+export const decToZero = (column: string, n: number): Expr => expr((t) => `GREATEST(${t}.${q(column)} - ?, 0)`, [n], { kind: 'decToZero', column, n });
 
 /** Appends to a JSON array column, as `$push` did */
 export const jsonAppend = (column: string, value: unknown): Expr =>
-  expr((t) => `JSON_ARRAY_APPEND(${t}.${q(column)}, '$', CAST(? AS JSON))`, [JSON.stringify(value)]);
+  expr((t) => `JSON_ARRAY_APPEND(${t}.${q(column)}, '$', CAST(? AS JSON))`, [JSON.stringify(value)], { kind: 'jsonAppend', column, value });
 
 /** A patch: a value per column, or an expression the server computes */
 export type Patch<R> = { [K in keyof R]?: R[K] | Expr };

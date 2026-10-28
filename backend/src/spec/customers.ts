@@ -3461,6 +3461,540 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "customers": {
+      "table": "customers_customers",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "user_id",
+        "ref",
+        "first_name",
+        "last_name",
+        "email",
+        "email_verified_at",
+        "phone",
+        "phone_verified_at",
+        "account_status",
+        "default_address_id",
+        "order_count",
+        "total_spend_minor",
+        "currency",
+        "closed_at",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "email_verified_at",
+        "phone",
+        "phone_verified_at",
+        "default_address_id",
+        "closed_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "email_verified_at",
+        "phone_verified_at",
+        "closed_at",
+        "created_at",
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_customers_customers_user_id",
+          "columns": [
+            "user_id"
+          ]
+        },
+        {
+          "name": "uq_customers_customers_ref",
+          "columns": [
+            "ref"
+          ]
+        }
+      ]
+    },
+    "addresses": {
+      "table": "customers_addresses",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "customer_id",
+        "label",
+        "name",
+        "line1",
+        "line2",
+        "city",
+        "region",
+        "postal_code",
+        "country",
+        "phone",
+        "delivery_instructions",
+        "is_default",
+        "validated_at",
+        "lat",
+        "lng",
+        "geocoded_at",
+        "geocode_precision",
+        "last_used_at",
+        "deleted_at",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "label",
+        "line2",
+        "phone",
+        "delivery_instructions",
+        "validated_at",
+        "lat",
+        "lng",
+        "geocoded_at",
+        "geocode_precision",
+        "last_used_at",
+        "deleted_at"
+      ],
+      "decimal": [
+        "lat",
+        "lng"
+      ],
+      "binary": [],
+      "dates": [
+        "validated_at",
+        "geocoded_at",
+        "last_used_at",
+        "deleted_at",
+        "created_at",
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [
+        "is_default"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_customers_addresses_2",
+          "columns": [
+            "customer_id"
+          ],
+          "partial": true
+        }
+      ]
+    },
+    "marketing_preferences": {
+      "table": "customers_marketing_preferences",
+      "key": [
+        "customer_id"
+      ],
+      "idColumn": "customer_id",
+      "columns": [
+        "customer_id",
+        "email_promotions",
+        "sms_promotions",
+        "push_promotions",
+        "wishlist_alerts",
+        "personalized_recommendations",
+        "recent_searches",
+        "updated_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [
+        "email_promotions",
+        "sms_promotions",
+        "push_promotions",
+        "wishlist_alerts",
+        "personalized_recommendations",
+        "recent_searches"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "customer_id"
+          ]
+        }
+      ]
+    },
+    "consent_log": {
+      "table": "customers_consent_log",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "customer_id",
+        "channel",
+        "granted",
+        "source",
+        "actor_kind",
+        "actor_id",
+        "ip",
+        "at"
+      ],
+      "nullable": [
+        "actor_id",
+        "ip"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [
+        "granted"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "recently_viewed": {
+      "table": "customers_recently_viewed",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "owner_kind",
+        "owner_id",
+        "product_id",
+        "variant_id",
+        "title",
+        "image_media_id",
+        "viewed_at"
+      ],
+      "nullable": [
+        "variant_id",
+        "image_media_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "viewed_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_customers_recently_viewed_1",
+          "columns": [
+            "owner_kind",
+            "owner_id",
+            "product_id"
+          ]
+        }
+      ]
+    },
+    "account_restrictions": {
+      "table": "customers_account_restrictions",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "customer_id",
+        "scope",
+        "reason_code",
+        "reason",
+        "still_works",
+        "appeal_route",
+        "appeal_deadline",
+        "starts_at",
+        "ends_at",
+        "state",
+        "set_by_kind",
+        "set_by_id",
+        "trust_report_id",
+        "trust_enforcement_id",
+        "lifted_at",
+        "lift_reason"
+      ],
+      "nullable": [
+        "appeal_deadline",
+        "ends_at",
+        "set_by_id",
+        "trust_report_id",
+        "trust_enforcement_id",
+        "lifted_at",
+        "lift_reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "appeal_deadline",
+        "starts_at",
+        "ends_at",
+        "lifted_at"
+      ],
+      "json": [
+        "still_works"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "account_actions": {
+      "table": "customers_account_actions",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "customer_id",
+        "action",
+        "reason_code",
+        "details",
+        "from_status",
+        "to_status",
+        "restriction_id",
+        "actor_kind",
+        "actor_id",
+        "at"
+      ],
+      "nullable": [
+        "from_status",
+        "to_status",
+        "restriction_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "guest_buyers": {
+      "table": "customers_guest_buyers",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "email_normalized",
+        "email",
+        "name",
+        "order_count",
+        "total_spend",
+        "currency",
+        "first_order_at",
+        "last_order_at",
+        "last_order_id",
+        "last_order_ref"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "first_order_at",
+        "last_order_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_customers_guest_buyers_email_normalized",
+          "columns": [
+            "email_normalized"
+          ]
+        }
+      ]
+    },
+    "customer_notes": {
+      "table": "customers_customer_notes",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "customer_id",
+        "body",
+        "author_id",
+        "author_name",
+        "created_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "data_requests": {
+      "table": "customers_data_requests",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "customer_id",
+        "kind",
+        "state",
+        "requested_at",
+        "due_by",
+        "file_media_id",
+        "ready_at",
+        "expires_at",
+        "scheduled_for",
+        "completed_at",
+        "cancelled_at",
+        "failure"
+      ],
+      "nullable": [
+        "file_media_id",
+        "ready_at",
+        "expires_at",
+        "scheduled_for",
+        "completed_at",
+        "cancelled_at",
+        "failure"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "requested_at",
+        "due_by",
+        "ready_at",
+        "expires_at",
+        "scheduled_for",
+        "completed_at",
+        "cancelled_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "guest_lookup_attempts": {
+      "table": "customers_guest_lookup_attempts",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "email_hash",
+        "ip",
+        "guest_session_id",
+        "succeeded",
+        "order_id",
+        "at"
+      ],
+      "nullable": [
+        "guest_session_id",
+        "order_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [
+        "succeeded"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

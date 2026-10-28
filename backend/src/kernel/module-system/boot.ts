@@ -21,11 +21,16 @@ import type { RefGenerator } from '../lib/refs.js';
 import type { ModuleSpecDef } from '../spec/define.js';
 import type { ModuleContext, ModuleDefinition, ModuleName } from './index.js';
 import { specOf } from './loader.js';
+import type { MysqlStore } from '../mysql/index.js';
+import type { Store } from '../store/index.js';
+import { mongoStore } from '../store/mongo.js';
 
 export interface KernelServices {
   config: Config;
   log: FastifyBaseLogger;
   mongo: MongoStore;
+  /** The MySQL store, where this process has one (config.mysql); the modules of config.mysqlModules use it */
+  mysql?: MysqlStore;
   clock: Clock;
   events: EventBus;
   jobs: JobScheduler;
@@ -122,13 +127,23 @@ export async function bootModules(defs: ModuleDefinition[], k: KernelServices): 
     const name = spec.name;
     const sets: RouteSet[] = [];
     let provided = false;
+    const mongo = k.mongo.module(name, spec.collections, def.schemas);
+    // one answer per module, decided at boot: a module's data is in MySQL (MYSQL_MODULES) or in MongoDB.
+    // Naming a module without a MySQL store, or without the generated table defs, is a misconfiguration
+    // worth refusing here rather than discovering on its first query.
+    let store: Store;
+    if (!k.config.mysqlModules.includes(name)) store = mongoStore(mongo);
+    else if (!k.mysql) throw new Error(`MYSQL_MODULES names ${name}, but this process has no MySQL (MYSQL_URL is not set)`);
+    else if (!spec.tables) throw new Error(`MYSQL_MODULES names ${name}, but its spec has no tables; run npm run gen`);
+    else store = k.mysql.module(name, spec.tables);
     const ctx: ModuleContext<any> = {
       name,
       spec,
       modules,
       config: k.config,
       log: k.log.child({ module: name }),
-      mongo: k.mongo.module(name, spec.collections, def.schemas),
+      mongo,
+      store,
       clock: k.clock,
       events: moduleEvents(k.events, spec),
       jobs: {

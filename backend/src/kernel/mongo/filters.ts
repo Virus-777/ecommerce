@@ -47,6 +47,13 @@ export type Cond<V> =
 /** Conditions on a row's columns, all of which must hold (undefined conditions are left out) */
 export type Where<R> = { [K in keyof R]?: Cond<R[K]> };
 
+/**
+ * A Where plus alternatives: the columns are ANDed, and `or` is a list of Wheres any one of which may hold,
+ * ANDed with the rest. The same shape the MySQL side takes (kernel/mysql/where.ts), so a repository written
+ * in this vocabulary reads the same on either store.
+ */
+export type WhereWithOr<R> = Where<R> & { or?: readonly Where<R>[] };
+
 const COMPARE: Record<string, string> = { '<': '$lt', '<=': '$lte', '>': '$gt', '>=': '$gte' };
 /** A condition no document meets (SQL: a comparison with null is never true) */
 const NOTHING = { $in: [] };
@@ -63,11 +70,21 @@ const isOperator = (v: unknown): v is { op: string; value: unknown } =>
  *   - `not in` skips nulls; an empty list leaves the column unfiltered; a list holding null matches nothing;
  *   - `<`, `<=`, `>`, `>=`, `between` [low, high] and `like` with a null value match nothing;
  *   - `like` is a case-sensitive anchored pattern (likePattern).
+ *
+ * `or` is a list of Wheres, any of which may hold, ANDed with the columns beside it. An `or` of one branch is
+ * that branch; an `or` of none matches nothing, which is what "any of these, and there are none" means, and is
+ * what NOTHING does on the SQL side.
  */
 export function whereFilter(where: Readonly<Record<string, unknown>>): Filter {
   const out: Filter = {};
   for (const [column, cond] of Object.entries(where)) {
     if (cond === undefined) continue;
+    if (column === 'or') {
+      const branches = Array.isArray(cond) ? (cond as Readonly<Record<string, unknown>>[]) : [];
+      if (branches.length) out.$or = branches.map((b) => whereFilter(b));
+      else out.$nor = [{}]; // "none of: everything"
+      continue;
+    }
     if (cond === null) out[column] = null;
     else if (Array.isArray(cond)) out[column] = { $in: cond.filter((v) => v !== null && v !== undefined) };
     else if (isOperator(cond)) {

@@ -3307,6 +3307,485 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "queues": {
+      "table": "workqueues_queues",
+      "key": [
+        "key"
+      ],
+      "idColumn": "key",
+      "columns": [
+        "key",
+        "name",
+        "area",
+        "owner_role",
+        "lead_staff_id",
+        "backup_staff_id",
+        "escalation_route",
+        "escalation_label",
+        "default_deadline_minutes",
+        "business_hours_only",
+        "pause_while_waiting",
+        "screen",
+        "screen_filter",
+        "visible_to_seller",
+        "active",
+        "updated_by",
+        "updated_at"
+      ],
+      "nullable": [
+        "screen_filter"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "json": [
+        "escalation_route"
+      ],
+      "booleans": [
+        "business_hours_only",
+        "pause_while_waiting",
+        "visible_to_seller",
+        "active"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "key"
+          ]
+        }
+      ]
+    },
+    "intake_rules": {
+      "table": "workqueues_intake_rules",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "event",
+        "queue_key",
+        "kind",
+        "title_template",
+        "dedupe_key_template",
+        "deadline_rule",
+        "priority",
+        "resolves_on",
+        "active"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [
+        "resolves_on"
+      ],
+      "booleans": [
+        "active"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "items": {
+      "table": "workqueues_items",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "queue_key",
+        "kind",
+        "title",
+        "summary",
+        "subject_type",
+        "subject_id",
+        "subject_ref",
+        "subject_label",
+        "related_subjects",
+        "seller_id",
+        "seller_name",
+        "customer_id",
+        "amount_minor",
+        "currency",
+        "owner_role",
+        "assignee_staff_id",
+        "due_at",
+        "deadline_state",
+        "priority",
+        "state",
+        "waiting_on",
+        "waiting_since",
+        "escalation_level",
+        "escalated_to",
+        "dedupe_key",
+        "source_module",
+        "source_event",
+        "links",
+        "visible_to_seller",
+        "opened_at",
+        "updated_at",
+        "resolved_at",
+        "resolution",
+        "archived_at"
+      ],
+      "nullable": [
+        "summary",
+        "subject_ref",
+        "subject_label",
+        "seller_id",
+        "seller_name",
+        "customer_id",
+        "amount_minor",
+        "currency",
+        "assignee_staff_id",
+        "waiting_on",
+        "waiting_since",
+        "escalated_to",
+        "source_event",
+        "resolved_at",
+        "resolution",
+        "archived_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "due_at",
+        "waiting_since",
+        "opened_at",
+        "updated_at",
+        "resolved_at",
+        "archived_at"
+      ],
+      "json": [
+        "related_subjects",
+        "links",
+        "resolution"
+      ],
+      "booleans": [
+        "visible_to_seller"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_workqueues_items_ref",
+          "columns": [
+            "ref"
+          ]
+        },
+        {
+          "name": "uq_workqueues_items_1",
+          "columns": [
+            "dedupe_key"
+          ],
+          "partial": true
+        }
+      ]
+    },
+    "item_events": {
+      "table": "workqueues_item_events",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "item_id",
+        "kind",
+        "detail",
+        "actor_kind",
+        "actor_id",
+        "at"
+      ],
+      "nullable": [
+        "actor_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [
+        "detail"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "item_notes": {
+      "table": "workqueues_item_notes",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "item_id",
+        "body",
+        "author_id",
+        "author_name",
+        "at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "saved_filters": {
+      "table": "workqueues_saved_filters",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "owner_staff_id",
+        "name",
+        "shared",
+        "target",
+        "screen",
+        "screen_state",
+        "filters",
+        "created_at"
+      ],
+      "nullable": [
+        "screen",
+        "screen_state"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "json": [
+        "filters"
+      ],
+      "booleans": [
+        "shared"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "day_end_reviews": {
+      "table": "workqueues_day_end_reviews",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "date",
+        "due_at",
+        "state",
+        "shared_with_roles",
+        "items",
+        "completed_by",
+        "completed_at",
+        "summary_sent_to"
+      ],
+      "nullable": [
+        "completed_by",
+        "completed_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "due_at",
+        "completed_at"
+      ],
+      "json": [
+        "shared_with_roles",
+        "items",
+        "summary_sent_to"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_workqueues_day_end_reviews_date",
+          "columns": [
+            "date"
+          ]
+        }
+      ]
+    },
+    "routine_templates": {
+      "table": "workqueues_routine_templates",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "title",
+        "area_label",
+        "owner_roles",
+        "due_time",
+        "weekdays",
+        "active"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [
+        "owner_roles",
+        "weekdays"
+      ],
+      "booleans": [
+        "active"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "routine_checks": {
+      "table": "workqueues_routine_checks",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "template_id",
+        "date",
+        "owner_staff_id",
+        "due_at",
+        "state",
+        "done_at",
+        "done_by",
+        "note",
+        "check_ins"
+      ],
+      "nullable": [
+        "done_at",
+        "done_by",
+        "note"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "due_at",
+        "done_at"
+      ],
+      "json": [
+        "check_ins"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_workqueues_routine_checks_1",
+          "columns": [
+            "template_id",
+            "date"
+          ]
+        }
+      ]
+    },
+    "daily_counts": {
+      "table": "workqueues_daily_counts",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "queue_key",
+        "date",
+        "open",
+        "overdue",
+        "opened",
+        "resolved",
+        "median_resolve_minutes"
+      ],
+      "nullable": [
+        "median_resolve_minutes"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        },
+        {
+          "name": "uq_workqueues_daily_counts_1",
+          "columns": [
+            "queue_key",
+            "date"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

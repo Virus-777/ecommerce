@@ -15,8 +15,8 @@
  */
 import { escapeLike } from '../lib/text.js';
 
-export type { Cond, Where } from '../mongo/filters.js';
-import type { Where } from '../mongo/filters.js';
+export type { Cond, Where, WhereWithOr } from '../mongo/filters.js';
+import type { Where, WhereWithOr } from '../mongo/filters.js';
 
 /** A fragment and the values it binds, in order */
 export interface Sql {
@@ -88,7 +88,7 @@ function condSql(column: string, cond: unknown): Sql | undefined {
 }
 
 /** A Where, and optionally `or: [...]`, as one condition */
-export type WhereWithOr<R> = Where<R> & { or?: readonly Where<R>[] };
+// Defined with Where itself, so the two stores cannot drift on what a filter means
 
 /**
  * A Where as SQL. Columns are ANDed; `or` is a list of Wheres, any of which may hold, ANDed with the rest —

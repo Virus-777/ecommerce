@@ -4372,6 +4372,516 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "case_categories": {
+      "table": "support_case_categories",
+      "key": [
+        "key"
+      ],
+      "idColumn": "key",
+      "columns": [
+        "key",
+        "label",
+        "audience",
+        "group_key",
+        "default_priority",
+        "team",
+        "seller_handles_first",
+        "first_response_business_hours",
+        "next_response_business_hours",
+        "resolution_business_days",
+        "active",
+        "updated_by",
+        "updated_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [
+        "seller_handles_first",
+        "active"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "key"
+          ]
+        }
+      ]
+    },
+    "cases": {
+      "table": "support_cases",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "kind",
+        "category_key",
+        "priority",
+        "status",
+        "subject",
+        "customer_id",
+        "guest_session_id",
+        "seller_id",
+        "order_id",
+        "return_id",
+        "handler_kind",
+        "owner_staff_id",
+        "team",
+        "support_following",
+        "next_action",
+        "first_response_due_at",
+        "next_response_due_at",
+        "resolution_due_at",
+        "waiting_on",
+        "reply_channel",
+        "decision",
+        "decision_draft",
+        "appeal_deadline",
+        "reopen_until",
+        "reopen_count",
+        "opened_by",
+        "opened_at",
+        "first_replied_at",
+        "resolved_at",
+        "closed_at",
+        "updated_at",
+        "order_ref",
+        "placed_at",
+        "return_ref",
+        "customer_name",
+        "contact_email",
+        "city",
+        "seller_name",
+        "owner_type",
+        "reference",
+        "trust_report_id",
+        "problem_type",
+        "desired_remedy",
+        "callback_phone",
+        "info_request_from",
+        "info_request_question",
+        "info_request_due_at",
+        "info_requested_at",
+        "info_requested_by",
+        "escalated_at",
+        "escalated_by",
+        "escalation_reason",
+        "escalated_to",
+        "escalation_note",
+        "seller_replied_at",
+        "dispatch_overdue_due_at",
+        "dispatch_overdue_noted_at",
+        "overdue_notified_for",
+        "appeal_window_closed",
+        "approval_request_id",
+        "pending_decision"
+      ],
+      "nullable": [
+        "customer_id",
+        "guest_session_id",
+        "seller_id",
+        "order_id",
+        "return_id",
+        "owner_staff_id",
+        "first_response_due_at",
+        "next_response_due_at",
+        "resolution_due_at",
+        "waiting_on",
+        "reply_channel",
+        "decision",
+        "decision_draft",
+        "appeal_deadline",
+        "reopen_until",
+        "first_replied_at",
+        "resolved_at",
+        "closed_at",
+        "order_ref",
+        "placed_at",
+        "return_ref",
+        "customer_name",
+        "contact_email",
+        "city",
+        "seller_name",
+        "owner_type",
+        "reference",
+        "trust_report_id",
+        "problem_type",
+        "desired_remedy",
+        "callback_phone",
+        "info_request_from",
+        "info_request_question",
+        "info_request_due_at",
+        "info_requested_at",
+        "info_requested_by",
+        "escalated_at",
+        "escalated_by",
+        "escalation_reason",
+        "escalated_to",
+        "escalation_note",
+        "seller_replied_at",
+        "dispatch_overdue_due_at",
+        "dispatch_overdue_noted_at",
+        "overdue_notified_for",
+        "approval_request_id",
+        "pending_decision"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "first_response_due_at",
+        "next_response_due_at",
+        "resolution_due_at",
+        "appeal_deadline",
+        "reopen_until",
+        "opened_at",
+        "first_replied_at",
+        "resolved_at",
+        "closed_at",
+        "updated_at",
+        "placed_at",
+        "info_request_due_at",
+        "info_requested_at",
+        "escalated_at",
+        "seller_replied_at",
+        "dispatch_overdue_due_at",
+        "dispatch_overdue_noted_at",
+        "overdue_notified_for"
+      ],
+      "json": [
+        "next_action",
+        "decision",
+        "decision_draft",
+        "pending_decision"
+      ],
+      "booleans": [
+        "support_following",
+        "appeal_window_closed"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_support_cases_ref",
+          "columns": [
+            "ref"
+          ]
+        }
+      ]
+    },
+    "case_items": {
+      "table": "support_case_items",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "case_id",
+        "order_item_id",
+        "snapshot"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [
+        "snapshot"
+      ],
+      "booleans": [],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        },
+        {
+          "name": "uq_support_case_items_1",
+          "columns": [
+            "case_id",
+            "order_item_id"
+          ]
+        }
+      ]
+    },
+    "case_messages": {
+      "table": "support_case_messages",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "case_id",
+        "author_kind",
+        "author_id",
+        "author_label",
+        "role",
+        "audience",
+        "body",
+        "media_ids",
+        "at"
+      ],
+      "nullable": [
+        "author_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [
+        "media_ids"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "case_evidence": {
+      "table": "support_case_evidence",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "case_id",
+        "party",
+        "kind",
+        "media_ids",
+        "note",
+        "added_by",
+        "at"
+      ],
+      "nullable": [
+        "note"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [
+        "media_ids"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "case_offers": {
+      "table": "support_case_offers",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "case_id",
+        "from_party",
+        "kind",
+        "amount",
+        "currency",
+        "ship_by",
+        "note",
+        "status",
+        "respond_by",
+        "created_at",
+        "responded_at"
+      ],
+      "nullable": [
+        "amount",
+        "currency",
+        "ship_by",
+        "note",
+        "respond_by",
+        "responded_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "respond_by",
+        "created_at",
+        "responded_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "case_remedies": {
+      "table": "support_case_remedies",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "case_id",
+        "kind",
+        "amount",
+        "currency",
+        "charged_to",
+        "order_item_ids",
+        "status",
+        "refund_request_id",
+        "replacement_id",
+        "goodwill_grant_id",
+        "due_at",
+        "note",
+        "created_by",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "amount",
+        "currency",
+        "charged_to",
+        "refund_request_id",
+        "replacement_id",
+        "goodwill_grant_id",
+        "due_at",
+        "note"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "due_at",
+        "created_at",
+        "updated_at"
+      ],
+      "json": [
+        "order_item_ids"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "case_appeals": {
+      "table": "support_case_appeals",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "case_id",
+        "by_kind",
+        "by_id",
+        "reason",
+        "media_ids",
+        "status",
+        "reviewer_staff_id",
+        "submitted_at",
+        "decided_at",
+        "outcome"
+      ],
+      "nullable": [
+        "reviewer_staff_id",
+        "decided_at",
+        "outcome"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "submitted_at",
+        "decided_at"
+      ],
+      "json": [
+        "media_ids"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "case_events": {
+      "table": "support_case_events",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "case_id",
+        "kind",
+        "label",
+        "detail",
+        "visibility",
+        "actor_kind",
+        "actor_id",
+        "reason",
+        "at"
+      ],
+      "nullable": [
+        "detail",
+        "actor_id",
+        "reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

@@ -5897,6 +5897,688 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "placements": {
+      "table": "advertising_placements",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "key",
+        "name",
+        "kind",
+        "enabled",
+        "availability",
+        "eligible_pages",
+        "formats",
+        "frequency_cap",
+        "trigger",
+        "rotation",
+        "dismissal",
+        "max_per_page",
+        "positions",
+        "label",
+        "description",
+        "version",
+        "updated_by",
+        "updated_at"
+      ],
+      "nullable": [
+        "frequency_cap",
+        "trigger",
+        "max_per_page",
+        "positions",
+        "updated_by"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "json": [
+        "eligible_pages",
+        "formats",
+        "frequency_cap",
+        "trigger",
+        "rotation",
+        "dismissal",
+        "positions"
+      ],
+      "booleans": [
+        "enabled"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_advertising_placements_key",
+          "columns": [
+            "key"
+          ]
+        }
+      ]
+    },
+    "global_rules": {
+      "table": "advertising_global_rules",
+      "key": [
+        "version"
+      ],
+      "idColumn": "version",
+      "columns": [
+        "version",
+        "rules",
+        "effective_at",
+        "approval_request_id",
+        "created_by",
+        "created_at"
+      ],
+      "nullable": [
+        "approval_request_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "effective_at",
+        "created_at"
+      ],
+      "json": [
+        "rules"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "version"
+          ]
+        }
+      ]
+    },
+    "campaigns": {
+      "table": "advertising_campaigns",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "name",
+        "origin",
+        "advertiser_kind",
+        "seller_id",
+        "brand_id",
+        "goal",
+        "owner_staff_id",
+        "linked_promotion_id",
+        "placement_id",
+        "pages",
+        "page_category_ids",
+        "audience",
+        "destination",
+        "starts_at",
+        "ends_at",
+        "time_zone",
+        "frequency_cap",
+        "dismissal",
+        "priority",
+        "billing",
+        "rate",
+        "daily_limit",
+        "total_limit",
+        "delivery_cap",
+        "spent",
+        "currency",
+        "stop_with_promotion",
+        "after_approval",
+        "status",
+        "paused_reason",
+        "paused_by",
+        "paused_at",
+        "pause_cause",
+        "rejected_reason",
+        "finished_reason",
+        "note_to_reviewers",
+        "position",
+        "alt",
+        "pending_change",
+        "created_by",
+        "created_at",
+        "updated_at",
+        "version"
+      ],
+      "nullable": [
+        "seller_id",
+        "brand_id",
+        "owner_staff_id",
+        "linked_promotion_id",
+        "starts_at",
+        "ends_at",
+        "rate",
+        "daily_limit",
+        "total_limit",
+        "delivery_cap",
+        "paused_reason",
+        "paused_by",
+        "paused_at",
+        "pause_cause",
+        "rejected_reason",
+        "finished_reason",
+        "note_to_reviewers",
+        "position",
+        "alt",
+        "pending_change"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "starts_at",
+        "ends_at",
+        "paused_at",
+        "created_at",
+        "updated_at"
+      ],
+      "json": [
+        "pages",
+        "page_category_ids",
+        "audience",
+        "destination",
+        "frequency_cap",
+        "dismissal",
+        "pending_change"
+      ],
+      "booleans": [
+        "stop_with_promotion"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_advertising_campaigns_ref",
+          "columns": [
+            "ref"
+          ]
+        }
+      ]
+    },
+    "campaign_items": {
+      "table": "advertising_campaign_items",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "campaign_id",
+        "kind",
+        "target_id",
+        "label",
+        "product_id"
+      ],
+      "nullable": [
+        "label",
+        "product_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        }
+      ]
+    },
+    "campaign_creatives": {
+      "table": "advertising_campaign_creatives",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "campaign_id",
+        "creative_id",
+        "device"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        },
+        {
+          "name": "uq_advertising_campaign_creatives_1",
+          "columns": [
+            "campaign_id",
+            "creative_id"
+          ]
+        }
+      ]
+    },
+    "approval_steps": {
+      "table": "advertising_approval_steps",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "campaign_id",
+        "submission",
+        "role",
+        "reviewer_id",
+        "state",
+        "note",
+        "decided_at"
+      ],
+      "nullable": [
+        "reviewer_id",
+        "note",
+        "decided_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "decided_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "creatives": {
+      "table": "advertising_creatives",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "advertiser_kind",
+        "seller_id",
+        "brand_id",
+        "kind",
+        "device",
+        "placement_key",
+        "media_id",
+        "file_name",
+        "width",
+        "height",
+        "bytes",
+        "duration_seconds",
+        "headline",
+        "body",
+        "button_text",
+        "link",
+        "status",
+        "link_check",
+        "auto_checks",
+        "created_by",
+        "created_at"
+      ],
+      "nullable": [
+        "seller_id",
+        "brand_id",
+        "media_id",
+        "file_name",
+        "width",
+        "height",
+        "bytes",
+        "duration_seconds",
+        "headline",
+        "body",
+        "button_text",
+        "link"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "json": [
+        "link_check",
+        "auto_checks"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "creative_reviews": {
+      "table": "advertising_creative_reviews",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "creative_id",
+        "reviewer_id",
+        "role",
+        "decision",
+        "reason_code",
+        "comment",
+        "at"
+      ],
+      "nullable": [
+        "reason_code",
+        "comment"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "campaign_log": {
+      "table": "advertising_campaign_log",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "campaign_id",
+        "action",
+        "from_status",
+        "to_status",
+        "reason",
+        "actor_kind",
+        "actor_id",
+        "at"
+      ],
+      "nullable": [
+        "from_status",
+        "to_status",
+        "reason",
+        "actor_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "ad_events": {
+      "table": "advertising_ad_events",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "impression_id",
+        "campaign_id",
+        "creative_id",
+        "placement_key",
+        "kind",
+        "visitor_key",
+        "session_id",
+        "customer_id",
+        "page",
+        "device",
+        "at",
+        "cost"
+      ],
+      "nullable": [
+        "customer_id",
+        "cost"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "frequency_state": {
+      "table": "advertising_frequency_state",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "visitor_key",
+        "campaign_id",
+        "session_id",
+        "session_displays",
+        "window_displays",
+        "window_started_at",
+        "display_day",
+        "day_displays",
+        "total_displays",
+        "last_display_at",
+        "suppressed_until"
+      ],
+      "nullable": [
+        "session_id",
+        "display_day",
+        "last_display_at",
+        "suppressed_until"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "window_started_at",
+        "last_display_at",
+        "suppressed_until"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        },
+        {
+          "name": "uq_advertising_frequency_state_1",
+          "columns": [
+            "visitor_key",
+            "campaign_id"
+          ]
+        }
+      ]
+    },
+    "attributions": {
+      "table": "advertising_attributions",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "order_id",
+        "campaign_id",
+        "click_event_id",
+        "amount",
+        "currency",
+        "attributed_at",
+        "reversed"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "attributed_at"
+      ],
+      "json": [],
+      "booleans": [
+        "reversed"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_advertising_attributions_1",
+          "columns": [
+            "order_id",
+            "campaign_id"
+          ]
+        }
+      ]
+    },
+    "daily_stats": {
+      "table": "advertising_daily_stats",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "campaign_id",
+        "day",
+        "displays",
+        "clicks",
+        "dismissals",
+        "spend",
+        "attributed_orders",
+        "attributed_sales"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        },
+        {
+          "name": "uq_advertising_daily_stats_1",
+          "columns": [
+            "campaign_id",
+            "day"
+          ]
+        }
+      ]
+    },
+    "ad_charges": {
+      "table": "advertising_ad_charges",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "campaign_id",
+        "seller_id",
+        "day",
+        "basis",
+        "units",
+        "rate",
+        "amount",
+        "currency",
+        "state",
+        "posted_at",
+        "ledger_entry_id",
+        "statement_ref",
+        "reason"
+      ],
+      "nullable": [
+        "posted_at",
+        "ledger_entry_id",
+        "statement_ref",
+        "reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "posted_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_advertising_ad_charges_1",
+          "columns": [
+            "campaign_id",
+            "day"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

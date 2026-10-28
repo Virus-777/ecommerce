@@ -3914,6 +3914,441 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "categories": {
+      "table": "services_categories",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "area",
+        "slug",
+        "name",
+        "icon",
+        "position",
+        "visible"
+      ],
+      "nullable": [
+        "icon"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [
+        "visible"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_services_categories_1",
+          "columns": [
+            "area",
+            "slug"
+          ]
+        }
+      ]
+    },
+    "providers": {
+      "table": "services_providers",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "slug",
+        "name",
+        "logo",
+        "cover",
+        "kind",
+        "category_id",
+        "city",
+        "verified",
+        "photos",
+        "description",
+        "since",
+        "contacts",
+        "location",
+        "point",
+        "hours",
+        "staff",
+        "reply_time",
+        "status",
+        "rating_sum",
+        "rating_count",
+        "rating_stars",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "logo",
+        "cover",
+        "kind",
+        "category_id",
+        "city",
+        "description",
+        "since",
+        "location",
+        "point",
+        "reply_time"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "updated_at"
+      ],
+      "json": [
+        "logo",
+        "cover",
+        "photos",
+        "contacts",
+        "location",
+        "point",
+        "hours",
+        "staff",
+        "rating_stars"
+      ],
+      "booleans": [
+        "verified"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_services_providers_slug",
+          "columns": [
+            "slug"
+          ]
+        }
+      ]
+    },
+    "services": {
+      "table": "services_services",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "slug",
+        "area",
+        "provider_id",
+        "category_id",
+        "title",
+        "summary",
+        "image",
+        "photos",
+        "badge",
+        "from_price",
+        "currency",
+        "price_unit",
+        "duration_label",
+        "supported_label",
+        "coverage",
+        "tags",
+        "description",
+        "included",
+        "requirements",
+        "supported",
+        "os_versions",
+        "handover",
+        "price_table",
+        "price_table_title",
+        "terms",
+        "full_terms",
+        "covered_by_warranty",
+        "steps",
+        "slot_minutes",
+        "duration_minutes",
+        "status",
+        "position",
+        "rating_sum",
+        "rating_count",
+        "rating_stars",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "category_id",
+        "summary",
+        "image",
+        "badge",
+        "from_price",
+        "duration_label",
+        "supported_label",
+        "coverage",
+        "description",
+        "price_table_title",
+        "full_terms",
+        "slot_minutes",
+        "duration_minutes"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "updated_at"
+      ],
+      "json": [
+        "image",
+        "photos",
+        "tags",
+        "included",
+        "requirements",
+        "supported",
+        "os_versions",
+        "handover",
+        "price_table",
+        "terms",
+        "steps",
+        "rating_stars"
+      ],
+      "booleans": [
+        "covered_by_warranty"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_services_services_slug",
+          "columns": [
+            "slug"
+          ]
+        }
+      ]
+    },
+    "requests": {
+      "table": "services_requests",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "area",
+        "service_id",
+        "provider_id",
+        "customer_id",
+        "slot_start",
+        "slot_end",
+        "staff_id",
+        "device_id",
+        "device",
+        "contact",
+        "details",
+        "status",
+        "provider_note",
+        "staff_note",
+        "history",
+        "reviewed",
+        "estimated_amount",
+        "estimated_currency",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "slot_start",
+        "slot_end",
+        "staff_id",
+        "device_id",
+        "device",
+        "provider_note",
+        "staff_note",
+        "estimated_amount",
+        "estimated_currency"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "slot_start",
+        "slot_end",
+        "created_at",
+        "updated_at"
+      ],
+      "json": [
+        "device",
+        "contact",
+        "details",
+        "history"
+      ],
+      "booleans": [
+        "reviewed"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_services_requests_ref",
+          "columns": [
+            "ref"
+          ]
+        }
+      ]
+    },
+    "reviews": {
+      "table": "services_reviews",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "service_id",
+        "provider_id",
+        "request_id",
+        "customer_id",
+        "author_name",
+        "rating",
+        "text",
+        "status",
+        "created_at"
+      ],
+      "nullable": [
+        "text"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_services_reviews_request_id",
+          "columns": [
+            "request_id"
+          ]
+        }
+      ]
+    },
+    "saved_providers": {
+      "table": "services_saved_providers",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "customer_id",
+        "provider_id",
+        "created_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_services_saved_providers_1",
+          "columns": [
+            "customer_id",
+            "provider_id"
+          ]
+        }
+      ]
+    },
+    "devices": {
+      "table": "services_devices",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "customer_id",
+        "brand",
+        "model",
+        "storage",
+        "imei",
+        "imei_last4",
+        "purchase_date",
+        "order_ref",
+        "status",
+        "covered_until",
+        "reject_reason",
+        "staff_note",
+        "verified_at",
+        "verified_by",
+        "history",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "storage",
+        "order_ref",
+        "covered_until",
+        "reject_reason",
+        "staff_note",
+        "verified_at",
+        "verified_by"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "verified_at",
+        "created_at",
+        "updated_at"
+      ],
+      "json": [
+        "history"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

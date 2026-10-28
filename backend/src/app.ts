@@ -29,10 +29,12 @@ import { systemClock, type Clock } from './kernel/lib/clock.js';
 import { mongoRefGenerator } from './kernel/lib/refs.js';
 import { connectMongo, type MongoStore } from './kernel/mongo/index.js';
 import { migrateMongo, mongoUnits } from './kernel/mongo/schema.js';
+import { connectMysql, type MysqlStore } from './kernel/mysql/index.js';
+import { migrateMysql } from './kernel/mysql/schema.js';
 import { bootModules, type BootResult } from './kernel/module-system/boot.js';
 import { allSpecs, loadDefinitions } from './kernel/module-system/loader.js';
 import { enabledModules } from './modules.config.js';
-import { graphqlFragments, moduleLoaders } from './modules/index.js';
+import { graphqlFragments, moduleLoaders, mysqlSchemas } from './modules/index.js';
 import * as common from './spec/common.js';
 import { baseTypeDefs } from './spec/graphql.js';
 
@@ -44,6 +46,8 @@ export interface BuildOptions {
   modules?: string[];
   /** Bring your own MongoDB store (tests; two apps given one store share its database); otherwise connected from the config (MONGODB_URI, or an embedded replica set) and closed with the app */
   mongo?: MongoStore;
+  /** Bring your own MySQL store (tests); otherwise connected from MYSQL_URL when MYSQL_MODULES names a module, and closed with the app */
+  mysql?: MysqlStore;
   clock?: Clock;
   /** Wrap the authorities (tests) */
   authorities?: (base: Authorities) => Authorities;
@@ -59,6 +63,8 @@ export interface BuildOptions {
 export interface Kernel {
   config: Config;
   mongo: MongoStore;
+  /** Where this process has one; tests reach a MySQL module's tables through it, as they do ctx.mongo (§10.6) */
+  mysql?: MysqlStore;
   events: EventBus;
   jobs: JobScheduler;
   modules: string[];
@@ -120,6 +126,15 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
     loadDefinitions(opts.modules ?? config.modules ?? enabledModules, moduleLoaders),
   ]);
 
+  // MySQL, for the modules whose data has moved (docs/10 §23 Y1). No module named, no connection: a process
+  // that needs none opens none, which is what keeps the two databases side by side rather than both required.
+  const needsMysql = config.mysqlModules.length > 0;
+  const mysql =
+    opts.mysql ??
+    (needsMysql && config.mysql
+      ? await connectMysql({ url: config.mysql.url, poolSize: config.mysql.poolSize, watch: { log: app.log, slowMs: config.mysql.slowTransactionMs } })
+      : undefined);
+
   /* ---------------------------------------------------------------- OpenAPI (generated from the same Zod schemas); Swagger UI in development */
   await app.register(swagger, {
     openapi: {
@@ -167,11 +182,19 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
   if (config.migrateOnStart) {
     // the kernel's and every module's collections, validators and indexes, then pending data migrations
     await migrateMongo(mongo, mongoUnits(defs), (m) => app.log.info(m));
+    // and, for the modules on MySQL, their tables there. Only theirs: a table of a module still on MongoDB
+    // has no business being created, and migrate reports anything in the database that no unit claims.
+    if (mysql) {
+      const units = await Promise.all(
+        defs.filter((d) => config.mysqlModules.includes(d.spec.name)).map(async (d) => (await mysqlSchemas[d.spec.name as keyof typeof mysqlSchemas]!()).unit),
+      );
+      await migrateMysql(mysql, units, (m) => app.log.info(m));
+    }
   }
   // modules get permission checks before the auth chain exists (it needs their APIs): bind it late
   let authChain: AuthChain | undefined;
   const can = async (principal: Principal | null | undefined, permission: string) => (authChain ? authChain.canPrincipal(principal, permission) : false);
-  const boot = await bootModules(defs, { config, log: app.log, mongo, clock, events, jobs, refs, rateLimits, can, stubbed: Object.keys(opts.apiStubs ?? {}) });
+  const boot = await bootModules(defs, { config, log: app.log, mongo, mysql, clock, events, jobs, refs, rateLimits, can, stubbed: Object.keys(opts.apiStubs ?? {}) });
   for (const w of boot.warnings) app.log.debug(w);
   for (const [m, v] of Object.entries(opts.webhookVerifiers ?? {})) if (!boot.webhookVerifiers.has(m)) boot.webhookVerifiers.set(m, v);
   for (const [m, stub] of Object.entries(opts.apiStubs ?? {})) boot.apis.set(m, withStubs(boot.apis.get(m), stub as object));
@@ -226,6 +249,7 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
   app.decorate('kernel', {
     config,
     mongo,
+    mysql,
     events,
     jobs,
     modules: defs.map((d) => d.spec.name),
@@ -245,6 +269,7 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
     await jobs.stop();
     await events.drain();
     if (!opts.mongo) await mongo.close();
+    if (mysql && !opts.mysql) await mysql.close();
   });
   return app;
 }

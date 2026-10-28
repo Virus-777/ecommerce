@@ -1627,6 +1627,296 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "entries": {
+      "table": "audit_entries",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "seq",
+        "at",
+        "actor_kind",
+        "actor_id",
+        "actor_name",
+        "actor_roles",
+        "action",
+        "action_label",
+        "module",
+        "category",
+        "target_type",
+        "target_id",
+        "target_ref",
+        "target_label",
+        "target_screen",
+        "seller_id",
+        "reason",
+        "before",
+        "after",
+        "before_text",
+        "after_text",
+        "evidence",
+        "approval_request_id",
+        "approval_note",
+        "request_id",
+        "ip",
+        "visible_to_seller",
+        "search_words",
+        "prev_hash",
+        "hash"
+      ],
+      "nullable": [
+        "actor_id",
+        "actor_name",
+        "target_ref",
+        "target_label",
+        "target_screen",
+        "seller_id",
+        "reason",
+        "before",
+        "after",
+        "before_text",
+        "after_text",
+        "approval_request_id",
+        "approval_note",
+        "request_id",
+        "ip"
+      ],
+      "decimal": [],
+      "binary": [
+        "prev_hash",
+        "hash"
+      ],
+      "dates": [
+        "at"
+      ],
+      "json": [
+        "actor_roles",
+        "before",
+        "after",
+        "evidence",
+        "search_words"
+      ],
+      "booleans": [
+        "visible_to_seller"
+      ],
+      "identity": "seq",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_audit_entries_seq",
+          "columns": [
+            "seq"
+          ]
+        }
+      ]
+    },
+    "entry_targets": {
+      "table": "audit_entry_targets",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "entry_id",
+        "target_type",
+        "target_id",
+        "at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        }
+      ]
+    },
+    "approval_states": {
+      "table": "audit_approval_states",
+      "key": [
+        "approval_request_id"
+      ],
+      "idColumn": "approval_request_id",
+      "columns": [
+        "approval_request_id",
+        "state",
+        "approvers",
+        "steps",
+        "awaiting",
+        "decided_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "awaiting",
+        "decided_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "decided_at",
+        "updated_at"
+      ],
+      "json": [
+        "approvers",
+        "steps"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "approval_request_id"
+          ]
+        }
+      ]
+    },
+    "retention": {
+      "table": "audit_retention",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "retain_years",
+        "pending_years",
+        "pending_reason",
+        "pending_approval_request_id",
+        "pending_requested_by",
+        "updated_by",
+        "updated_at",
+        "last_purge_at",
+        "last_purge_removed",
+        "last_purge_through"
+      ],
+      "nullable": [
+        "pending_years",
+        "pending_reason",
+        "pending_approval_request_id",
+        "pending_requested_by",
+        "updated_by",
+        "updated_at",
+        "last_purge_at",
+        "last_purge_removed",
+        "last_purge_through"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at",
+        "last_purge_at",
+        "last_purge_through"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "checkpoints": {
+      "table": "audit_checkpoints",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "seq",
+        "hash",
+        "mac",
+        "key_id",
+        "kind",
+        "created_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [
+        "hash"
+      ],
+      "dates": [
+        "created_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_audit_checkpoints_seq",
+          "columns": [
+            "seq"
+          ]
+        }
+      ]
+    },
+    "integrity_checks": {
+      "table": "audit_integrity_checks",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "started_at",
+        "finished_at",
+        "from_seq",
+        "to_seq",
+        "ok",
+        "broken_at_seq"
+      ],
+      "nullable": [
+        "finished_at",
+        "ok",
+        "broken_at_seq"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "started_at",
+        "finished_at"
+      ],
+      "json": [],
+      "booleans": [
+        "ok"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

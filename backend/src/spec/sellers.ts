@@ -9726,6 +9726,1298 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "sellers": {
+      "table": "sellers_sellers",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "slug",
+        "store_name",
+        "legal_name",
+        "seller_type",
+        "business_type",
+        "state_of_registration",
+        "registry_number",
+        "tax_id_type",
+        "tax_id_encrypted",
+        "tax_id_last4",
+        "business_address",
+        "phone",
+        "website",
+        "contact",
+        "market",
+        "status",
+        "status_since",
+        "closed_reason",
+        "verification_state",
+        "verification_checked",
+        "verified_at",
+        "verification_expires_at",
+        "launch_review",
+        "payout_readiness",
+        "payout_destination_label",
+        "payout_blocked_reasons",
+        "account_manager_id",
+        "application_id",
+        "approved_at",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "state_of_registration",
+        "registry_number",
+        "website",
+        "closed_reason",
+        "verified_at",
+        "verification_expires_at",
+        "payout_destination_label",
+        "account_manager_id",
+        "application_id",
+        "approved_at"
+      ],
+      "decimal": [],
+      "binary": [
+        "tax_id_encrypted"
+      ],
+      "dates": [
+        "status_since",
+        "verified_at",
+        "verification_expires_at",
+        "approved_at",
+        "created_at",
+        "updated_at"
+      ],
+      "json": [
+        "business_address",
+        "contact",
+        "verification_checked",
+        "launch_review",
+        "payout_blocked_reasons"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_sellers_sellers_ref",
+          "columns": [
+            "ref"
+          ]
+        },
+        {
+          "name": "uq_sellers_sellers_slug",
+          "columns": [
+            "slug"
+          ]
+        }
+      ]
+    },
+    "applications": {
+      "table": "sellers_applications",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "applicant_account_id",
+        "seller_id",
+        "invitation_id",
+        "state",
+        "current_step",
+        "completed_steps",
+        "account",
+        "business",
+        "verification",
+        "tax_id_hash",
+        "payout",
+        "return_address",
+        "decision",
+        "reviewer_id",
+        "submitted_at",
+        "decision_target_at",
+        "can_reapply_from",
+        "draft_saved_at",
+        "created_at"
+      ],
+      "nullable": [
+        "seller_id",
+        "invitation_id",
+        "tax_id_hash",
+        "decision",
+        "reviewer_id",
+        "submitted_at",
+        "decision_target_at",
+        "can_reapply_from"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "submitted_at",
+        "decision_target_at",
+        "draft_saved_at",
+        "created_at"
+      ],
+      "json": [
+        "completed_steps",
+        "account",
+        "business",
+        "verification",
+        "payout",
+        "return_address",
+        "decision"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_sellers_applications_ref",
+          "columns": [
+            "ref"
+          ]
+        }
+      ]
+    },
+    "application_documents": {
+      "table": "sellers_application_documents",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "application_id",
+        "seller_id",
+        "kind",
+        "media_id",
+        "file_name",
+        "size_bytes",
+        "status",
+        "note",
+        "delete_after",
+        "uploaded_at"
+      ],
+      "nullable": [
+        "seller_id",
+        "note",
+        "delete_after"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "uploaded_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "verification_checks": {
+      "table": "sellers_verification_checks",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "application_id",
+        "seller_id",
+        "kind",
+        "result",
+        "summary",
+        "source",
+        "provider",
+        "provider_ref",
+        "accepted_note",
+        "checked_by",
+        "checked_at"
+      ],
+      "nullable": [
+        "application_id",
+        "seller_id",
+        "provider",
+        "provider_ref",
+        "accepted_note",
+        "checked_by",
+        "checked_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "checked_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_sellers_verification_checks_3",
+          "columns": [
+            "provider",
+            "provider_ref"
+          ]
+        }
+      ]
+    },
+    "information_requests": {
+      "table": "sellers_information_requests",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "application_id",
+        "items",
+        "message",
+        "due_at",
+        "reminder",
+        "reminded_at",
+        "requested_by",
+        "requested_at",
+        "responded_at",
+        "state",
+        "draft_saved_at"
+      ],
+      "nullable": [
+        "reminded_at",
+        "responded_at",
+        "draft_saved_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "due_at",
+        "reminded_at",
+        "requested_at",
+        "responded_at",
+        "draft_saved_at"
+      ],
+      "json": [
+        "items"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "risk_reviews": {
+      "table": "sellers_risk_reviews",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "application_id",
+        "trust_report_id",
+        "state",
+        "level",
+        "flags",
+        "recommendation",
+        "reviewed_by",
+        "reviewed_at"
+      ],
+      "nullable": [
+        "trust_report_id",
+        "level",
+        "recommendation",
+        "reviewed_by",
+        "reviewed_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "reviewed_at"
+      ],
+      "json": [
+        "flags"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "agreement_acceptances": {
+      "table": "sellers_agreement_acceptances",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "seller_id",
+        "application_id",
+        "policy_key",
+        "version_label",
+        "policy_version_id",
+        "signed_name",
+        "accepted_by",
+        "ip",
+        "accepted_at"
+      ],
+      "nullable": [
+        "seller_id",
+        "application_id",
+        "policy_version_id",
+        "ip"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "accepted_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "store_profiles": {
+      "table": "sellers_store_profiles",
+      "key": [
+        "seller_id"
+      ],
+      "idColumn": "seller_id",
+      "columns": [
+        "seller_id",
+        "logo_media_id",
+        "banner_media_id",
+        "introduction",
+        "location",
+        "contact_options",
+        "warranty",
+        "updated_at",
+        "tagline"
+      ],
+      "nullable": [
+        "logo_media_id",
+        "banner_media_id",
+        "introduction",
+        "location",
+        "warranty",
+        "tagline"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "json": [
+        "contact_options"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "seller_id"
+          ]
+        }
+      ]
+    },
+    "featured_collections": {
+      "table": "sellers_featured_collections",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "seller_id",
+        "title",
+        "image_media_id",
+        "offer_ids",
+        "position",
+        "visible",
+        "updated_at"
+      ],
+      "nullable": [
+        "image_media_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "json": [
+        "offer_ids"
+      ],
+      "booleans": [
+        "visible"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "public_claims": {
+      "table": "sellers_public_claims",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "seller_id",
+        "kind",
+        "text",
+        "brand_id",
+        "evidence_media_ids",
+        "state",
+        "decision_reason",
+        "decided_by",
+        "submitted_at",
+        "decided_at",
+        "expires_at"
+      ],
+      "nullable": [
+        "brand_id",
+        "decision_reason",
+        "decided_by",
+        "decided_at",
+        "expires_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "submitted_at",
+        "decided_at",
+        "expires_at"
+      ],
+      "json": [
+        "evidence_media_ids"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "change_requests": {
+      "table": "sellers_change_requests",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "seller_id",
+        "kind",
+        "current",
+        "proposed",
+        "evidence_media_ids",
+        "state",
+        "decision_reason",
+        "impact",
+        "submitted_by",
+        "submitted_at",
+        "decided_by",
+        "decided_at"
+      ],
+      "nullable": [
+        "current",
+        "decision_reason",
+        "impact",
+        "decided_by",
+        "decided_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "submitted_at",
+        "decided_at"
+      ],
+      "json": [
+        "current",
+        "proposed",
+        "evidence_media_ids"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "members": {
+      "table": "sellers_members",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "seller_id",
+        "account_id",
+        "name",
+        "email",
+        "role",
+        "permissions",
+        "is_owner",
+        "status",
+        "invitation_id",
+        "invited_by",
+        "invited_at",
+        "invite_expires_at",
+        "joined_at",
+        "last_active_at",
+        "removed_at"
+      ],
+      "nullable": [
+        "account_id",
+        "invitation_id",
+        "invited_by",
+        "invited_at",
+        "invite_expires_at",
+        "joined_at",
+        "last_active_at",
+        "removed_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "invited_at",
+        "invite_expires_at",
+        "joined_at",
+        "last_active_at",
+        "removed_at"
+      ],
+      "json": [
+        "permissions"
+      ],
+      "booleans": [
+        "is_owner"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_sellers_members_1",
+          "columns": [
+            "seller_id",
+            "email"
+          ],
+          "partial": true
+        },
+        {
+          "name": "uq_sellers_members_3",
+          "columns": [
+            "seller_id"
+          ],
+          "partial": true
+        }
+      ]
+    },
+    "performance_events": {
+      "table": "sellers_performance_events",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "seller_id",
+        "kind",
+        "subject_id",
+        "value",
+        "occurred_at",
+        "category_id"
+      ],
+      "nullable": [
+        "subject_id",
+        "value",
+        "category_id"
+      ],
+      "decimal": [
+        "value"
+      ],
+      "binary": [],
+      "dates": [
+        "occurred_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_sellers_performance_events_2",
+          "columns": [
+            "kind",
+            "subject_id"
+          ]
+        }
+      ]
+    },
+    "performance_snapshots": {
+      "table": "sellers_performance_snapshots",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "seller_id",
+        "computed_at",
+        "window_from",
+        "window_to",
+        "order_count",
+        "metrics",
+        "overall"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "computed_at"
+      ],
+      "json": [
+        "metrics"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "performance_targets": {
+      "table": "sellers_performance_targets",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "metric",
+        "category_id",
+        "comparator",
+        "threshold",
+        "unit",
+        "window_days",
+        "is_example",
+        "effective_from",
+        "set_by",
+        "reason"
+      ],
+      "nullable": [
+        "category_id"
+      ],
+      "decimal": [
+        "threshold"
+      ],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [
+        "is_example"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "warnings": {
+      "table": "sellers_warnings",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "seller_id",
+        "kind",
+        "title",
+        "detail",
+        "state",
+        "issued_by",
+        "issued_at",
+        "resolved_at",
+        "resolution_note",
+        "trust_enforcement_id"
+      ],
+      "nullable": [
+        "resolved_at",
+        "resolution_note",
+        "trust_enforcement_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "issued_at",
+        "resolved_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "restrictions": {
+      "table": "sellers_restrictions",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "seller_id",
+        "state",
+        "title",
+        "reason_code",
+        "reason",
+        "rule_ref",
+        "affected_activities",
+        "scope",
+        "affected_summary",
+        "still_works",
+        "to_resolve",
+        "appeal_route",
+        "review_date",
+        "started_at",
+        "ends_at",
+        "set_by",
+        "recommended_by",
+        "trust_report_id",
+        "trust_enforcement_id",
+        "approval_request_id",
+        "resolution_evidence",
+        "lifted_at",
+        "lift_reason"
+      ],
+      "nullable": [
+        "rule_ref",
+        "started_at",
+        "ends_at",
+        "recommended_by",
+        "trust_report_id",
+        "trust_enforcement_id",
+        "approval_request_id",
+        "lifted_at",
+        "lift_reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "started_at",
+        "ends_at",
+        "lifted_at"
+      ],
+      "json": [
+        "affected_activities",
+        "scope",
+        "still_works",
+        "appeal_route",
+        "resolution_evidence"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_sellers_restrictions_ref",
+          "columns": [
+            "ref"
+          ]
+        }
+      ]
+    },
+    "suspensions": {
+      "table": "sellers_suspensions",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "seller_id",
+        "state",
+        "reason_code",
+        "reason",
+        "review_date",
+        "open_orders",
+        "requested_by",
+        "second_reviewer_id",
+        "approval_request_id",
+        "trust_report_id",
+        "trust_enforcement_id",
+        "appeal_route",
+        "started_at",
+        "ended_at",
+        "end_reason"
+      ],
+      "nullable": [
+        "approval_request_id",
+        "trust_report_id",
+        "trust_enforcement_id",
+        "started_at",
+        "ended_at",
+        "end_reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "started_at",
+        "ended_at"
+      ],
+      "json": [
+        "appeal_route"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_sellers_suspensions_ref",
+          "columns": [
+            "ref"
+          ]
+        }
+      ]
+    },
+    "payout_changes": {
+      "table": "sellers_payout_changes",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "seller_id",
+        "kind",
+        "account_holder_name",
+        "account_type",
+        "label",
+        "provider_destination_id",
+        "previous_label",
+        "state",
+        "rejection_reason",
+        "review_id",
+        "requested_by",
+        "requested_at",
+        "decided_at"
+      ],
+      "nullable": [
+        "previous_label",
+        "rejection_reason",
+        "review_id",
+        "decided_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "requested_at",
+        "decided_at"
+      ],
+      "json": [
+        "requested_by"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_sellers_payout_changes_2",
+          "columns": [
+            "seller_id"
+          ],
+          "partial": true
+        },
+        {
+          "name": "uq_sellers_payout_changes_3",
+          "columns": [
+            "seller_id"
+          ],
+          "partial": true
+        }
+      ]
+    },
+    "pending_changes": {
+      "table": "sellers_pending_changes",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "kind",
+        "seller_id",
+        "target_id",
+        "approval_request_id",
+        "payload",
+        "reason",
+        "requested_by",
+        "state",
+        "requested_at",
+        "decided_at"
+      ],
+      "nullable": [
+        "seller_id",
+        "target_id",
+        "decided_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "requested_at",
+        "decided_at"
+      ],
+      "json": [
+        "payload",
+        "requested_by"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_sellers_pending_changes_approval_request_id",
+          "columns": [
+            "approval_request_id"
+          ]
+        }
+      ]
+    },
+    "appeals": {
+      "table": "sellers_appeals",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "seller_id",
+        "subject",
+        "subject_id",
+        "level",
+        "argument",
+        "evidence_media_ids",
+        "state",
+        "reviewer_id",
+        "original_decider_id",
+        "decide_by",
+        "decision",
+        "trust_report_id",
+        "submitted_at"
+      ],
+      "nullable": [
+        "reviewer_id",
+        "decision",
+        "trust_report_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "decide_by",
+        "submitted_at"
+      ],
+      "json": [
+        "evidence_media_ids",
+        "decision"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_sellers_appeals_ref",
+          "columns": [
+            "ref"
+          ]
+        },
+        {
+          "name": "uq_sellers_appeals_3",
+          "columns": [
+            "subject",
+            "subject_id",
+            "level"
+          ]
+        }
+      ]
+    },
+    "seller_notes": {
+      "table": "sellers_seller_notes",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "seller_id",
+        "application_id",
+        "body",
+        "author_id",
+        "author_name",
+        "created_at"
+      ],
+      "nullable": [
+        "seller_id",
+        "application_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "account_events": {
+      "table": "sellers_account_events",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "seller_id",
+        "kind",
+        "title",
+        "detail",
+        "visibility",
+        "actor_kind",
+        "actor_id",
+        "ref",
+        "at"
+      ],
+      "nullable": [
+        "detail",
+        "actor_id",
+        "ref"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "template_grants": {
+      "table": "sellers_template_grants",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "template",
+        "permission",
+        "created_at",
+        "applied_at",
+        "members_updated"
+      ],
+      "nullable": [
+        "applied_at",
+        "members_updated"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "applied_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_sellers_template_grants_1",
+          "columns": [
+            "template",
+            "permission"
+          ]
+        }
+      ]
+    },
+    "seller_invitations": {
+      "table": "sellers_seller_invitations",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "email",
+        "business_name",
+        "message",
+        "code_hash",
+        "invited_by",
+        "sent_at",
+        "expires_at",
+        "state",
+        "application_id"
+      ],
+      "nullable": [
+        "message",
+        "application_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "sent_at",
+        "expires_at"
+      ],
+      "json": [],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_sellers_seller_invitations_code_hash",
+          "columns": [
+            "code_hash"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 

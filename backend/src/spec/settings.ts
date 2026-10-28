@@ -2093,6 +2093,260 @@ export const spec = defineModuleSpec({
       "unenforced": []
     }
   },
+  tables: {
+    "definitions": {
+      "table": "settings_definitions",
+      "key": [
+        "key"
+      ],
+      "idColumn": "key",
+      "columns": [
+        "key",
+        "module",
+        "section",
+        "label",
+        "description",
+        "value_type",
+        "schema",
+        "default_value",
+        "editable",
+        "approval",
+        "min_lead_days",
+        "apply_scopes",
+        "seller_visible",
+        "public",
+        "example_value",
+        "edit_permission",
+        "registered_at",
+        "unavailable_since"
+      ],
+      "nullable": [
+        "unavailable_since"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "registered_at",
+        "unavailable_since"
+      ],
+      "json": [
+        "schema",
+        "default_value",
+        "apply_scopes"
+      ],
+      "booleans": [
+        "editable",
+        "seller_visible",
+        "public",
+        "example_value"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "key"
+          ]
+        }
+      ]
+    },
+    "values": {
+      "table": "settings_values",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "key",
+        "version",
+        "value",
+        "effective_from",
+        "effective_to",
+        "apply_scope",
+        "change_id",
+        "changed_by_kind",
+        "changed_by_id",
+        "approved_by_id",
+        "reason",
+        "created_at"
+      ],
+      "nullable": [
+        "effective_to",
+        "change_id",
+        "approved_by_id",
+        "reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "effective_from",
+        "effective_to",
+        "created_at"
+      ],
+      "json": [
+        "value"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_settings_values_1",
+          "columns": [
+            "key",
+            "version"
+          ]
+        }
+      ]
+    },
+    "changes": {
+      "table": "settings_changes",
+      "key": [
+        "id"
+      ],
+      "idColumn": "id",
+      "columns": [
+        "id",
+        "ref",
+        "status",
+        "items",
+        "effective_at",
+        "apply_scope",
+        "reason",
+        "impact",
+        "created_by_kind",
+        "created_by_id",
+        "created_at",
+        "submitted_at",
+        "approval_request_id",
+        "applied_at",
+        "cancel_reason",
+        "version",
+        "announced_at"
+      ],
+      "nullable": [
+        "submitted_at",
+        "approval_request_id",
+        "applied_at",
+        "cancel_reason",
+        "announced_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "effective_at",
+        "created_at",
+        "submitted_at",
+        "applied_at",
+        "announced_at"
+      ],
+      "json": [
+        "items",
+        "impact"
+      ],
+      "booleans": [],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "uq_settings_changes_ref",
+          "columns": [
+            "ref"
+          ]
+        }
+      ]
+    },
+    "change_keys": {
+      "table": "settings_change_keys",
+      "key": [],
+      "idColumn": null,
+      "columns": [
+        "change_id",
+        "key",
+        "open"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "json": [],
+      "booleans": [
+        "open"
+      ],
+      "identity": "row_id",
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "row_id"
+          ]
+        },
+        {
+          "name": "uq_settings_change_keys_1",
+          "columns": [
+            "key"
+          ],
+          "partial": true
+        }
+      ]
+    },
+    "feature_flags": {
+      "table": "settings_feature_flags",
+      "key": [
+        "key"
+      ],
+      "idColumn": "key",
+      "columns": [
+        "key",
+        "module",
+        "label",
+        "description",
+        "enabled",
+        "rollout",
+        "percentage",
+        "public",
+        "planned_phase",
+        "updated_by",
+        "updated_at"
+      ],
+      "nullable": [
+        "percentage",
+        "planned_phase",
+        "updated_by",
+        "updated_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "json": [],
+      "booleans": [
+        "enabled",
+        "public"
+      ],
+      "identity": null,
+      "uniqueKeys": [
+        {
+          "name": "PRIMARY",
+          "columns": [
+            "key"
+          ]
+        }
+      ]
+    }
+  },
   endpoints,
 });
 
