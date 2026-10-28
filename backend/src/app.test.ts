@@ -102,7 +102,8 @@ describe('module configuration', () => {
     } finally {
       await app.close();
     }
-  });
+    // booting every module takes longer than the 60 s a test gets by default once the workers are all busy
+  }, 180_000);
 });
 
 describe('apiStubs (tests)', () => {

@@ -347,6 +347,22 @@ describe('repository helpers', () => {
     expect(() => whereFilter({ stock: { op: '~', value: 1 } })).toThrow(/unsupported/);
   });
 
+  it('whereFilter writes or, and and [] paths as MongoDB reads them', () => {
+    // The filter, not its effect. Mongoose *strips* an empty $and or $or before sending, so a wrong
+    // translation of either is invisible through a query — while the server itself answers
+    // "$and/$or/$nor must be a nonempty array". What is built here has to be right on its own.
+    expect(whereFilter({ and: [] })).toEqual({});
+    expect(whereFilter({ or: [] })).toEqual({ $nor: [{}] });
+    expect(whereFilter({ and: [{ a: 1 }, { b: 2 }] })).toEqual({ $and: [{ a: 1 }, { b: 2 }] });
+    expect(whereFilter({ or: [{ a: 1 }], b: 2 })).toEqual({ b: 2, $or: [{ a: 1 }] });
+    // a [] path is MongoDB's own dotted path, which already means "any element of the array"
+    expect(whereFilter({ 'items[].key': 'k' })).toEqual({ 'items.key': 'k' });
+    expect(whereFilter({ 'items[].key': ['k', 'j'] })).toEqual({ 'items.key': { $in: ['k', 'j'] } });
+    expect(whereFilter({ 'tags[]': 't' })).toEqual({ tags: 't' });
+    expect(() => whereFilter({ 'items[].key': { op: '<', value: 1 } })).toThrow(/is a \[\] path/);
+    expect(() => whereFilter({ 'items[].key': null })).toThrow(/is a \[\] path/);
+  });
+
   it('contains and likePattern match literally', () => {
     expect(contains('  a.b ')).toEqual({ $regex: 'a\\.b', $options: 'i' });
     const like = new RegExp(likePattern('50\\%_x%').$regex);

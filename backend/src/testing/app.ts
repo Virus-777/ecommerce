@@ -1,6 +1,10 @@
 /**
  * Test helpers: boot the app (or a few modules) on the in-memory MongoDB (testing/mongo.ts) and sign requests with
  * development tokens (EdDSA JWTs, the same format identity issues) for any kind of caller.
+ *
+ * `TEST_MYSQL_MODULES=settings` runs those modules' data on MySQL instead, in every app a test builds
+ * (docs/10-mysql-migration.md §10.5a). A store-neutral module must pass its own tests either way, and the way to
+ * know it does is to run them both ways rather than to read the repository again: `npm run test:mysql-modules`.
  */
 import type { FastifyInstance } from 'fastify';
 import { buildApp, type BuildOptions } from '../app.js';
@@ -9,6 +13,14 @@ import { devSigner, newDevJwk, signAccessToken } from '../kernel/auth/tokens.js'
 import { dateInZone } from '../kernel/lib/clock.js';
 import { withDependencies } from '../kernel/module-system/loader.js';
 import { testMongo } from './mongo.js';
+import { testMysql } from './mysql.js';
+
+/** Modules whose data this run puts in MySQL (TEST_MYSQL_MODULES), for the apps every test builds */
+export const mysqlModulesUnderTest = (env: Record<string, string | undefined> = process.env): string[] =>
+  (env.TEST_MYSQL_MODULES ?? '')
+    .split(',')
+    .map((m) => m.trim())
+    .filter(Boolean);
 
 /** One dev key per test process */
 export const TEST_JWK = newDevJwk();
@@ -18,17 +30,24 @@ export { signWebhook } from '../kernel/http/webhooks.js';
 
 export async function buildTestApp(opts: BuildOptions & { only?: string[] } = {}): Promise<FastifyInstance> {
   const mongo = opts.mongo ?? (await testMongo());
+  // the modules this run keeps in MySQL, minus any the test is not running: naming a module that is not here
+  // would stop the boot, and a test that runs a few modules should not have to know about the setting at all
+  const modules = opts.modules ?? (opts.only ? withDependencies(opts.only) : undefined);
+  const onMysql = mysqlModulesUnderTest().filter((m) => !modules || modules.includes(m));
+  const mysql = opts.mysql ?? (onMysql.length ? await testMysql() : undefined);
   const app = await buildApp({
     env: { NODE_ENV: 'test' },
     ...opts,
     mongo,
-    modules: opts.modules ?? (opts.only ? withDependencies(opts.only) : undefined),
-    config: { devTokens: true, devSigning: { file: '', jwk: TEST_JWK }, migrateOnStart: true, responseValidation: true, ...opts.config },
+    ...(mysql ? { mysql } : {}),
+    modules,
+    config: { devTokens: true, devSigning: { file: '', jwk: TEST_JWK }, migrateOnStart: true, responseValidation: true, ...(onMysql.length ? { mysqlModules: onMysql } : {}), ...opts.config },
   }).catch(async (err) => {
-    if (!opts.mongo) await mongo.close();
+    await Promise.all([opts.mongo ? undefined : mongo.close(), opts.mysql || !mysql ? undefined : mysql.close()]);
     throw err;
   });
   if (!opts.mongo) app.addHook('onClose', () => mongo.close());
+  if (mysql && !opts.mysql) app.addHook('onClose', () => mysql.close());
   await app.ready();
   return app;
 }

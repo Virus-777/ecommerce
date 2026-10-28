@@ -28,6 +28,8 @@ const schema = z.object({
   /** Folder with the built Admin Center (index.html, assets/); served on this address outside /api, /graphql, /files … */
   ADMIN_APP_DIR: z.string().optional(),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
+  /** Tests only: the level a test run logs at, which is otherwise silent (see logLevel below) */
+  TEST_LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).optional(),
   /** mongodb://…/marketly?replicaSet=rs0 (a replica set: transactions need one); empty = an embedded replica set (development, tests) */
   MONGODB_URI: z.string().optional(),
   /** Embedded MongoDB only: keep its data in this folder between restarts */
@@ -216,7 +218,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     tls: e.TLS_CERT_FILE && e.TLS_KEY_FILE ? { certFile: e.TLS_CERT_FILE, keyFile: e.TLS_KEY_FILE } : undefined,
     httpRedirectPort: e.HTTP_REDIRECT_PORT,
     adminAppDir: e.ADMIN_APP_DIR || undefined,
-    logLevel: e.NODE_ENV === 'test' ? 'silent' : e.LOG_LEVEL,
+    // the tests run silent, because a passing suite has nothing to say. TEST_LOG_LEVEL=error turns the log
+    // back on for a run: a 500 in a test otherwise shows as a 500 and the error behind it is nowhere
+    logLevel: e.NODE_ENV === 'test' ? e.TEST_LOG_LEVEL || 'silent' : e.LOG_LEVEL,
     mongo: { uri: e.MONGODB_URI || undefined, dataDir: e.MONGO_DATA_DIR || undefined, port: e.MONGO_PORT, slowTransactionMs: e.TX_SLOW_MS },
     mysql: e.MYSQL_URL ? { url: e.MYSQL_URL, poolSize: e.MYSQL_POOL_SIZE, slowTransactionMs: e.TX_SLOW_MS } : null,
     mysqlModules: (e.MYSQL_MODULES ?? '')

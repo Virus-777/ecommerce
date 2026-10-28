@@ -165,7 +165,8 @@ describe('role assignments', () => {
     } finally {
       await solo.close();
     }
-  });
+    // this one boots an app of its own, which is more than the 60 s a test gets once the workers are all busy
+  }, 180_000);
 
   it('invites staff with roles and returns the link and pass code; assignments start when the invitation is accepted', async () => {
     const res = await f.call('POST', '/staff-invitations', f.token(admin), { email: 'new.hire@marketly.test', name: 'Nina Hire', roleIds: [await f.roleId('support_agent')], reason: 'New agent', requestLimitReview: true });

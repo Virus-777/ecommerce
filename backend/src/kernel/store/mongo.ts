@@ -19,7 +19,7 @@ import { whereFilter } from '../mongo/filters.js';
 import type { ModuleStore as MongoModuleStore } from '../mongo/index.js';
 import type { Filter, Table as MongoTable } from '../mongo/table.js';
 import { isExpr, type Expr, type Patch } from '../mysql/table.js';
-import type { Store, StoreFindOptions, StoreTable, WhereWithOr } from './index.js';
+import type { Store, StoreFindOptions, StoreTable, UpsertRow, WhereWithOr } from './index.js';
 
 /** The neutral filter as a MongoDB filter. `undefined` is "no filter", which is every row. */
 const filterOf = <R>(where: WhereWithOr<R> | undefined): Filter => (where ? whereFilter(where as Readonly<Record<string, unknown>>) : {});
@@ -69,32 +69,32 @@ function plainOf<R>(patch: Patch<R>): Record<string, unknown> {
 }
 
 /**
- * The write methods are async even where they only delegate: a patch this file refuses is a *rejection*, not a
- * synchronous throw, because the interface says the method returns a Promise and a caller's try/catch around an
- * await should see it either way.
+ * The methods are async even where they only delegate: a filter or a patch this file refuses is a *rejection*,
+ * not a synchronous throw, because the interface says the method returns a Promise and a caller's try/catch
+ * around an await should see it either way.
  */
 function neutralTable<R extends object>(t: MongoTable<R>): StoreTable<R> {
   return {
     get: (id, o) => t.get(id, o),
-    findOne: (where, o) => t.findOne(filterOf(where), o),
-    find: (where, o: StoreFindOptions = {}) => t.find(filterOf(where), o),
+    findOne: async (where, o) => t.findOne(filterOf(where), o),
+    find: async (where, o: StoreFindOptions = {}) => t.find(filterOf(where), o),
     getMany: (ids, o) => t.getMany(ids, o),
-    count: (where) => t.count(filterOf(where)),
-    exists: (where) => t.exists(filterOf(where)),
-    distinct: <T>(column: string, where?: WhereWithOr<R>) => t.distinct<T>(column, filterOf(where)),
-    page: (where, req: PageRequest, order: KeysetOrder): Promise<Page<R>> => t.page(filterOf(where), req, order),
+    count: async (where) => t.count(filterOf(where)),
+    exists: async (where) => t.exists(filterOf(where)),
+    distinct: async <T>(column: string, where?: WhereWithOr<R>) => t.distinct<T>(column, filterOf(where)),
+    page: async (where, req: PageRequest, order: KeysetOrder): Promise<Page<R>> => t.page(filterOf(where), req, order),
     insert: (row) => t.insert(row),
     insertMany: (rows) => t.insertMany(rows),
     insertIfAbsent: (row, key) => t.insertIfAbsent(row, key),
     insertManyIfAbsent: (rows, key) => t.insertManyIfAbsent(rows, key),
     upsert: async (row, o = {}) => t.upsert(row, { key: o.key, ...(o.update ? { update: plainOf(o.update) } : {}) }),
-    upsertMany: async (rows, o = {}) => t.upsertMany(rows, { key: o.key, ...(o.update ? { update: (row: Record<string, unknown>) => plainOf(o.update!(row)) } : {}) }),
+    upsertMany: async (rows, o = {}) => t.upsertMany(rows, { key: o.key, ...(o.update ? { update: (row: UpsertRow<R>) => plainOf(o.update!(row)) } : {}) }),
     increment: (key, fields) => t.increment(key, fields),
     update: async (id, patch) => t.update(id, updateOf(patch)),
     updateOne: async (where, patch, o) => t.updateOne(filterOf(where), updateOf(patch), o),
     updateMany: async (where, patch) => t.updateMany(filterOf(where), updateOf(patch)),
     delete: (id) => t.delete(id),
-    deleteMany: (where) => t.deleteMany(filterOf(where)),
+    deleteMany: async (where) => t.deleteMany(filterOf(where)),
   };
 }
 

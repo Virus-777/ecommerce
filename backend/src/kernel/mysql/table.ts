@@ -29,7 +29,7 @@ import type { Page } from '../../spec/common.js';
 import type { TableDef, UniqueKeyDef } from '../spec/define.js';
 import { detecting, keysFromWhere, lockedByWrite, readRows, rowKey, writingRows } from './detect.js';
 import { duplicateKeyName, isDuplicateKey } from './errors.js';
-import { q, raw, whereSql, type Sql, type WhereWithOr } from './where.js';
+import { q, raw, whereSql, type Sql, type WhereOptions, type WhereWithOr } from './where.js';
 
 export { q, raw };
 export type { Sql, WhereWithOr };
@@ -158,6 +158,8 @@ export class Table<R extends object> {
   readonly #decimal: Set<string>;
   readonly #binary: Set<string>;
   readonly #json: Set<string>;
+  readonly #nullable: Set<string>;
+  readonly #whereOptions: WhereOptions;
   readonly #booleans: Set<string>;
 
   constructor(
@@ -168,6 +170,10 @@ export class Table<R extends object> {
     this.#decimal = new Set(def.decimal);
     this.#binary = new Set(def.binary);
     this.#json = new Set(def.json);
+    this.#nullable = new Set(def.nullable);
+    // a JSON column that cannot be null holds `null` as a JSON document, so a filter asking for null asks of
+    // the document and not of SQL NULL — which is the only reading that agrees with MongoDB (#param)
+    this.#whereOptions = { jsonNotNull: new Set(def.json.filter((c) => !this.#nullable.has(c))) };
     this.#booleans = new Set(def.booleans);
   }
 
@@ -210,7 +216,11 @@ export class Table<R extends object> {
 
   /** One value as a bound parameter: JSON is text on the way in, and a numeric keeps its exact digits */
   #param(column: string, value: unknown): unknown {
-    if (value === null || value === undefined) return null;
+    // A JSON column that cannot be null still holds `null`, the JSON value: a setting declared with no default,
+    // or whose value is "no cap", is null, and that is a JSON document like any other (PostgreSQL's
+    // `'null'::jsonb`). Only a *nullable* JSON column takes SQL NULL. MongoDB has one null for both and so
+    // never had to tell them apart, which is why this shows up on the first module to move.
+    if (value === null || value === undefined) return this.#json.has(column) && !this.#nullable.has(column) ? 'null' : null;
     // mysql2 turns an array into a value list and an object into `key = value` pairs, neither of which is JSON
     if (this.#json.has(column)) return JSON.stringify(value);
     if (this.#binary.has(column) && value instanceof Uint8Array && !Buffer.isBuffer(value)) return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
@@ -234,7 +244,7 @@ export class Table<R extends object> {
 
   /** A where, an optional extra condition, as `WHERE …` (or '' when nothing is filtered) */
   #where(where: WhereWithOr<R> | undefined, o: ReadOptions = {}, extra: readonly Sql[] = []): Sql {
-    const parts = [whereSql(where), ...(o.and ? [o.and] : []), ...extra].filter((p) => p.sql !== '1 = 1');
+    const parts = [whereSql(where, this.#whereOptions), ...(o.and ? [o.and] : []), ...extra].filter((p) => p.sql !== '1 = 1');
     if (!parts.length) return { sql: '', params: [] };
     return { sql: `WHERE ${parts.map((p) => `(${p.sql})`).join(' AND ')}`, params: parts.flatMap((p) => p.params) };
   }
@@ -489,7 +499,7 @@ export class Table<R extends object> {
   }
 
   /** upsert for many rows; one statement per {@link INSERT_CHUNK} rows where the key is the only one at risk */
-  async upsertMany(rows: readonly (Partial<R> | Record<string, unknown>)[], o: { key?: readonly string[]; update?: (row: Record<string, unknown>) => Patch<R> } = {}): Promise<void> {
+  async upsertMany(rows: readonly (Partial<R> | Record<string, unknown>)[], o: { key?: readonly string[]; update?: (row: Partial<R> & Record<string, unknown>) => Patch<R> } = {}): Promise<void> {
     if (!rows.length) return;
     const key = o.key ?? this.def.key;
     this.#uniqueKeyFor(key, 'upsertMany');
@@ -499,7 +509,9 @@ export class Table<R extends object> {
       for (let i = 0; i < full.length; i += INSERT_CHUNK) await this.#onDuplicateUpdate(full.slice(i, i + INSERT_CHUNK), key);
       return;
     }
-    for (const row of full) await this.upsert(row, { key, ...(o.update ? { update: o.update(row) } : {}) });
+    // the callback is handed the row the caller passed (with its nullable columns filled in), which is a row
+    // of this table: that is what it is for
+    for (const row of full) await this.upsert(row, { key, ...(o.update ? { update: o.update(row as Partial<R> & Record<string, unknown>) } : {}) });
   }
 
   /**

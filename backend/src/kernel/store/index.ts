@@ -7,7 +7,9 @@
  *
  *   - **filters**: `WhereWithOr<R>` — `{ column: value | list | null | { op, value }, or: [...] }`. It was
  *     defined with SQL's reading of null in the first place (kernel/mongo/filters.ts), which is why there is
- *     one type and not two;
+ *     one type and not two. A key may also be a `[]` path into a JSON array — `items[].key` is "some element
+ *     of items has key = …" — because MongoDB's dotted path and SQL's `MEMBER OF` are the same question asked
+ *     of the same column, and only SQL needs telling that the column is an array;
  *   - **patches**: `Patch<R>` — a value per column, or one of the portable expressions `inc` and `jsonAppend`,
  *     which the server computes. `decToZero` and a hand-written `expr` are SQL and the MongoDB side refuses
  *     them by name (see mongo.ts): better a compile-time-looking failure in one place than two writes that do
@@ -20,11 +22,18 @@ import type { KeysetOrder, PageRequest } from '../lib/pagination.js';
 import type { Page } from '../../spec/common.js';
 import type { Patch } from '../mysql/table.js';
 
-export type { Cond, Where, WhereWithOr } from '../mongo/filters.js';
+export type { Cond, JsonArrayPath, Where, WhereWithOr } from '../mongo/filters.js';
 export type { Expr, Intent, Patch } from '../mysql/table.js';
 export { decToZero, expr, inc, isExpr, jsonAppend } from '../mysql/table.js';
 
 import type { WhereWithOr } from '../mongo/filters.js';
+
+/**
+ * The row an upsert's `update` callback is handed: the one the caller passed, read as a row of this table.
+ * It is what both stores already pass; saying so is what lets a repository write `{ label: r.label }` without
+ * a cast, and `Patch` takes `undefined` for a column the row left out.
+ */
+export type UpsertRow<R> = Partial<R> & Record<string, unknown>;
 
 /** How strings are read back: both stores take the same options object, and ignore what does not apply */
 export interface StoreReadOptions {
@@ -55,7 +64,7 @@ export interface StoreTable<R extends object> {
   insertIfAbsent(row: Partial<R> | Record<string, unknown>, key?: readonly string[]): Promise<R | undefined>;
   insertManyIfAbsent(rows: readonly (Partial<R> | Record<string, unknown>)[], key?: readonly string[]): Promise<number>;
   upsert(row: Partial<R> | Record<string, unknown>, o?: { key?: readonly string[]; update?: Patch<R> }): Promise<R>;
-  upsertMany(rows: readonly (Partial<R> | Record<string, unknown>)[], o?: { key?: readonly string[]; update?: (row: Record<string, unknown>) => Patch<R> }): Promise<void>;
+  upsertMany(rows: readonly (Partial<R> | Record<string, unknown>)[], o?: { key?: readonly string[]; update?: (row: UpsertRow<R>) => Patch<R> }): Promise<void>;
   increment(key: Record<string, unknown>, fields: Record<string, number>): Promise<R>;
   update(id: unknown, patch: Patch<R>): Promise<R | undefined>;
   updateOne(where: WhereWithOr<R>, patch: Patch<R>, o?: { sort?: Readonly<Record<string, 1 | -1>> }): Promise<R | undefined>;

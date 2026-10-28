@@ -1,6 +1,6 @@
 import type { PageRequest } from '../../kernel/lib/pagination.js';
 import { orThrow } from '../../kernel/lib/or-throw.js';
-import type { ModuleStore } from '../../kernel/mongo/index.js';
+import { inc, type Store } from '../../kernel/store/index.js';
 import type { Page } from '../../spec/common.js';
 import type { SettingsDb } from '../../spec/settings.js';
 import {
@@ -23,11 +23,19 @@ import {
 type DefinitionRow = SettingsDb['definitions'];
 type ChangeKeyRow = SettingsDb['change_keys'];
 
-/** settings.definitions, settings.values, settings.changes, settings.change_keys, settings.feature_flags (MongoDB, docs/04-mongodb-migration.md) */
+/**
+ * settings.definitions, settings.values, settings.changes, settings.change_keys, settings.feature_flags.
+ *
+ * Written against `Store` (kernel/store/index.ts) and so in the one vocabulary both databases understand:
+ * this module's data is in MySQL or in MongoDB depending on `MYSQL_MODULES`, and nothing here knows which
+ * (docs/10-mysql-migration.md §10.5a). The conditions are `{ column: value | list | { op, value } }` with
+ * `or` for alternatives; `items[].key` is a path into a JSON array; and a version bump is `inc`, which the
+ * server computes, rather than a value this process read and wrote back.
+ */
 export class SettingsRepository {
   readonly #t;
 
-  constructor(private readonly store: ModuleStore) {
+  constructor(private readonly store: Store) {
     this.#t = {
       definitions: store.table<DefinitionRow>('definitions'),
       values: store.table<ValueRow>('values'),
@@ -74,7 +82,8 @@ export class SettingsRepository {
 
   /** Mark every definition not in `keys` unavailable (module disabled), once */
   markUnavailableExcept(keys: string[], at: Date): Promise<number> {
-    return this.#t.definitions.updateMany({ unavailable_since: null, ...(keys.length ? { key: { $nin: keys } } : {}) }, { unavailable_since: at });
+    // "not in" an empty list leaves the column unfiltered, which is what no keys at all means: every one of them
+    return this.#t.definitions.updateMany({ unavailable_since: null, key: { op: 'not in', value: keys } }, { unavailable_since: at });
   }
 
   /* ---------------------------------------------------------------- values */
@@ -85,7 +94,10 @@ export class SettingsRepository {
   }
 
   async valueAt(key: string, at: Date): Promise<ValueRecord | null> {
-    const r = await this.#t.values.findOne({ key, effective_from: { $lte: at }, $or: [{ effective_to: null }, { effective_to: { $gt: at } }] }, { sort: { effective_from: -1, version: -1 } });
+    const r = await this.#t.values.findOne(
+      { key, effective_from: { op: '<=', value: at }, or: [{ effective_to: null }, { effective_to: { op: '>', value: at } }] },
+      { sort: { effective_from: -1, version: -1 } },
+    );
     return r ? toValue(r) : null;
   }
 
@@ -110,8 +122,8 @@ export class SettingsRepository {
   /** Latest version written by a person (not the boot seed) among keys */
   async lastChangeAmong(keys: string[]): Promise<ValueRecord | null> {
     if (!keys.length) return null;
-    // "changed_by_id <> seed" never matches a null changed_by_id either
-    const r = await this.#t.values.findOne({ key: { $in: keys }, changed_by_id: { $nin: [SEED_ACTOR.id, null] } }, { sort: { created_at: -1, version: -1 } });
+    // `<>` never matches a null changed_by_id either, on either store (kernel/mongo/filters.ts)
+    const r = await this.#t.values.findOne({ key: keys, changed_by_id: { op: '<>', value: SEED_ACTOR.id } }, { sort: { created_at: -1, version: -1 } });
     return r ? toValue(r) : null;
   }
 
@@ -173,15 +185,17 @@ export class SettingsRepository {
 
   /** Applies the patch and bumps the row version */
   async updateChange(id: string, patch: ChangePatch): Promise<ChangeRecord> {
-    return toChange(orThrow(await this.#t.changes.update(id, { $set: changeColumns(patch), $inc: { version: 1 } }), `settings: change ${id}`));
+    return toChange(orThrow(await this.#t.changes.update(id, { ...changeColumns(patch), version: inc('version', 1) }), `settings: change ${id}`));
   }
 
   async listChanges(filter: ChangeFilter, page: PageRequest): Promise<Page<ChangeRecord>> {
+    // a key, and the keys of a section: both ask "is some item of this change about that key", which is what a
+    // [] path asks of a JSON array. Two conditions on one name, so they go in `and` — a caller may give both
+    // (?key= and ?section=), and then a change has to be about the key and about something in the section.
     const p = await this.#t.changes.page(
       {
         ...(filter.status ? { status: filter.status } : {}),
-        ...(filter.key ? { 'items.key': filter.key } : {}),
-        ...(filter.keys ? { $and: [{ 'items.key': { $in: filter.keys } }] } : {}),
+        and: [...(filter.key ? [{ 'items[].key': filter.key }] : []), ...(filter.keys ? [{ 'items[].key': filter.keys }] : [])],
       },
       page,
       { column: 'created_at', direction: 'desc' },
@@ -191,12 +205,12 @@ export class SettingsRepository {
 
   /** pending_approval and scheduled changes, soonest first */
   async openChanges(): Promise<ChangeRecord[]> {
-    return (await this.#t.changes.find({ status: { $in: ['pending_approval', 'scheduled'] } }, { sort: { effective_at: 1, id: 1 } })).map(toChange);
+    return (await this.#t.changes.find({ status: ['pending_approval', 'scheduled'] }, { sort: { effective_at: 1, id: 1 } })).map(toChange);
   }
 
   /** Scheduled changes whose effective time has come, oldest first */
   async dueChanges(now: Date, limit: number): Promise<ChangeRecord[]> {
-    return (await this.#t.changes.find({ status: 'scheduled', effective_at: { $lte: now } }, { sort: { effective_at: 1, id: 1 }, limit })).map(toChange);
+    return (await this.#t.changes.find({ status: 'scheduled', effective_at: { op: '<=', value: now } }, { sort: { effective_at: 1, id: 1 }, limit })).map(toChange);
   }
 
   /* ---------------------------------------------------------------- change keys (one open change per key) */
@@ -204,7 +218,8 @@ export class SettingsRepository {
   /** Open changes (other than `exceptChangeId`) that touch any of the keys */
   async keyConflicts(keys: string[], exceptChangeId?: string): Promise<{ key: string; changeId: string; ref: string }[]> {
     if (!keys.length) return [];
-    const open = await this.#t.changeKeys.find({ open: true, key: { $in: keys }, ...(exceptChangeId ? { change_id: { $ne: exceptChangeId } } : {}) });
+    // `is not` is "is distinct from", which is what excluding one change means: every row but that one
+    const open = await this.#t.changeKeys.find({ open: true, key: keys, ...(exceptChangeId ? { change_id: { op: 'is not', value: exceptChangeId } } : {}) });
     const refs = new Map((await this.#t.changes.getMany([...new Set(open.map((k) => k.change_id))])).map((c) => [c.id, c.ref]));
     return open.filter((k) => refs.has(k.change_id)).map((k) => ({ key: k.key, changeId: k.change_id, ref: refs.get(k.change_id)! }));
   }
@@ -212,11 +227,11 @@ export class SettingsRepository {
   /** Claims the keys for a change; false when another open change holds one */
   async claimKeys(changeId: string, keys: string[]): Promise<boolean> {
     if (!keys.length) return true;
-    // one open change per key (unique key where open): a key another open change holds is not claimed
-    const claimed = await this.#t.changeKeys.insertManyIfAbsent(
-      keys.map((key) => ({ change_id: changeId, key, open: true })),
-      ['key', 'open'],
-    );
+    // One open change per key, which the table's unique key *where open* is what enforces. Naming no key is
+    // what says "unless a unique index refuses it": each store then asks its own index, which is the only way
+    // this reads the same on both. Naming (key, open) would be a MongoDB upsert filter, and no key of the
+    // table at all — a partial unique index is on (key), with the open rows being the ones it covers.
+    const claimed = await this.#t.changeKeys.insertManyIfAbsent(keys.map((key) => ({ change_id: changeId, key, open: true })));
     return claimed === keys.length;
   }
 

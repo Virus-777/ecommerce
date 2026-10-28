@@ -38,7 +38,8 @@
     "prod:keys": "node dist/tools/keys.js",
     "prod:db-setup": "node --env-file-if-exists=.env.production dist/tools/db-setup.js",
     "check:ddl": "tsx tools/check-mysql-ddl.ts",
-    "test:mysql80": "tsx tools/run-on-mysql80.ts"
+    "test:mysql80": "tsx tools/run-on-mysql80.ts",
+    "test:mysql-modules": "tsx tools/test-mysql-modules.ts"
   },
   "dependencies": {
     "@fastify/compress": "^9.2.2",

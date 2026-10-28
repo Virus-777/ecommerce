@@ -44,7 +44,10 @@ beforeAll(async () => {
   const on = await f.call('PUT', '/api/store/customers/marketing-preferences', { token: bea.accessToken, body: { wishlistAlerts: true } });
   expect(on.status, JSON.stringify(on.body)).toBe(200);
   expect(on.body.wishlistAlerts).toBe(true);
-}, 120_000);
+  // no timeout of its own: the project allows a hook 300 s (vitest.config.ts) and this is the most expensive
+  // setup in the suite — every launch module booted, then a seller, a listing and two customers over HTTP.
+  // It takes 42 s alone and more than 120 s when twelve workers are doing the same thing at once.
+});
 afterAll(async () => {
   tokenClock.now = undefined;
   tokenClock.ttlSeconds = 900;

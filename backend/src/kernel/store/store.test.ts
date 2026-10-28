@@ -41,6 +41,10 @@ const demo = {
         from_at: 'timestamptz',
         to_at: 'timestamptz?',
         tags: 'text[]',
+        // a JSON array of objects, which is what an `items[].key` path asks of (settings.changes.items)
+        items: 'jsonb?',
+        // a JSON column that cannot be null, and so holds `null` as a JSON value (settings.definitions.default_value)
+        meta: 'jsonb',
         // the four conversions a TableDef drives, which a def that mis-categorises a column gets wrong
         price: 'numeric(10,2)',
         pinned: 'bool',
@@ -64,6 +68,8 @@ interface Note {
   from_at: Date;
   to_at: Date | null;
   tags: string[];
+  items: { key: string; n: number }[] | null;
+  meta: unknown;
   price: string;
   pinned: boolean;
   body_hash: Uint8Array | null;
@@ -92,6 +98,8 @@ function demoSchemas(d: Record<string, CollectionDef>): ModuleSchemas {
       from_at: { type: Date, required: true },
       to_at: { type: Date, default: null },
       tags: { type: [String], default: undefined },
+      items: { type: Schema.Types.Mixed, default: null },
+      meta: { type: Schema.Types.Mixed },
       price: { type: Schema.Types.Decimal128, required: true },
       pinned: { type: Boolean, required: true },
       body_hash: { type: Buffer, default: null },
@@ -159,6 +167,8 @@ const note = (id: string, o: Partial<Note> = {}): Note => ({
   from_at: JAN,
   to_at: null,
   tags: [],
+  items: null,
+  meta: { of: 'n1' },
   price: '12.50',
   pinned: false,
   body_hash: null,
@@ -245,6 +255,69 @@ describe.each(['mongo', 'mysql'])('%s', (kind) => {
     expect(await ids({ owner: 'ann', or: [{ status: 'draft' }, { status: 'gone' }] })).toEqual(['n1']);
     // an or of nothing can be satisfied by nothing
     expect(await ids({ or: [] })).toEqual([]);
+  });
+
+  it('asks a JSON array whether some element matches', async () => {
+    await notes().insertMany([
+      note('n1', { tags: ['red', 'blue'], items: [{ key: 'a.x', n: 1 }, { key: 'b.y', n: 2 }] }),
+      note('n2', { tags: ['blue'], items: [{ key: 'c.z', n: 3 }], owner: 'bo' }),
+      note('n3', { tags: [], items: [] }),
+    ]);
+    const ids = async (where: Record<string, unknown>) => (await notes().find(where as never, { sort: { id: 1 } })).map((r) => r.id);
+
+    // a field of the objects in the array: "some item of this note is about that key"
+    expect(await ids({ 'items[].key': 'a.x' })).toEqual(['n1']);
+    expect(await ids({ 'items[].key': ['a.x', 'c.z'] })).toEqual(['n1', 'n2']);
+    expect(await ids({ 'items[].key': 'nope' })).toEqual([]);
+    // "any of none", as an empty list is everywhere else here
+    expect(await ids({ 'items[].key': [] })).toEqual([]);
+    // the array's own elements, which is what a path with no field asks
+    expect(await ids({ 'tags[]': 'blue' })).toEqual(['n1', 'n2']);
+    expect(await ids({ 'tags[]': ['red', 'none'] })).toEqual(['n1']);
+    // anded with the ordinary columns beside it
+    expect(await ids({ owner: 'ann', 'tags[]': 'blue' })).toEqual(['n1']);
+    // a number reads back as one: the extraction is JSON, not text
+    expect(await ids({ 'items[].n': 3 })).toEqual(['n2']);
+    // an empty array, and a null column, hold no element that matches anything
+    expect(await ids({ 'items[].key': 'a.x', or: [{ id: 'n1' }, { id: 'n3' }] })).toEqual(['n1']);
+
+    // an operator and null mean nothing on a path, on either store, and say so rather than guessing
+    await expect(notes().find({ 'items[].key': { op: '<', value: 'z' } } as never)).rejects.toThrow(/is a \[\] path/);
+    await expect(notes().find({ 'items[].key': null } as never)).rejects.toThrow(/is a \[\] path/);
+  });
+
+  it('keeps null in a JSON column that cannot be null, and finds it again', async () => {
+    // A setting declared with no default is null, and null is a JSON document: the column is `jsonb` with no
+    // `?`, so there is nowhere for SQL NULL to go. MongoDB has one null for both and never had to tell them
+    // apart, which is why this is the first thing the first module to move ran into.
+    await notes().insertMany([note('n1', { meta: null }), note('n2', { meta: { cap: 5 } }), note('n3', { meta: 0 })]);
+    expect(await notes().get('n1')).toMatchObject({ meta: null });
+    expect((await notes().get('n2'))?.meta).toEqual({ cap: 5 });
+    // 0 and false are JSON values too, and neither is null
+    expect((await notes().get('n3'))?.meta).toBe(0);
+
+    const ids = async (where: Record<string, unknown>) => (await notes().find(where as never, { sort: { id: 1 } })).map((r) => r.id);
+    expect(await ids({ meta: null })).toEqual(['n1']);
+    expect(await ids({ meta: { op: 'is not', value: null } })).toEqual(['n2', 'n3']);
+    // and a patch writes it the same way an insert does
+    await notes().update('n2', { meta: null });
+    expect(await ids({ meta: null })).toEqual(['n1', 'n2']);
+  });
+
+  it('ands a list of conditions, for what one filter object cannot say twice', async () => {
+    await notes().insertMany([
+      note('n1', { items: [{ key: 'a.x', n: 1 }, { key: 'b.y', n: 2 }] }),
+      note('n2', { items: [{ key: 'a.x', n: 1 }] }),
+    ]);
+    const ids = async (where: Record<string, unknown>) => (await notes().find(where as never, { sort: { id: 1 } })).map((r) => r.id);
+
+    // two conditions on one name: a key *and* a key of a section (settings' change list)
+    expect(await ids({ and: [{ 'items[].key': 'a.x' }, { 'items[].key': 'b.y' }] })).toEqual(['n1']);
+    expect(await ids({ and: [{ 'items[].key': 'a.x' }, { 'items[].key': 'c.z' }] })).toEqual([]);
+    // anded with the columns beside it, and each branch may hold an `or` of its own
+    expect(await ids({ status: 'live', and: [{ or: [{ id: 'n1' }, { id: 'n9' }] }] })).toEqual(['n1']);
+    // all of no conditions is every row (and MongoDB refuses an empty $and, so this is not nothing)
+    expect(await ids({ and: [] })).toEqual(['n1', 'n2']);
   });
 
   it('counts, tests existence and lists distinct values', async () => {

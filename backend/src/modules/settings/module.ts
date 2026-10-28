@@ -20,7 +20,7 @@ export default defineModule({
   schemas,
   async register(ctx) {
     const service = new SettingsService({
-      repo: new SettingsRepository(ctx.mongo),
+      repo: new SettingsRepository(ctx.store),
       ctx,
       // the kernel does not tell a module which modules run; this mirrors app.ts (spec gap, see report)
       enabledModules: ctx.modules,

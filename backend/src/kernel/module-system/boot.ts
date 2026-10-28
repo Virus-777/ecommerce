@@ -55,6 +55,8 @@ export interface BootResult {
   devRoutes: ModuleDevRoute[];
   /** Public APIs provided by enabled modules */
   apis: Map<string, object>;
+  /** Each module's data, in whichever database holds it: what a test reads rows through without knowing which */
+  stores: Map<string, Store>;
   warnings: string[];
   /** Runs every module's afterBoot hooks; the app calls it once the APIs are final (tests install apiStubs first) */
   runAfterBoot(): Promise<void>;
@@ -107,7 +109,7 @@ function checkRoutes(spec: ModuleSpecDef, sets: readonly RouteSet[]) {
 export async function bootModules(defs: ModuleDefinition[], k: KernelServices): Promise<BootResult> {
   const enabled = new Set(defs.map((d) => d.spec.name));
   const stubbed = new Set(k.stubbed ?? []);
-  const result: BootResult = { endpoints: [], resolvers: new Map(), webhookVerifiers: new Map(), fileRoutes: [], sessionCookie: new Set(), devRoutes: [], apis: new Map(), warnings: [], runAfterBoot: async () => {} };
+  const result: BootResult = { endpoints: [], resolvers: new Map(), webhookVerifiers: new Map(), fileRoutes: [], sessionCookie: new Set(), devRoutes: [], apis: new Map(), stores: new Map(), warnings: [], runAfterBoot: async () => {} };
   const { apis, resolvers, webhookVerifiers, warnings } = result;
   const proxies = new Map<string, object>();
   const afterBoot: { module: string; fn: () => unknown }[] = [];
@@ -136,6 +138,7 @@ export async function bootModules(defs: ModuleDefinition[], k: KernelServices): 
     else if (!k.mysql) throw new Error(`MYSQL_MODULES names ${name}, but this process has no MySQL (MYSQL_URL is not set)`);
     else if (!spec.tables) throw new Error(`MYSQL_MODULES names ${name}, but its spec has no tables; run npm run gen`);
     else store = k.mysql.module(name, spec.tables);
+    result.stores.set(name, store);
     const ctx: ModuleContext<any> = {
       name,
       spec,

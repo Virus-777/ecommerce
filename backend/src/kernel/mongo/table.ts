@@ -476,12 +476,13 @@ export class Table<R extends object> {
    * upsert for many rows in one round trip: each row is inserted, or `update(row)` (default: every field but the
    * key) is set on the existing one.
    */
-  async upsertMany(rows: readonly (Partial<R> | Record<string, unknown>)[], o: { key?: readonly string[]; update?: (row: Record<string, unknown>) => Record<string, unknown> } = {}): Promise<void> {
+  async upsertMany(rows: readonly (Partial<R> | Record<string, unknown>)[], o: { key?: readonly string[]; update?: (row: Partial<R> & Record<string, unknown>) => Record<string, unknown> } = {}): Promise<void> {
     if (!rows.length) return;
     const key = o.key ?? this.#defaultKey();
     const values = rows as readonly Record<string, unknown>[];
     const docs = await this.#insertDocs(values);
-    const ops = values.map((row, i) => ({ updateOne: { filter: this.#keyFilter(row, key), update: this.#upsertUpdate(row, key, docs[i]!, o.update?.(row)), upsert: true } }));
+    // the callback is handed the row the caller passed, which is a row of this table: that is what it is for
+    const ops = values.map((row, i) => ({ updateOne: { filter: this.#keyFilter(row, key), update: this.#upsertUpdate(row, key, docs[i]!, o.update?.(row as Partial<R> & Record<string, unknown>)), upsert: true } }));
     await this.model.bulkWrite(ops as never, { session: this.session, ordered: true });
   }
 

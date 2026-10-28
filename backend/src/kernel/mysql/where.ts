@@ -15,14 +15,27 @@
  */
 import { escapeLike } from '../lib/text.js';
 
-export type { Cond, Where, WhereWithOr } from '../mongo/filters.js';
-import type { Where, WhereWithOr } from '../mongo/filters.js';
+export type { Cond, JsonArrayPath, Where, WhereWithOr } from '../mongo/filters.js';
+import { jsonArrayPath, pathValues, type Where, type WhereWithOr } from '../mongo/filters.js';
 
 /** A fragment and the values it binds, in order */
 export interface Sql {
   sql: string;
   params: unknown[];
 }
+
+export interface WhereOptions {
+  /**
+   * Columns where a `null` condition asks about the JSON value null and not about SQL NULL: a JSON column the
+   * table says cannot be null (`Table` works them out from its def). Such a column holds `null` as a JSON
+   * document — a setting whose default is "no cap" — so `IS NULL` would never match it, while MongoDB, which
+   * has one null for both, matches those very rows. Asking as JSON is what makes the two answer alike.
+   */
+  jsonNotNull?: ReadonlySet<string>;
+}
+
+/** The JSON document `null`, which is not SQL NULL */
+const JSON_NULL = "CAST('null' AS JSON)";
 
 /** Matches every row: an empty Where filters nothing */
 export const EVERYTHING: Sql = { sql: '1 = 1', params: [] };
@@ -43,13 +56,15 @@ const isOperator = (v: unknown): v is { op: string; value: unknown } =>
   typeof v === 'object' && v !== null && !Array.isArray(v) && !(v instanceof Date) && 'op' in v;
 
 /** One `{ op, value }` condition; undefined means "no condition on this column" */
-function operatorSql(column: string, op: string, value: unknown): Sql | undefined {
+function operatorSql(column: string, op: string, value: unknown, o: WhereOptions): Sql | undefined {
   const col = q(column);
   const list = Array.isArray(value) ? (value as unknown[]) : undefined;
+  const jsonNull = o.jsonNotNull?.has(column) ?? false;
   switch (op) {
     // "is distinct from": `is not` null is every non-null value, and `is not` x also matches nulls
     case 'is not':
-      return value === null ? { sql: `${col} IS NOT NULL`, params: [] } : { sql: `NOT (${col} <=> ?)`, params: [value] };
+      if (value === null) return jsonNull ? { sql: `NOT (${col} <=> ${JSON_NULL})`, params: [] } : { sql: `${col} IS NOT NULL`, params: [] };
+      return { sql: `NOT (${col} <=> ?)`, params: [value] };
     // SQL's <> already excludes nulls, which is what this condition has always meant
     case '<>':
       return value === null ? NOTHING : { sql: `${col} <> ?`, params: [value] };
@@ -72,18 +87,41 @@ function operatorSql(column: string, op: string, value: unknown): Sql | undefine
   }
 }
 
+/**
+ * A condition on a `[]` path: "some element of the JSON array matches". `items[].key` is
+ * `? MEMBER OF (items->'$[*].key')`, and `role_keys[]` is `? MEMBER OF (role_keys)` — the multi-valued index
+ * of §8.1 answers both (EXPLAIN: `type: ref`, `key: mv_…`). A list is one MEMBER OF per value, ORed; an empty
+ * list matches nothing, as an empty `IN` does.
+ *
+ * The path is a JSON path written into the SQL text, which is why it is built from the `[]` name and never from
+ * a value: `jsonArrayPath` splits it, and a name with a quote or a backslash in it cannot get this far because
+ * it is the repository's own source text.
+ */
+function pathSql(name: string, path: { column: string; field?: string }, cond: unknown): Sql | undefined {
+  if (cond === undefined) return undefined;
+  // the field goes into the SQL text as part of a JSON path, so it is held to what a field name may be. It
+  // comes from the repository's own source and not from a value, and this is what keeps that true.
+  if (path.field !== undefined && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(path.field)) throw new Error(`where: ${name} is not a path this store can build: "${path.field}" is not a plain field name`);
+  const array = path.field ? `${q(path.column)}->'$[*].${path.field}'` : q(path.column);
+  const values = pathValues(name, cond); // refuses an operator and null, as the MongoDB side does
+  if (!values.length) return NOTHING; // "any of none"
+  return { sql: values.length === 1 ? `? MEMBER OF (${array})` : `(${values.map(() => `? MEMBER OF (${array})`).join(' OR ')})`, params: [...values] };
+}
+
 /** One column's condition */
-function condSql(column: string, cond: unknown): Sql | undefined {
+function condSql(column: string, cond: unknown, o: WhereOptions): Sql | undefined {
+  const path = jsonArrayPath(column);
+  if (path) return pathSql(column, path, cond);
   const col = q(column);
   if (cond === undefined) return undefined;
-  if (cond === null) return { sql: `${col} IS NULL`, params: [] };
+  if (cond === null) return o.jsonNotNull?.has(column) ? { sql: `${col} = ${JSON_NULL}`, params: [] } : { sql: `${col} IS NULL`, params: [] };
   if (Array.isArray(cond)) {
     // a list is "in": nulls in it are ignored (null equals nothing), and an empty list matches nothing
     const values = cond.filter((v) => v !== null && v !== undefined);
     if (!values.length) return NOTHING;
     return { sql: `${col} IN (${values.map(() => '?').join(', ')})`, params: values };
   }
-  if (isOperator(cond)) return operatorSql(column, cond.op, cond.value);
+  if (isOperator(cond)) return operatorSql(column, cond.op, cond.value, o);
   return { sql: `${col} = ?`, params: [cond] };
 }
 
@@ -92,22 +130,28 @@ function condSql(column: string, cond: unknown): Sql | undefined {
 
 /**
  * A Where as SQL. Columns are ANDed; `or` is a list of Wheres, any of which may hold, ANDed with the rest —
- * the same shape repositories build today with `$or`.
+ * the same shape repositories build today with `$or` — and `and` is a list all of which must hold, for the two
+ * conditions on one name that an object cannot carry.
  */
-export function whereSql<R>(where: WhereWithOr<R> | undefined): Sql {
+export function whereSql<R>(where: WhereWithOr<R> | undefined, o: WhereOptions = {}): Sql {
   if (!where) return EVERYTHING;
   const parts: Sql[] = [];
   for (const [column, cond] of Object.entries(where)) {
-    if (column === 'or') continue;
-    const part = condSql(column, cond);
+    if (column === 'or' || column === 'and') continue;
+    const part = condSql(column, cond, o);
     if (part) parts.push(part);
+  }
+  // every one of these must hold: what an object cannot say twice of one name (kernel/mongo/filters.ts)
+  for (const also of (where as { and?: readonly WhereWithOr<R>[] }).and ?? []) {
+    const part = whereSql(also, o);
+    if (part.sql !== EVERYTHING.sql) parts.push({ sql: `(${part.sql})`, params: part.params });
   }
   const alternatives = (where as { or?: readonly Where<R>[] }).or;
   if (alternatives) {
     if (!alternatives.length) {
       parts.push(NOTHING); // an `or` of nothing can be satisfied by nothing
     } else {
-      const branches = alternatives.map((w) => whereSql(w as WhereWithOr<R>));
+      const branches = alternatives.map((w) => whereSql(w as WhereWithOr<R>, o));
       parts.push({
         sql: `(${branches.map((b) => `(${b.sql})`).join(' OR ')})`,
         params: branches.flatMap((b) => b.params),
@@ -119,8 +163,8 @@ export function whereSql<R>(where: WhereWithOr<R> | undefined): Sql {
 }
 
 /** `WHERE …`, or '' when nothing is filtered, ready to append to a statement */
-export function whereClause<R>(where: WhereWithOr<R> | undefined): Sql {
-  const w = whereSql(where);
+export function whereClause<R>(where: WhereWithOr<R> | undefined, o: WhereOptions = {}): Sql {
+  const w = whereSql(where, o);
   return w.sql === EVERYTHING.sql ? { sql: '', params: [] } : { sql: `WHERE ${w.sql}`, params: w.params };
 }
 

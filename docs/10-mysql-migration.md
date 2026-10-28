@@ -1,6 +1,10 @@
 # Phase: MySQL 8.0 migration plan
 
-Status: **plan only, nothing built** (re-measured 2026-10-23). No code has changed. Each phase in §23 starts only after the owner approves it. Decided by the owner on 2026-10-22: D1 (MySQL 8.0 or later), D2 (ids as readable text), D5 (MySQL search engine), D9 (portable `mysqld`); D11 (geographic points, §3) is new and open; the other decisions in §3 are still open.
+Status: **Y0 done; Y1 in progress** on branch `build/mysql-migration` (last updated 2026-10-29). Each phase in §23 starts only after the owner approves it. Decided by the owner on 2026-10-22: D1 (MySQL 8.0 or later), D2 (ids as readable text), D5 (MySQL search engine), D9 (portable `mysqld`); D11 (geographic points, §3) is new and open; the other decisions in §3 are still open.
+
+**Where Y1 stands.** Built and tested: the ten views (§9.1–9.2), `kernel/mysql/*` (pool, transactions with retry, `Table`, `Where`, locks, claim, counters, migrate, the kernel tables), the job queue on `SKIP LOCKED`, the MySQL rate-limit, idempotency and webhook-event stores, the purge job that replaces the TTL monitors, the generator's DDL / Kysely types / views / triggers / runtime `TableDef`s, the portable `mysqld` and the one-server test harness, the read-modify-write detector, the store seam (§10.5a) and the **settings pilot** (§10.5b). `check:ddl` applies all 472 tables to a real server and reads back all 5,652 columns.
+
+Left in Y1: the **access pilot**; `app.ts` choosing the MySQL kernel stores it does not yet choose (idempotency, the webhook log and the rate limits are still wired to MongoDB, and `config.jobsBackend`/`rateLimitStore` have no `'mysql'` option), with `kernel.purge-expired` registered and the kernel tables created at boot; the MySQL section of BUILDING-MODULES.md; and the 8.0 half of the §20.1 gate for the pilots.
 
 **Re-census of 2026-10-23.** The first census was taken at 01:04 on 2026-10-22, from commit `3dcf7961`. The whole ten-Departments programme (six modules: departments, services, software, food, rewards, farm) landed between 02:29 and 23:37 that same day, followed by the advertising and API work of 10-23. Every count below was therefore re-measured on `d27cc18e`. The drift is **additive**: six new modules, 54 tables and about 1,800 lines of repository, with no new kind of data access. Every file:line reference this plan makes into the modules it first analysed (orders, finance, search, sellers, support, payments, promotions) still resolves to the same code, except the two noted in Appendix C. Nothing of the design changes; the numbers, the tranches and four appendix lists do.
 
@@ -241,7 +245,7 @@ Only the retention purge job sets `@marketly_purge` in its own session. Today ap
 Most JSON columns are snapshots or option lists read with their row: they stay `JSON`, with no change. Where a query filters or sorts on a path inside one (Appendix B lists every place from the code census), the rule is:
 
 - **list filter or sort on a large table** → a generated column (`snapshot_title VARCHAR(255) AS (snapshot->>'$.title') STORED`) with an index, or FULLTEXT if it is a search box. Example: `orders_order_items.product_snapshot.title`, which the seller order search reads.
-- **rare admin filter combined with a selective indexed filter** → `JSON_EXTRACT`/`->>` in the WHERE clause, no index.
+- **rare admin filter combined with a selective indexed filter** → `JSON_EXTRACT`/`->>` in the WHERE clause, no index. **Add `COLLATE utf8mb4_0900_bin` to the extraction**, or compare as JSON (`col->'$.p' = CAST(? AS JSON)`): `->>` returns `utf8mb4_bin` and a bound string is `utf8mb4_0900_bin`, which is an "Illegal mix of collations" error and not a subtlety (§10.5b, probed 2026-10-29).
 - **membership in a JSON array of objects** (`related_subjects $elemMatch {type,id}`, `actor_roles.key`) → a multi-valued index over `CAST(col->'$[*].ref' AS CHAR(80) ARRAY)` where a single path is enough, or a small child table where two fields must match together (`workqueues_item_subjects (item_id, type, subject_id)`).
 - **string dates inside JSON compared as ranges** (`decision.decidedAt`, `info_request.replyDueAt`) → a generated `DATETIME(3)` column.
 
@@ -440,6 +444,7 @@ Each trigger is written in the spec, owned by its module, and covered by the mod
 | `../store/index.ts` | `Store` and `StoreTable<R>`: the one vocabulary a repository is written in to run on either database, and what is deliberately not in it (§10.5a) | |
 | `../store/mongo.ts` | a MongoDB module store seen as a `Store`, so a module that has not moved still has `ctx.store` | |
 | `../store/store.test.ts` | the store contract: one spec, one set of tests, run on MongoDB and on MySQL | |
+| `../store/wiring.test.ts` | the per-module choice through a real app: whose tables are created, and what is refused | |
 | `errors.ts` | `isDuplicateKey` (1062) with the key name, `isDeadlock` (1213), `isLockTimeout` (1205), `isConnectionLost` | |
 | *(not in this folder)* | the three kernel services that are not data access — `mysqlRateLimitStore`, `mysqlIdempotencyStore`, `mysqlWebhookEventLog` — are written **beside their MongoDB twins** in `kernel/auth/rate-limit.ts`, `kernel/http/idempotency.ts` and `kernel/auth/chain.ts`, under the interface both implement. The contract tests then run over both stores with `describe.each`, which is what holds them to the same promises, and Y4 deletes one function per file rather than a folder | |
 | `portable.ts` | finds and starts a private `mysqld` (dev/tests, D9) | `binary.ts` + mongodb-memory-server |
@@ -508,10 +513,38 @@ rather than discovered on its first query. `ctx.mongo` stays exactly as it is fo
 moved, so nothing about them changes on the day a pilot moves.
 
 **One vocabulary, both stores** (`kernel/store/`). A repository takes `Store` instead of `ModuleStore` and is
-written in the neutral form: `WhereWithOr<R>` filters (`{ column: value | list | null | { op, value }, or: [...] }`)
+written in the neutral form: `WhereWithOr<R>` filters (`{ column: value | list | null | { op, value }, or: [...], and: [...] }`)
 and `Patch<R>` writes (a value per column, or `inc`/`jsonAppend`, which the server computes). `Where` was
 defined with SQL's reading of null in the first place, so there is one type and not two — `kernel/mysql/where.ts`
 and `kernel/mongo/filters.ts` both consume it, and `whereFilter` learned `or` to match.
+
+The settings pilot added two things to it, both because a real repository asked for them (2026-10-29):
+
+- **`[]` paths into a JSON array.** `items[].key` is "some element of items has key = …", and `role_keys[]` is
+  "some element of role_keys is …". MongoDB spells both `items.key` and `role_keys`, and reads a dotted path as
+  "the field, or any array element's field" without being told which; SQL has to choose, so the `[]` is written
+  out and `whereSql` builds `? MEMBER OF (items->'$[*].key')` — which the multi-valued index of §8.1 answers
+  (`EXPLAIN`: `type: ref`). A list is one `MEMBER OF` per value, ORed. An operator and null are refused **by
+  both stores**, because `MEMBER OF` has no `<` and "some element is null" is a question about the array.
+  A path with no `[]` is a column name and nothing else, so no existing filter changes meaning. Appendix B's
+  census of 690 such sites is what this is for; the object-field flavour (`link_check.state`) is still open, and
+  the probe below says what it will take.
+- **`and: [...]`, for what one object cannot say twice of one name.** The change list filters by a key *and* by
+  the keys of a section — both conditions on `items[].key`, and `{ a: x, a: y }` is not a thing one can write.
+  An `and` of none adds no condition — handled, not passed on: the MongoDB server answers "$and/$or/$nor must
+  be a nonempty array" to `$and: []`, while Mongoose strips it first, so the guard is checked against the filter
+  `whereFilter` builds rather than against what a query returns. (The sabotage pass is what found that: breaking
+  the guard changed no query's answer.)
+  It is the filter's own `and`, not `ReadOptions.and`, which is a raw `Sql` fragment for what `Where` cannot say.
+
+**A null in a JSON column is a JSON null, not SQL NULL** (the pilot's first failure). `settings.definitions.default_value`
+is `jsonb` with no `?`, and a setting declared with no default — "a platform cap on purchase limits, if any" —
+has `null` for a value. On PostgreSQL that was `'null'::jsonb`, a document like any other; MongoDB has one null
+and never had to tell the two apart. So `Table` writes `null` into a **non-nullable** JSON column as the JSON
+document `null`, and a `{ column: null }` filter on such a column asks `col = CAST('null' AS JSON)` rather than
+`IS NULL` — which is the only reading that answers the same rows as MongoDB. A *nullable* JSON column keeps SQL
+NULL, where there is somewhere for it to go. This gives `TableDef.nullable` a second job, and this one is
+covered by a test (the three uncovered fields below are now two).
 
 Three decisions worth keeping:
 
@@ -524,15 +557,61 @@ Three decisions worth keeping:
 - **The write methods reject rather than throw.** They are typed to return a Promise, so a caller's
   `try/catch` around an `await` sees a refusal either way.
 
+**Running a module's own tests on either database.** `TEST_MYSQL_MODULES=settings` puts those modules' data in
+MySQL in **every** app a test builds (`testing/app.ts`, which also skips a named module the test is not running,
+so a test of three modules need not know about the setting). `npm run test:mysql-modules` is the suite that way
+round, and it reads the same variable as `npm run test:mysql80`, so the pilots can be run on the version the
+server actually has. A module's tests reach its rows through `app.kernel.boot.stores.get('<module>')` — its own
+store, whichever database holds it — rather than building a second MongoDB store of their own.
+
+Also `TEST_LOG_LEVEL=error`: a test run is silent, and a 500 in a test shows as a 500 with the error behind it
+nowhere. One variable turns the app's log back on for a run. The first pilot failure took three runs to see
+because of this, which is three more than it should have.
+
 **What the contract suite proves, and what it does not.** `store.test.ts` builds both stores from one demo spec
 with the generator's own libraries, then runs the same forty tests over each. Every test was checked by breaking
 the thing it tests, including each field of the generated `TableDef` one at a time. Six of the nine fields fail a
-test when they are wrong: `json`, `booleans`, `binary`, `identity`, `uniqueKeys` and `idColumn`. The other three
-are belt-and-braces on MySQL today and no test here can tell: `decimal` (mysql2 already returns DECIMAL as a
-string under `decimalNumbers: false`), `dates` (used only to turn a page cursor back into an instant, and MySQL
-coerces the ISO string anyway) and `nullable` (fills in columns a read left out, and `SELECT *` leaves none out).
-They are kept because each becomes load-bearing the moment those conditions change, but nobody should believe
-they are covered.
+test when they are wrong: `json`, `booleans`, `binary`, `identity`, `uniqueKeys`, `idColumn` — and, since the
+settings pilot, `nullable`, which decides whether a JSON column's `null` is a JSON null or SQL NULL. The other
+two are belt-and-braces on MySQL today and no test here can tell: `decimal` (mysql2 already returns DECIMAL as a
+string under `decimalNumbers: false`) and `dates` (used only to turn a page cursor back into an instant, and
+MySQL coerces the ISO string anyway). They are kept because each becomes load-bearing the moment those
+conditions change, but nobody should believe they are covered.
+
+### 10.5b The settings pilot (built 2026-10-29)
+
+`settings/repository.ts` takes `Store` and is written in the neutral vocabulary; `module.ts` passes
+`ctx.store`. All **129 settings tests pass unchanged on both databases** — the same files, the same assertions,
+`TEST_MYSQL_MODULES=settings` the only difference. Nothing in the service, the HTTP layer or the tests' subject
+matter changed; three things in the repository did.
+
+| Site | Was (MongoDB) | Now (both) |
+|---|---|---|
+| `valueAt` | `{ effective_from: { $lte: at }, $or: [...] }` | `{ effective_from: { op: '<=', value: at }, or: [...] }` |
+| `markUnavailableExcept` | `keys.length ? { key: { $nin: keys } } : {}` | `{ key: { op: 'not in', value: keys } }` — an empty `not in` leaves the column unfiltered, which is what "all of them" means, so the guard goes |
+| `lastChangeAmong` | `{ changed_by_id: { $nin: [SEED_ACTOR.id, null] } }` | `{ changed_by_id: { op: '<>', value: SEED_ACTOR.id } }` — `<>` already never matches a null, on either store |
+| `updateChange` | `{ $set: changeColumns(p), $inc: { version: 1 } }` | `{ ...changeColumns(p), version: inc('version', 1) }` |
+| `listChanges` | `{ 'items.key': key, $and: [{ 'items.key': { $in: keys } }] }` | `{ and: [{ 'items[].key': key }, { 'items[].key': keys }] }` |
+| `keyConflicts` | `{ change_id: { $ne: exceptId } }` | `{ change_id: { op: 'is not', value: exceptId } }` |
+| `claimKeys` | `insertManyIfAbsent(rows, ['key', 'open'])` | `insertManyIfAbsent(rows)` — see below |
+
+**What the pilot found that reading would not have.**
+
+1. **`insertIfAbsent` with a key cannot name a partial unique index.** "One open change per key" is
+   `unique (key) where open`, which MySQL builds as `UNIQUE KEY ((IF(open = 1, key, NULL)))` — a functional
+   index whose columns are `(key)`. The repository named `(key, open)`, which is a MongoDB *upsert filter* and
+   no key of the table: MySQL refused it by name at the first submit. Naming **no** key is the neutral spelling —
+   "insert unless a unique index refuses it" — and each store then asks its own index: MongoDB checks every
+   unique index whose partial filter the row falls under, MySQL lets the insert itself decide and swallows the
+   1062. Naming `(key)` would have been wrong on MongoDB, where the upsert filter would also match a *closed*
+   row and refuse a claim that should succeed.
+2. **A JSON null is not SQL NULL** — see §10.5a above. This was the pilot's very first failure.
+3. **`->>` will not compare with a bound string** (probed on 8.4.13, 2026-10-29). `JSON_UNQUOTE` returns
+   `utf8mb4_bin`, and the session runs `utf8mb4_0900_bin`, so `obj->>'$.state' = ?` is not slow or subtly
+   wrong — it is **"Illegal mix of collations"**, every time. Appendix B's "`JSON_EXTRACT`/`->>` in the WHERE
+   clause" needs `COLLATE utf8mb4_0900_bin` after the extraction, or `obj->'$.state' = CAST(? AS JSON)`, which
+   also keeps numbers and booleans honest (`->>` turns `true` into the string `'true'`). Nothing uses the
+   object-field form yet; this is written down so the first module that does is not surprised by it.
 
 ### 10.6 Boundaries
 
@@ -939,6 +1018,24 @@ Expected downtime: minutes, and bounded by `migrate` rather than by the size of 
 ## 19. Tests and development
 
 **One server for the whole run** (built 2026-10-27, `testing/mysql.ts` + `testing/global-setup.ts`). Each MySQL test file first started a `mysqld` of its own on a port of its own: seven servers for seven files, all running beside the MongoDB replica set and four hundred other test files, and two such files could never run at the same time. Now global setup starts one server for the run (or uses `TEST_MYSQL_URL`) and each file takes a database of its own from it, named after the vitest worker slot and reused by the next file in that slot — the same arrangement `testing/mongo.ts` has. The `kernel/mysql` folder went from 34 s to 13 s, and the run stopped reporting killed workers. A machine with no MySQL yet still runs the MongoDB tests: the failure is handed to `testing/mysql.ts` and only the MySQL tests fail, with the reason.
+**Emptying a database: `DELETE`, not `TRUNCATE`** (changed 2026-10-29, found by the settings pilot). A slot's
+database keeps the tables of every file that ran in it, so once some file has migrated all forty modules it holds
+483 of them — and `empty()` ran a `TRUNCATE` on each, on acquire *and* again on close. InnoDB's TRUNCATE drops
+and recreates a tablespace per table: **23 s** for 483 tables, so about 46 s of every test file that wanted
+MySQL. The same wipe by `DELETE` costs **0.5 s**, because a DELETE on an empty table does almost nothing, plus
+188 ms to rewind the AUTO_INCREMENT of the 24 tables that have one (which is the only thing TRUNCATE gave that
+DELETE does not). The whole-suite run with a pilot on MySQL went from 720 s to 488 s.
+
+**What that did *not* fix, and what the real cause was.** Five consecutive full runs each lost a file to a
+timeout, and this was the suspect. It was not: the files kept failing after the fix. `vitest.config.ts` allows a
+hook 300 s and a test 60 s with `maxWorkers: 12`, and the casualties were the suite's heaviest set-ups — the two
+wishlist files, which boot every launch module and then run a seller → listing → customer flow over HTTP (42 s
+alone), and `app.test.ts` / `access/roles.test.ts`, which boot a whole app *inside a test*. The wishlist files
+passed `120_000` to their own `beforeAll`, overriding the project's 300 s **downward**; twelve such boots at once
+exceed it. They now inherit the project's budget and the two app-booting tests take 180 s, after which the suite
+ran **430 files and 10,173 tests with no failures** — the first clean full run in six. Sixteen files cap a hook at
+120 s this way; only the two that failed were changed, and whether the rest should follow is still open.
+
 
 - **Portable server (D9).** `kernel/mysql/portable.ts` looks for `mysqld` and starts a private one:
   - where it looks: `MYSQLD_PATH`; `C:\Program Files\MySQL\MySQL Server <version>\bin` (8.0, 8.4 or later; the newest found wins); `/usr/sbin/mysqld`; or an unzipped "ZIP Archive" build under `~/.cache/mysql` (offline: copy the zip once). Pointing `MYSQLD_PATH` at another unzipped version is how the 8.0 and 8.4 test runs of §20.1 are made;
@@ -1420,7 +1517,7 @@ From the code census (2026-10-22). "Generated" means an indexed generated column
 | support:297 | case_items | `snapshot.productId` in | generated + index |
 | support:353 | cases | `decision.outcome`, `decision.decidedAt` (string range) | generated `decision_outcome`, `decided_at DATETIME(3)` + index `(seller_id, decided_at)` |
 | services:156 (added 2026-10-23) | requests | `contact.name`, `contact.phone` regex | generated `contact_name` / `contact_phone` (as_ci) + index; requests are always narrowed by provider, service or state first, so JSON in the WHERE clause is also enough |
-| settings:183 | changes | `items.key` | multi-valued index |
+| settings:183 | changes | `items.key` | **done 2026-10-29**: `items[].key` in the neutral vocabulary → `? MEMBER OF (items->'$[*].key')` (§10.5a). The multi-valued index is not created yet; the probe confirmed `EXPLAIN` uses one (`type: ref`) once it is |
 | notifications:538 | member_preferences | `groups.promotions` | JSON (read per seller) |
 | catalog:93; reviews:135 | products; reviews | `recrop_media_ids.0`, `media_ids.0` (non-empty) | `JSON_LENGTH(col) > 0`; generated flag if it is a list filter |
 | notifications (spec gin(link)) | notices | link paths | generated columns for the paths the inbox filters on |

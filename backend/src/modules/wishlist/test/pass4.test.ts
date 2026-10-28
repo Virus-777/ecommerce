@@ -31,7 +31,8 @@ beforeAll(async () => {
   listing = await f.liveListing({ price: 18900, quantity: 5 });
   ann = await f.customer('ann@example.com');
   expect((await f.call('PUT', '/api/store/customers/marketing-preferences', { token: ann.accessToken, body: { wishlistAlerts: true } })).status).toBe(200);
-}, 120_000);
+  // see flow.test.ts: the project's 300 s, not a tighter limit of its own
+});
 afterAll(async () => {
   tokenClock.now = undefined;
   tokenClock.ttlSeconds = 900;

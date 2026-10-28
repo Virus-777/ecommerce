@@ -52,17 +52,39 @@ async function createDatabase(u: URL, name: string): Promise<void> {
   }
 }
 
-/** Empties every table that has rows; the tables themselves stay, so the next file reuses them */
+/**
+ * Empties every table; the tables themselves stay, so the next file in this slot reuses them.
+ *
+ * **`DELETE`, not `TRUNCATE`.** A slot's database accumulates the tables of every file that ran in it, and once
+ * some file has migrated all forty modules that is 483 of them. InnoDB's TRUNCATE drops and recreates a
+ * tablespace per table, which costs **23 s** for 483 tables, measured; the same wipe by DELETE costs **0.5 s**,
+ * because a DELETE on an empty table does almost nothing. This runs twice for every database a test file takes
+ * (here, and again when the store closes), so it was about 46 s of every file that wanted MySQL — enough to
+ * expire a 120 s `beforeAll` when several workers ask for one at the same time, which is what the suite's
+ * "timeout waiting for a database" turned out to be.
+ *
+ * What TRUNCATE gave and DELETE does not is resetting AUTO_INCREMENT, so the tables that have one are rewound
+ * by hand (24 of the 483; 188 ms). **No test depends on that**, and breaking it on purpose proved as much: the
+ * contract suite's identity test asserts `second.seq === first.seq + 1` rather than 1 and 2, deliberately, and
+ * nothing else in the suite reads an absolute identity value. It is kept because a database this says it has
+ * emptied should also look empty, and a counter drifting upward between files is the kind of thing that fails a
+ * module's test in Y2 for a reason nobody can see.
+ */
 async function empty(pool: Pool, database: string): Promise<void> {
-  // BASE TABLE only: a view has no rows of its own, and TRUNCATE on one answers "table doesn't exist"
-  const [tables] = await pool.query<RowDataPacket[]>("SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE'", [database]);
+  // BASE TABLE only: a view has no rows of its own. AUTO_INCREMENT is null for a table without one, and
+  // otherwise holds the *next* value, so above 1 means rows were numbered and the counter needs rewinding
+  const [tables] = await pool.query<(RowDataPacket & { TABLE_NAME: string; AUTO_INCREMENT: number | null })[]>(
+    "SELECT TABLE_NAME, AUTO_INCREMENT FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE'",
+    [database],
+  );
   if (!tables.length) return;
   const conn = await pool.getConnection();
   try {
     // the tables point at each other, so the order would matter; switching the checks off for the wipe is
     // both faster and the only way to do it without a topological sort
     await conn.query('SET FOREIGN_KEY_CHECKS = 0');
-    for (const t of tables) await conn.query(`TRUNCATE TABLE \`${String(t.TABLE_NAME)}\``);
+    for (const t of tables) await conn.query(`DELETE FROM \`${t.TABLE_NAME}\``);
+    for (const t of tables) if ((t.AUTO_INCREMENT ?? 1) > 1) await conn.query(`ALTER TABLE \`${t.TABLE_NAME}\` AUTO_INCREMENT = 1`);
     await conn.query('SET FOREIGN_KEY_CHECKS = 1');
   } finally {
     conn.release();

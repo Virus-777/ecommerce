@@ -162,14 +162,15 @@ export const toFlag = (r: FlagRow): FlagRecord => ({
   updatedAt: r.updated_at,
 });
 
-export const changeColumns = (p: ChangePatch) => {
-  const out: Partial<Record<keyof ChangeRow, unknown>> = {};
+/** A patch as the columns it writes (the row's JSON columns hold the records as they are) */
+export const changeColumns = (p: ChangePatch): Partial<ChangeRow> => {
+  const out: Partial<ChangeRow> = {};
   if (p.status !== undefined) out.status = p.status;
-  if (p.items !== undefined) out.items = p.items;
+  if (p.items !== undefined) out.items = p.items as unknown as ChangeRow['items'];
   if (p.effectiveAt !== undefined) out.effective_at = p.effectiveAt;
   if (p.applyScope !== undefined) out.apply_scope = p.applyScope;
   if (p.reason !== undefined) out.reason = p.reason;
-  if (p.meta !== undefined) out.impact = p.meta;
+  if (p.meta !== undefined) out.impact = p.meta as unknown as ChangeRow['impact'];
   if (p.submittedAt !== undefined) out.submitted_at = p.submittedAt;
   if (p.approvalRequestId !== undefined) out.approval_request_id = p.approvalRequestId;
   if (p.appliedAt !== undefined) out.applied_at = p.appliedAt;

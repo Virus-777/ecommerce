@@ -1,6 +1,4 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { spec } from '../../../spec/settings.js';
-import { schemas } from '../schema.js';
 import { decided, draft, harness, inDays, inMinutes, staff, submit, type Harness } from './helpers.js';
 
 let h: Harness;
@@ -50,7 +48,8 @@ describe('definitions and values', () => {
 
   it('sync-definitions writes the registry, the flags and seeds market defaults once', async () => {
     await h.app.kernel.jobs.runNow('settings.sync-definitions');
-    const store = h.app.kernel.mongo.module('settings', spec.collections, schemas);
+    // the module's own store, whichever database this run keeps it in (TEST_MYSQL_MODULES)
+    const store = h.app.kernel.boot.stores.get('settings')!;
     const defs = await store.table<{ key: string }>('definitions').find();
     expect(defs.find((d) => d.key === 'market.timeZone')).toBeDefined();
     const flags = await store.table<{ key: string }>('feature_flags').find();
@@ -58,7 +57,7 @@ describe('definitions and values', () => {
     const seeded = await store.table<{ key: string; version: number }>('values').find({ key: 'market.country' });
     expect(seeded.map((v) => ({ key: v.key, version: v.version }))).toEqual([{ key: 'market.country', version: 1 }]);
     await h.app.kernel.jobs.runNow('settings.sync-definitions');
-    expect(await store.table('values').count({ key: 'market.country' })).toBe(1);
+    expect(await store.table<{ key: string }>('values').count({ key: 'market.country' })).toBe(1);
     const detail = (await get('/values/market.country')).json();
     expect(detail.current).toMatchObject({ version: 1, value: 'US', changedBy: { kind: 'system' } });
   });
