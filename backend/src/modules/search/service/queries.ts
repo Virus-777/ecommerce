@@ -18,7 +18,7 @@ import { attrKey, expandQuery, normalizeQuery, plural, queryGtin, synonymTerms, 
 import type { SearchFilters, SearchMatch, SearchQuery, SearchResultSet, SearchSession, SortKey, SponsoredSlot } from '../domain/types.js';
 import type { DocRow, EngineFilters, EngineHit, EngineQuery, FacetCounts, RecentRow } from '../ports.js';
 import type { CategoryNode, CategoryTree } from './base.js';
-import { SearchIndexer } from './indexer.js';
+import { SearchDepartments } from './departments.js';
 
 const FACET_VALUES = 10;
 
@@ -68,6 +68,12 @@ export function pageInfoOf(page: PageRequest, offset: number, limit: number, tot
   return { nextCursor: next, total };
 }
 
+/** A document's image, answered from media when it could be read (thumbRefs) */
+const imageOf = (d: DocRow, thumbs: Map<string, common.MediaRef>): common.MediaRef | null => {
+  const image = (d.image as unknown as common.MediaRef | null) ?? null;
+  return image ? (thumbs.get(image.id) ?? image) : null;
+};
+
 /** 'Fri, Oct 16' n business days after a market date */
 function businessDate(from: string, days: number): string {
   const d = new Date(`${from}T12:00:00Z`);
@@ -93,7 +99,7 @@ function businessDaysBetween(from: string, to: string): number {
   return n;
 }
 
-export class SearchQueries extends SearchIndexer {
+export class SearchQueries extends SearchDepartments {
   /* ---------------------------------------------------------------- preparing a query */
 
   protected async synonymSets(): Promise<SynonymSet[]> {
@@ -324,6 +330,7 @@ export class SearchQueries extends SearchIndexer {
     const today = this.marketDate(now);
     // carrier transit assumed for every destination (setting transitBusinessDays, decision S-D4)
     const transit = Number(await this.setting('transitBusinessDays'));
+    const thumbs = await this.thumbRefs(hits.map((h) => (h.doc.image as unknown as common.MediaRef | null)?.id));
     return hits.map((h, i) => {
       const d = h.doc;
       const o = h.offer;
@@ -364,7 +371,7 @@ export class SearchQueries extends SearchIndexer {
         slug: d.slug,
         title: d.title,
         brandName: d.brand_name,
-        image: (d.image as unknown as common.MediaRef | null) ?? null,
+        image: imageOf(d, thumbs),
         variantId,
         variantCue,
         rating: d.rating === null || !d.rating_count ? null : Number(d.rating),
@@ -955,12 +962,12 @@ export class SearchQueries extends SearchIndexer {
       const rows = owner ? await this.repo.recentSearches(owner, await this.setting('recentSearchesMax')) : [];
       return rows.filter((r) => !norm || normalizeQuery(r.query).startsWith(norm)).slice(0, per).map(this.recentOut);
     };
-    if (!norm) return { query: prefix, queries: [], categories: [], brands: [], stores: [], products: [], recent: await recentOf() };
+    if (!norm) return { query: prefix, queries: [], categories: [], brands: [], stores: [], products: [], recent: await recentOf(), departments: [] };
     const words = tokens(norm);
     const prefixOf = (text: string) => (text.toLowerCase().startsWith(norm) ? norm : '');
 
     // asked on every key press: the independent reads run at once, in two rounds (the second needs the first's terms)
-    const [recent, threshold, tree] = await Promise.all([recentOf(), this.setting('typoSimilarityThreshold'), this.categoryTree()]);
+    const [recent, threshold, tree, departments] = await Promise.all([recentOf(), this.setting('typoSimilarityThreshold'), this.categoryTree(), this.departmentSuggestions(prefix)]);
     const [queryTerms, fixed, categoryTerms, brandTerms, storeTerms] = await Promise.all([
       this.engine.suggestTerms('query', norm, threshold, per),
       // the last word may still be being typed: it is fixed only when no known word starts with it
@@ -1020,15 +1027,16 @@ export class SearchQueries extends SearchIndexer {
       });
 
     // products
+    const productThumbs = await this.thumbRefs(docs.map((d: DocRow) => (d.image as unknown as common.MediaRef | null)?.id));
     const products = docs.map((d: DocRow) => ({
       productId: d.product_id,
       slug: d.slug,
       title: d.title,
-      image: (d.image as unknown as common.MediaRef | null) ?? null,
+      image: imageOf(d, productThumbs),
       fromPrice: d.min_price !== null ? money(d.min_price, d.currency) : d.featured_price !== null ? money(d.featured_price, d.currency) : null,
       sellerName: d.featured_seller_name,
     }));
 
-    return { query: prefix, queries: queries.slice(0, per), categories: categories.slice(0, per), brands, stores, products, recent };
+    return { query: prefix, queries: queries.slice(0, per), categories: categories.slice(0, per), brands, stores, products, recent, departments };
   }
 }

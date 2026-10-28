@@ -12,6 +12,10 @@ export const storeRoutes = (service: SearchService) =>
     searchProducts: async ({ query, page, principal }) => service.restProducts(query, page, principal),
     /** GET /facets: Everything around the results for the same query: total, correction, applied filters, facets with counts, sorts, store match, category context, empty guidance */
     getSearchContext: async ({ query, principal }) => service.restContext(query, principal),
+    /** GET /departments: The same query answered by every department: one section per department with matches */
+    searchDepartmentsAll: async ({ query }) => service.departmentResults(query.q, query.limit),
+    /** GET /departments/{key}: One department's results for the query, paged group by group */
+    searchDepartmentScope: async ({ params, query }) => service.departmentScope(params.key, query),
     /** GET /suggestions: Suggestions while typing: queries, categories, brands, stores, products and recent searches */
     getSuggestions: async ({ query, principal }) => service.suggestions(query.q, await service.sessionFor(principal), query.limit),
     /** GET /popular-searches: Popular search keywords across the store (shown as chips before the customer types) */

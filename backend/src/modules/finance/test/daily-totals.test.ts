@@ -117,9 +117,12 @@ describe('sellerBalancesByDay', () => {
     const live = await expectLedgerMatches(k, S);
     expect(live).toMatchObject({ pending: 0, held: 1_000, available: 9_500 + 300 - 1_000 });
     const rows = (await k.svc.sellerBalancesByDay({ from: d0, to: d9 })).filter((r) => r.sellerId === S);
-    // every day from the order day to the day before the release: the lot was pending (the cancelled item left nothing)
-    expect(rows).toHaveLength(10);
-    for (const r of rows.slice(0, 9)) expect(r).toMatchObject({ pending: USD(9_500), available: USD(0), held: USD(0), owed: USD(0) });
+    // every day from the order day to the day before the release: the lot was pending (the cancelled item left nothing).
+    // The clock moved 9 x 24 h, which is nine market days only when no DST change falls in the span: in the week
+    // before one, 9 x 24 h started just after local midnight lands at 23:00 the day before. Count what d0..d9 holds.
+    const spanDays = Math.round((Date.parse(`${d9}T00:00:00Z`) - Date.parse(`${d0}T00:00:00Z`)) / DAY) + 1;
+    expect(rows).toHaveLength(spanDays);
+    for (const r of rows.slice(0, -1)) expect(r).toMatchObject({ pending: USD(9_500), available: USD(0), held: USD(0), owed: USD(0) });
     // today: the live balances
     expect(rows.at(-1)).toEqual({ day: d9, sellerId: S, pending: USD(live.pending), available: USD(live.available), held: USD(live.held), owed: USD(0) });
     const bal = await k.call('GET', `${SELLER}/balances`, k.sellerToken(S));

@@ -30,6 +30,7 @@ import { OPEN_STATUSES } from './domain/exceptions.js';
 import { Core, type ShippingServiceDeps } from './service/core.js';
 import { Estimates } from './service/estimates.js';
 import { Exceptions } from './service/exceptions.js';
+import { OwnCarriers } from './service/own-carriers.js';
 import { Profiles } from './service/profiles.js';
 import { Setup } from './service/setup.js';
 import { registerShippingSettingsSection } from './service/settings-section.js';
@@ -53,6 +54,7 @@ export class ShippingService implements ShippingPublicApi {
   readonly estimates: Estimates;
   readonly setup: Setup;
   readonly profiles: Profiles;
+  readonly ownCarriers: OwnCarriers;
   readonly shipments: Shipments;
   readonly exceptions: Exceptions;
 
@@ -61,8 +63,9 @@ export class ShippingService implements ShippingPublicApi {
     this.views = new Views(this.core);
     this.estimates = new Estimates(this.core);
     this.setup = new Setup(this.core, this.views, this.estimates);
-    this.profiles = new Profiles(this.core, this.views, this.estimates);
-    this.shipments = new Shipments(this.core, this.views, this.estimates, this.profiles);
+    this.ownCarriers = new OwnCarriers(this.core);
+    this.profiles = new Profiles(this.core, this.views, this.estimates, this.ownCarriers);
+    this.shipments = new Shipments(this.core, this.views, this.estimates, this.profiles, this.ownCarriers);
     this.exceptions = new Exceptions(this.core, this.views, this.estimates);
     this.shipments.exceptions = this.exceptions;
     this.exceptions.shipments = this.shipments;

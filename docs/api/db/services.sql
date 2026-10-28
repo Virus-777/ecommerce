@@ -110,6 +110,8 @@ CREATE TABLE `services_requests` (
   `staff_note` TEXT NULL,
   `history` JSON NOT NULL,
   `reviewed` TINYINT(1) NOT NULL,
+  `estimated_amount` BIGINT NULL,
+  `estimated_currency` TEXT NULL,
   `created_at` DATETIME(3) NOT NULL,
   `updated_at` DATETIME(3) NOT NULL,
   PRIMARY KEY (`id`),

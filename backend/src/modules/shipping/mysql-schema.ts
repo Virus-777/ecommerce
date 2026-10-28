@@ -2,7 +2,7 @@
 
 import type { MysqlUnit } from '../../kernel/mysql/schema.js';
 
-/** shipping: 21 tables, 247 columns, 34 keys, 9 foreign keys. The readable form of the same thing is docs/api/db/shipping.sql. */
+/** shipping: 22 tables, 257 columns, 36 keys, 9 foreign keys. The readable form of the same thing is docs/api/db/shipping.sql. */
 export const unit: MysqlUnit = {
   module: "shipping",
   tables: [
@@ -166,6 +166,27 @@ export const unit: MysqlUnit = {
       triggers: [],
     },
     {
+      name: "shipping_seller_carriers",
+      columns: [
+        {"name":"id","ddl":"`id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL"},
+        {"name":"seller_id","ddl":"`seller_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL"},
+        {"name":"code","ddl":"`code` VARCHAR(255) NOT NULL"},
+        {"name":"name","ddl":"`name` VARCHAR(255) NOT NULL"},
+        {"name":"tracking_url_template","ddl":"`tracking_url_template` TEXT NULL"},
+        {"name":"tracking_pattern","ddl":"`tracking_pattern` TEXT NULL"},
+        {"name":"created_at","ddl":"`created_at` DATETIME(3) NOT NULL"},
+        {"name":"updated_at","ddl":"`updated_at` DATETIME(3) NOT NULL"},
+      ],
+      primaryKey: ["id"],
+      keys: [
+        {"name":"uq_shipping_seller_carriers_code","ddl":"UNIQUE KEY `uq_shipping_seller_carriers_code` (`code`)"},
+        {"name":"ix_shipping_seller_carriers_1","ddl":"KEY `ix_shipping_seller_carriers_1` (`seller_id`, `name`)"},
+      ],
+      checks: [],
+      foreignKeys: [],
+      triggers: [],
+    },
+    {
       name: "shipping_dispatch_targets",
       columns: [
         {"name":"id","ddl":"`id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL"},
@@ -244,6 +265,8 @@ export const unit: MysqlUnit = {
         {"name":"fulfilled_by","ddl":"`fulfilled_by` VARCHAR(32) NOT NULL"},
         {"name":"package_no","ddl":"`package_no` INT NOT NULL"},
         {"name":"carrier_code","ddl":"`carrier_code` VARCHAR(255) NULL"},
+        {"name":"carrier_name","ddl":"`carrier_name` TEXT NULL"},
+        {"name":"tracking_url","ddl":"`tracking_url` TEXT NULL"},
         {"name":"service_name","ddl":"`service_name` TEXT NULL"},
         {"name":"tracking_number","ddl":"`tracking_number` VARCHAR(255) NULL"},
         {"name":"tracking_state","ddl":"`tracking_state` TEXT NOT NULL"},

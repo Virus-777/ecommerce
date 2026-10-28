@@ -76,6 +76,15 @@ const group = <T, K>(rows: readonly T[], key: (r: T) => K) => {
 export const carrierNameOf = (code: string | null | undefined, carriers?: readonly CarrierRec[]) =>
   code ? (carriers?.find((c) => c.code === code)?.name ?? CARRIER_CATALOG[code]?.name ?? code.toUpperCase()) : null;
 
+/**
+ * A recorded shipment's carrier name and tracking page. A seller's own courier is not in the catalog, so its name
+ * and link are copied onto the shipment when it is recorded; those come first, which also keeps a package reading
+ * right after the seller renames or removes that carrier.
+ */
+export const shipmentCarrierName = (s: Pick<ShipmentRec, 'carrier_code' | 'carrier_name'>, carriers?: readonly CarrierRec[]) => s.carrier_name?.trim() || carrierNameOf(s.carrier_code, carriers);
+
+export const shipmentTrackingUrl = (s: Pick<ShipmentRec, 'carrier_code' | 'tracking_number' | 'tracking_url'>) => s.tracking_url?.trim() || trackingUrlOf(s.carrier_code, s.tracking_number);
+
 export class Views {
   constructor(private readonly core: Core) {}
 
@@ -234,7 +243,7 @@ export class Views {
       groupId: s.group_id,
       packageLabel: this.packageLabel(s, parts),
       sellerName: this.core.nameOf(parts.names, s.owner_type, s.seller_id),
-      carrierName: carrierNameOf(s.carrier_code),
+      carrierName: shipmentCarrierName(s),
       trackingNumber: s.tracking_number,
       status: s.status,
       statusLabel: statusLabel(s.status, s.tracking_state, s.kind),
@@ -285,10 +294,10 @@ export class Views {
       sellerName: this.core.nameOf(parts.names, s.owner_type, s.seller_id),
       packageLabel: this.packageLabel(s, parts),
       carrierCode: s.carrier_code,
-      carrierName: carrierNameOf(s.carrier_code),
+      carrierName: shipmentCarrierName(s),
       serviceName: s.service_name,
       trackingNumber: s.tracking_number,
-      trackingUrl: trackingUrlOf(s.carrier_code, s.tracking_number),
+      trackingUrl: shipmentTrackingUrl(s),
       trackingState: s.tracking_state as Shipment['trackingState'],
       status: s.status as Shipment['status'],
       statusLabel: statusLabel(s.status, s.tracking_state, s.kind),

@@ -57,4 +57,6 @@ export const storeRoutes = (service: SoftwareService) =>
     listMyPurchases: async ({ page, scope, principal }) => service.listMyPurchases(customerOf(scope, principal), page),
     /** GET /library: Apps I own, newest first */
     listLibrary: async ({ page, scope, principal }) => service.listLibrary(customerOf(scope, principal), page),
+    /** GET /statistics: What the customer paid for software in a period */
+    getMyStatistics: async ({ query, scope, principal }) => service.statisticsFor(customerOf(scope, principal), query),
   });

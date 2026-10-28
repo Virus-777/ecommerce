@@ -29,14 +29,15 @@ import type {
 } from '../../../spec/shipping.js';
 import { addDays, arrivalRange, HOUR_MS, DAY_MS, MON_FRI, onOrAfter, type DayRules } from '../domain/calendar.js';
 import { labelMachine, shipmentMachine } from '../domain/state-machines.js';
-import { EVENT_LABELS, formatOk, MOVING, normalizeCode, normalizeTracking, pathFor, STEPS, stepOf, statusLabel, trackingUrlOf, type ShipmentStatus, type TrackingCode } from '../domain/tracking.js';
+import { EVENT_LABELS, formatOk, MOVING, normalizeCode, normalizeTracking, pathFor, STEPS, stepOf, statusLabel, type ShipmentStatus, type TrackingCode } from '../domain/tracking.js';
 import { CarrierRefused, CarrierUnreachable, type CarrierRec, type CarrierScan, type LabelRec, type LineRec, type ServiceRec, type ShipmentRec } from '../ports.js';
 import type { ShippingRepository } from '../repository.js';
 import { Batch, byMarketly, fulfilledByOf, invalid, iso, notFound, SYSTEM, type By, type Core, type FulfilledBy } from './core.js';
 import type { Estimates, Owner } from './estimates.js';
 import type { Exceptions } from './exceptions.js';
+import { ownTrackingUrl, type OwnCarriers } from './own-carriers.js';
 import type { Profiles } from './profiles.js';
-import { carrierNameOf, labelCarrier, type BilledTo, type Views } from './views.js';
+import { carrierNameOf, labelCarrier, shipmentCarrierName, shipmentTrackingUrl, type BilledTo, type Views } from './views.js';
 
 export interface GroupCtx {
   task: orders.FulfillmentTask;
@@ -65,6 +66,7 @@ export class Shipments {
     private readonly views: Views,
     private readonly estimates: Estimates,
     private readonly profiles: Profiles,
+    private readonly ownCarriers: OwnCarriers,
   ) {}
 
   private get repo() {
@@ -181,7 +183,7 @@ export class Shipments {
     return {
       shipment: summary,
       orderRef: s.order_ref,
-      carrier: { name: carrierNameOf(s.carrier_code) ?? 'Carrier not set', trackingNumber: s.tracking_number, externalUrl: trackingUrlOf(s.carrier_code, s.tracking_number) },
+      carrier: { name: shipmentCarrierName(s) ?? 'Carrier not set', trackingNumber: s.tracking_number, externalUrl: shipmentTrackingUrl(s) },
       headline: headlineOf(s),
       estimate: s.status === 'delivered' ? null : s.estimated_arrival,
       estimateNote: estimateNoteOf(s),
@@ -374,10 +376,10 @@ export class Shipments {
       fulfilledBy: fulfilledByOf(s.owner_type, s.fulfilled_by),
       packageLabel,
       carrierCode: s.carrier_code,
-      carrierName: carrierNameOf(s.carrier_code),
+      carrierName: shipmentCarrierName(s),
       serviceName: s.service_name,
       trackingNumber: s.tracking_number,
-      trackingUrl: trackingUrlOf(s.carrier_code, s.tracking_number),
+      trackingUrl: shipmentTrackingUrl(s),
       lines: this.views.contents(lines),
       status: s.status,
     });
@@ -438,22 +440,29 @@ export class Shipments {
     const again = await this.sameRecorded(this.repo, g.task.groupId, input.carrierCode.trim().toLowerCase(), normalizeTracking(input.trackingNumber), input.items);
     if (again) return this.view(again, by.principal);
     await this.checkItems(g, input.items);
-    const carrier = await this.carrierByCode(input.carrierCode);
-    if (!carrier || carrier.status !== 'active') throw invalid([{ path: 'carrierCode', message: 'Choose one of the listed carriers' }]);
-    const services = await this.servicesOfCarrier(carrier.id);
+    // One of Marketly's carriers, or one of this seller's own (own-…): both end up as a code, a name and the
+    // tracking patterns to check against.
+    const own = await this.ownCarriers.byCode(g.owner.sellerId, input.carrierCode);
+    const carrier = own ? undefined : await this.carrierByCode(input.carrierCode);
+    if (!own && (!carrier || carrier.status !== 'active')) throw invalid([{ path: 'carrierCode', message: 'Choose one of the listed carriers' }]);
+    const carrierCode = own ? own.code : carrier!.code;
+    const carrierName = own ? own.name : carrier!.name;
+    const services = own ? [] : await this.servicesOfCarrier(carrier!.id);
     let service: ServiceRec | null = null;
-    if (input.carrierServiceId) {
+    if (!own && input.carrierServiceId) {
       service = services.find((s) => s.id === input.carrierServiceId) ?? null;
-      if (!service) throw invalid([{ path: 'carrierServiceId', message: `Not a ${carrier.name} service` }]);
-    } else if (input.serviceName) service = services.find((s) => s.name.toLowerCase() === input.serviceName!.trim().toLowerCase() || s.code === input.serviceName!.trim().toLowerCase()) ?? null;
+      if (!service) throw invalid([{ path: 'carrierServiceId', message: `Not a ${carrierName} service` }]);
+    } else if (!own && input.serviceName) service = services.find((s) => s.name.toLowerCase() === input.serviceName!.trim().toLowerCase() || s.code === input.serviceName!.trim().toLowerCase()) ?? null;
     const tracking = normalizeTracking(input.trackingNumber);
-    if (!tracking && carrier.code !== 'other') throw invalid([{ path: 'trackingNumber', message: 'Enter the tracking number' }]);
+    // A seller's own courier may have no tracking at all, as 'other' does.
+    if (!tracking && carrierCode !== 'other' && !own) throw invalid([{ path: 'trackingNumber', message: 'Enter the tracking number' }]);
     let trackingState: 'pending' | 'invalid' | 'missing' = tracking ? 'pending' : 'missing';
-    if (tracking && !this.checkFormat(tracking, services, service)) {
-      if (!input.acknowledgeFormatWarning) throw this.core.error('TRACKING_FORMAT_INVALID', `This does not look like a ${carrier.name} tracking number. Check it, or save it anyway.`, { carrierCode: carrier.code, pattern: service?.tracking_pattern ?? null });
+    const patterns = own ? [own.tracking_pattern] : service ? [service.tracking_pattern] : services.map((s) => s.tracking_pattern);
+    if (tracking && !formatOk(tracking, patterns)) {
+      if (!input.acknowledgeFormatWarning) throw this.core.error('TRACKING_FORMAT_INVALID', `This does not look like a ${carrierName} tracking number. Check it, or save it anyway.`, { carrierCode, pattern: (own ? own.tracking_pattern : service?.tracking_pattern) ?? null });
       trackingState = 'invalid';
     }
-    if (tracking) await this.assertUnused(carrier.code, tracking);
+    if (tracking) await this.assertUnused(carrierCode, tracking);
     const shippedAt = new Date(input.shippedAt);
     const now = this.core.now();
     if (Number.isNaN(shippedAt.getTime()) || shippedAt.getTime() > now.getTime() + HOUR_MS) throw invalid([{ path: 'shippedAt', message: 'The ship date cannot be in the future' }]);
@@ -467,7 +476,7 @@ export class Shipments {
       // records of the same unit made two shipments, as orders learns of the first only by event, after the commit)
       await tx.lock(`record-shipment:${g.task.groupId}`);
       batch = new Batch(by); // a retried attempt starts its events over
-      const same = await this.sameRecorded(tx, g.task.groupId, carrier.code, tracking, input.items);
+      const same = await this.sameRecorded(tx, g.task.groupId, carrierCode, tracking, input.items);
       if (same) return { s: same, made: false };
       const over = await this.overPending(tx, g, input.items);
       if (over.length) throw this.core.error('ITEMS_NOT_SHIPPABLE', over[0]!, { items: over });
@@ -483,8 +492,11 @@ export class Shipments {
         seller_id: g.owner.sellerId,
         fulfilled_by: g.fulfilledBy,
         package_no: packageNo,
-        carrier_code: carrier.code,
-        service_name: service?.name ?? input.serviceName?.trim() ?? null,
+        carrier_code: carrierCode,
+        carrier_name: own ? own.name : null,
+        tracking_url: own ? ownTrackingUrl(own, tracking) : null,
+        // A seller's own carrier has the one service, named after itself; keeping it would read "Speedy · Speedy".
+        service_name: own ? null : (service?.name ?? input.serviceName?.trim() ?? null),
         tracking_number: tracking || null,
         tracking_state: trackingState,
         status: shipmentMachine.initial,
@@ -507,7 +519,7 @@ export class Shipments {
         dispatched_on_time: shippedAt.getTime() <= due.getTime(),
         estimated_arrival: this.estimateAfter(shippedAt, service ? { min: service.transit_min, max: service.transit_max } : null, g.task.delivery.arrival),
       });
-      await tx.insert('tracking_events', { id: newId(), shipment_id: id, code: 'info', label: source === 'warehouse' ? 'Handed to the carrier by the warehouse' : 'Shipment recorded by the seller', detail: tracking ? `${carrier.name} ${tracking}` : `${carrier.name}, no tracking number`, location: null, source, carrier_event_id: null, at: shippedAt });
+      await tx.insert('tracking_events', { id: newId(), shipment_id: id, code: 'info', label: source === 'warehouse' ? 'Handed to the carrier by the warehouse' : 'Shipment recorded by the seller', detail: tracking ? `${carrierName} ${tracking}` : `${carrierName}, no tracking number`, location: null, source, carrier_event_id: null, at: shippedAt });
       this.created(batch, { ...after, status: 'label_created' }, lines, `Shipment ${packageNo}`);
       this.statusChanged(batch, after, 'label_created', after.status, shippedAt);
       this.dispatched(batch, after, lines);
@@ -518,7 +530,7 @@ export class Shipments {
     await this.core.flush(batch);
     await this.afterDispatch(s, g);
     if (trackingState !== 'pending') {
-      await this.exceptions.openMissingTracking(s, trackingState === 'missing' ? `${carrier.name}: shipped without a tracking number` : `${carrier.name} number not recognized`, by);
+      await this.exceptions.openMissingTracking(s, trackingState === 'missing' ? `${carrierName}: shipped without a tracking number` : `${carrierName} number not recognized`, by);
     }
     await this.matchStored(s);
     return this.view((await this.repo.get('shipments', id))!, by.principal);
@@ -791,6 +803,8 @@ export class Shipments {
         fulfilled_by: g.fulfilledBy,
         package_no: packageNo,
         carrier_code: carrier.code,
+        carrier_name: null,
+        tracking_url: null,
         service_name: service.name,
         tracking_number: tracking,
         tracking_state: 'pending',
@@ -885,31 +899,43 @@ export class Shipments {
       throw new AppError('ILLEGAL_TRANSITION', 'Tracking of a delivered, returned or cancelled package cannot be changed', { machine: 'Shipment', from: s.status, event: 'correct_tracking', allowed: [] });
     }
     const code = (body.carrierCode ?? s.carrier_code ?? '').trim().toLowerCase();
-    const carrier = code ? await this.carrierByCode(code) : undefined;
-    if (!carrier) throw invalid([{ path: 'carrierCode', message: 'Choose one of the listed carriers' }]);
+    // A package sent with one of the seller's own couriers is corrected the same way; its code is only theirs.
+    const own = await this.ownCarriers.byCode(s.seller_id, code);
+    const carrier = own || !code ? undefined : await this.carrierByCode(code);
+    if (!own && !carrier) throw invalid([{ path: 'carrierCode', message: 'Choose one of the listed carriers' }]);
+    const carrierCode = own ? own.code : carrier!.code;
+    const carrierName = own ? own.name : carrier!.name;
     const tracking = normalizeTracking(body.trackingNumber);
     if (!tracking) throw invalid([{ path: 'trackingNumber', message: 'Enter the tracking number' }]);
-    const services = await this.servicesOfCarrier(carrier.id);
+    const services = own ? [] : await this.servicesOfCarrier(carrier!.id);
     const service = services.find((x) => x.name === s.service_name) ?? null;
-    if (!this.checkFormat(tracking, services, carrier.code === s.carrier_code ? service : null)) {
-      throw this.core.error('TRACKING_FORMAT_INVALID', `This does not look like a ${carrier.name} tracking number.`, { carrierCode: carrier.code });
+    const patterns = own ? [own.tracking_pattern] : carrierCode === s.carrier_code && service ? [service.tracking_pattern] : services.map((x) => x.tracking_pattern);
+    if (!formatOk(tracking, patterns)) {
+      throw this.core.error('TRACKING_FORMAT_INVALID', `This does not look like a ${carrierName} tracking number.`, { carrierCode });
     }
-    if (tracking === s.tracking_number && carrier.code === s.carrier_code) return this.view(s, by.principal);
-    await this.assertUnused(carrier.code, tracking, s.id);
-    const fromLabel = [carrierNameOf(s.carrier_code), s.tracking_number].filter(Boolean).join(' ') || 'No tracking';
-    const toLabel = `${carrier.name} ${tracking}`;
+    if (tracking === s.tracking_number && carrierCode === s.carrier_code) return this.view(s, by.principal);
+    await this.assertUnused(carrierCode, tracking, s.id);
+    const fromLabel = [shipmentCarrierName(s), s.tracking_number].filter(Boolean).join(' ') || 'No tracking';
+    const toLabel = `${carrierName} ${tracking}`;
     const notified = o.staff ? Boolean(body.notifyCustomer) : true;
     const now = this.core.now();
     const batch = new Batch(by);
     const after = await this.repo.transaction(async (tx) => {
       await tx.get('shipments', s.id, { forUpdate: true });
       await tx.insert('tracking_corrections', { id: newId(), shipment_id: s.id, from_value: fromLabel, to_value: toLabel, reason: body.reason.trim(), by: by.actor, customer_notified: notified, at: now });
-      const updated = await tx.update('shipments', s.id, { carrier_code: carrier.code, tracking_number: tracking, tracking_state: s.tracking_state === 'valid' && tracking === s.tracking_number ? 'valid' : 'pending', ...(carrier.code !== s.carrier_code ? { service_name: null } : {}) });
-      batch.push('shipping.tracking.corrected', { shipmentId: s.id, orderId: s.order_id, from: s.tracking_number ?? carrierNameOf(s.carrier_code) ?? '', to: tracking, reason: body.reason.trim(), by: by.actor });
+      const updated = await tx.update('shipments', s.id, {
+        carrier_code: carrierCode,
+        carrier_name: own ? own.name : null,
+        tracking_url: own ? ownTrackingUrl(own, tracking) : null,
+        tracking_number: tracking,
+        tracking_state: s.tracking_state === 'valid' && tracking === s.tracking_number ? 'valid' : 'pending',
+        ...(carrierCode !== s.carrier_code ? { service_name: null } : {}),
+      });
+      batch.push('shipping.tracking.corrected', { shipmentId: s.id, orderId: s.order_id, from: s.tracking_number ?? shipmentCarrierName(s) ?? '', to: tracking, reason: body.reason.trim(), by: by.actor });
       return updated;
     });
     await this.core.flush(batch);
-    if (o.staff) await this.core.audit({ action: 'shipping.tracking.correct', actionLabel: 'Corrected tracking', category: 'shipping', target: { type: 'shipment', id: s.id, ref: s.order_ref, label: toLabel }, before: { carrier: s.carrier_code, trackingNumber: s.tracking_number }, after: { carrier: carrier.code, trackingNumber: tracking, customerNotified: notified }, reason: body.reason }, by);
+    if (o.staff) await this.core.audit({ action: 'shipping.tracking.correct', actionLabel: 'Corrected tracking', category: 'shipping', target: { type: 'shipment', id: s.id, ref: s.order_ref, label: toLabel }, before: { carrier: s.carrier_code, trackingNumber: s.tracking_number }, after: { carrier: carrierCode, trackingNumber: tracking, customerNotified: notified }, reason: body.reason }, by);
     await this.matchStored(after);
     return this.view((await this.repo.get('shipments', s.id))!, by.principal);
   }
@@ -992,7 +1018,7 @@ export class Shipments {
       return out;
     };
     const zero = money(0, this.core.currency);
-    const carrier = carrierNameOf(s.carrier_code) ?? 'the carrier';
+    const carrier = shipmentCarrierName(s) ?? 'the carrier';
     const options: DeliveryChoiceOption[] = [
       { choice: 'redeliver', title: 'Deliver again', description: `${carrier} tries again on the day you choose.`, cost: zero, costIfNoChoice: null, dates: next(3), pickupLocation: null },
       { choice: 'pickup', title: 'Pick it up', description: `Collect the package from ${e.location ?? `the nearest ${carrier} location`}. Bring an ID.`, cost: zero, costIfNoChoice: null, dates: next(5), pickupLocation: e.location ?? null },
@@ -1140,6 +1166,8 @@ export class Shipments {
         fulfilled_by: g.fulfilledBy,
         package_no: 0,
         carrier_code: carrier.code,
+        carrier_name: null,
+        tracking_url: null,
         service_name: null,
         tracking_number: tracking,
         tracking_state: 'pending',

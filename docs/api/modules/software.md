@@ -39,6 +39,7 @@ The app's Softwares department: apps for phones and PCs that customers download.
 | POST | `/api/store/software/purchases/{id}/retry` | Pay a failed purchase again _(idempotent)_ | customer | `RetryPaymentInput` → `SoftwarePurchase` |
 | GET | `/api/store/software/purchases` | My software purchases, newest first | customer | Page<SoftwarePurchase> |
 | GET | `/api/store/software/library` | Apps I own, newest first | customer | Page<LibraryApp> |
+| GET | `/api/store/software/statistics` | What the customer paid for software in a period: totals, trend and breakdowns | customer | `SoftwareStatistics` |
 
 ## Admin API
 
@@ -597,6 +598,63 @@ The app's Softwares department: apps for phones and PCs that customers download.
 |---|---|
 | reason | `string` Why the key is replaced, e.g. the customer's key leaked; kept in the action history |
 
+### SoftwareStatPurchaseRef
+
+| Field | Type |
+|---|---|
+| purchaseId | `uuid` |
+| ref | `string` |
+| title | `string` The app or pack name |
+| paidAt | `datetime?` |
+| amount | `Money` |
+
+### SoftwareStatApp
+
+| Field | Type |
+|---|---|
+| appId | `uuid?` Null for a pack row, which has no single app |
+| slug | `string?` |
+| title | `string` |
+| icon | `MediaRef?` |
+| company | `string?` |
+| apps | `int` Apps the purchase added: 1 for an app, the pack's size for a pack |
+| amount | `Money` |
+| boughtAt | `datetime?` |
+
+### SoftwareStatTotals
+
+| Field | Type |
+|---|---|
+| paid | `Money` What the card was charged for apps and packs that went through |
+| notPaid | `Money` Purchases that failed or were cancelled (never charged, not in paid) |
+| purchases | `int` |
+| appsAdded | `int` Apps added to the library in the period, however they were added |
+| paidApps | `int` |
+| freeApps | `int` |
+| packs | `int` |
+| licenceKeys | `int` Keys issued for the paid apps added in the period |
+| reviews | `int` Reviews the customer left in the period |
+| averageRating | `number?` Stars the customer gave, one decimal; null when they left none |
+| averagePurchase | `Money` |
+| largestPurchase | `SoftwareStatPurchaseRef?` |
+
+### SoftwareStatistics
+
+| Field | Type |
+|---|---|
+| from | `date` First market day covered (range all: the day of the first counted purchase or library addition, else today) |
+| to | `date` |
+| grain | `enum(day|week|month)` Size of each series point: the grain asked for, else day up to 31 days, week up to 92, month beyond |
+| currency | `string` |
+| totals | `SoftwareStatTotals` |
+| previous | `StatPrevious?` The same number of days just before from; null for range all |
+| series | `StatSeriesPoint[]` Paid per point, count = purchases; zeros included |
+| byCategory | `StatShare[]` App categories by amount, at most 5 plus Other; a pack counts under the categories of its apps, split by their share of the pack price |
+| byCompany | `StatShare[]` Companies by amount, at most 5 plus Other; a pack is split like byCategory |
+| bySource | `StatShare[]` How apps reached the library — free, purchase, pack, staff — counted in apps, not money |
+| byWeekday | `StatWeekday[]` Monday to Sunday by the day the payment went through (market time zone) |
+| topApps | `SoftwareStatApp[]` At most 5, by amount; a pack is one row |
+
 ## Status flows
 
 ### Software purchase (`SoftwarePurchase.status`)
@@ -800,6 +858,7 @@ Indexes: `unique (app_id, customer_id)`, `(app_id, hidden, created_at)`
 
 | Function | Signature | Used by |
 |---|---|---|
+| searchSoftware | `(input: DeptSearchRequest) => DeptSearchResult`<br>Integrated search: published apps, packs and visible categories that match the typed text, as ranked hits with their store paths. | search |
 | exportCustomerData | `(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]`<br>The customer's software purchases (reference, apps, amount, status, dates), owned apps and reviews for the personal data export | customers |
 
 ## Permissions

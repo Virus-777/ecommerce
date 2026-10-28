@@ -83,6 +83,42 @@ export const Carrier: z.ZodType<Carrier> = z.object({
   },
 }).register(common.apiTypes, { id: "shipping.Carrier" });
 
+export interface SellerCarrier {
+  id: string;
+  /** own-<hex>, unique across the platform so tracking numbers stay comparable */
+  code: string;
+  /** What the buyer sees, e.g. 'Speedy Local Courier' */
+  name: string;
+  /** Tracking page with {n} where the number goes; without one the buyer sees the number but no link */
+  trackingUrlTemplate?: string | null;
+  /** Regex the seller's own numbers match, checked like a platform carrier's */
+  trackingPattern?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const SellerCarrier: z.ZodType<SellerCarrier> = z.object({
+  id: z.uuid(),
+  code: z.string().describe("own-<hex>, unique across the platform so tracking numbers stay comparable"),
+  name: z.string().describe("What the buyer sees, e.g. 'Speedy Local Courier'"),
+  trackingUrlTemplate: z.string().describe("Tracking page with {n} where the number goes; without one the buyer sees the number but no link").nullish(),
+  trackingPattern: z.string().describe("Regex the seller's own numbers match, checked like a platform carrier's").nullish(),
+  createdAt: z.iso.datetime({ offset: true }),
+  updatedAt: z.iso.datetime({ offset: true }),
+}).register(common.apiTypes, { id: "shipping.SellerCarrier" });
+
+export interface SellerCarrierInput {
+  name: string;
+  trackingUrlTemplate?: string | null;
+  trackingPattern?: string | null;
+}
+
+export const SellerCarrierInput: z.ZodType<SellerCarrierInput> = z.object({
+  name: z.string(),
+  trackingUrlTemplate: z.string().nullish(),
+  trackingPattern: z.string().nullish(),
+}).register(common.apiTypes, { id: "shipping.SellerCarrierInput" });
+
 export interface CarrierContact {
   role: "account_manager" | "operations" | "claims" | "billing" | "escalation";
   name: string;
@@ -2456,6 +2492,17 @@ export interface ShippingDb {
     from_date: string;
     to_date: string;
   };
+  /** Carriers a seller uses that Marketly has no account with (own van, local courier): chosen when recording a shipment, never shown to other sellers */
+  seller_carriers: {
+    id: string;
+    seller_id: string;
+    code: string;
+    name: string;
+    tracking_url_template: string | null;
+    tracking_pattern: string | null;
+    created_at: Date;
+    updated_at: Date;
+  };
   dispatch_targets: {
     id: string;
     official: Json;
@@ -2507,6 +2554,10 @@ export interface ShippingDb {
     fulfilled_by: 'official_warehouse' | 'seller' | 'marketly_service';
     package_no: number;
     carrier_code: string | null;
+    /** set when the carrier is one the seller added; views prefer it over the catalog, so a removed carrier still reads right */
+    carrier_name: string | null;
+    /** resolved from the seller carrier template at record time */
+    tracking_url: string | null;
     service_name: string | null;
     tracking_number: string | null;
     tracking_state: string;
@@ -2841,6 +2892,73 @@ export const endpoints = defineEndpoints({
     response: () => z.array(ShippingProfile),
     status: 200,
     screens: ["seller/shipping","seller/offer"],
+    phase: 1,
+  },
+  listSellerCarriers: {
+    area: "seller",
+    method: "GET",
+    path: "/carriers",
+    auth: "seller",
+    permission: "shipping.seller-settings.view",
+    scope: "own-seller",
+    summary: "The seller's own carriers",
+    response: () => z.array(SellerCarrier),
+    status: 200,
+    screens: ["seller/shipping"],
+    phase: 1,
+  },
+  addSellerCarrier: {
+    area: "seller",
+    method: "POST",
+    path: "/carriers",
+    auth: "seller",
+    permission: "shipping.seller-settings.manage",
+    scope: "own-seller",
+    summary: "Add a carrier the seller ships with itself",
+    desc: "For a courier Marketly has no account with. It appears in the seller's record-shipment form only; tracking is manual, so numbers are checked against the pattern if one is given and never updated by a carrier feed.",
+    body: () => SellerCarrierInput,
+    response: () => SellerCarrier,
+    status: 201,
+    errors: ["VALIDATION_FAILED","CONFLICT"],
+    screens: ["seller/shipping"],
+    phase: 1,
+  },
+  updateSellerCarrier: {
+    area: "seller",
+    method: "PATCH",
+    path: "/carriers/{id}",
+    auth: "seller",
+    permission: "shipping.seller-settings.manage",
+    scope: "own-seller",
+    summary: "Rename a carrier or change its tracking link",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => SellerCarrierInput,
+    response: () => SellerCarrier,
+    status: 200,
+    errors: ["VALIDATION_FAILED","CONFLICT","NOT_FOUND"],
+    screens: ["seller/shipping"],
+    phase: 1,
+  },
+  removeSellerCarrier: {
+    area: "seller",
+    method: "DELETE",
+    path: "/carriers/{id}",
+    auth: "seller",
+    permission: "shipping.seller-settings.manage",
+    scope: "own-seller",
+    summary: "Remove a carrier from the list",
+    desc: "Packages already sent with it keep its name and tracking link.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    response: null,
+    status: 204,
+    errors: ["NOT_FOUND"],
+    screens: ["seller/shipping"],
     phase: 1,
   },
   createSellerProfile: {
@@ -5339,6 +5457,103 @@ export const spec = defineModuleSpec({
       ],
       "unenforced": []
     },
+    "seller_carriers": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "seller_id",
+        "code",
+        "name",
+        "tracking_url_template",
+        "tracking_pattern",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "tracking_url_template",
+        "tracking_pattern"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "seller_id",
+            "code",
+            "name",
+            "created_at",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "seller_id": {
+              "bsonType": "string"
+            },
+            "code": {
+              "bsonType": "string"
+            },
+            "name": {
+              "bsonType": "string"
+            },
+            "tracking_url_template": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "tracking_pattern": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "seller_carriers_code_0faf86",
+          "key": {
+            "code": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "seller_carriers_seller_id_name_7566c8",
+          "key": {
+            "seller_id": 1,
+            "name": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
     "dispatch_targets": {
       "idField": "id",
       "key": [
@@ -5643,6 +5858,8 @@ export const spec = defineModuleSpec({
         "fulfilled_by",
         "package_no",
         "carrier_code",
+        "carrier_name",
+        "tracking_url",
         "service_name",
         "tracking_number",
         "tracking_state",
@@ -5662,6 +5879,8 @@ export const spec = defineModuleSpec({
         "return_id",
         "seller_id",
         "carrier_code",
+        "carrier_name",
+        "tracking_url",
         "service_name",
         "tracking_number",
         "shipped_at",
@@ -5753,6 +5972,18 @@ export const spec = defineModuleSpec({
               ]
             },
             "carrier_code": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "carrier_name": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "tracking_url": {
               "bsonType": [
                 "string",
                 "null"

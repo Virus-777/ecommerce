@@ -35,6 +35,8 @@ The spec's table notation started as SQL (PostgreSQL, docs/04 §2). Most of the 
 
 Size of the job, measured on main `d27cc18e` (2026-10-23): **40 modules; 471 tables; 5,603 columns; 901 indexes** (125 unique, 70 partial, 17 expression/GIN); **329 references inside modules (none across modules)**; 437 JSON columns; 17 array columns; 8 binary columns; 1,620 endpoints. In code: about **15,500 lines of repositories**, plus the search engine. Module-wide counts: about **738 transactions, 581 `forUpdate` reads, 148 `claim()` calls and 169 jobs**.
 
+**`main` merged into the branch on 2026-10-28** (seven commits: department statistics, the integrated store search across all ten departments, registration without an email code, and sellers shipping with their own carriers). The drift is additive again and small: **one new table** (`shipping_seller_carriers`), **12 new columns** (two on `services_requests`, ten on `shipping_shipments`), **10 more endpoints** — 40 modules, 472 tables, 5,652 columns, 1,630 endpoints. Nearly all of the new code reads: four statistics services and five search services, no new kind of data access, no new JSON-path query. The generator, `check:ddl`, `migrateMysql` and the full suite all took it without a change to the kernel. What it did add to the work is two rows in Appendix C.
+
 For comparison, the figures of the first census (commit `3dcf7961`, 2026-10-22), on the same counting method: 34 modules; 417 tables; 4,915 columns; 800 indexes; 291 references; 357 JSON columns; 16 array columns; 13,687 lines of repositories; 690 transactions; 543 `forUpdate` reads; 162 jobs. The six Departments modules account for nearly all of the difference: 54 tables, 676 columns, 96 indexes, 245 endpoints, 6 jobs and about 1,800 lines of repository.
 
 ---
@@ -790,7 +792,7 @@ Depth 9, cost 1,500, page size 100 and a 10 s timeout per field stay. The 10 s t
 - `tools/lib/tables.ts` (the parser) stays and learns the §17.1 notation.
 - Checks: index key length; reserved words (quoted); functional key parts; partial-unique translation; index redundancy; foreign-key indexes; view mergeability; table name collisions.
 
-**Applied to a real server, 2026-10-27.** `npm run check:ddl` generates the whole schema from the spec and creates it on a throwaway database, because a generated string can look perfect and still be refused. The result: **471 of 471 tables, 1,568 indexes, 329 foreign keys, 161 CHECK constraints and 10 append-only triggers, every statement accepted** by MySQL 8.4.13.
+**Applied to a real server, 2026-10-27.** `npm run check:ddl` generates the whole schema from the spec and creates it on a throwaway database, because a generated string can look perfect and still be refused. The result: **471 of 471 tables, 1,568 indexes, 329 foreign keys, 161 CHECK constraints and 10 append-only triggers, every statement accepted** by MySQL 8.4.13. (Re-run after `main` was merged on 2026-10-28: **472 of 472 tables, 1,571 indexes, 329 foreign keys, 161 checks, 10 triggers, 10 views all merged, and 5,652 columns read back and compared**.)
 
 It did not pass first time, and the seven things it caught are worth keeping, because none would have been found by reading:
 
@@ -828,7 +830,7 @@ Two translations that Appendix A describes were also missing entirely and are no
 **The whole schema, through migrate, 2026-10-28** (`src/modules/mysql-schema.test.ts`). `check:ddl` proves the generated
 SQL is accepted by a server; this proves the other half, which is a different code path over the same spec and the only
 one that runs in production: the units the modules ship, applied by `migrateMysql` to an empty database, come to **471
-tables, 329 foreign keys, 161 CHECK constraints and 10 triggers** — the census exactly, and nothing in the database that
+tables, 329 foreign keys, 161 CHECK constraints and 10 triggers** (**472 tables** after the 2026-10-28 merge of `main`) — the census exactly, and nothing in the database that
 is not in a unit. Then: a second start applies nothing and logs nothing (the per-module hash); a column added to one
 unit is added to that module and no other, as `ALGORITHM=INSTANT`; and with the column gone from the unit again it is
 reported as something the database has and the spec does not, never dropped.
@@ -1411,6 +1413,13 @@ Re-run on 2026-10-23 over the six Departments modules. They are mostly written i
 | departments/service/blogs.ts:346-356 — **done** (added 2026-10-23) | `likeBlogReply`: inserts or deletes the like row, then `countReplyLikes`, then writes `like_count`. No transaction, so two likes on the same reply can interleave and the later count be overwritten by the earlier one | wrap in a transaction and lock the reply row first (`getReply(id, { forUpdate: true })`), or drop the stored count and read it from `blog_reply_likes` (the table is small and already indexed by reply) |
 | departments/service/blogs.ts:364-366 — **done** (added 2026-10-23) | `recountReplies`: `countVisibleReplies` then writes `reply_count`, no transaction | same fix, locking the post row; `reactToBlogPost` two functions above is the pattern to copy |
 | finance/service/ledger.ts:323, 525 | lot re-read, already locked at 296 | none (safe) |
+
+Re-run on 2026-10-28 over everything `main` brought in (department statistics, the integrated search, registration without an email code, sellers shipping with their own carriers). Almost all of it reads: the four statistics services and the five search services write nothing. Of the code that does write, registration already opens a transaction and reads every row it changes with `forUpdate`; `rewards` still reads its progress row locked before `count + 1`; the shipment writes take their values from the request, not from a row they read. Two sites are worth the appendix, and **both are the check-then-insert shape, not the lost-update shape** — the same thing the catalog brand race turned out to be, and the same thing §11.2 rule 2 cannot see, because neither opens a transaction:
+
+| Place | Today | Fix |
+|---|---|---|
+| shipping/service/own-carriers.ts:148→150 (added 2026-10-28) | `assertNameFree` lists the seller's carriers and refuses a name already used, then `add` inserts. The index behind it, `(seller_id, name)`, is **not** unique, so two requests sent together both pass the check and the seller ends up with two carriers of the same name — which the ship form cannot tell apart, the one thing the check exists to prevent | a unique key on `(seller_id, name)` and an insert that turns 1062 into the same `CONFLICT`. Y2, with the module. Note that the sibling check is already right by accident: `freeCode` is also check-then-insert, but `code` is uniquely indexed, so a loser fails loudly instead of duplicating |
+| shipping/service/shipments.ts:465→340 (pre-existing, extended on 2026-10-28 to the seller's own carriers) | `assertUnused` refuses a tracking number already on an active package, outside the transaction that then inserts the shipment. `(carrier_code, tracking_number)` is an ordinary key, and the check is narrowed to the active statuses, so no index can enforce it | not a unique key (the condition is on `status`): read it inside the transaction instead, or accept the duplicate and let the exception queue show it. Y2, with the module |
 
 ## Appendix D: GraphQL fields to batch (done in Y0)
 

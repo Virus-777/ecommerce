@@ -125,10 +125,8 @@ export class Authentication {
         return { error: new AppError('ACCOUNT_DISABLED', 'This account is disabled') };
       }
       if (a.status === 'pending_verification') {
-        await repo.supersedeChallenges(a.id, 'email_verification');
-        const { row, code } = await this.core.newEmailCode(repo, { accountId: a.id, purpose: 'email_verification', email: a.email, payload: { visitorSessionId, device: body.device } }, s, now);
-        after = () => this.core.codeIssued(row, code, 'email', a.email);
-        return { error: new AppError('EMAIL_NOT_VERIFIED', 'Confirm your email first; we sent you a new code', { challenge: map.verificationChallenge(row) }) };
+        // registered before the email code step was removed: the password proves the account, so it opens up
+        a = await repo.updateAccount(a.id, { status: accountStatusMachine.next('pending_verification', 'verifyEmail') });
       }
       if (needsRehash(a.password_hash!)) a = await repo.updateAccount(a.id, { password_hash: await hashPassword(body.password) });
       const next = await this.afterFirstFactor(
@@ -345,6 +343,11 @@ export class Authentication {
           a = await repo.updateAccount(a.id, { status: accountStatusMachine.next('pending_verification', 'verifyEmail'), email_verified_at: now, password_hash: null });
           await this.core.securityEvent(repo, a.id, 'email_verified', 'completed', { client: caller.client, detail: { via: body.provider } });
         }
+        if (!a.email_verified_at) {
+          // registered with a password and never confirmed: the provider confirms the address now
+          a = await repo.updateAccount(a.id, { email_verified_at: now });
+          await this.core.securityEvent(repo, a.id, 'email_verified', 'completed', { client: caller.client, detail: { via: body.provider } });
+        }
       } else {
         const local = ext.email.split('@')[0]!;
         const firstName = ext.firstName?.trim() || local;
@@ -356,7 +359,7 @@ export class Authentication {
           email_normalized: email,
           email_verified_at: now,
           display_name: `${firstName} ${lastName}`.trim(),
-          status: accountStatusMachine.next(accountStatusMachine.initial, 'verifyEmail'),
+          status: accountStatusMachine.initial,
           password_hash: null,
           password_changed_at: null,
           must_reset_password: false,

@@ -745,6 +745,155 @@ export const OrderAction: z.ZodType<OrderAction> = z.object({
   staffNote: z.string().nullish(),
 }).register(common.apiTypes, { id: "farm.OrderAction" });
 
+export interface FarmStatOrderRef {
+  orderId: string;
+  ref: string;
+  placedAt?: string | null;
+  amount: common.Money;
+}
+
+export const FarmStatOrderRef: z.ZodType<FarmStatOrderRef> = z.object({
+  orderId: z.uuid(),
+  ref: z.string(),
+  placedAt: z.iso.datetime({ offset: true }).nullish(),
+  get amount() {
+    return common.Money;
+  },
+}).register(common.apiTypes, { id: "farm.FarmStatOrderRef" });
+
+export interface FarmStatMachine {
+  productId: string;
+  productSlug?: string | null;
+  title: string;
+  image?: common.MediaRef | null;
+  orders: number;
+  /** The machine itself, attachments and delivery left out */
+  amount: common.Money;
+  lastOrderedAt?: string | null;
+}
+
+export const FarmStatMachine: z.ZodType<FarmStatMachine> = z.object({
+  productId: z.uuid(),
+  productSlug: z.string().nullish(),
+  title: z.string(),
+  get image() {
+    return common.MediaRef.nullish();
+  },
+  orders: z.number().int(),
+  get amount() {
+    return common.Money;
+  },
+  lastOrderedAt: z.iso.datetime({ offset: true }).nullish(),
+}).register(common.apiTypes, { id: "farm.FarmStatMachine" });
+
+export interface FarmStatTotals {
+  /** What the machines cost: machine, attachments and delivery of every order the dealer has not rejected and the customer has not cancelled, whether or not the card has been charged */
+  spent: common.Money;
+  /** Orders cancelled or rejected (not in spent) */
+  cancelled: common.Money;
+  /** Delivery fees, included in spent */
+  delivery: common.Money;
+  /** Attachments, included in spent */
+  attachments: common.Money;
+  /** Pay-on-delivery deposits the card has been charged (the dealer confirmed) */
+  depositsPaid: common.Money;
+  /** The rest of pay-on-delivery orders, paid to the dealer when the machine arrives */
+  dueOnDelivery: common.Money;
+  orders: number;
+  machines: number;
+  attachmentCount: number;
+  averageOrder: common.Money;
+  /** Placed to delivered, one decimal; null until an order has been delivered */
+  averageDeliveryDays?: number | null;
+  largestOrder?: FarmStatOrderRef | null;
+}
+
+export const FarmStatTotals: z.ZodType<FarmStatTotals> = z.object({
+  get spent() {
+    return common.Money;
+  },
+  get cancelled() {
+    return common.Money;
+  },
+  get delivery() {
+    return common.Money;
+  },
+  get attachments() {
+    return common.Money;
+  },
+  get depositsPaid() {
+    return common.Money;
+  },
+  get dueOnDelivery() {
+    return common.Money;
+  },
+  orders: z.number().int(),
+  machines: z.number().int(),
+  attachmentCount: z.number().int(),
+  get averageOrder() {
+    return common.Money;
+  },
+  averageDeliveryDays: z.number().describe("Placed to delivered, one decimal; null until an order has been delivered").nullish(),
+  get largestOrder() {
+    return FarmStatOrderRef.nullish();
+  },
+}).register(common.apiTypes, { id: "farm.FarmStatTotals" });
+
+export interface FarmStatistics {
+  /** First market day covered (range all: the day of the first counted order, else today) */
+  from: string;
+  to: string;
+  /** Size of each series point: the grain asked for, else day up to 31 days, week up to 92, month beyond */
+  grain: "day" | "week" | "month";
+  currency: string;
+  totals: FarmStatTotals;
+  /** The same number of days just before from; null for range all */
+  previous?: common.StatPrevious | null;
+  /** Spent per point, with cancelled as the second series; zeros included */
+  series: common.StatSeriesPoint[];
+  /** The Farm machines department's types (Tractors, Harvesters…) by amount, at most 5 plus Other; a machine no longer picked counts as Other machines */
+  byMachineType: common.StatShare[];
+  /** Dealers by amount, at most 5 plus Other */
+  byDealer: common.StatShare[];
+  /** pay_in_full, installments and pay_on_delivery by amount */
+  byPaymentOption: common.StatShare[];
+  /** Monday to Sunday by the day orders were placed (market time zone) */
+  byWeekday: common.StatWeekday[];
+  /** At most 5, by amount */
+  topMachines: FarmStatMachine[];
+}
+
+export const FarmStatistics: z.ZodType<FarmStatistics> = z.object({
+  from: z.iso.date().describe("First market day covered (range all: the day of the first counted order, else today)"),
+  to: z.iso.date(),
+  grain: z.enum(["day", "week", "month"]).describe("Size of each series point: the grain asked for, else day up to 31 days, week up to 92, month beyond"),
+  currency: z.string(),
+  get totals() {
+    return FarmStatTotals;
+  },
+  get previous() {
+    return common.StatPrevious.nullish();
+  },
+  get series() {
+    return z.array(common.StatSeriesPoint);
+  },
+  get byMachineType() {
+    return z.array(common.StatShare);
+  },
+  get byDealer() {
+    return z.array(common.StatShare);
+  },
+  get byPaymentOption() {
+    return z.array(common.StatShare);
+  },
+  get byWeekday() {
+    return z.array(common.StatWeekday);
+  },
+  get topMachines() {
+    return z.array(FarmStatMachine);
+  },
+}).register(common.apiTypes, { id: "farm.FarmStatistics" });
+
 /* ------------------------------------------------------------------ events */
 
 /** farm.order.placed: A farm order reaches placed (at once for installments; when the card is authorized for pay in full and for the pay-on-delivery deposit) */
@@ -1057,6 +1206,27 @@ export const endpoints = defineEndpoints({
     errors: ["NOT_FOUND","ILLEGAL_TRANSITION"],
     events: ["farm.order.status_changed"],
     screens: ["store/farm-order-detail"],
+    phase: 2,
+  },
+  getMyStatistics: {
+    area: "store",
+    method: "GET",
+    path: "/statistics",
+    auth: "customer",
+    scope: "own-customer",
+    summary: "What the customer spent on farm machines in a period: totals, trend and breakdowns",
+    desc: "Orders count by the day they were placed (market time zone). Spent is the machine, its attachments and delivery for every order not cancelled or rejected, so a pay-on-delivery order counts in full while only its deposit has been charged; depositsPaid and dueOnDelivery split it. Orders still waiting for payment are left out. from/to (both or neither) replace range; at most 3 years. Default range last_12_months.",
+    query: () =>
+      z.object({
+        range: z.enum(["last_30_days", "last_3_months", "last_6_months", "last_12_months", "this_year", "last_year", "all"]).optional(),
+        from: z.iso.date().optional(),
+        to: z.iso.date().optional(),
+        grain: z.enum(["day", "week", "month"]).optional(),
+      }),
+    response: () => FarmStatistics,
+    status: 200,
+    errors: ["VALIDATION_FAILED"],
+    screens: ["account/statistics"],
     phase: 2,
   },
   listDealers: {

@@ -10,10 +10,10 @@ import { caller, refreshTokenOf, send } from './client.js';
  */
 export const publicRoutes = (service: IdentityService) =>
   routes(endpoints, 'public', {
-    /** POST /registrations: Create a customer account and send an email code */
-    register: async (input) => service.registration.register(input.body, caller(input)),
-    /** POST /verifications/{id}/confirm: Confirm an email or phone code (registration, email change, phone change) */
-    confirmVerification: async (input) => send(input.reply, await service.registration.confirmVerification(input.params.id, input.body, caller(input))),
+    /** POST /registrations: Create a customer account and sign in */
+    register: async (input) => send(input.reply, await service.registration.register(input.body, caller(input))),
+    /** POST /verifications/{id}/confirm: Confirm an email change or phone code */
+    confirmVerification: async (input) => service.registration.confirmVerification(input.params.id, input.body, caller(input)),
     /** POST /verifications/{id}/resend: Send a new code */
     resendVerification: async ({ params }) => service.registration.resendVerification(params.id),
     /** POST /sessions: Sign in with email and password */

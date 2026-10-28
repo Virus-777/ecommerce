@@ -109,6 +109,20 @@ CREATE TABLE `shipping_closures` (
   KEY `ix_shipping_closures_1` (`seller_id`, `from_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_bin;
 
+CREATE TABLE `shipping_seller_carriers` (
+  `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  `seller_id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  `code` VARCHAR(255) NOT NULL,
+  `name` VARCHAR(255) NOT NULL,
+  `tracking_url_template` TEXT NULL,
+  `tracking_pattern` TEXT NULL,
+  `created_at` DATETIME(3) NOT NULL,
+  `updated_at` DATETIME(3) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_shipping_seller_carriers_code` (`code`),
+  KEY `ix_shipping_seller_carriers_1` (`seller_id`, `name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_bin;
+
 CREATE TABLE `shipping_dispatch_targets` (
   `id` CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   `official` JSON NOT NULL,
@@ -167,6 +181,8 @@ CREATE TABLE `shipping_shipments` (
   `fulfilled_by` VARCHAR(32) NOT NULL,
   `package_no` INT NOT NULL,
   `carrier_code` VARCHAR(255) NULL,
+  `carrier_name` TEXT NULL,
+  `tracking_url` TEXT NULL,
   `service_name` TEXT NULL,
   `tracking_number` VARCHAR(255) NULL,
   `tracking_state` TEXT NOT NULL,

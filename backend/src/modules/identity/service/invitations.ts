@@ -175,7 +175,7 @@ export class Invitations {
           email_normalized: normalizeEmail(i.email),
           email_verified_at: now,
           display_name: name,
-          status: accountStatusMachine.next(accountStatusMachine.initial, 'verifyEmail'),
+          status: accountStatusMachine.initial,
           password_hash: hash,
           password_changed_at: now,
           must_reset_password: false,

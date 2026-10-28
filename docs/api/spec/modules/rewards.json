@@ -18,6 +18,7 @@
   "dependsOn": ["promotions"],
   "optionalDeps": ["customers", "audit", "notifications"],
   "publicApi": [
+    { "name": "searchRewards", "signature": "(input: DeptSearchRequest) => DeptSearchResult", "desc": "Integrated search: rewards of the catalogue whose title or condition matches the typed text, as ranked hits that open the Daily rewards department. Needs customerId for the customer's own points; a visitor gets the catalogue without them.", "usedBy": ["search"] },
     { "name": "exportCustomerData", "signature": "(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]", "desc": "The customer's points history, check-ins and redemptions for the personal data export", "usedBy": ["customers"] }
   ],
   "types": {

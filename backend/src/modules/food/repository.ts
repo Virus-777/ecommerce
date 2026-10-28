@@ -111,6 +111,9 @@ export class FoodRepository {
   getSection(id: string): Promise<SectionRow | undefined> {
     return this.#t.sections.get(id);
   }
+  sectionsByIds(ids: string[]): Promise<SectionRow[]> {
+    return ids.length ? this.#t.sections.getMany(ids) : Promise.resolve([]);
+  }
   insertSection(row: SectionRow): Promise<SectionRow> {
     return this.#t.sections.insert(row);
   }

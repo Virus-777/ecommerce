@@ -47,6 +47,7 @@ Services customers request or book in the app's department pages: OS installs an
 | GET | `/api/store/services/devices/{id}` | One of my devices | customer | `Device` |
 | PATCH | `/api/store/services/devices/{id}` | Change a pending or rejected device | customer | `DeviceInput` → `Device` |
 | DELETE | `/api/store/services/devices/{id}` | Remove one of my devices | customer | 204 No content |
+| GET | `/api/store/services/statistics` | The customer's service requests in a period: totals, trend and breakdowns | customer | `ServiceStatistics` |
 
 ## Admin API
 
@@ -703,6 +704,64 @@ Services customers request or book in the app's department pages: OS installs an
 | coveredUntil | `date?` End of the warranty cover; default the purchase date plus 12 months |
 | staffNote | `string?` |
 
+### ServiceStatProviderRef
+
+| Field | Type |
+|---|---|
+| providerId | `uuid` |
+| slug | `string?` |
+| name | `string` |
+| requests | `int` |
+
+### ServiceStatService
+
+| Field | Type |
+|---|---|
+| serviceId | `uuid` |
+| slug | `string?` |
+| title | `string` |
+| image | `MediaRef?` |
+| provider | `string` |
+| requests | `int` |
+| lastRequestedAt | `datetime?` |
+
+### ServiceStatTotals
+
+| Field | Type |
+|---|---|
+| requests | `int` |
+| completed | `int` |
+| underWay | `int` Confirmed or in progress |
+| cancelled | `int` Cancelled by the customer |
+| declined | `int` Declined by the provider |
+| services | `int` |
+| providers | `int` |
+| estimated | `Money` What the providers' price lists come to for the requests that have a fixed price. Never what the customer actually paid: these services are paid at the provider |
+| estimatedFrom | `int` Requests behind estimated (the ones with a fixed price); the rest are charged by the hour, whose hours are not recorded here |
+| averageDays | `number?` Requested to completed, one decimal; null until a request has been completed |
+| reviews | `int` |
+| averageRating | `number?` Stars the customer gave, one decimal; null when they left none |
+| topProvider | `ServiceStatProviderRef?` |
+
+### ServiceStatistics
+
+| Field | Type |
+|---|---|
+| area | `enum(os_install|post_sale|welfare|booking)?` The area asked for; absent when every area is counted |
+| from | `date` First market day covered (range all: the day of the first counted request, else today) |
+| to | `date` |
+| grain | `enum(day|week|month)` Size of each series point: the grain asked for, else day up to 31 days, week up to 92, month beyond |
+| currency | `string` |
+| totals | `ServiceStatTotals` |
+| previous | `StatPrevious?` The same number of days just before from; null for range all. count compares requests, amount the estimate |
+| series | `StatSeriesPoint[]` Requests per point in count, with the estimate in amount; zeros included |
+| byService | `StatShare[]` Services by requests, at most 5 plus Other |
+| byProvider | `StatShare[]` Providers by requests, at most 5 plus Other |
+| byPlan | `StatShare[]` The price row the customer chose (Weekly, Per visit, Assessment…) by requests, at most 5 plus Other; requests with no plan count as Other. amount is the estimate for rows with a fixed price, zero for hourly ones |
+| byStatus | `StatShare[]` requested, confirmed, in_progress, completed, cancelled and declined, counted in requests |
+| byWeekday | `StatWeekday[]` Monday to Sunday by the day the request was made (market time zone) |
+| topServices | `ServiceStatService[]` At most 5, by requests |
+
 ## Status flows
 
 ### Service request (`ServiceRequest.status`)
@@ -851,6 +910,8 @@ Indexes: `(area, status, position)`, `(provider_id, status, position)`, `(catego
 | staff_note | text? |
 | history | jsonb |
 | reviewed | bool |
+| estimated_amount | bigint? (what the provider's price list came to when the request was made, when it is a fixed price: the chosen price row, else the service's from price. Null when the price is by the hour or unknown — these services are paid at the provider, so nothing here is what the customer paid) |
+| estimated_currency | text? |
 | created_at | timestamptz |
 | updated_at | timestamptz |
 
@@ -921,6 +982,7 @@ Indexes: `(customer_id, created_at)`, `(status, created_at)`, `(imei)`
 
 | Function | Signature | Used by |
 |---|---|---|
+| searchServices | `(input: DeptSearchRequest) => DeptSearchResult`<br>Integrated search: published services, providers and categories that match the typed text, as ranked hits with their store paths. Each group carries its area (os_install and post_sale belong to the Phones section, welfare and booking to their own). | search |
 | exportCustomerData | `(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]`<br>The customer's service requests and bookings (reference, service, provider, time, contact, details, device, status history), reviews, saved providers and registered devices (with the full IMEI) for the personal data export. Requests and reviews are found by the account id, saved providers and devices by the customers-module id (and the account id they fall back to). Staff notes are left out. | customers |
 
 ## Permissions

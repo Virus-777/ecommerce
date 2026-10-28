@@ -6,7 +6,7 @@
 import { newId } from '../../../kernel/lib/ids.js';
 import { slugify } from '../../../kernel/lib/text.js';
 import type * as search from '../../../spec/search.js';
-import type { FarmAdmin, FarmInput, FarmMachine, FarmMachineCard, FarmMachineInput, FarmPage, FarmType } from '../../../spec/departments.js';
+import type { FarmAdmin, FarmInput, FarmMachine, FarmMachineCard, FarmMachineInput, FarmMachineType, FarmPage, FarmType } from '../../../spec/departments.js';
 import { LIMITS } from '../domain/rules.js';
 import { actorKey, invalid, iso, notFound, requireText, unique, type By } from './base.js';
 import { DepartmentsPhones } from './phones.js';
@@ -52,6 +52,25 @@ export class DepartmentsFarm extends DepartmentsPhones {
     const product = cards.get(m.productId);
     if (!product) throw notFound('Machine');
     return { product, typeId: m.typeId, highlights: m.highlights ?? [], attachments: (m.attachmentIds ?? []).map((id) => cards.get(id)).filter((c): c is search.ProductCard => Boolean(c)) };
+  }
+
+  /**
+   * The type of each picked machine, keyed by product id (farm statistics group orders by machine type).
+   * A product that is not picked any more, or whose type has been removed, is left out rather than failing, so
+   * old orders can still be counted; no card is read, only the farm setup row.
+   */
+  async farmMachineTypes(productIds: string[]): Promise<Record<string, FarmMachineType>> {
+    const wanted = new Set(productIds);
+    if (!wanted.size) return {};
+    const { types, machines } = await this.farmSetup();
+    const names = new Map(types.map((t) => [t.id, t.name]));
+    const out: Record<string, FarmMachineType> = {};
+    for (const m of machines) {
+      if (!wanted.has(m.productId)) continue;
+      const typeName = names.get(m.typeId);
+      if (typeName) out[m.productId] = { typeId: m.typeId, typeName };
+    }
+    return out;
   }
 
   async getFarmAdmin(): Promise<FarmAdmin> {

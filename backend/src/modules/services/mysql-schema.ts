@@ -2,7 +2,7 @@
 
 import type { MysqlUnit } from '../../kernel/mysql/schema.js';
 
-/** services: 7 tables, 121 columns, 23 keys, 10 foreign keys. The readable form of the same thing is docs/api/db/services.sql. */
+/** services: 7 tables, 123 columns, 23 keys, 10 foreign keys. The readable form of the same thing is docs/api/db/services.sql. */
 export const unit: MysqlUnit = {
   module: "services",
   tables: [
@@ -143,6 +143,8 @@ export const unit: MysqlUnit = {
         {"name":"staff_note","ddl":"`staff_note` TEXT NULL"},
         {"name":"history","ddl":"`history` JSON NOT NULL"},
         {"name":"reviewed","ddl":"`reviewed` TINYINT(1) NOT NULL"},
+        {"name":"estimated_amount","ddl":"`estimated_amount` BIGINT NULL"},
+        {"name":"estimated_currency","ddl":"`estimated_currency` TEXT NULL"},
         {"name":"created_at","ddl":"`created_at` DATETIME(3) NOT NULL"},
         {"name":"updated_at","ddl":"`updated_at` DATETIME(3) NOT NULL"},
       ],

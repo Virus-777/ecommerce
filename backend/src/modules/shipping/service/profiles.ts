@@ -34,6 +34,7 @@ import { shippingProfileVersionMachine } from '../domain/state-machines.js';
 import type { ProfileRec } from '../ports.js';
 import { invalid, notFound, type By, type Core } from './core.js';
 import { ownerKey, type Estimates, type Owner } from './estimates.js';
+import { ownCarrierAsCarrier, type OwnCarriers } from './own-carriers.js';
 import type { Views } from './views.js';
 
 type Issue = { path: string; message: string };
@@ -71,6 +72,7 @@ export class Profiles {
     private readonly core: Core,
     private readonly views: Views,
     private readonly estimates: Estimates,
+    private readonly ownCarriers: OwnCarriers,
   ) {}
 
   private get repo() {
@@ -639,12 +641,14 @@ export class Profiles {
   async setup(sellerId: string): Promise<SellerShippingSetup> {
     await this.core.ensureSeeded();
     const owner: Owner = { ownerType: 'seller', sellerId };
-    const [settings, carriers, services] = await Promise.all([
+    const [settings, carriers, services, own] = await Promise.all([
       this.estimates.settingsFor(owner),
       this.repo.find('carriers', { status: 'active' }, { orderBy: [['name', 'asc']] }),
       this.repo.find('carrier_services', { enabled: true }, { orderBy: [['name', 'asc']] }),
+      this.ownCarriers.recordsOf(sellerId),
     ]);
-    const list = carriers.map((c) => this.views.carrier(c, services, { staff: false, enabledOnly: true }));
+    // The seller's own couriers come after Marketly's, so the familiar names stay at the top of the list.
+    const list = [...carriers.map((c) => this.views.carrier(c, services, { staff: false, enabledOnly: true })), ...own.map(ownCarrierAsCarrier)];
     const labelsOk = services.some((s) => s.label_supported && carriers.some((c) => c.id === s.carrier_id));
     const p = settings.default_parcel;
     return {

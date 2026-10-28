@@ -286,7 +286,10 @@ describe('inbound shipments', () => {
     const late = await k.call('POST', S('/inbound'), { token: s.token, body: { shipFrom: ADDRESS, lines: [{ skuEnrollmentId: s.skuId, quantity: 1 }], boxes: 1, expectedArrival: new Date(k.clock.now().getTime() + 2 * 86_400_000).toISOString().slice(0, 10) } });
     await k.call('POST', S(`/inbound/${late.body.id}/submit`), { token: s.token });
     const d = await short();
-    k.clock.advance(15 * 86_400_000);
+    // The job closes what has waited more than 14 market days, so the advance has to clear 14 calendar days.
+    // 15 x 24 h does not, in the week before a DST change: started just after local midnight it lands at 23:00 on
+    // day 14. 16 x 24 h clears it either way round.
+    k.clock.advance(16 * 86_400_000);
     await k.app.kernel.jobs.runNow('fulfillment-service.inbound-overdue');
     expect(k.work.find((w) => w.dedupeKey === `fs_inbound_overdue:${late.body.id}`)).toMatchObject({ queueKey: 'fulfillment.receiving', kind: 'receiving', subject: { ref: late.body.ref } });
     const auto = await k.call('GET', S(`/inbound/${d}`), { token: s.token });

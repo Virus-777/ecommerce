@@ -115,11 +115,17 @@ describe('the MySQL store and its one statement', () => {
 describe('two app instances on one database', () => {
   const apps: FastifyInstance[] = [];
 
+  // One fixed instant for both apps, so their requests fall in one minute window -- but a day AHEAD of real
+  // time, not the fixed past date the rest of this file uses. kernel.rate_limits carries the TTL index
+  // window_end_ttl (expireAfterSeconds: 0), so a window stamped in the past is already expired, and MongoDB's TTL
+  // monitor, which sweeps every 60 s, deletes the counter mid-test whenever the 601-request loop runs long enough
+  // to meet a sweep. The count then restarts and the request that should be refused is allowed.
+  const shared = new Date(Date.now() + 86_400_000);
+
   beforeAll(async () => {
     // both apps are given the same MongoDB database, as two servers on one replica set
     for (let i = 0; i < 2; i++) {
-      // one fixed time for both, so the requests fall in one minute window
-      const fixed = { now: () => new Date('2026-05-04T10:00:30Z') };
+      const fixed = { now: () => shared };
       const app = await buildApp({ env: { NODE_ENV: 'test' }, mongo, clock: fixed, modules: [], config: { rateLimitStore: 'mongo', migrateOnStart: false, devTokens: true, devSigning: { file: '', jwk: TEST_JWK } } });
       await app.ready();
       apps.push(app);

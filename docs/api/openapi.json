@@ -45589,6 +45589,132 @@
         "x-phase": 2
       }
     },
+    "/api/store/farm/statistics": {
+      "get": {
+        "operationId": "farm.getMyStatistics",
+        "tags": [
+          "Store API · Farm orders"
+        ],
+        "summary": "What the customer spent on farm machines in a period: totals, trend and breakdowns",
+        "description": "Orders count by the day they were placed (market time zone). Spent is the machine, its attachments and delivery for every order not cancelled or rejected, so a pay-on-delivery order counts in full while only its deposit has been charged; depositsPaid and dueOnDelivery split it. Orders still waiting for payment are left out. from/to (both or neither) replace range; at most 3 years. Default range last_12_months.\n\n**Screens:** account/statistics\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "range",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "last_30_days",
+                "last_3_months",
+                "last_6_months",
+                "last_12_months",
+                "this_year",
+                "last_year",
+                "all"
+              ]
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date"
+            }
+          },
+          {
+            "name": "grain",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "day",
+                "week",
+                "month"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/farm.FarmStatistics"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "farm",
+        "x-area": "store",
+        "x-auth": "customer",
+        "x-screens": [
+          "account/statistics"
+        ],
+        "x-phase": 2
+      }
+    },
     "/api/admin/farm/dealers": {
       "get": {
         "operationId": "farm.listDealers",
@@ -55708,6 +55834,132 @@
         "x-phase": 2
       }
     },
+    "/api/store/food/statistics": {
+      "get": {
+        "operationId": "food.getMyStatistics",
+        "tags": [
+          "Store API · Food delivery"
+        ],
+        "summary": "What the customer spent on food delivery in a period: totals, trend and breakdowns",
+        "description": "Orders count by the day and hour they were placed (market time zone). The card is charged on delivery, so spent counts delivered orders — dishes and delivery fee together; orders cancelled by the customer or declined by the restaurant are never charged and counted apart as notDelivered, and one still on its way counts in neither, but shows in byStatus. Orders still waiting for payment are left out. from/to (both or neither) replace range; at most 3 years. Default range last_12_months.\n\n**Screens:** account/statistics\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "range",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "last_30_days",
+                "last_3_months",
+                "last_6_months",
+                "last_12_months",
+                "this_year",
+                "last_year",
+                "all"
+              ]
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date"
+            }
+          },
+          {
+            "name": "grain",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "day",
+                "week",
+                "month"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/food.FoodStatistics"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "food",
+        "x-area": "store",
+        "x-auth": "customer",
+        "x-screens": [
+          "account/statistics"
+        ],
+        "x-phase": 2
+      }
+    },
     "/api/admin/food/categories": {
       "get": {
         "operationId": "food.listCategoriesAdmin",
@@ -63082,8 +63334,8 @@
         "tags": [
           "Public API · Identity"
         ],
-        "summary": "Create a customer account and send an email code",
-        "description": "Always answers 202 with a challenge so the form cannot be used to discover accounts: if the email already has an account, the email says so and offers sign-in and password reset, and the code will not verify. Password rules are checked live with GET /password-policy and again here.\n\n**Publishes:** `identity.user.registered`, `identity.verification.code_issued`\n\n**Screens:** auth/register, auth/guest-orders, store/confirmation",
+        "summary": "Create a customer account and sign in",
+        "description": "Creates the account and opens a store session in the same call: there is no email code step, and the email address is recorded unverified (emailVerified false). An email that already has an account is refused with EMAIL_IN_USE. A visitor session passed in is claimed, so the guest cart moves to the new account. Password rules are checked live with GET /password-policy and again here.\n\n**Publishes:** `identity.user.registered`, `identity.guest_session.claimed`, `identity.session.new_device`\n\n**Screens:** auth/register, auth/guest-orders, store/confirmation",
         "security": [
           {
             "bearer": []
@@ -63100,12 +63352,12 @@
           }
         },
         "responses": {
-          "202": {
+          "201": {
             "description": "Success",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/identity.VerificationChallenge"
+                  "$ref": "#/components/schemas/identity.RegistrationResult"
                 }
               }
             }
@@ -63140,6 +63392,16 @@
               }
             }
           },
+          "409": {
+            "description": "EMAIL_IN_USE: Another account in this realm uses that email.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "429": {
             "description": "RATE_LIMITED: Too many requests; retry after the Retry-After header (seconds, also in details.retryAfterSeconds).",
             "content": {
@@ -63161,7 +63423,8 @@
         ],
         "x-events": [
           "identity.user.registered",
-          "identity.verification.code_issued"
+          "identity.guest_session.claimed",
+          "identity.session.new_device"
         ],
         "x-phase": 1,
         "x-rate-limit": "registration"
@@ -63173,8 +63436,8 @@
         "tags": [
           "Public API · Identity"
         ],
-        "summary": "Confirm an email or phone code (registration, email change, phone change)",
-        "description": "Registration: activates the account and signs the customer in; guest orders placed with this email can then be attached (identity.user.verified, consumed by customers). Email change: switches the sign-in email and alerts the old address. Phone: marks the number verified (identity.user.verified with channel phone).\n\n**Publishes:** `identity.user.verified`, `identity.email.changed`\n\n**Screens:** auth/register, account/profile",
+        "summary": "Confirm an email change or phone code",
+        "description": "Email change: switches the sign-in email and alerts the old address. Phone: marks the number verified (identity.user.verified with channel phone). Registration issues no codes, so nothing is signed in here.\n\n**Publishes:** `identity.user.verified`, `identity.email.changed`\n\n**Screens:** account/profile",
         "security": [
           {
             "bearer": []
@@ -63277,7 +63540,6 @@
         "x-area": "public",
         "x-auth": "visitor",
         "x-screens": [
-          "auth/register",
           "account/profile"
         ],
         "x-events": [
@@ -63295,7 +63557,7 @@
           "Public API · Identity"
         ],
         "summary": "Send a new code",
-        "description": "**Publishes:** `identity.verification.code_issued`\n\n**Screens:** auth/register",
+        "description": "**Publishes:** `identity.verification.code_issued`\n\n**Screens:** account/profile",
         "security": [
           {
             "bearer": []
@@ -63388,7 +63650,7 @@
         "x-area": "public",
         "x-auth": "visitor",
         "x-screens": [
-          "auth/register"
+          "account/profile"
         ],
         "x-events": [
           "identity.verification.code_issued"
@@ -63404,7 +63666,7 @@
           "Public API · Identity"
         ],
         "summary": "Sign in with email and password",
-        "description": "Returns tokens, or a 2-step challenge, or (seller audience with several sellers) the list of sellers to choose from. Wrong passwords return INVALID_CREDENTIALS with details.attemptsLeft; at the limit the account locks for lockoutMinutes and ACCOUNT_LOCKED carries details.lockedUntil. Unknown emails get the same answer and timing. A guest session passed in is claimed (cart and recently viewed merge). A sign-in from a device not seen before publishes identity.session.new_device for the security alert.\n\n**Publishes:** `identity.session.new_device`, `identity.guest_session.claimed`, `identity.account.locked`\n\n**Screens:** auth/sign-in, store/checkout",
+        "description": "Returns tokens, or a 2-step challenge, or (seller audience with several sellers) the list of sellers to choose from. Wrong passwords return INVALID_CREDENTIALS with details.attemptsLeft; at the limit the account locks for lockoutMinutes and ACCOUNT_LOCKED carries details.lockedUntil. Unknown emails get the same answer and timing. An account left pending_verification by the old email code step is activated by a successful sign-in. A guest session passed in is claimed (cart and recently viewed merge). A sign-in from a device not seen before publishes identity.session.new_device for the security alert.\n\n**Publishes:** `identity.session.new_device`, `identity.guest_session.claimed`, `identity.account.locked`\n\n**Screens:** auth/sign-in, store/checkout",
         "security": [
           {
             "bearer": []
@@ -63452,7 +63714,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nACCOUNT_DISABLED: The account is disabled or closed.\nEMAIL_NOT_VERIFIED: Confirm the email first. details.challenge is a fresh VerificationChallenge.\nNO_SELLER_ACCESS: This account cannot act for that seller (or for any seller).",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nACCOUNT_DISABLED: The account is disabled or closed.\nNO_SELLER_ACCESS: This account cannot act for that seller (or for any seller).",
             "content": {
               "application/json": {
                 "schema": {
@@ -128770,6 +129032,219 @@
         "x-phase": 1
       }
     },
+    "/api/store/search/departments": {
+      "get": {
+        "operationId": "search.searchDepartmentsAll",
+        "tags": [
+          "Store API · Search"
+        ],
+        "summary": "The same query answered by every department: one section per department with matches",
+        "description": "Asks each department module in parallel and ranks the sections against each other (best hit first, then the number of matches, then the home rail's order). A department that is off, not built yet or too slow is left out and partial is true. Departments the query names but that have no matching record come back as shortcuts.\n\n**Screens:** store/search",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "Hits per group, default departmentSectionLimit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/search.DepartmentResults"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "search",
+        "x-area": "store",
+        "x-auth": "visitor",
+        "x-screens": [
+          "store/search"
+        ],
+        "x-phase": 1
+      }
+    },
+    "/api/store/search/departments/{key}": {
+      "get": {
+        "operationId": "search.searchDepartmentScope",
+        "tags": [
+          "Store API · Search"
+        ],
+        "summary": "One department's results for the query, paged group by group",
+        "description": "The scoped list behind a department's chip. Each group pages on its own: send kind and that group's cursor. NOT_FOUND when the key is not a department or its module is off.\n\n**Screens:** store/search",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Page this group only"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "Hits per group, default departmentScopeLimit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/search.DepartmentSection"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "search",
+        "x-area": "store",
+        "x-auth": "visitor",
+        "x-screens": [
+          "store/search"
+        ],
+        "x-phase": 1
+      }
+    },
     "/api/store/search/popular-searches": {
       "get": {
         "operationId": "search.listPopularSearches",
@@ -143186,6 +143661,149 @@
         "x-phase": 2
       }
     },
+    "/api/store/services/statistics": {
+      "get": {
+        "operationId": "services.getMyStatistics",
+        "tags": [
+          "Store API · Services"
+        ],
+        "summary": "The customer's service requests in a period: totals, trend and breakdowns",
+        "description": "One area with area=, every area without it; the app's Welfare statistics tab asks for welfare. Requests count by the day they were made (market time zone), whichever day the visit was, and cancelled and declined requests are counted too. These services are paid at the provider, so there is no record of what the customer paid: estimated adds up the providers' price lists for the requests that have a fixed price (per visit, per night, free) and leaves out the ones charged by the hour, whose hours are not recorded. Requests made before the estimate was kept fall back to the service's price list today. from/to (both or neither) replace range; at most 3 years. Default range last_12_months.\n\n**Screens:** account/statistics\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "area",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "os_install",
+                "post_sale",
+                "welfare",
+                "booking"
+              ]
+            }
+          },
+          {
+            "name": "range",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "last_30_days",
+                "last_3_months",
+                "last_6_months",
+                "last_12_months",
+                "this_year",
+                "last_year",
+                "all"
+              ]
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date"
+            }
+          },
+          {
+            "name": "grain",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "day",
+                "week",
+                "month"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/services.ServiceStatistics"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "services",
+        "x-area": "store",
+        "x-auth": "customer",
+        "x-screens": [
+          "account/statistics"
+        ],
+        "x-phase": 2
+      }
+    },
     "/api/admin/services/categories": {
       "get": {
         "operationId": "services.listCategoriesAdmin",
@@ -148628,6 +149246,340 @@
           "shipping.profile.changed"
         ],
         "x-audited": true,
+        "x-phase": 1
+      }
+    },
+    "/api/seller/shipping/carriers": {
+      "get": {
+        "operationId": "shipping.listSellerCarriers",
+        "tags": [
+          "Seller API · Shipping"
+        ],
+        "summary": "The seller's own carriers",
+        "description": "**Permission:** `shipping.seller-settings.view`\n\n**Screens:** seller/shipping",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/shipping.SellerCarrier"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "shipping",
+        "x-area": "seller",
+        "x-auth": "seller",
+        "x-permission": "shipping.seller-settings.view",
+        "x-screens": [
+          "seller/shipping"
+        ],
+        "x-phase": 1
+      },
+      "post": {
+        "operationId": "shipping.addSellerCarrier",
+        "tags": [
+          "Seller API · Shipping"
+        ],
+        "summary": "Add a carrier the seller ships with itself",
+        "description": "For a courier Marketly has no account with. It appears in the seller's record-shipment form only; tracking is manual, so numbers are checked against the pattern if one is given and never updated by a carrier feed.\n\n**Permission:** `shipping.seller-settings.manage`\n\n**Screens:** seller/shipping",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/shipping.SellerCarrierInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/shipping.SellerCarrier"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFLICT: Concurrent change; reload and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "shipping",
+        "x-area": "seller",
+        "x-auth": "seller",
+        "x-permission": "shipping.seller-settings.manage",
+        "x-screens": [
+          "seller/shipping"
+        ],
+        "x-phase": 1
+      }
+    },
+    "/api/seller/shipping/carriers/{id}": {
+      "patch": {
+        "operationId": "shipping.updateSellerCarrier",
+        "tags": [
+          "Seller API · Shipping"
+        ],
+        "summary": "Rename a carrier or change its tracking link",
+        "description": "**Permission:** `shipping.seller-settings.manage`\n\n**Screens:** seller/shipping",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/shipping.SellerCarrierInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/shipping.SellerCarrier"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFLICT: Concurrent change; reload and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "shipping",
+        "x-area": "seller",
+        "x-auth": "seller",
+        "x-permission": "shipping.seller-settings.manage",
+        "x-screens": [
+          "seller/shipping"
+        ],
+        "x-phase": 1
+      },
+      "delete": {
+        "operationId": "shipping.removeSellerCarrier",
+        "tags": [
+          "Seller API · Shipping"
+        ],
+        "summary": "Remove a carrier from the list",
+        "description": "Packages already sent with it keep its name and tracking link.\n\n**Permission:** `shipping.seller-settings.manage`\n\n**Screens:** seller/shipping",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success, no content"
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "shipping",
+        "x-area": "seller",
+        "x-auth": "seller",
+        "x-permission": "shipping.seller-settings.manage",
+        "x-screens": [
+          "seller/shipping"
+        ],
         "x-phase": 1
       }
     },
@@ -157204,6 +158156,132 @@
         "x-auth": "customer",
         "x-screens": [
           "store/software-library"
+        ],
+        "x-phase": 2
+      }
+    },
+    "/api/store/software/statistics": {
+      "get": {
+        "operationId": "software.getMyStatistics",
+        "tags": [
+          "Store API · Softwares"
+        ],
+        "summary": "What the customer paid for software in a period: totals, trend and breakdowns",
+        "description": "Money comes from purchases, counted on the day the payment went through; app counts come from the library, counted on the day each app was added. Purchases still waiting for payment are left out, and ones that failed or were cancelled are counted apart. A pack counts once at its price, adds every app in it to the library, and is split across its apps' categories and companies by their share of the pack price. from/to (both or neither) replace range; at most 3 years. Default range last_12_months.\n\n**Screens:** account/statistics\n\n**Launch phase:** 2",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "range",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "last_30_days",
+                "last_3_months",
+                "last_6_months",
+                "last_12_months",
+                "this_year",
+                "last_year",
+                "all"
+              ]
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date"
+            }
+          },
+          {
+            "name": "grain",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "day",
+                "week",
+                "month"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/software.SoftwareStatistics"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "software",
+        "x-area": "store",
+        "x-auth": "customer",
+        "x-screens": [
+          "account/statistics"
         ],
         "x-phase": 2
       }
@@ -180994,6 +182072,203 @@
   },
   "components": {
     "schemas": {
+      "DeptSearchRequest": {
+        "type": "object",
+        "properties": {
+          "q": {
+            "type": "string",
+            "description": "What the customer typed, trimmed; never empty"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Hits per group at most"
+          },
+          "kinds": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Answer only for these kinds; a scoped list pages one kind"
+          },
+          "cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor of the one kind being paged (from that group's nextCursor)"
+          },
+          "customerId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The signed-in customer: owned, saved and customer-only records"
+          },
+          "sections": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Answer only for these sections; the departments and services modules answer for several"
+          }
+        },
+        "required": [
+          "q",
+          "limit"
+        ]
+      },
+      "DeptSearchHit": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "description": "What the record is: restaurant, dish, app, phone, post, company, game, …"
+          },
+          "title": {
+            "type": "string"
+          },
+          "meta": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The grey line under the title, e.g. 'Pizza · Italian · ★ 4.7 (1,204)'"
+          },
+          "sub": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A second grey line, shown only in a scoped list, e.g. 'Open until 11 PM · 1.2 mi'"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MediaRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "badge": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Short mark on the row, e.g. Verified, Free delivery, −15%"
+          },
+          "badgeTone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "brand",
+              "deal",
+              "info",
+              "neutral"
+            ]
+          },
+          "priceLabel": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Right side of the row: $12.00, Free, 150 points, ★ 4.6"
+          },
+          "wasLabel": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Struck-through price under priceLabel"
+          },
+          "path": {
+            "type": "string",
+            "description": "Store path the app opens, e.g. /food/restaurants/napoli-pizza"
+          },
+          "score": {
+            "type": "integer",
+            "description": "0–100 match strength, so sections of different departments can be ranked together"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "title",
+          "path",
+          "score"
+        ]
+      },
+      "DeptSearchGroup": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "The kind every hit of this group has"
+          },
+          "title": {
+            "type": "string",
+            "description": "Heading of the group, e.g. Restaurants, Dishes, Apps, Posts"
+          },
+          "area": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "services only: os_install | post_sale | welfare | booking, so search knows which section the group belongs to"
+          },
+          "total": {
+            "type": "integer",
+            "description": "Matching records of this kind, also when only a few are sent"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeptSearchHit"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "More of this group; null when the last hit was sent"
+          }
+        },
+        "required": [
+          "kind",
+          "title",
+          "total",
+          "items"
+        ]
+      },
+      "DeptSearchResult": {
+        "type": "object",
+        "properties": {
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeptSearchGroup"
+            },
+            "description": "Only groups with at least one hit, the module's own order"
+          }
+        },
+        "required": [
+          "groups"
+        ]
+      },
       "Money": {
         "type": "object",
         "properties": {
@@ -181293,6 +182568,145 @@
         "required": [
           "dueAt",
           "state"
+        ]
+      },
+      "StatSeriesPoint": {
+        "type": "object",
+        "properties": {
+          "start": {
+            "type": "string",
+            "format": "date",
+            "description": "First day of the point (Monday for weeks, the 1st for months; never before the period's from)"
+          },
+          "label": {
+            "type": "string",
+            "description": "\"Oct 14\", \"Week of Oct 13\", \"Oct 2026\""
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Money in the point; zero where the department has no money of its own"
+          },
+          "secondary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A second series the screen draws beside the first (refunds, cancellations); absent when there is none"
+          },
+          "count": {
+            "type": "integer",
+            "description": "Records in the point (orders, purchases, requests)"
+          }
+        },
+        "required": [
+          "start",
+          "label",
+          "amount",
+          "count"
+        ]
+      },
+      "StatShare": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "The thing's id or a stable word, and `other` for the rest beyond the top rows"
+          },
+          "label": {
+            "type": "string"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "sharePct": {
+            "type": "number",
+            "description": "Share of the period's total, one decimal"
+          },
+          "count": {
+            "type": "integer",
+            "description": "Records behind the row"
+          },
+          "units": {
+            "type": "integer",
+            "description": "Items behind the row (machines, apps, dishes); 0 where the department counts none"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "amount",
+          "sharePct",
+          "count",
+          "units"
+        ]
+      },
+      "StatWeekday": {
+        "type": "object",
+        "properties": {
+          "weekday": {
+            "type": "string",
+            "enum": [
+              "mon",
+              "tue",
+              "wed",
+              "thu",
+              "fri",
+              "sat",
+              "sun"
+            ]
+          },
+          "label": {
+            "type": "string",
+            "description": "Mon … Sun"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "count": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "weekday",
+          "label",
+          "amount",
+          "count"
+        ]
+      },
+      "StatPrevious": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date"
+          },
+          "to": {
+            "type": "string",
+            "format": "date"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "changePct": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Change of the headline number in %, one decimal; null when the previous period had nothing to compare with"
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "amount",
+          "count"
         ]
       },
       "PageInfo": {
@@ -203354,6 +204768,22 @@
           "attachments"
         ]
       },
+      "departments.FarmMachineType": {
+        "type": "object",
+        "properties": {
+          "typeId": {
+            "type": "string"
+          },
+          "typeName": {
+            "type": "string",
+            "description": "e.g. Tractors"
+          }
+        },
+        "required": [
+          "typeId",
+          "typeName"
+        ]
+      },
       "departments.FarmMachineInput": {
         "type": "object",
         "properties": {
@@ -204855,6 +206285,246 @@
         },
         "required": [
           "action"
+        ]
+      },
+      "farm.FarmStatOrderRef": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ref": {
+            "type": "string"
+          },
+          "placedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Money"
+          }
+        },
+        "required": [
+          "orderId",
+          "ref",
+          "amount"
+        ]
+      },
+      "farm.FarmStatMachine": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "productSlug": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MediaRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "orders": {
+            "type": "integer"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Money",
+            "description": "The machine itself, attachments and delivery left out"
+          },
+          "lastOrderedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "productId",
+          "title",
+          "orders",
+          "amount"
+        ]
+      },
+      "farm.FarmStatTotals": {
+        "type": "object",
+        "properties": {
+          "spent": {
+            "$ref": "#/components/schemas/Money",
+            "description": "What the machines cost: machine, attachments and delivery of every order the dealer has not rejected and the customer has not cancelled, whether or not the card has been charged"
+          },
+          "cancelled": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Orders cancelled or rejected (not in spent)"
+          },
+          "delivery": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Delivery fees, included in spent"
+          },
+          "attachments": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Attachments, included in spent"
+          },
+          "depositsPaid": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Pay-on-delivery deposits the card has been charged (the dealer confirmed)"
+          },
+          "dueOnDelivery": {
+            "$ref": "#/components/schemas/Money",
+            "description": "The rest of pay-on-delivery orders, paid to the dealer when the machine arrives"
+          },
+          "orders": {
+            "type": "integer"
+          },
+          "machines": {
+            "type": "integer"
+          },
+          "attachmentCount": {
+            "type": "integer"
+          },
+          "averageOrder": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "averageDeliveryDays": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Placed to delivered, one decimal; null until an order has been delivered"
+          },
+          "largestOrder": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/farm.FarmStatOrderRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "spent",
+          "cancelled",
+          "delivery",
+          "attachments",
+          "depositsPaid",
+          "dueOnDelivery",
+          "orders",
+          "machines",
+          "attachmentCount",
+          "averageOrder"
+        ]
+      },
+      "farm.FarmStatistics": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date",
+            "description": "First market day covered (range all: the day of the first counted order, else today)"
+          },
+          "to": {
+            "type": "string",
+            "format": "date"
+          },
+          "grain": {
+            "type": "string",
+            "enum": [
+              "day",
+              "week",
+              "month"
+            ],
+            "description": "Size of each series point: the grain asked for, else day up to 31 days, week up to 92, month beyond"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/farm.FarmStatTotals"
+          },
+          "previous": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StatPrevious"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The same number of days just before from; null for range all"
+          },
+          "series": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatSeriesPoint"
+            },
+            "description": "Spent per point, with cancelled as the second series; zeros included"
+          },
+          "byMachineType": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatShare"
+            },
+            "description": "The Farm machines department's types (Tractors, Harvesters…) by amount, at most 5 plus Other; a machine no longer picked counts as Other machines"
+          },
+          "byDealer": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatShare"
+            },
+            "description": "Dealers by amount, at most 5 plus Other"
+          },
+          "byPaymentOption": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatShare"
+            },
+            "description": "pay_in_full, installments and pay_on_delivery by amount"
+          },
+          "byWeekday": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatWeekday"
+            },
+            "description": "Monday to Sunday by the day orders were placed (market time zone)"
+          },
+          "topMachines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/farm.FarmStatMachine"
+            },
+            "description": "At most 5, by amount"
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "grain",
+          "currency",
+          "totals",
+          "series",
+          "byMachineType",
+          "byDealer",
+          "byPaymentOption",
+          "byWeekday",
+          "topMachines"
         ]
       },
       "finance.Reference": {
@@ -210377,6 +212047,284 @@
           "hidden"
         ]
       },
+      "food.FoodStatOrderRef": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ref": {
+            "type": "string"
+          },
+          "restaurant": {
+            "type": "string"
+          },
+          "placedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Money"
+          }
+        },
+        "required": [
+          "orderId",
+          "ref",
+          "restaurant",
+          "amount"
+        ]
+      },
+      "food.FoodStatDish": {
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MediaRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "restaurant": {
+            "type": "string"
+          },
+          "units": {
+            "type": "integer"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "lastOrderedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "itemId",
+          "name",
+          "restaurant",
+          "units",
+          "amount"
+        ]
+      },
+      "food.FoodStatHourBlock": {
+        "type": "object",
+        "properties": {
+          "hour": {
+            "type": "integer",
+            "description": "First hour of the four-hour block in market time: 0, 4, 8, 12, 16 or 20"
+          },
+          "label": {
+            "type": "string",
+            "description": "e.g. 12 am, 4 pm"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "count": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hour",
+          "label",
+          "amount",
+          "count"
+        ]
+      },
+      "food.FoodStatTotals": {
+        "type": "object",
+        "properties": {
+          "spent": {
+            "$ref": "#/components/schemas/Money",
+            "description": "What the card paid for orders that arrived: the dishes and the delivery fee"
+          },
+          "delivery": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Delivery fees, included in spent"
+          },
+          "dishesTotal": {
+            "$ref": "#/components/schemas/Money",
+            "description": "The dishes alone, delivery fees left out"
+          },
+          "notDelivered": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Orders cancelled or declined; never charged, not in spent"
+          },
+          "orders": {
+            "type": "integer",
+            "description": "Orders that arrived"
+          },
+          "dishes": {
+            "type": "integer",
+            "description": "Items in those orders, quantities added up"
+          },
+          "restaurants": {
+            "type": "integer"
+          },
+          "averageOrder": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "averageDeliveryMinutes": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Placed to delivered, one decimal; null until an order has been delivered"
+          },
+          "reviews": {
+            "type": "integer",
+            "description": "Reviews the customer left in the period"
+          },
+          "averageRating": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Stars the customer gave, one decimal; null when they left none"
+          },
+          "largestOrder": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/food.FoodStatOrderRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "spent",
+          "delivery",
+          "dishesTotal",
+          "notDelivered",
+          "orders",
+          "dishes",
+          "restaurants",
+          "averageOrder",
+          "reviews"
+        ]
+      },
+      "food.FoodStatistics": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date",
+            "description": "First market day covered (range all: the day of the first counted order, else today)"
+          },
+          "to": {
+            "type": "string",
+            "format": "date"
+          },
+          "grain": {
+            "type": "string",
+            "enum": [
+              "day",
+              "week",
+              "month"
+            ],
+            "description": "Size of each series point: the grain asked for, else day up to 31 days, week up to 92, month beyond"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/food.FoodStatTotals"
+          },
+          "previous": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StatPrevious"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The same number of days just before from; null for range all"
+          },
+          "series": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatSeriesPoint"
+            },
+            "description": "Spent per point, with the not-delivered total as the second series; zeros included"
+          },
+          "byRestaurant": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatShare"
+            },
+            "description": "Restaurants by amount, at most 5 plus Other"
+          },
+          "byMenuSection": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatShare"
+            },
+            "description": "The restaurants' own menu sections (Pizzas, Ramen, Sides…) by amount of dishes, at most 5 plus Other. Sections belong to one restaurant each, so rows group by name — two restaurants' \"Pizza\" is one row — and a dish whose item has since been removed counts as Other"
+          },
+          "byStatus": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatShare"
+            },
+            "description": "The statuses the period's orders are in — delivered, on the way, cancelled, declined… — counted in orders; amount is what was spent, so only delivered rows carry money"
+          },
+          "byWeekday": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatWeekday"
+            },
+            "description": "Monday to Sunday by the day orders were placed (market time zone)"
+          },
+          "byHour": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/food.FoodStatHourBlock"
+            },
+            "description": "Six four-hour blocks by the hour orders were placed (market time zone)"
+          },
+          "topDishes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/food.FoodStatDish"
+            },
+            "description": "At most 5, by amount"
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "grain",
+          "currency",
+          "totals",
+          "series",
+          "byRestaurant",
+          "byMenuSection",
+          "byStatus",
+          "byWeekday",
+          "byHour",
+          "topDishes"
+        ]
+      },
       "fulfillment-service.Enrollment": {
         "type": "object",
         "properties": {
@@ -212325,6 +214273,13 @@
             "type": "string",
             "description": "Purchase terms / privacy version shown on the form (content module)"
           },
+          "keepSignedIn": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Long refresh token (30 days) instead of 24 hours for the session this call opens"
+          },
           "guestSessionId": {
             "type": [
               "string",
@@ -212344,6 +214299,22 @@
           "marketingOptIn",
           "acceptedTermsVersion",
           "device"
+        ]
+      },
+      "identity.RegistrationResult": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/identity.AccountSummary"
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/identity.SessionTokens",
+            "description": "Registration opens a store session right away"
+          }
+        },
+        "required": [
+          "account",
+          "tokens"
         ]
       },
       "identity.VerificationChallenge": {
@@ -212396,22 +214367,6 @@
           "code": {
             "type": "string",
             "description": "6 digits"
-          },
-          "keepSignedIn": {
-            "type": [
-              "boolean",
-              "null"
-            ]
-          },
-          "device": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/identity.DeviceInfo"
-              },
-              {
-                "type": "null"
-              }
-            ]
           }
         },
         "required": [
@@ -212426,17 +214381,6 @@
           },
           "account": {
             "$ref": "#/components/schemas/identity.AccountSummary"
-          },
-          "tokens": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/identity.SessionTokens"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Registration verification signs the customer in"
           }
         },
         "required": [
@@ -244028,6 +245972,156 @@
           "query"
         ]
       },
+      "search.DepartmentSection": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "enum": [
+              "phones",
+              "farm",
+              "software",
+              "welfare",
+              "booking",
+              "food",
+              "blogs",
+              "companies",
+              "play",
+              "rewards"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "description": "The department's name as the home rail shows it, e.g. Food delivery"
+          },
+          "icon": {
+            "type": "string",
+            "description": "Lucide icon name, the rail's icon for this department"
+          },
+          "path": {
+            "type": "string",
+            "description": "The department's own screen, e.g. /food (the 'Open department' link)"
+          },
+          "total": {
+            "type": "integer",
+            "description": "Matching records in every group of this section"
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeptSearchGroup"
+            }
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "icon",
+          "path",
+          "total",
+          "groups"
+        ]
+      },
+      "search.DepartmentShortcut": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "tagline": {
+            "type": "string",
+            "description": "One line under the name, e.g. Order from restaurants near you"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "icon",
+          "path",
+          "tagline"
+        ]
+      },
+      "search.DepartmentSuggestGroup": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string",
+            "description": "The department's own screen"
+          },
+          "total": {
+            "type": "integer"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeptSearchHit"
+            }
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "icon",
+          "path",
+          "total",
+          "items"
+        ]
+      },
+      "search.DepartmentResults": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "total": {
+            "type": "integer",
+            "description": "Matching records in every section together"
+          },
+          "sections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/search.DepartmentSection"
+            },
+            "description": "Only departments with matches, best match first"
+          },
+          "shortcuts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/search.DepartmentShortcut"
+            },
+            "description": "Departments the query names that have no section of their own"
+          },
+          "partial": {
+            "type": "boolean",
+            "description": "A department could not answer in time or failed: its section is missing from this answer"
+          }
+        },
+        "required": [
+          "query",
+          "total",
+          "sections",
+          "shortcuts",
+          "partial"
+        ]
+      },
       "search.Suggestions": {
         "type": "object",
         "properties": {
@@ -244070,6 +246164,13 @@
               "$ref": "#/components/schemas/search.RecentSearch"
             },
             "description": "Only when a customer or guest session is present and recent searches are on"
+          },
+          "departments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/search.DepartmentSuggestGroup"
+            },
+            "description": "Matching records of each department, one group per department with matches (at most departmentSuggestLimit hits each)"
           }
         },
         "required": [
@@ -244079,7 +246180,8 @@
           "brands",
           "stores",
           "products",
-          "recent"
+          "recent",
+          "departments"
         ]
       },
       "search.RankingFactor": {
@@ -253148,6 +255250,271 @@
           }
         }
       },
+      "services.ServiceStatProviderRef": {
+        "type": "object",
+        "properties": {
+          "providerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "slug": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "requests": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "providerId",
+          "name",
+          "requests"
+        ]
+      },
+      "services.ServiceStatService": {
+        "type": "object",
+        "properties": {
+          "serviceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "slug": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MediaRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "provider": {
+            "type": "string"
+          },
+          "requests": {
+            "type": "integer"
+          },
+          "lastRequestedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "serviceId",
+          "title",
+          "provider",
+          "requests"
+        ]
+      },
+      "services.ServiceStatTotals": {
+        "type": "object",
+        "properties": {
+          "requests": {
+            "type": "integer"
+          },
+          "completed": {
+            "type": "integer"
+          },
+          "underWay": {
+            "type": "integer",
+            "description": "Confirmed or in progress"
+          },
+          "cancelled": {
+            "type": "integer",
+            "description": "Cancelled by the customer"
+          },
+          "declined": {
+            "type": "integer",
+            "description": "Declined by the provider"
+          },
+          "services": {
+            "type": "integer"
+          },
+          "providers": {
+            "type": "integer"
+          },
+          "estimated": {
+            "$ref": "#/components/schemas/Money",
+            "description": "What the providers' price lists come to for the requests that have a fixed price. Never what the customer actually paid: these services are paid at the provider"
+          },
+          "estimatedFrom": {
+            "type": "integer",
+            "description": "Requests behind estimated (the ones with a fixed price); the rest are charged by the hour, whose hours are not recorded here"
+          },
+          "averageDays": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Requested to completed, one decimal; null until a request has been completed"
+          },
+          "reviews": {
+            "type": "integer"
+          },
+          "averageRating": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Stars the customer gave, one decimal; null when they left none"
+          },
+          "topProvider": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/services.ServiceStatProviderRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "requests",
+          "completed",
+          "underWay",
+          "cancelled",
+          "declined",
+          "services",
+          "providers",
+          "estimated",
+          "estimatedFrom",
+          "reviews"
+        ]
+      },
+      "services.ServiceStatistics": {
+        "type": "object",
+        "properties": {
+          "area": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "os_install",
+              "post_sale",
+              "welfare",
+              "booking"
+            ],
+            "description": "The area asked for; absent when every area is counted"
+          },
+          "from": {
+            "type": "string",
+            "format": "date",
+            "description": "First market day covered (range all: the day of the first counted request, else today)"
+          },
+          "to": {
+            "type": "string",
+            "format": "date"
+          },
+          "grain": {
+            "type": "string",
+            "enum": [
+              "day",
+              "week",
+              "month"
+            ],
+            "description": "Size of each series point: the grain asked for, else day up to 31 days, week up to 92, month beyond"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/services.ServiceStatTotals"
+          },
+          "previous": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StatPrevious"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The same number of days just before from; null for range all. count compares requests, amount the estimate"
+          },
+          "series": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatSeriesPoint"
+            },
+            "description": "Requests per point in count, with the estimate in amount; zeros included"
+          },
+          "byService": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatShare"
+            },
+            "description": "Services by requests, at most 5 plus Other"
+          },
+          "byProvider": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatShare"
+            },
+            "description": "Providers by requests, at most 5 plus Other"
+          },
+          "byPlan": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatShare"
+            },
+            "description": "The price row the customer chose (Weekly, Per visit, Assessment…) by requests, at most 5 plus Other; requests with no plan count as Other. amount is the estimate for rows with a fixed price, zero for hourly ones"
+          },
+          "byStatus": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatShare"
+            },
+            "description": "requested, confirmed, in_progress, completed, cancelled and declined, counted in requests"
+          },
+          "byWeekday": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatWeekday"
+            },
+            "description": "Monday to Sunday by the day the request was made (market time zone)"
+          },
+          "topServices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/services.ServiceStatService"
+            },
+            "description": "At most 5, by requests"
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "grain",
+          "currency",
+          "totals",
+          "series",
+          "byService",
+          "byProvider",
+          "byPlan",
+          "byStatus",
+          "byWeekday",
+          "topServices"
+        ]
+      },
       "settings.DayHours": {
         "type": "object",
         "properties": {
@@ -254822,6 +257189,75 @@
           "trackingConnected",
           "services",
           "contacts"
+        ]
+      },
+      "shipping.SellerCarrier": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "code": {
+            "type": "string",
+            "description": "own-<hex>, unique across the platform so tracking numbers stay comparable"
+          },
+          "name": {
+            "type": "string",
+            "description": "What the buyer sees, e.g. 'Speedy Local Courier'"
+          },
+          "trackingUrlTemplate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Tracking page with {n} where the number goes; without one the buyer sees the number but no link"
+          },
+          "trackingPattern": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Regex the seller's own numbers match, checked like a platform carrier's"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "name",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "shipping.SellerCarrierInput": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "trackingUrlTemplate": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "trackingPattern": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "name"
         ]
       },
       "shipping.CarrierContact": {
@@ -260968,6 +263404,259 @@
         },
         "required": [
           "reason"
+        ]
+      },
+      "software.SoftwareStatPurchaseRef": {
+        "type": "object",
+        "properties": {
+          "purchaseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ref": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string",
+            "description": "The app or pack name"
+          },
+          "paidAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Money"
+          }
+        },
+        "required": [
+          "purchaseId",
+          "ref",
+          "title",
+          "amount"
+        ]
+      },
+      "software.SoftwareStatApp": {
+        "type": "object",
+        "properties": {
+          "appId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Null for a pack row, which has no single app"
+          },
+          "slug": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "icon": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MediaRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "company": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "apps": {
+            "type": "integer",
+            "description": "Apps the purchase added: 1 for an app, the pack's size for a pack"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "boughtAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "title",
+          "apps",
+          "amount"
+        ]
+      },
+      "software.SoftwareStatTotals": {
+        "type": "object",
+        "properties": {
+          "paid": {
+            "$ref": "#/components/schemas/Money",
+            "description": "What the card was charged for apps and packs that went through"
+          },
+          "notPaid": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Purchases that failed or were cancelled (never charged, not in paid)"
+          },
+          "purchases": {
+            "type": "integer"
+          },
+          "appsAdded": {
+            "type": "integer",
+            "description": "Apps added to the library in the period, however they were added"
+          },
+          "paidApps": {
+            "type": "integer"
+          },
+          "freeApps": {
+            "type": "integer"
+          },
+          "packs": {
+            "type": "integer"
+          },
+          "licenceKeys": {
+            "type": "integer",
+            "description": "Keys issued for the paid apps added in the period"
+          },
+          "reviews": {
+            "type": "integer",
+            "description": "Reviews the customer left in the period"
+          },
+          "averageRating": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Stars the customer gave, one decimal; null when they left none"
+          },
+          "averagePurchase": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "largestPurchase": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/software.SoftwareStatPurchaseRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "paid",
+          "notPaid",
+          "purchases",
+          "appsAdded",
+          "paidApps",
+          "freeApps",
+          "packs",
+          "licenceKeys",
+          "reviews",
+          "averagePurchase"
+        ]
+      },
+      "software.SoftwareStatistics": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date",
+            "description": "First market day covered (range all: the day of the first counted purchase or library addition, else today)"
+          },
+          "to": {
+            "type": "string",
+            "format": "date"
+          },
+          "grain": {
+            "type": "string",
+            "enum": [
+              "day",
+              "week",
+              "month"
+            ],
+            "description": "Size of each series point: the grain asked for, else day up to 31 days, week up to 92, month beyond"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/software.SoftwareStatTotals"
+          },
+          "previous": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StatPrevious"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The same number of days just before from; null for range all"
+          },
+          "series": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatSeriesPoint"
+            },
+            "description": "Paid per point, count = purchases; zeros included"
+          },
+          "byCategory": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatShare"
+            },
+            "description": "App categories by amount, at most 5 plus Other; a pack counts under the categories of its apps, split by their share of the pack price"
+          },
+          "byCompany": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatShare"
+            },
+            "description": "Companies by amount, at most 5 plus Other; a pack is split like byCategory"
+          },
+          "bySource": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatShare"
+            },
+            "description": "How apps reached the library — free, purchase, pack, staff — counted in apps, not money"
+          },
+          "byWeekday": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatWeekday"
+            },
+            "description": "Monday to Sunday by the day the payment went through (market time zone)"
+          },
+          "topApps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/software.SoftwareStatApp"
+            },
+            "description": "At most 5, by amount; a pack is one row"
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "grain",
+          "currency",
+          "totals",
+          "series",
+          "byCategory",
+          "byCompany",
+          "bySource",
+          "byWeekday",
+          "topApps"
         ]
       },
       "support.DailyCaseStats": {

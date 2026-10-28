@@ -156,6 +156,49 @@
       "deliveryDate": { "type": "date?", "desc": "confirm: the delivery date (the requested one when left out); reschedule: the new date (required). Today or later" },
       "note": { "type": "string?", "desc": "Shown to the customer (reject and cancel reasons, a note with the date)" },
       "staffNote": "string?"
+    },
+    "FarmStatOrderRef": {
+      "orderId": "uuid",
+      "ref": "string",
+      "placedAt": "datetime?",
+      "amount": "Money"
+    },
+    "FarmStatMachine": {
+      "productId": "uuid",
+      "productSlug": "string?",
+      "title": "string",
+      "image": "MediaRef?",
+      "orders": "int",
+      "amount": { "type": "Money", "desc": "The machine itself, attachments and delivery left out" },
+      "lastOrderedAt": "datetime?"
+    },
+    "FarmStatTotals": {
+      "spent": { "type": "Money", "desc": "What the machines cost: machine, attachments and delivery of every order the dealer has not rejected and the customer has not cancelled, whether or not the card has been charged" },
+      "cancelled": { "type": "Money", "desc": "Orders cancelled or rejected (not in spent)" },
+      "delivery": { "type": "Money", "desc": "Delivery fees, included in spent" },
+      "attachments": { "type": "Money", "desc": "Attachments, included in spent" },
+      "depositsPaid": { "type": "Money", "desc": "Pay-on-delivery deposits the card has been charged (the dealer confirmed)" },
+      "dueOnDelivery": { "type": "Money", "desc": "The rest of pay-on-delivery orders, paid to the dealer when the machine arrives" },
+      "orders": "int",
+      "machines": "int",
+      "attachmentCount": "int",
+      "averageOrder": "Money",
+      "averageDeliveryDays": { "type": "number?", "desc": "Placed to delivered, one decimal; null until an order has been delivered" },
+      "largestOrder": "FarmStatOrderRef?"
+    },
+    "FarmStatistics": {
+      "from": { "type": "date", "desc": "First market day covered (range all: the day of the first counted order, else today)" },
+      "to": "date",
+      "grain": { "type": "enum(day|week|month)", "desc": "Size of each series point: the grain asked for, else day up to 31 days, week up to 92, month beyond" },
+      "currency": "string",
+      "totals": "FarmStatTotals",
+      "previous": { "type": "StatPrevious?", "desc": "The same number of days just before from; null for range all" },
+      "series": { "type": "StatSeriesPoint[]", "desc": "Spent per point, with cancelled as the second series; zeros included" },
+      "byMachineType": { "type": "StatShare[]", "desc": "The Farm machines department's types (Tractors, Harvesters…) by amount, at most 5 plus Other; a machine no longer picked counts as Other machines" },
+      "byDealer": { "type": "StatShare[]", "desc": "Dealers by amount, at most 5 plus Other" },
+      "byPaymentOption": { "type": "StatShare[]", "desc": "pay_in_full, installments and pay_on_delivery by amount" },
+      "byWeekday": { "type": "StatWeekday[]", "desc": "Monday to Sunday by the day orders were placed (market time zone)" },
+      "topMachines": { "type": "FarmStatMachine[]", "desc": "At most 5, by amount" }
     }
   },
   "tables": [
@@ -181,6 +224,7 @@
     { "id": "completeOrderAction", "area": "store", "method": "POST", "path": "/orders/{id}/complete-action", "summary": "Finish the bank challenge of a farm order", "auth": "customer", "params": { "id": "uuid" }, "body": "CompleteActionInput", "response": "FarmOrder", "idempotent": true, "errors": ["NOT_FOUND", "ILLEGAL_TRANSITION"], "events": ["farm.order.placed", "farm.order.status_changed"], "screens": ["store/farm-order", "store/farm-order-detail"] },
     { "id": "retryOrderPayment", "area": "store", "method": "POST", "path": "/orders/{id}/retry", "summary": "Pay a failed farm order again", "auth": "customer", "params": { "id": "uuid" }, "body": "RetryPaymentInput", "response": "FarmOrder", "idempotent": true, "errors": ["NOT_FOUND", "ILLEGAL_TRANSITION"], "events": ["farm.order.placed", "farm.order.status_changed"], "screens": ["store/farm-order-detail"] },
     { "id": "cancelOrder", "area": "store", "method": "POST", "path": "/orders/{id}/cancel", "summary": "Cancel an order the dealer hasn't confirmed", "desc": "While placed or payment_failed; the card hold is released.", "auth": "customer", "params": { "id": "uuid" }, "body": "CancelInput", "response": "FarmOrder", "errors": ["NOT_FOUND", "ILLEGAL_TRANSITION"], "events": ["farm.order.status_changed"], "screens": ["store/farm-order-detail"] },
+    { "id": "getMyStatistics", "area": "store", "method": "GET", "path": "/statistics", "summary": "What the customer spent on farm machines in a period: totals, trend and breakdowns", "desc": "Orders count by the day they were placed (market time zone). Spent is the machine, its attachments and delivery for every order not cancelled or rejected, so a pay-on-delivery order counts in full while only its deposit has been charged; depositsPaid and dueOnDelivery split it. Orders still waiting for payment are left out. from/to (both or neither) replace range; at most 3 years. Default range last_12_months.", "auth": "customer", "query": { "range": "enum(last_30_days|last_3_months|last_6_months|last_12_months|this_year|last_year|all)?", "from": "date?", "to": "date?", "grain": "enum(day|week|month)?" }, "response": "FarmStatistics", "errors": ["VALIDATION_FAILED"], "screens": ["account/statistics"] },
 
     { "id": "listDealers", "area": "admin", "method": "GET", "path": "/dealers", "summary": "Dealers in order", "auth": "staff", "permission": "farm.view", "query": { "q": "string?", "active": "bool?" }, "response": "DealerAdmin[]", "screens": ["admin/departments-farm-orders"] },
     { "id": "createDealer", "area": "admin", "method": "POST", "path": "/dealers", "summary": "Add a dealer", "desc": "Without a pin the address is geocoded (customers.geocodeAddress); a dealer without a point is never the nearest, only the market default.", "auth": "staff", "permission": "farm.manage", "body": "DealerInput", "response": "DealerAdmin", "status": 201, "errors": ["VALIDATION_FAILED"], "audited": true, "screens": ["admin/departments-farm-orders"] },

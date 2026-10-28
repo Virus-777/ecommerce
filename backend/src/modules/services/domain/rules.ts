@@ -2,7 +2,7 @@
  * Pure services rules: areas, opening hours and the time slots cut from them, labels the app shows (prices, times,
  * statuses), request references, ratings and how reviews are signed. No I/O.
  */
-import { format as formatMoney, type Money } from '../../../kernel/lib/money.js';
+import { format as formatMoney, money, type Money } from '../../../kernel/lib/money.js';
 import { slugify } from '../../../kernel/lib/text.js';
 import { dateInZone, zonedTimeToUtc, zoneOffsetMs } from '../../../kernel/lib/clock.js';
 import { addMonths } from '../../../kernel/lib/dates.js';
@@ -132,6 +132,49 @@ export const requestPriceLabel = (price: Money | null | undefined, unit: string)
   const p = priceText(price, unit);
   return p ? `${p} · pay at the provider` : 'Pay at the provider';
 };
+
+/* ------------------------------------------------------------------ what one request is worth by the price list */
+
+/** Price units that charge for the time worked, so one request has no total until the hours are known */
+const RATE_UNITS = new Set(['hour']);
+/** The same, as written after an amount in a price-list row ("$24/hr") */
+const RATE_SUFFIXES = new Set(['hr', 'hour', 'hourly', 'h']);
+
+/**
+ * The fixed price of ONE request from a price-list row's display text ("$229", "$190/night", "Free"), or null
+ * when the row charges by the hour — the hours worked are never recorded here, so no total could be honest.
+ * Only the first amount is read, so a range ("$80–$120") counts as its lower end.
+ */
+export function fixedPriceOfRow(text: string | null | undefined, currency: string): Money | null {
+  const s = String(text ?? '').trim();
+  if (!s) return null;
+  if (/^free$/i.test(s)) return money(0, currency);
+  const m = /(\d[\d,]*(?:\.\d{1,2})?)\s*(?:\/\s*([a-z]+))?/i.exec(s);
+  if (!m) return null;
+  if (m[2] && RATE_SUFFIXES.has(m[2].toLowerCase())) return null;
+  const amount = Number(m[1]!.replace(/,/g, ''));
+  if (!Number.isFinite(amount)) return null;
+  return money(Math.round(amount * 100), currency);
+}
+
+/**
+ * What one request of a service is worth by the price list at the time it is made: the price row the customer
+ * chose, else the service's own from price. Null when the service charges by the hour, or has no price at all.
+ *
+ * Never what the customer paid — these services are paid at the provider — so it is only ever shown as an
+ * estimate (services statistics, ServiceStatTotals.estimated).
+ */
+export function requestEstimate(
+  service: { from_price?: number | null; currency: string; price_unit: string; price_table?: unknown },
+  plan: string | null | undefined,
+): Money | null {
+  const rows = Array.isArray(service.price_table) ? (service.price_table as { label?: string; price?: string }[]) : [];
+  const chosen = plan ? rows.find((r) => String(r?.label ?? '').trim().toLowerCase() === plan.trim().toLowerCase()) : undefined;
+  if (chosen) return fixedPriceOfRow(chosen.price, service.currency);
+  if (service.price_unit === 'free') return money(0, service.currency);
+  if (RATE_UNITS.has(service.price_unit) || service.from_price == null) return null;
+  return money(service.from_price, service.currency);
+}
 
 const STATUS_LABEL: Record<string, (provider: string) => string> = {
   requested: (p) => `Waiting for ${p} to confirm`,

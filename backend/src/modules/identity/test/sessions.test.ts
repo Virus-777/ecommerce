@@ -86,49 +86,37 @@ describe('app sessions (visitor tokens)', () => {
   });
 });
 
-describe('registration and email verification', () => {
-  it('creates an account, sends a code, and signs in on confirmation (claiming the visitor session)', async () => {
+describe('registration', () => {
+  it('creates an account, signs it in and claims the visitor session (no email code)', async () => {
     const email = uniqueEmail('reg');
     const v = await visitor(kit);
     const reg = await kit.call('POST', `${PUBLIC}/registrations`, {
       token: v.accessToken,
       body: { email, password: STRONG, firstName: 'Ana', lastName: 'Lopez', marketingOptIn: true, acceptedTermsVersion: '2026-01', device: android() },
     });
-    expect(reg.status).toBe(202);
-    expect(reg.body).toMatchObject({ purpose: 'email_verification', codeLength: 6, attemptsLeft: 5 });
-    expect(reg.body.emailMasked).toMatch(/^r•+@example\.com$/);
+    expect(reg.status, JSON.stringify(reg.body)).toBe(201);
+    // the address is taken on trust: nothing is sent and nothing is verified
+    expect(reg.body.account).toMatchObject({ email, realm: 'member', status: 'active', emailVerified: false });
+    expect(reg.body.tokens.refreshToken).toMatch(/^s\./);
+    expect(kit.of('identity.verification.code_issued')).toHaveLength(0);
     const registered = kit.last('identity.user.registered');
     expect(registered).toMatchObject({ email, firstName: 'Ana', lastName: 'Lopez', marketingOptIn: true, acceptedTermsVersion: '2026-01', guestSessionId: v.sessionId });
-    const issued = kit.of('identity.verification.code_issued').find((e) => e.challengeId === reg.body.id);
-    expect(issued).toMatchObject({ purpose: 'email_verification', channel: 'email', to: email, existingAccount: false });
-
-    // the account can't sign in before confirming: EMAIL_NOT_VERIFIED with a fresh challenge
-    const early = await kit.call('POST', `${PUBLIC}/sessions`, { token: v.accessToken, body: { email, password: STRONG, audience: 'store', keepSignedIn: false, device: android() } });
-    expect(early.status).toBe(403);
-    expect(early.body.error.code).toBe('EMAIL_NOT_VERIFIED');
-    expect(early.body.error.details.challenge.id).toBeDefined();
-    const fresh = kit.of('identity.verification.code_issued').find((e) => e.challengeId === early.body.error.details.challenge.id);
-
-    // a wrong code counts; the superseded first challenge no longer works
-    const wrong = await kit.call('POST', `${PUBLIC}/verifications/${early.body.error.details.challenge.id}/confirm`, { token: v.accessToken, body: { code: fresh.code === '000000' ? '111111' : '000000' } });
-    expect(wrong.status).toBe(400);
-    expect(wrong.body.error).toMatchObject({ code: 'CODE_INVALID', details: { attemptsLeft: 4 } });
-    const old = await kit.call('POST', `${PUBLIC}/verifications/${reg.body.id}/confirm`, { token: v.accessToken, body: { code: issued.code } });
-    expect(old.status).toBe(410);
-
-    const ok = await kit.call('POST', `${PUBLIC}/verifications/${early.body.error.details.challenge.id}/confirm`, { token: v.accessToken, body: { code: fresh.code, device: android() } });
-    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
-    expect(ok.body).toMatchObject({ verified: true, account: { email, status: 'active', emailVerified: true, realm: 'member' } });
-    expect(kit.last('identity.user.verified')).toMatchObject({ accountId: ok.body.account.id, channel: 'email', email });
-    expect(kit.last('identity.guest_session.claimed')).toEqual({ guestSessionId: v.sessionId, accountId: ok.body.account.id });
+    expect(kit.last('identity.guest_session.claimed')).toEqual({ guestSessionId: v.sessionId, accountId: reg.body.account.id });
+    expect(kit.of('identity.user.verified')).toHaveLength(0);
 
     // the issued customer token works on account endpoints
-    const sec = await kit.call('GET', `${STORE}/security`, { token: ok.body.tokens.accessToken });
+    const sec = await kit.call('GET', `${STORE}/security`, { token: reg.body.tokens.accessToken });
     expect(sec.status, JSON.stringify(sec.body)).toBe(200);
-    expect(sec.body.account.id).toBe(ok.body.account.id);
+    expect(sec.body.account.id).toBe(reg.body.account.id);
+    expect(sec.body.email).toMatchObject({ address: email, verifiedAt: null });
     expect(sec.body.warnings.map((w: any) => w.code)).toContain('two_step_off');
     expect(sec.body.devices).toHaveLength(1);
     expect(sec.body.devices[0].current).toBe(true);
+
+    // and the password signs in straight away, with nothing to confirm first
+    const back = await signIn(kit, { email, password: STRONG });
+    expect(back.status, JSON.stringify(back.body)).toBe(200);
+    expect(back.body.status).toBe('signed_in');
 
     // the claimed visitor session is over: its token is revoked once servers sync
     await kit.syncRevocations();
@@ -136,7 +124,7 @@ describe('registration and email verification', () => {
     expect(gone.status).toBe(401);
   });
 
-  it('answers the same for an email that already has an account, and that code never verifies', async () => {
+  it('refuses an email that already has an account', async () => {
     const c = await customer(kit);
     const v = await visitor(kit);
     const before = kit.of('identity.user.registered').length;
@@ -144,15 +132,12 @@ describe('registration and email verification', () => {
       token: v.accessToken,
       body: { email: c.email, password: 'Another-Pass-99', firstName: 'Eve', lastName: 'Mallory', marketingOptIn: false, acceptedTermsVersion: '2026-01', device: web },
     });
-    expect(reg.status).toBe(202);
+    expect(reg.status, JSON.stringify(reg.body)).toBe(409);
+    expect(reg.body.error.code).toBe('EMAIL_IN_USE');
     expect(kit.of('identity.user.registered').length).toBe(before);
-    const issued = kit.of('identity.verification.code_issued').find((e) => e.challengeId === reg.body.id);
-    expect(issued.existingAccount).toBe(true);
-    const conf = await kit.call('POST', `${PUBLIC}/verifications/${reg.body.id}/confirm`, { token: v.accessToken, body: { code: issued.code } });
-    expect(conf.status).toBe(400);
-    expect(conf.body.error.code).toBe('CODE_INVALID');
-    // the existing password still works, the new one does not
+    // the existing password still works, the one just typed does not
     expect((await signIn(kit, { email: c.email, password: c.password })).status).toBe(200);
+    expect((await signIn(kit, { email: c.email, password: 'Another-Pass-99' })).status).toBe(401);
   });
 
   it('checks the password rules', async () => {
@@ -166,37 +151,6 @@ describe('registration and email verification', () => {
     expect(res.body.error.details.failed).toEqual(expect.arrayContaining(['min_length', 'number', 'uppercase', 'personal_info']));
   });
 
-  it('resends a code only after the resend timer', async () => {
-    const v = await visitor(kit);
-    const reg = await kit.call('POST', `${PUBLIC}/registrations`, {
-      token: v.accessToken,
-      body: { email: uniqueEmail(), password: STRONG, firstName: 'Ana', lastName: 'Lopez', marketingOptIn: false, acceptedTermsVersion: '1', device: web },
-    });
-    const soon = await kit.call('POST', `${PUBLIC}/verifications/${reg.body.id}/resend`, { token: v.accessToken });
-    expect(soon.status).toBe(429);
-    expect(soon.body.error.code).toBe('RESEND_TOO_SOON');
-    kit.clock.advance(61_000);
-    const again = await kit.call('POST', `${PUBLIC}/verifications/${reg.body.id}/resend`, { token: v.accessToken });
-    expect(again.status).toBe(200);
-    const codes = kit.of('identity.verification.code_issued').filter((e) => e.challengeId === reg.body.id);
-    expect(codes).toHaveLength(2);
-  });
-
-  it('locks a challenge after too many wrong codes', async () => {
-    const v = await visitor(kit);
-    const reg = await kit.call('POST', `${PUBLIC}/registrations`, {
-      token: v.accessToken,
-      body: { email: uniqueEmail(), password: STRONG, firstName: 'Ana', lastName: 'Lopez', marketingOptIn: false, acceptedTermsVersion: '1', device: web },
-    });
-    const code = kit.of('identity.verification.code_issued').find((e) => e.challengeId === reg.body.id).code;
-    const bad = code === '123456' ? '654321' : '123456';
-    let last: any;
-    for (let i = 0; i < 5; i++) last = await kit.call('POST', `${PUBLIC}/verifications/${reg.body.id}/confirm`, { token: v.accessToken, body: { code: bad } });
-    expect(last.status).toBe(429);
-    expect(last.body.error.code).toBe('CHALLENGE_LOCKED');
-    const after = await kit.call('POST', `${PUBLIC}/verifications/${reg.body.id}/confirm`, { token: v.accessToken, body: { code } });
-    expect(after.body.error.code).toBe('CHALLENGE_LOCKED');
-  });
 });
 
 describe('sign-in', () => {
@@ -414,6 +368,16 @@ describe('passwords', () => {
 });
 
 describe('email change and re-auth', () => {
+  /** A customer with a pending email-change code: email changes and phone numbers are the code flows left */
+  const pendingEmailChange = async () => {
+    const c = await customer(kit);
+    const reauth = await kit.call('POST', `${STORE}/reauth`, { token: c.tokens.accessToken, body: { purpose: 'email-change', password: c.password } });
+    const change = await kit.call('POST', `${STORE}/email-changes`, { token: c.tokens.accessToken, body: { newEmail: uniqueEmail('moved'), reauthToken: reauth.body.reauthToken } });
+    expect(change.status, JSON.stringify(change.body)).toBe(202);
+    const code = kit.of('identity.verification.code_issued').find((e) => e.challengeId === change.body.id)!.code as string;
+    return { id: change.body.id as string, code, token: c.tokens.accessToken as string };
+  };
+
   it('needs a re-auth token, sends a code to the new address and switches on confirmation', async () => {
     const c = await customer(kit);
     const newEmail = uniqueEmail('moved');
@@ -446,6 +410,28 @@ describe('email change and re-auth', () => {
     expect(ok.body.tokens ?? null).toBeNull();
     expect(kit.last('identity.email.changed')).toEqual({ accountId: c.accountId, oldEmail: c.email, newEmail });
     expect((await signIn(kit, { email: newEmail, password: c.password })).status).toBe(200);
+  });
+
+  it('resends a code only after the resend timer', async () => {
+    const ch = await pendingEmailChange();
+    const soon = await kit.call('POST', `${PUBLIC}/verifications/${ch.id}/resend`, { token: ch.token });
+    expect(soon.status).toBe(429);
+    expect(soon.body.error.code).toBe('RESEND_TOO_SOON');
+    kit.clock.advance(61_000);
+    const again = await kit.call('POST', `${PUBLIC}/verifications/${ch.id}/resend`, { token: ch.token });
+    expect(again.status, JSON.stringify(again.body)).toBe(200);
+    expect(kit.of('identity.verification.code_issued').filter((e) => e.challengeId === ch.id)).toHaveLength(2);
+  });
+
+  it('locks a challenge after too many wrong codes', async () => {
+    const ch = await pendingEmailChange();
+    const bad = ch.code === '123456' ? '654321' : '123456';
+    let last: any;
+    for (let i = 0; i < 5; i++) last = await kit.call('POST', `${PUBLIC}/verifications/${ch.id}/confirm`, { token: ch.token, body: { code: bad } });
+    expect(last.status).toBe(429);
+    expect(last.body.error.code).toBe('CHALLENGE_LOCKED');
+    const after = await kit.call('POST', `${PUBLIC}/verifications/${ch.id}/confirm`, { token: ch.token, body: { code: ch.code } });
+    expect(after.body.error.code).toBe('CHALLENGE_LOCKED');
   });
 
   it('refuses an email another account uses', async () => {
