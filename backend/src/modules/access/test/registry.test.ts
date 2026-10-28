@@ -26,6 +26,13 @@ describe('registry sync and system roles', () => {
     const wallet = await f.table('permissions').find({ module: 'wallet' });
     expect(wallet.length).toBeGreaterThan(0);
     expect(wallet.every((p) => p.unavailable_since)).toBe(true);
+    // ...and the other direction, which is the one that matters in production: a permission of a module that
+    // *is* enabled stays available. Without this, a sync that marked everything unavailable would satisfy the
+    // line above and make every approval action unavailable (service/approvals.ts:626 filters on this field).
+    // Found by breaking markPermissionsUnavailable and watching the suite pass.
+    const live = await f.table('permissions').find({ module: 'access' });
+    expect(live.length).toBeGreaterThan(0);
+    expect(live.every((p) => p.unavailable_since === null)).toBe(true);
     const actions = await f.call('GET', '/approval-actions', f.token('00000000-0000-7000-8000-000000000001'));
     expect(actions.status).toBe(200);
     expect(actions.body.find((a: any) => a.key === 'wallet.goodwill.grant').available).toBe(false);

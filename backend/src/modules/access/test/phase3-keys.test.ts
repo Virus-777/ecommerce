@@ -6,6 +6,16 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PHASE3_MANAGE, PHASE3_SUPPORT } from '../domain/seed.js';
 import { phase3Keys } from '../migrations.js';
 import { accessFixture, type Fixture } from './fixture.js';
+import { mysqlModulesUnderTest } from '../../../testing/app.js';
+/**
+ * The tests of this module's MongoDB **data migrations** (migrations.ts) run on MongoDB only.
+ *
+ * A migration like `businessOwnerViewKeys.up(db)` takes the MongoDB driver and writes collections directly,
+ * to upgrade an install that already has roles. A MySQL database starts empty (D10: no ETL), so there is
+ * nothing for one to upgrade and no MySQL counterpart to write, and they go with MongoDB in Y4. Skipping them
+ * when this run keeps access's data in MySQL is not avoiding a failure: the subject of the test is not there.
+ */
+const onMongo = mysqlModulesUnderTest().includes('access') ? it.skip : it;
 
 let f: Fixture;
 beforeAll(async () => {
@@ -29,12 +39,12 @@ describe('software, food and rewards keys', () => {
     expect(await phase3Of('finance_manager')).toEqual([]);
   });
 
-  it('migration: roles seeded before the keys get them once, the Business Owner the manage keys only when it edits department pages', async () => {
+  onMongo('migration: roles seeded before the keys get them once, the Business Owner the manage keys only when it edits department pages', async () => {
     const roles = ['content_manager', 'marketing_manager', 'customer_support_manager', 'support_agent', 'business_owner'];
     const expected: Record<string, string[]> = {};
     for (const r of roles) expected[r] = await phase3Of(r);
     // as if the roles were seeded before the keys existed
-    await f.table('role_permissions').deleteMany({ permission_key: { $in: ALL } });
+    await f.table('role_permissions').deleteMany({ permission_key: ALL });
     await phase3Keys.up(f.app.kernel.mongo.db);
     for (const r of ['content_manager', 'marketing_manager', 'customer_support_manager', 'support_agent']) expect(await phase3Of(r), r).toEqual(expected[r]);
     expect(await phase3Of('business_owner')).toEqual([]); // view keys come from the registry sync

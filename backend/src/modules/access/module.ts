@@ -19,7 +19,7 @@ export default defineModule({
   schemas,
   mongoMigrations,
   register(ctx) {
-    const service = new AccessService({ repo: new AccessRepository(ctx.mongo), ctx });
+    const service = new AccessService({ repo: new AccessRepository(ctx.store), ctx });
     ctx.provide(service);
     ctx.http.routes(adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

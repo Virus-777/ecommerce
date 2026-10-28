@@ -4,7 +4,7 @@ Status: **Y0 done; Y1 in progress** on branch `build/mysql-migration` (last upda
 
 **Where Y1 stands.** Built and tested: the ten views (§9.1–9.2), `kernel/mysql/*` (pool, transactions with retry, `Table`, `Where`, locks, claim, counters, migrate, the kernel tables), the job queue on `SKIP LOCKED`, the MySQL rate-limit, idempotency and webhook-event stores, the purge job that replaces the TTL monitors, the generator's DDL / Kysely types / views / triggers / runtime `TableDef`s, the portable `mysqld` and the one-server test harness, the read-modify-write detector, the store seam (§10.5a) and the **settings pilot** (§10.5b). `check:ddl` applies all 472 tables to a real server and reads back all 5,652 columns.
 
-Left in Y1: the **access pilot**; `app.ts` choosing the MySQL kernel stores it does not yet choose (idempotency, the webhook log and the rate limits are still wired to MongoDB, and `config.jobsBackend`/`rateLimitStore` have no `'mysql'` option), with `kernel.purge-expired` registered and the kernel tables created at boot; the MySQL section of BUILDING-MODULES.md; and the 8.0 half of the §20.1 gate for the pilots.
+Left in Y1: `app.ts` choosing the MySQL kernel stores it does not yet choose (idempotency, the webhook log and the rate limits are still wired to MongoDB, and `config.jobsBackend`/`rateLimitStore` have no `'mysql'` option), with `kernel.purge-expired` registered and the kernel tables created at boot; the MySQL section of BUILDING-MODULES.md; and re-running the 8.0 half of the §20.1 gate over both pilots. **Both pilots are done** — settings (§10.5b) and access (§10.5c).
 
 **Re-census of 2026-10-23.** The first census was taken at 01:04 on 2026-10-22, from commit `3dcf7961`. The whole ten-Departments programme (six modules: departments, services, software, food, rewards, farm) landed between 02:29 and 23:37 that same day, followed by the advertising and API work of 10-23. Every count below was therefore re-measured on `d27cc18e`. The drift is **additive**: six new modules, 54 tables and about 1,800 lines of repository, with no new kind of data access. Every file:line reference this plan makes into the modules it first analysed (orders, finance, search, sellers, support, payments, promotions) still resolves to the same code, except the two noted in Appendix C. Nothing of the design changes; the numbers, the tranches and four appendix lists do.
 
@@ -612,6 +612,54 @@ matter changed; three things in the repository did.
    clause" needs `COLLATE utf8mb4_0900_bin` after the extraction, or `obj->'$.state' = CAST(? AS JSON)`, which
    also keeps numbers and booleans honest (`->>` turns `true` into the string `'true'`). Nothing uses the
    object-field form yet; this is written down so the first module that does is not surprised by it.
+
+### 10.5c The access pilot (built 2026-10-29)
+
+`access/repository.ts` takes `Store`; `module.ts` passes `ctx.store`. **215 tests pass on MongoDB; 206 pass and 9
+are skipped on MySQL**, the 9 being tests of MongoDB-only data migrations (below). It is the larger of the two
+pilots — twelve tables, 27 operator sites — and three of its changes were not conversions but improvements the
+conversion forced:
+
+| Site | Was | Now |
+|---|---|---|
+| `oneOf` helper | `(values) => ({ $in: [...values] })`, used 14 times | **gone**: a list is "one of" in the neutral vocabulary, and an empty one matches no row on either store |
+| `candidateRequests` | `{ eligible_role_keys: { $in: roleKeys } }` | `{ 'eligible_role_keys[]': roleKeys }` — the column is a JSON **array**, so MongoDB read this as "the array holds any of these", not "the column is one of these". The `[]` path says which; the old spelling was right by accident and silently wrong on SQL |
+| `supersedeDecisions` | one statement with an update **pipeline** (`$concat: ['superseded_', '$decision']`) | three ordinary patches, one per decision. Neither a portable expression nor `CONCAT`: there are exactly three values, so writing them out is something both stores say plainly, on a resubmit path where three statements cost nothing |
+| `inForce(at, from, to)` | took the two **column names as strings** | `inForce(at)` names them. Both callers always passed the same two, and a filter built from strings cannot be typechecked at all |
+| `awayFilter` | mutated a `{ $gt }` record to take the later of two dates | one condition, `ends_at > max(from, endsAfter)` |
+| `requestFilter`, `listAssignments` | `$and: [...]` wrappers | the `$and` around `due_at`/`expires_at` was never needed (different columns); the one around `account_id` was, and is now `and: [...]` |
+
+**A test helper that holds its own store fails silently when its module moves.** `access/test/fixture.ts` built a
+MongoDB store of its own (`app.kernel.mongo.module('access', …)`) and all fourteen test files seed and assert
+through its `table()`. On the first MySQL run that wrote into an empty MongoDB and read it back: **22 failures
+with no error logged anywhere**, because nothing was wrong — the rows simply went somewhere else. A probe booting
+the app and running the registry sync found its 230 permissions and 21 roles written to MySQL correctly. The fix
+is one line (`app.kernel.boot.stores.get('access')`, added to `BootResult` for this), but **both pilots had this
+same helper**, so Y2 should look for it in a module *before* converting the repository: it is the first thing
+that will fail and the last thing that looks like the cause.
+
+**How much of this is waiting in Y2** (counted 2026-10-29): **about thirty modules** have at least one test that
+builds its own MongoDB store with `app.kernel.mongo.module('<name>', …)` — reports ×6, search ×4, wishlist,
+warehouse, support, reviews and messaging ×2 each, and one apiece for seventeen others — and nine more places
+reach a collection through the raw driver (`kernel.mongo.db.collection('returns.…')` ×5, warehouse, wallet,
+shipping, search). Each is fine until its module moves, and then fails *silently*: the rows go to a database
+nobody is reading. So the per-module checklist in Y2 starts with "re-point this module's test helpers at
+`boot.stores.get(name)`", before the repository is touched at all.
+
+**And one of them crosses modules**, which is worse because the module's own tests look fine.
+`finance/test/real-access.test.ts` activated pending role assignments by writing straight into
+`access.role_assignments` through the MongoDB driver. With access on MySQL that write went into an empty
+collection, the assignments stayed `pending_approval`, and the only symptom was a **403 from a permission check
+that was right to refuse** — in a *finance* test, two pilots away from anything that had changed. It was the
+whole-suite run with both pilots on MySQL that found it, which is the argument for having that mode at all.
+
+**Tests of MongoDB data migrations run on MongoDB only.** `migrations.ts` holds nine `MongoMigration`s that take
+the driver's `db` and write collections directly, to upgrade an install that already has roles. A MySQL database
+starts **empty** (D10 dropped the ETL), so there is nothing for them to upgrade and no MySQL counterpart to
+write; they are deleted with MongoDB in Y4. The nine tests that drive them are marked `onMongo` and skipped when
+the module's data is in MySQL, each with the reason written where it is skipped. Two of the nine also covered the
+*seed* path, which does work on MySQL — that much coverage is lost in the MySQL run and kept by the "new install"
+tests beside them.
 
 ### 10.6 Boundaries
 
@@ -1329,7 +1377,7 @@ Each phase ends with `npm run check` green and a report. The next starts after a
 | Phase | Work | Done when |
 |---|---|---|
 | **Y0 Prepare on MongoDB** (started 2026-10-23, branch `build/mysql-migration`) | 1. The catalogue exporter of §18.1, run once while MongoDB still holds the 107 real products — **before anything else**. 2. Appendix C concurrency fixes, including the two `departments/service/blogs.ts` writers found on 2026-10-23. 3. Appendix D GraphQL batching fixes + batch-loader cache and cap. 4. **Spec additions — done.** The notation (sizes, `ci`, `cascade`/`nofk`, `appendOnly`, `views`) is in `lib/tables.ts` and `spec.ts` with a test of its own, documented in FORMAT.md and rendered in the module docs. Applied where Y0 could confirm it from the code: 5 append-only tables, 2 `ci` columns, 6 cascades, 2 `mediumtext` bodies. No `nofk` (that waits for Y5 measurements) and no view SQL (Y1, §9.1). 5. Re-run the census (§0) and Appendices A, B, C and E, and keep re-running them whenever modules are added: the 2026-10-22 census went stale within two hours. D4, D10 and D11 were decided at the start of this phase; D3, D6, D7 and D8 are confirmed before Y1. | Check green on MongoDB; `real-products.json` committed and `npm run seed` reproduces the catalogue; census current; no behaviour change |
-| **Y1 Foundations** | The §9.2 view SQL, written against the generator and the contract suite that prove it (§9.1). `kernel/mysql/*`: pool, transactions with retry, `Table`, `Where`, locks, claim, counters, migrate, kernel tables. Jobs on MySQL (`SKIP LOCKED`); rate limits; idempotency; webhook log; refs; purge job. Generator → DDL, Kysely types, views, triggers. Portable `mysqld`; test harness; contract suite; read-modify-write detector. During the transition a module chooses `store: 'mongo' \| 'mysql'` (as M1 did). The kernel's own tables and jobs move to MySQL first; each module's inbox claims go to the store of that module's data, so a claim always commits with its effects. Pilots: **settings, access**. | Kernel tests and the two pilots pass on MySQL **8.0 and 8.4** (§20.1); BUILDING-MODULES.md gets the MySQL section |
+| **Y1 Foundations** (pilots done 2026-10-29: §10.5b, §10.5c) | The §9.2 view SQL, written against the generator and the contract suite that prove it (§9.1). `kernel/mysql/*`: pool, transactions with retry, `Table`, `Where`, locks, claim, counters, migrate, kernel tables. Jobs on MySQL (`SKIP LOCKED`); rate limits; idempotency; webhook log; refs; purge job. Generator → DDL, Kysely types, views, triggers. Portable `mysqld`; test harness; contract suite; read-modify-write detector. During the transition a module chooses `store: 'mongo' \| 'mysql'` (as M1 did). The kernel's own tables and jobs move to MySQL first; each module's inbox claims go to the store of that module's data, so a claim always commits with its effects. Pilots: **settings, access**. | Kernel tests and the two pilots pass on MySQL **8.0 and 8.4** (§20.1); BUILDING-MODULES.md gets the MySQL section |
 | **Y2 Modules in tranches** | 37 modules in seven tranches (tables in brackets). A: identity, audit, media, notifications, backups [45] · B: customers, catalog, inventory, sellers, purchasing, workqueues [91] · C: offers, promotions, cart, orders, content [56] · D: payments, shipping, checkout, messaging, reviews, finance, returns [100] · E: support, trust, advertising, reports, warehouse [71] · F: wishlist, wallet, fulfillment-service [26] · **G (new): departments, services, software, food, rewards, farm [54]**. Per module: repository rewrite, views, summary columns, tests reading tables. | Each module's tests, contract and `test:http` pass on MySQL with the detector on |
 | **Y3 Search, reports, statistics, SQL speed-ups** | MySQL search engine (§14) + benchmark; reports market-day columns; finance ledger `day`; statistics queries; `EXPLAIN` review of every list; the §9.5 candidates (set-based statements, stored procedures, summary triggers), each with a parity test and a before/after measurement | Engine contract green; bench targets met; financial statistics equal to MongoDB on the same seeded data; each kept §9.5 item shows its gain, the rest stay in TypeScript |
 | **Y4 Remove MongoDB** | Delete `kernel/mongo`, Mongoose (nothing reads MongoDB any more under D10, so it goes here rather than being kept for an ETL), mongodb-memory-server, the Mongo engine, Mongo env vars. Update docs 02, MAINTAINING, README, FORMAT, `.env.example`, BUILDING-MODULES, docs/08, the deploy scripts (`install.sh`, `db-setup`, `backup.sh`, `restore.sh`, `ops.sh`, `check.sh`, the `marketly` command) | Check green with MySQL only |

@@ -9,6 +9,16 @@ import { newId } from '../../../kernel/lib/ids.js';
 import { platformAdminAccountActions, staffWorkUploads } from '../migrations.js';
 import { STAFF_UPLOADS } from '../domain/seed.js';
 import { accessFixture, type Fixture } from './fixture.js';
+import { mysqlModulesUnderTest } from '../../../testing/app.js';
+/**
+ * The tests of this module's MongoDB **data migrations** (migrations.ts) run on MongoDB only.
+ *
+ * A migration like `businessOwnerViewKeys.up(db)` takes the MongoDB driver and writes collections directly,
+ * to upgrade an install that already has roles. A MySQL database starts empty (D10: no ETL), so there is
+ * nothing for one to upgrade and no MySQL counterpart to write, and they go with MongoDB in Y4. Skipping them
+ * when this run keeps access's data in MySQL is not avoiding a failure: the subject of the test is not there.
+ */
+const onMongo = mysqlModulesUnderTest().includes('access') ? it.skip : it;
 
 /** The seeded roles whose work attaches files (photos, evidence, Official Store, content and ad files) */
 const UPLOADERS = [
@@ -53,7 +63,7 @@ describe('staff uploads (media.uploads.create)', () => {
     expect(await f.svc.hasPermission(f.principal(id), 'media.assets.manage')).toBe(false);
   });
 
-  it('an existing install: the migration grants it to the seeded roles and to every role holding media.assets.manage, once', async () => {
+  onMongo('an existing install: the migration grants it to the seeded roles and to every role holding media.assets.manage, once', async () => {
     const now = new Date();
     // a role the owner made, which could upload before (media.assets.manage)
     const custom = newId();
@@ -77,7 +87,7 @@ describe('staff uploads (media.uploads.create)', () => {
 });
 
 describe('staff account actions (identity.accounts.manage)', () => {
-  it('the Platform Administrator may lock, unlock, sign out and force a password reset: seed, and migration once', async () => {
+  onMongo('the Platform Administrator may lock, unlock, sign out and force a password reset: seed, and migration once', async () => {
     expect(await keysOf('platform_administrator')).toContain('identity.accounts.manage');
     await f.table('role_permissions').deleteMany({ role_id: await f.roleId('platform_administrator'), permission_key: 'identity.accounts.manage' });
     await platformAdminAccountActions.up(f.app.kernel.mongo.db);

@@ -14,7 +14,7 @@
 import { spawnSync } from 'node:child_process';
 
 /** The modules this run keeps in MySQL. Each pilot joins the list as it is converted */
-const MODULES = process.env.TEST_MYSQL_MODULES || 'settings';
+const MODULES = process.env.TEST_MYSQL_MODULES || 'settings,access';
 
 console.log(`running the suite with these modules' data in MySQL: ${MODULES}\n`);
 

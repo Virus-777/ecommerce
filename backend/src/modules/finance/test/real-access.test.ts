@@ -40,9 +40,13 @@ beforeAll(async () => {
   specialist = await f.staffWithRoles(owner, 'sam@marketly.test', 'Sam Specialist', ['finance_staff']);
   // finance roles carry sensitive permissions: access holds them for a second Platform Administrator, whom this
   // test has not got (the bootstrap owner requested them). Stand in for that approval, as access's own fixture does.
-  await app.kernel.mongo.db
-    .collection('access.role_assignments')
-    .updateMany({ status: 'pending_approval', account_id: { $in: [managerA.accountId, managerB.accountId, specialist.accountId] } }, { $set: { status: 'active', approval_request_id: null } });
+  // through access's own store, whichever database this run keeps access in (TEST_MYSQL_MODULES): reaching for
+  // `kernel.mongo.db.collection('access.role_assignments')` wrote into an empty MongoDB once access moved, and
+  // the only symptom was a 403 from a permission check that was right to refuse.
+  await app.kernel.boot.stores
+    .get('access')!
+    .table<{ status: string; account_id: string; approval_request_id: string | null }>('role_assignments')
+    .updateMany({ status: 'pending_approval', account_id: [managerA.accountId, managerB.accountId, specialist.accountId] }, { status: 'active', approval_request_id: null });
   // a verified payout account and a balance above the $50,000 second-reviewer threshold
   const providerDestinationId = 'dest_real';
   app.kernel.events.publish('test', 'sellers.payout_account.changed', { sellerId: S, changeId: newId(), providerDestinationId, label: 'Pacific Coast CU •••• 6620', accountHolderName: 'Northwind LLC', accountType: 'business_checking', previousLabel: null, isInitial: true, requestedBy: { kind: 'seller', id: newId() } });

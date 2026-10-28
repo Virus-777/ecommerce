@@ -8,9 +8,8 @@ import type { Clock } from '../../../kernel/lib/clock.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { withDependencies } from '../../../kernel/module-system/loader.js';
 import { auth, buildTestApp, callers } from '../../../testing/app.js';
-import type { Table } from '../../../kernel/mongo/index.js';
-import { spec, type AccessDb } from '../../../spec/access.js';
-import { schemas } from '../schema.js';
+import type { StoreTable } from '../../../kernel/store/index.js';
+import type { AccessDb } from '../../../spec/access.js';
 import type * as audit from '../../../spec/audit.js';
 import type * as identity from '../../../spec/identity.js';
 import type { AccessService } from '../service.js';
@@ -20,8 +19,11 @@ type Row<T extends keyof AccessDb> = AccessDb[T];
 export interface Fixture {
   app: FastifyInstance;
   svc: AccessService;
-  /** A collection of the module, as its repository reads it (rows in spec shape) */
-  table<T extends keyof AccessDb & string>(name: T): Table<Row<T>>;
+  /**
+   * A table of the module, as its repository reads it (rows in spec shape), in whichever database this run
+   * keeps the module's data in — so a filter here is written in the neutral vocabulary, not MongoDB's.
+   */
+  table<T extends keyof AccessDb & string>(name: T): StoreTable<Row<T>>;
   clock: Clock & { advance(ms: number): void; reset(): void };
   accounts: Map<string, identity.AccountSummary>;
   invitations: { email: string; name: string }[];
@@ -100,7 +102,9 @@ export async function accessFixture(): Promise<Fixture> {
     },
   });
   const svc = app.kernel.boot.apis.get('access') as AccessService;
-  const store = app.kernel.mongo.module('access', spec.collections, schemas);
+  // the module's own store, whichever database this run keeps it in (TEST_MYSQL_MODULES). Building a second
+  // MongoDB store here would read an empty database on a MySQL run, and every seeded row would go missing.
+  const store = app.kernel.boot.stores.get('access')!;
   const table = <T extends keyof AccessDb & string>(name: T) => store.table<Row<T>>(name);
   const events: { name: string; payload: any }[] = [];
   for (const name of ACCESS_EVENTS) app.kernel.events.subscribe('test', name, (e) => void events.push({ name, payload: e.payload }));
