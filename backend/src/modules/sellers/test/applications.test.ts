@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
-import { signWebhook } from '../../../testing/app.js';
+import { marketDate, signWebhook } from '../../../testing/app.js';
 import { accountInput, ADMIN, approvedSeller, boot, customer, invitation, mediaGone, payoutInput, staff, STORE, submitted, type Kit } from './helpers.js';
 import { agreementDocument } from '../domain/catalogue.js';
 
@@ -242,7 +242,9 @@ describe('application', () => {
     expect(empty.body.error.code).toBe('VALIDATION_FAILED');
     const rej = await kit.call('POST', `${ADMIN}/applications/${s.id}/reject`, reviewer, { reasonCode: 'outside_assortment', explanation: 'We do not list refurbished phones at launch', reapply: 'after_30_days' });
     expect(rej.body.application).toMatchObject({ state: 'rejected', sellerStatus: 'closed' });
-    const reapply = new Date(kit.clock.now().getTime() + 30 * 86_400_000).toISOString().slice(0, 10);
+    // the market day 30 days out, not the UTC one: the two differ for the eight hours a day the market is
+    // behind UTC, and this test then failed for the hour it was run at (2026-10-28)
+    const reapply = marketDate(kit.clock.now(), 30);
     expect(rej.body.application.decision).toMatchObject({ canReapplyFrom: reapply, notEligibleToReapply: false });
     const { code } = await invitation(kit);
     const again = await kit.call('POST', `${STORE}/applications`, s.token, accountInput('Retry', code));

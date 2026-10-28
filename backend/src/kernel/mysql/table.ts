@@ -27,6 +27,7 @@ import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql
 import { decodeCursor, encodeCursor, type KeysetOrder, type PageRequest } from '../lib/pagination.js';
 import type { Page } from '../../spec/common.js';
 import type { TableDef, UniqueKeyDef } from '../spec/define.js';
+import { detecting, keysFromWhere, lockedByWrite, readRows, rowKey, writingRows } from './detect.js';
 import { duplicateKeyName, isDuplicateKey } from './errors.js';
 import { q, raw, whereSql, type Sql, type WhereWithOr } from './where.js';
 
@@ -259,7 +260,15 @@ export class Table<R extends object> {
     const sort = o.sort ?? (o.forUpdate && this.ctx.inTransaction ? Object.fromEntries(this.def.key.map((c) => [c, 1 as const])) : undefined);
     const forUpdate = o.forUpdate && this.ctx.inTransaction ? ' FOR UPDATE' : '';
     const sql = `SELECT ${this.#columnList} FROM ${q(this.name)} ${w.sql}${this.#orderBy(sort, o.nullsLast)}${this.#limit(o)}${forUpdate}`;
-    return (await this.#rows(sql, w.params)).map((r) => this.fromRow(r));
+    const rows = (await this.#rows(sql, w.params)).map((r) => this.fromRow(r));
+    // §11.2 rule 2: a row read here without a lock is one a write later in this transaction could be losing
+    if (detecting() && this.ctx.inTransaction)
+      readRows(
+        this.ctx.conn,
+        rows.map((r) => this.#rowKey(r)),
+        Boolean(forUpdate),
+      );
+    return rows;
   }
 
   /** Rows whose primary key is one of `ids` (none for an empty list) */
@@ -385,7 +394,10 @@ export class Table<R extends object> {
     );
     const identity = this.def.identity;
     if (identity && values[identity] == null) values[identity] = res.insertId;
-    return this.fromRow(values);
+    const inserted = this.fromRow(values);
+    // the insert holds this row until the transaction commits, so reading it back and writing it loses nothing
+    if (detecting() && this.ctx.inTransaction) lockedByWrite(this.ctx.conn, [this.#rowKey(inserted)]);
+    return inserted;
   }
 
   /** Several rows in one statement per {@link INSERT_CHUNK} rows; every row must fill the same columns */
@@ -522,6 +534,7 @@ export class Table<R extends object> {
   async updateMany(where: WhereWithOr<R>, patch: Patch<R>, o: ReadOptions = {}): Promise<number> {
     const set = this.#setClause(patch);
     if (!set.sql) return 0;
+    if (detecting() && this.ctx.inTransaction) this.#checkNotLosingAnUpdate(where, patch);
     const w = this.#where(where, o);
     const res = await this.#run(`UPDATE ${q(this.name)} SET ${set.sql} ${w.sql}`, [...set.params, ...w.params]);
     return res.affectedRows;
@@ -537,6 +550,41 @@ export class Table<R extends object> {
   }
 
   /* ---------------------------------------------------------------- write helpers */
+
+  /* ---------------------------------------------------------------- the unlocked read-modify-write detector (§11.2 rule 2) */
+
+  /** How a row of this table is remembered: by its primary key */
+  #rowKey(row: R | Record<string, unknown>): string {
+    return rowKey(
+      this.name,
+      this.def.key.map((c) => (row as Record<string, unknown>)[c]),
+    );
+  }
+
+  /**
+   * Refuses a write that would lose an update: a row this transaction read without a lock, written now with a
+   * value this process computed. A patch of nothing but expressions is the server computing from the stored
+   * row, which is safe by construction, and a filter that names no particular row cannot be checked at all.
+   */
+  #checkNotLosingAnUpdate(where: WhereWithOr<R>, patch: Patch<R>): void {
+    if (!Object.entries(patch).some(([, v]) => v !== undefined && !isExpr(v))) return;
+    const keys = keysFromWhere(this.name, this.def.key, where as Record<string, unknown>);
+    if (keys) writingRows(this.ctx.conn, this.name, keys);
+  }
+
+  /**
+   * Rows an upsert is about to write, as long as it names the whole primary key: checked against what this
+   * transaction read without a lock, unless the new values are ones the server computes from the stored row,
+   * and locked by the statement from here on either way.
+   */
+  #writingUpsert(rows: readonly Record<string, unknown>[], computed: boolean): void {
+    if (!detecting() || !this.ctx.inTransaction) return;
+    const named = rows.filter((r) => this.def.key.every((c) => r[c] !== undefined && r[c] !== null));
+    if (!named.length) return;
+    const keys = named.map((r) => this.#rowKey(r));
+    if (computed) lockedByWrite(this.ctx.conn, keys);
+    else writingRows(this.ctx.conn, this.name, keys);
+  }
 
   /** `SET a = ?, n = n + ?` from a patch; an expression is written out, a value is bound */
   #setClause(patch: Patch<R>): Sql {
@@ -570,11 +618,16 @@ export class Table<R extends object> {
     if (update && rows.length > 1) throw new Error(`${this.name}: one ON DUPLICATE KEY UPDATE clause cannot carry a patch per row`);
     const patch = update ? update(rows[0]!) : (Object.fromEntries(columns.filter((c) => !key.includes(c)).map((c) => [c, expr(`new.${q(c)}`)])) as Patch<R>);
     const set = this.#setClause(patch);
+    // an upsert without a patch overwrites with the values in hand, and `new.col` is one of those values, not
+    // the server reading the stored row — so only a patch that is all expressions (`increment`'s) is safe here
+    const computed = Boolean(update) && Object.values(patch as Record<string, unknown>).every((v) => v === undefined || isExpr(v));
     if (!set.sql) {
       // nothing to change: keep a key column as it is, so the statement is still an "insert if absent"
+      this.#writingUpsert(rows, true);
       await this.#run(`INSERT INTO ${q(this.name)} (${names}) VALUES ${rows.map(() => placeholders).join(', ')} AS new ON DUPLICATE KEY UPDATE ${q(key[0]!)} = ${q(this.name)}.${q(key[0]!)}`, params);
       return;
     }
+    this.#writingUpsert(rows, computed);
     await this.#run(`INSERT INTO ${q(this.name)} (${names}) VALUES ${rows.map(() => placeholders).join(', ')} AS new ON DUPLICATE KEY UPDATE ${set.sql}`, [...params, ...set.params]);
   }
 

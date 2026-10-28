@@ -14,6 +14,7 @@
 import { Kysely, MysqlDialect } from 'kysely';
 import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import type { TableDef } from '../spec/define.js';
+import { serialisedScope } from './detect.js';
 import { isDuplicateKey } from './errors.js';
 import { Table, type TableContext } from './table.js';
 import type { MysqlStore, Tx } from './index.js';
@@ -142,6 +143,9 @@ export class ModuleStore<DB = Record<string, never>> {
       'INSERT INTO `kernel_locks` (`name`, `n`) VALUES (?, 1) AS new ON DUPLICATE KEY UPDATE `n` = `kernel_locks`.`n` + 1',
       [`${this.module}:${name}`],
     );
+    // the transaction is now serialised against every other holder of the name, which is the one case where
+    // an unlocked read-modify-write is deliberate: the detector of §11.2 rule 2 stands down for it
+    serialisedScope(this.tx.conn);
   }
 
   /**

@@ -14,6 +14,7 @@
  */
 import { createPool, type Pool, type PoolConnection, type ResultSetHeader, type RowDataPacket } from 'mysql2/promise';
 import { AppError } from '../errors/index.js';
+import { beginScope, endScope } from './detect.js';
 import { isConnectionLost, isRetryable } from './errors.js';
 import { KERNEL_TABLES, kernelDdl, type KernelTable } from './kernel-tables.js';
 import { ModuleStore, type ModuleTables } from './module-store.js';
@@ -21,6 +22,7 @@ import { CLIENT_OPTIONS, SESSION_COLLATION } from './portable.js';
 
 export { KERNEL_TABLES, type KernelTable };
 export { ModuleStore, type ModuleTables };
+export { setDetector, UnlockedReadModifyWrite, UNLOCKED_READ_MODIFY_WRITE } from './detect.js';
 export { Table } from './table.js';
 export type { Sort, Patch, FindOptions, ReadOptions, ComputedOrder, TableContext } from './table.js';
 export { decToZero, expr, inc, jsonAppend, q, raw } from './table.js';
@@ -111,6 +113,8 @@ export function mysqlStore(pool: Pool, o: { watch?: TransactionWatch; slowAcquir
           const conn = await acquire();
           try {
             await conn.beginTransaction();
+            // §11.2 rule 2: from here until this transaction ends, what it reads unlocked is remembered
+            beginScope(conn);
             const result = await fn({ conn });
             await conn.commit();
             return result;
@@ -134,6 +138,7 @@ export function mysqlStore(pool: Pool, o: { watch?: TransactionWatch; slowAcquir
             }
             throw err;
           } finally {
+            endScope(conn);
             conn.release();
           }
         }

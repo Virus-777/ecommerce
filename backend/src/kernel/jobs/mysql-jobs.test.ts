@@ -87,15 +87,22 @@ describe('MySQL job queue', () => {
       running--;
       runs++;
     });
-    const calls = [s.runNow('q.stately'), s.runNow('q.stately'), s.runNow('q.stately')];
-
-    // The first run is held until the queue holds the two rows this is about — one running, one waiting — rather
-    // than for a fixed 60 ms. Under load the first run finished before the third call was even made, so all three
-    // ran and the test failed for the machine having been busy (found in a full-suite run, 2026-10-28). Waiting
-    // for the state makes the count exact instead of an upper bound: two rows run, the third caller joins.
-    await until(async () => (await rows('SELECT `state` FROM `kernel_jobs` WHERE `name` = ?', ['q.stately'])).length === 2);
+    // The three callers arrive one at a time, each after the queue is in the state its arrival is about. Nothing
+    // can move while the handler is held — the running row is blocked in it and the waiting row cannot be claimed
+    // while another is active — so the third caller is guaranteed to find the waiting row and join it.
+    //
+    // Both earlier versions of this test were races. A fixed 60 ms hold assumed the three calls all got there in
+    // that window; waiting for "two rows" assumed the third call had got there by the time the first two had, and
+    // when it had not, the held run finished, the waiting one ran, and the third enqueued a run of its own —
+    // correct behaviour, a failing test, and nothing wrong but the test (2026-10-28, twice, under full-suite load).
+    const inState = async (state: string) => (await rows('SELECT `id` FROM `kernel_jobs` WHERE `name` = ? AND `state` = ?', ['q.stately', state])).length;
+    const first = s.runNow('q.stately');
+    await until(async () => (await inState('active')) === 1);
+    const second = s.runNow('q.stately');
+    await until(async () => (await inState('queued')) === 1);
+    const third = s.runNow('q.stately');
     release();
-    await Promise.all(calls);
+    await Promise.all([first, second, third]);
     expect(most).toBe(1);
     expect(runs).toBe(2);
   });

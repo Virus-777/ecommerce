@@ -432,6 +432,9 @@ Each trigger is written in the spec, owned by its module, and covered by the mod
 | `where.ts` | `Where<R>` → SQL with SQL's own null rules (the `whereFilter` meanings move unchanged), plus `or`, `contains`, `startsWith`, `equalsIgnoringCase`, `memberOf`/`allMembersOf`, and `raw` for a condition `Where` has no shape for. No `likePattern`: the `like` condition is MySQL's own `LIKE` | `kernel/mongo/filters.ts` |
 | `schema.ts` | `migrateMysql`: desired DDL from the spec vs `information_schema`, applying additive changes online; data migrations; hashes in `kernel_migrations` | `kernel/mongo/schema.ts` |
 | `kernel-tables.ts` | DDL of the kernel tables (§12) | `kernel/mongo/schemas.ts` |
+| `ops-views.ts` | the five `ops_v_*` views one person reads the database with, and the rule that a missing table skips a view rather than failing the migration (§9.2, MAINTAINING.md §6a) | |
+| `purge.ts` | `kernel.purge-expired`: what MongoDB expired by itself, deleted in batches (§12) | MongoDB TTL indexes |
+| `detect.ts` | the unlocked read-modify-write detector of §11.2 rule 2, on in tests and development | |
 | `errors.ts` | `isDuplicateKey` (1062) with the key name, `isDeadlock` (1213), `isLockTimeout` (1205), `isConnectionLost` | |
 | *(not in this folder)* | the three kernel services that are not data access — `mysqlRateLimitStore`, `mysqlIdempotencyStore`, `mysqlWebhookEventLog` — are written **beside their MongoDB twins** in `kernel/auth/rate-limit.ts`, `kernel/http/idempotency.ts` and `kernel/auth/chain.ts`, under the interface both implement. The contract tests then run over both stores with `describe.each`, which is what holds them to the same promises, and Y4 deletes one function per file rather than a folder | |
 | `portable.ts` | finds and starts a private `mysqld` (dev/tests, D9) | `binary.ts` + mongodb-memory-server |
@@ -514,7 +517,18 @@ InnoDB does the opposite: the second writer **waits** for the first to commit an
 ### 11.2 Rules (written into BUILDING-MODULES.md)
 
 1. **Every read whose value is written back** inside a transaction uses `forUpdate` (or `lock()`), or the write is atomic in SQL (`SET n = n + ?`, `SET x = GREATEST(x - ?, 0)`, or a guarded `WHERE` with an `affectedRows` check). Appendix C lists the 15 places the census found, with the fix for each. They are fixed on MongoDB in Y0, where they are latent bugs for the reads made outside a transaction.
-2. **A detector proves rule 1.** In tests and development, `Table` records each row read in a transaction without a lock. If the same transaction later updates that row with a value, `Table` throws `UNLOCKED_READ_MODIFY_WRITE` (table, id, file:line). The full test suite and the simulator run with the detector on in Y2. **What the detector cannot see:** a read-modify-write that never opens a transaction at all. Both 2026-10-23 entries in Appendix C are of that kind. So the detector proves rule 1 inside transactions only, and Appendix C is re-read by hand whenever modules are added.
+2. **A detector proves rule 1** (`kernel/mysql/detect.ts`, built 2026-10-28). Inside a transaction, every row `Table` reads **without** `forUpdate` is remembered along with the file:line that read it; if that transaction then writes that row with a value, `Table` throws `UNLOCKED_READ_MODIFY_WRITE` naming the table, the row and the place of the read. It is on in tests and development, off in production (`setDetector`), and costs a stack only for a row it is actually remembering. The full test suite and the simulator run with it on in Y2.
+
+   What it does **not** flag, because none of these can lose an update: a write made of expressions (`inc`, `decToZero`, `expr` — the server computes from the stored row); a row this transaction inserted or has already written, which it holds a lock on until it commits; and a transaction serialised on `lock(name)`, which rule 5 makes the deliberate alternative to a row lock.
+
+   Three things it was deliberately made **strict** about, each of which was a choice:
+
+   - **A lock taken after the read is too late.** `get(id)` then `updateOne({ id }, …)` is still reported, although `updateOne` locks the row before writing it: the value being written was worked out from the first read, and locking a row afterwards does not make it current. The alternative — letting the later lock clear the memory — would have excused the most common write there is.
+   - **An upsert that overwrites is a value write.** `ON DUPLICATE KEY UPDATE … = new.col` looks like an expression but `new.col` is a value this process is sending, not the server reading the stored row. Only an all-expression patch (what `increment` sends) is treated as computed.
+   - **A filter it cannot resolve to rows is not checked at all**, rather than checked loosely. `updateMany` with a filter that does not pin the primary key is passed without a word; a detector that guesses which rows a filter means would eventually accuse an innocent one, and a detector that cries wolf gets switched off.
+
+   **What it cannot see:** a read-modify-write that never opens a transaction — there is nothing to attach the memory to. Both 2026-10-23 entries in Appendix C are of that kind, and so is the catalog brand race found on 2026-10-28, which makes three. It also does not watch reads through `db` (Kysely), `pageQuery` or hand-written SQL, which serve pages and reports rather than values that go back into a row. So the detector proves rule 1 inside transactions only, and Appendix C is re-read by hand whenever modules are added.
+
 3. **Lock order stays the rule.** Rows locked together are locked in one order: by primary key, or the order a module documents. Inventory's order is reservations → their lines → stock levels sorted by `(stock_item_id, location_id)`. `find(…, {forUpdate})` without an explicit sort locks in primary-key order.
 4. **READ COMMITTED.** It has no gap locks, so concurrent inserts into the same range do not deadlock (checkout under load). Phantom protection was never given by MongoDB either: check-then-insert flows rely on unique keys, `insertIfAbsent` or `lock(name)`, and they keep doing so.
 5. **`lock(name)`**: `INSERT INTO kernel_locks (name, n) VALUES (?, 1) ON DUPLICATE KEY UPDATE n = n + 1`. The row lock is held until commit; a second transaction waits (MongoDB made it conflict and retry). It is used by access, audit (chain), backups and shipping.
@@ -565,7 +579,7 @@ COMMIT;
 
 Two tests are MySQL's own, because the MongoDB runner has nothing to compare them with. One holds a row with `FOR UPDATE` from another connection and insists the **next** job in the same pass still runs: without `SKIP LOCKED` the claim would wait on the held row for the full `innodb_lock_wait_timeout` and the whole queue would wait with it (checked by taking `SKIP LOCKED` out — the test then times out). The other has one instance already running a job and insists a second instance treats the 1062 on `uq_active` as "someone else has it" rather than as an error.
 
-**TTL indexes → one purge job.** `kernel.purge-expired` runs every 10 min and replaces MongoDB's TTL monitor. Each table is purged in batches (`DELETE … WHERE created_at < ? ORDER BY created_at LIMIT 5000`, repeated until fewer rows are deleted), so locks stay short and replication-friendly:
+**TTL indexes → one purge job** (`kernel/mysql/purge.ts`, built 2026-10-28). `kernel.purge-expired` runs every 10 min and replaces MongoDB's TTL monitor. Each table is purged in batches (`DELETE … WHERE <column> < ? ORDER BY <column> LIMIT 5000`, repeated until a pass deletes fewer rows than it asked for), so locks stay short and replication-friendly:
 - idempotency keys after 24 h;
 - webhook events after 90 d;
 - finished jobs after 7 d;
@@ -573,6 +587,15 @@ Two tests are MySQL's own, because the MongoDB runner has nothing to compare the
 - processed events after 90 d (D6).
 
 Module purges (audit retention, logs) keep their own jobs.
+
+Four details that are easy to get wrong and silent when they are:
+
+- **`ORDER BY` the indexed column**, so each pass takes the oldest rows and the next pass starts where it stopped. Without it MySQL deletes whatever it reaches first, and a table that is behind never catches up in any particular order.
+- **A run stops after 200 passes** (a million rows per table) and says `more`, so one run cannot work for hours on a table that is years behind; the run ten minutes later continues.
+- **`finished_at < ?` excludes nulls**, which is exactly right for `kernel_jobs`: a queued or running row has no `finished_at` and is never "a run from eight days ago", however long it has been waiting. Purging by `created_at` instead would delete the queue's own work; the test that insists on this is the one that fails when the column is changed.
+- **Every rule's column leads an index** — `kernel-tables.test.ts` holds each of the five to it — or the job that keeps these tables small would scan them.
+
+The statements run on the pool, outside any transaction (each pass is its own), and are retried on a deadlock or lock wait timeout like the job runner's own statements: a DELETE run twice deletes what is left.
 
 **Revocation polling** (every 3 s, three range queries on `identity_sessions.revoked_at`, `guest_sessions.claimed_at`, `accounts.tokens_valid_after`) uses the indexes from Appendix A, so each poll is an index range read.
 
