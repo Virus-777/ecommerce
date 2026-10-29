@@ -1966,6 +1966,20 @@ Re-run on 2026-10-28 over everything `main` brought in (department statistics, t
 | shipping/service/own-carriers.ts:148→150 (added 2026-10-28) | `assertNameFree` lists the seller's carriers and refuses a name already used, then `add` inserts. The index behind it, `(seller_id, name)`, is **not** unique, so two requests sent together both pass the check and the seller ends up with two carriers of the same name — which the ship form cannot tell apart, the one thing the check exists to prevent | a unique key on `(seller_id, name)` and an insert that turns 1062 into the same `CONFLICT`. Y2, with the module. Note that the sibling check is already right by accident: `freeCode` is also check-then-insert, but `code` is uniquely indexed, so a loser fails loudly instead of duplicating |
 | shipping/service/shipments.ts:465→340 (pre-existing, extended on 2026-10-28 to the seller's own carriers) | `assertUnused` refuses a tracking number already on an active package, outside the transaction that then inserts the shipment. `(carrier_code, tracking_number)` is an ordinary key, and the check is narrowed to the active statuses, so no index can enforce it | not a unique key (the condition is on `status`): read it inside the transaction instead, or accept the duplicate and let the exception queue show it. Y2, with the module |
 
+**Re-read while converting cart (2026-10-30), and three more of the one shape this appendix keeps finding — a
+read taken *outside* the transaction that writes it.** None of the three is fixable inside a conversion, so
+each is commented where it is and listed here for a decision of its own:
+
+| Place | Today | Fix |
+|---|---|---|
+| cart/service.ts `previewCoupon`, `removeCoupon`, `dropInvalidCarriedCodes` | `coupon_codes` is read and written back **with no transaction at all**, so two codes applied at once keep one | the write is followed by a re-check that calls promotions and shipping, and §11.2 rule 7 keeps those out of a transaction — so this wants a guarded `updateMany` (the compare-and-set that §10.4 gives a counter), not a lock |
+| cart/service.ts `merge` (~570) | the cart row is re-read under its lock, but the **guest's lines** are read before the transaction and their quantities written inside it: a guest adding in another tab at sign-in loses the change | the quantities feed `evaluateLine`'s offer facts, which is why it is not a one-line change |
+| cart/service.ts `switchItemOffer` (same-offer branch), `acceptItemChanges` | the quantity is computed from a read taken before the lock | re-read the line under the lock and recompute, as `restoreItems` now does |
+
+The detector cannot see any of these, which is the point of keeping this appendix by hand: it watches unlocked
+reads *inside* a transaction (§11.2 rule 2), and all three of these read before one exists. Every row this
+appendix has ever had open was that shape.
+
 ## Appendix D: GraphQL fields to batch (done in Y0)
 
 **Priority 1 is done** (2026-10-24, branch `build/mysql-migration`; full suite 9,763 tests green). Two things to carry into the rest of the appendix:

@@ -1149,7 +1149,9 @@ export class EnforcementPart extends Part {
   async onEnforcementReversed(e: EventPayload<'trust.enforcement.reversed'>, eventId?: string) {
     if (!['restrict_seller', 'warn_seller', 'suspend_seller'].includes(e.action)) return;
     const key = `trust-enforcement-reversed:${eventId ?? e.enforcementId}`;
-    if (await this.ctx.mongo.seen(key)) return;
+    // the inbox follows this module's data (`ctx.store`), not MongoDB: with sellers in MySQL, a claim written
+    // through `ctx.mongo` goes to a database nothing else here reads and that Y4 deletes (§12)
+    if (await this.ctx.store.seen(key)) return;
     const by: By = { actor: e.reversedBy?.kind === 'staff' ? e.reversedBy : { ...TRUST_TEAM } };
     const reason = `Reversed by Trust and Risk (${e.ref}): ${e.reason}`;
     const sellerIds = new Set((e.targets ?? []).filter((t) => t?.type === 'seller' && isUuid(t.id)).map((t) => t.id));
@@ -1190,7 +1192,7 @@ export class EnforcementPart extends Part {
       if (legacy?.state === 'open' && !rows.some((r) => r.id === legacy.id) && mine([legacy]).length) rows.push(legacy);
       for (const w of rows) await this.resolveWarning(w.id, reason, by);
     }
-    await this.ctx.mongo.claim(key);
+    await this.ctx.store.claim(key);
   }
 
   /* ---------------------------------------------------------------- jobs */
