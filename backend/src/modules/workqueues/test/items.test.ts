@@ -279,5 +279,22 @@ describe('notes, manual tasks, lists', () => {
     expect(rows.rows[0]).toMatchObject({ queue: 'Overdue dispatch', area: 'orders_shipping' });
     expect((await t.service.exportRows('workqueues.admin.items', {}, { kind: 'staff', accountId: outsider.id })).rows.every((r) => (r as { area: string }).area !== 'orders_shipping')).toBe(true);
     await expect(t.service.exportRows('other.dataset', {}, { kind: 'staff', accountId: lead.id })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+
+    // the export walks (opened_at, id) a batch at a time, and items raised together share an opened_at, so a
+    // batch of one has to reach every item once and no item twice
+    const query = { states: ['open', 'assigned', 'in_progress', 'waiting'] };
+    const all = await t.service.core.repo.scanItems(query, null, 1000);
+    expect(all.length).toBeGreaterThan(2);
+    const walked: string[] = [];
+    let after: { openedAt: string; id: string } | null = null;
+    for (;;) {
+      const batch = await t.service.core.repo.scanItems(query, after, 1);
+      if (!batch.length) break;
+      walked.push(...batch.map((r) => r.id));
+      const last = batch.at(-1)!;
+      after = { openedAt: last.opened_at.toISOString(), id: last.id };
+      if (walked.length > all.length) break; // a keyset that repeats a row would otherwise never end
+    }
+    expect(walked).toEqual(all.map((r) => r.id));
   });
 });

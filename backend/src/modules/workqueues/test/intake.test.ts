@@ -378,6 +378,9 @@ describe('kinds raised by other modules and the queue of each kind', () => {
     const returnId = newId();
     const overdue = await t.service.raise({ sourceModule: 'test', queueKey: 'returns.decisions', kind: 'return_parcel_overdue', title: 'Return parcel not received: RT-1', subject: { type: 'other', id: parcelId, label: 'Return parcel' }, relatedSubjects: [{ type: 'return', id: returnId }], dedupeKey: `return_parcel_overdue:${parcelId}` });
     expect(overdue).toMatchObject({ queueKey: 'warehouse.return_parcels', kind: 'return_parcel_overdue' });
+    // the related subject is matched by type *and* id together: the same id under another type is not it
+    expect((await t.service.listForSubject('return', returnId)).map((i) => i.id)).toEqual([overdue.id]);
+    expect(await t.service.listForSubject('refund', returnId)).toEqual([]);
     const strayId = newId();
     const stray = await t.service.raise({ sourceModule: 'test', queueKey: 'warehouse.return_parcels', kind: 'unexpected_return_parcel', title: 'Unexpected return parcel 1Z', subject: { type: 'other', id: strayId, label: 'Return parcel' }, dedupeKey: `return_parcel:${strayId}` });
     const received = (id: string, unexpected: boolean) => ev('warehouse.return_parcel.received', { parcelId: id, returnId: unexpected ? null : returnId, unexpected, parcelCondition: 'intact', receivedAt: new Date().toISOString() });
@@ -444,6 +447,9 @@ describe('public API', () => {
     const counts = await t.service.openCounts(['warehouse.pick_pack', 'nope.queue']);
     expect(counts['warehouse.pick_pack']!.open).toBeGreaterThanOrEqual(1);
     expect(counts['nope.queue']).toEqual({ open: 0, overdue: 0 });
+    // an item of the same seller and kind that the seller does not see is not one of their tasks
+    const hiddenId = newId();
+    await t.service.raise({ ...base, subject: { type: 'order' as const, id: hiddenId, ref: 'MK-2' }, dedupeKey: `pick_pack:${hiddenId}`, visibleToSeller: false });
     expect(await t.service.sellerTaskCounts(sellerId)).toEqual({ pick_pack: 1 });
     expect(await t.service.resolveBySource(`pick_pack:${subjectId}`, { note: 'Packed', by: { kind: 'system', name: 'warehouse' } })).toBe(1);
     expect(await t.service.resolveBySource(`pick_pack:${subjectId}`, { note: 'Packed', by: { kind: 'system', name: 'warehouse' } })).toBe(0);

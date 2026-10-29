@@ -7,7 +7,7 @@
 import { AppError, isAppError } from '../../../kernel/errors/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
-import { isDuplicateKey } from '../../../kernel/mongo/index.js';
+import { isDuplicateKey } from '../../../kernel/store/index.js';
 import type { Actor, Money, Page } from '../../../spec/common.js';
 import type { EscalationStep, SellerTask, WorkItem, WorkItemNote, WorkSubject } from '../../../spec/workqueues.js';
 import { ACTIVE_STATES, bump, CLOSED_STATES, DEDUPE_PREFIX_QUEUES, isActive, isArea, KIND_QUEUES, KINDS as ALL_KINDS, priorityRank, PRIORITIES, sellerScreen, type Kind, type Priority } from '../domain/catalog.js';
@@ -113,7 +113,8 @@ export class Items {
         const res = await this.repo.transaction(async (tx) => {
           const existing = await tx.activeByDedupe(spec.dedupeKey, { forUpdate: true });
           if (existing) return { row: await this.#refresh(tx, existing, spec, dueAt, defaultDue, dueSoon), created: false };
-          const closed = await tx.latestClosedByDedupe(spec.dedupeKey);
+          // locked: a dismissed item found here is reopened by writing it, in this transaction (§11.2 rule 1)
+          const closed = await tx.latestClosedByDedupe(spec.dedupeKey, { forUpdate: true });
           if (closed?.state === 'dismissed') {
             const due = dueAt ?? defaultDue;
             const row = await tx.updateItem(closed.id, {
@@ -186,8 +187,8 @@ export class Items {
           ref = await core.ctx.refs.next('WQ', { digits: 4 });
           continue;
         }
-        // two raises of the same key at once: the unique index refuses the second insert (MongoDB duplicate key,
-        // which aborts that transaction); run it again and refresh instead
+        // two raises of the same key at once: the unique index refuses the second insert (and on MongoDB that
+        // aborts the whole transaction); run it again and refresh instead
         if (attempt < 3 && isDuplicateKey(err)) continue;
         throw err;
       }
@@ -257,7 +258,7 @@ export class Items {
 
   /**
    * Close the active items of these kinds about these subjects, or with these dedupe keys (resolvesOn
-   * events). With a claim key (ctx.mongo.claim) the claim commits with the closing: a redelivered event changes nothing.
+   * events). With a claim key (store.claim) the claim commits with the closing: a redelivered event changes nothing.
    */
   async closeMatching(kinds: Kind[], matches: Match[], note: string, by: Actor, event: string | null, opts: { dedupeKeys?: string[]; claimKey?: string } = {}): Promise<number> {
     const core = this.core;
