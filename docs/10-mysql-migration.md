@@ -4,7 +4,7 @@ Status: **Y0 done; Y1 in progress** on branch `build/mysql-migration` (last upda
 
 **Y1 is done** (2026-10-29), and waits on the owner's approval before Y2. Built and tested: the ten views (§9.1–9.2), `kernel/mysql/*` (pool, transactions with retry, `Table`, `Where`, locks, claim, counters, migrate, the kernel tables), the job queue on `SKIP LOCKED`, the MySQL rate-limit, idempotency, webhook-event and reference-number stores, the purge job that replaces the TTL monitors, the generator's DDL / Kysely types / views / triggers / runtime `TableDef`s, the portable `mysqld` and the one-server test harness, the read-modify-write detector, the store seam (§10.5a), both pilots — **settings** (§10.5b) and **access** (§10.5c) — the boot's choice of kernel store (`KERNEL_STORE`, §10.5d) and §5c of BUILDING-MODULES.md. `check:ddl` applies all 472 tables to a real server and reads back all 5,652 columns.
 
-The Y1 exit criterion is met: the kernel's tests and both pilots pass on **MySQL 8.0.45 and 8.4** (§20.1) — 63 files, 822 tests with the pilots and the kernel's own data in MySQL — and the full suite passes both ways round, on MongoDB and with those in MySQL.
+The Y1 exit criterion is met: the kernel's tests and both pilots pass on **MySQL 8.0.45 and 8.4** (§20.1) — 63 files, 828 tests with the pilots and the kernel's own data in MySQL — and the full suite passes both ways round: 10,190 tests with those in MySQL, 10,199 on MongoDB.
 
 **Re-census of 2026-10-23.** The first census was taken at 01:04 on 2026-10-22, from commit `3dcf7961`. The whole ten-Departments programme (six modules: departments, services, software, food, rewards, farm) landed between 02:29 and 23:37 that same day, followed by the advertising and API work of 10-23. Every count below was therefore re-measured on `d27cc18e`. The drift is **additive**: six new modules, 54 tables and about 1,800 lines of repository, with no new kind of data access. Every file:line reference this plan makes into the modules it first analysed (orders, finance, search, sellers, support, payments, promotions) still resolves to the same code, except the two noted in Appendix C. Nothing of the design changes; the numbers, the tranches and four appendix lists do.
 
@@ -735,8 +735,9 @@ through `loadConfig(opts.env ?? process.env)`, and `buildTestApp` passes `env: {
 test builds. It is forwarded now. Until it was, these 341 failures showed as `INTERNAL_ERROR` and nothing
 else, which is how a one-line schema fault can look like 74 broken test files.
 
-Result: the pilots **and** the kernel on MySQL 8.0.45 — 63 files, 822 tests, 9 skipped — and the full suite that
-way round beside the full suite on MongoDB.
+Result: the pilots **and** the kernel on MySQL 8.0.45 — 63 files, **828 tests**, 9 skipped; the whole suite that
+way round — 431 files, **10,190 tests**, 10 skipped (the 9 `onMongo` migration tests and the OpenSearch
+integration test) — and the whole suite on MongoDB, **10,199 tests**, that one OpenSearch test skipped.
 
 ### 10.6 Boundaries
 
