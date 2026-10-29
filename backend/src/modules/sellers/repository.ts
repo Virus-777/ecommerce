@@ -143,17 +143,28 @@ export class SellersRepository {
     return this.#t('sellers').exists({ slug });
   }
 
+  /**
+   * The seller search box: the names, the contact email inside the `contact` document, and the reference.
+   * One `or` of `contains` conditions, which both stores answer the same way — the collation does the case on
+   * MySQL and a case-insensitive regex does it on MongoDB (§10.5e). It took a per-store query until the
+   * vocabulary could say `contains` of a path into a document.
+   */
+  #sellerTerm(text: string): WhereWithOr<SellerRec> {
+    const has = { op: 'contains' as const, value: text };
+    return { or: [{ store_name: has }, { legal_name: has }, { 'contact.email': has }, { ref: has }] };
+  }
+
   async listSellers(filter: SellerListFilter, page: PageRequest): Promise<common.Page<SellerRec>> {
     const where = await this.#sellerFilter(filter);
     const order = filter.sort === 'name' ? ({ column: 'store_name', direction: 'asc' } as const) : ({ column: 'created_at', direction: 'desc' } as const);
     const term = filter.q?.trim();
-    return term ? this.queries.pageSellersMatching(where, term, page, order) : this.#t('sellers').page(where, page, order);
+    return this.#t('sellers').page(term ? { and: [where, this.#sellerTerm(term)] } : where, page, order);
   }
 
   async allSellerIds(filter: SellerListFilter, limit: number): Promise<SellerRec[]> {
     const where = await this.#sellerFilter(filter);
     const term = filter.q?.trim();
-    return term ? this.queries.findSellersMatching(where, term, limit) : this.#t('sellers').find(where, { sort: { created_at: -1 }, limit });
+    return this.#t('sellers').find(term ? { and: [where, this.#sellerTerm(term)] } : where, { sort: { created_at: -1 }, limit });
   }
 
   async countSellersByStatus(): Promise<Record<string, number>> {
@@ -190,9 +201,11 @@ export class SellersRepository {
       ...(and.length ? { and } : {}),
     };
     const term = f.q?.trim();
-    // the term searches `account.storeName`, `business.legalName` and `account.contactName` as well as the
-    // reference: three paths inside JSON documents, so the search is the queries port's (queries.ts)
-    return term ? this.queries.pageApplicationsMatching(where, term, page) : this.#t('applications').page(where, page, { column: 'decision_target_at', direction: 'asc' });
+    // the term searches three fields inside JSON documents as well as the reference, which the vocabulary
+    // says since `contains` works on a path (§10.5e); it was a per-store query until then
+    const has = { op: 'contains' as const, value: term ?? '' };
+    const matching: WhereWithOr<ApplicationRec> = { or: [{ ref: has }, { 'account.storeName': has }, { 'business.legalName': has }, { 'account.contactName': has }] };
+    return this.#t('applications').page(term ? { and: [where, matching] } : where, page, { column: 'decision_target_at', direction: 'asc' });
   }
 
   latestApplicationOf(accountId: string): Promise<ApplicationRec | undefined> {
@@ -202,7 +215,20 @@ export class SellersRepository {
   /** Other applications (any state, so closed sellers too) sharing a work email, payout token, business or return address, or tax id hash */
   applicationsMatching(s: ApplicationSignals, excludeId: string): Promise<ApplicationRec[]> {
     if (!s.emails.length && !s.tokens.length && !s.addresses.length && !s.taxIdHashes?.length) return Promise.resolve([]);
-    return this.queries.applicationsMatching(s, excludeId);
+    // every signal is sayable now that a path takes `equals ignoring case` and a list (§10.5e): an address
+    // is a postal code *and* a line, of one element of the `or`, which is why each pair is its own branch
+    const or: WhereWithOr<ApplicationRec>[] = [];
+    // the application steps store `account.workEmail` lower-cased already (service/applications.ts), so this
+    // is belt and braces — and it is what the filter means rather than what the data happens to be
+    for (const email of s.emails) or.push({ 'account.workEmail': { op: 'equals ignoring case', value: email } });
+    if (s.tokens.length) or.push({ 'payout.current.providerDestinationId': [...s.tokens] }, { 'payout.pendingChange.providerDestinationId': [...s.tokens] });
+    for (const a of s.addresses) {
+      const line = { op: 'equals ignoring case' as const, value: a.line1.trim() };
+      or.push({ 'business.address.postalCode': a.postalCode.trim(), 'business.address.line1': line });
+      or.push({ 'return_address.address.postalCode': a.postalCode.trim(), 'return_address.address.line1': line });
+    }
+    if (s.taxIdHashes?.length) or.push({ tax_id_hash: [...s.taxIdHashes] });
+    return this.#t('applications').find({ id: { op: '<>', value: excludeId }, or }, { limit: 20 });
   }
 
   /* ---------------------------------------------------------------- members */

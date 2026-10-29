@@ -2,11 +2,11 @@
 
 Status: **Y0 and Y1 done; Y2 in progress** on branch `build/mysql-migration` (last updated 2026-10-29). Each phase in §23 starts only after the owner approves it. Decided by the owner on 2026-10-22: D1 (MySQL 8.0 or later), D2 (ids as readable text), D5 (MySQL search engine), D9 (portable `mysqld`); D11 (geographic points, §3) is new and open; the other decisions in §3 are still open.
 
-**Y2 started 2026-10-29** with the owner's approval. **Tranche A is done** — identity, audit, media,
-notifications and backups, 45 tables, 1,051 tests passing on both databases (§10.5f) — along with the four
-things the seam needed before thirty-seven repositories could be written against it (§10.5e). Six tranches
-remain: B (customers, catalog, inventory, sellers, purchasing, workqueues) through G (the six Departments
-modules).
+**Y2 started 2026-10-29** with the owner's approval. **Tranches A and B are done**: eleven modules and 136
+tables, **2,674 tests passing on both databases** (§10.5f, §10.5g), the twelve converted modules passing
+`test:http-mysql`'s 1,924 endpoint checks with the kernel's own data in MySQL, and three of Appendix C's
+read-modify-write rows closed. Five tranches remain: C (offers, promotions, cart, orders, content) through G
+(the six Departments modules).
 
 **Y1 is done** (2026-10-29). Built and tested: the ten views (§9.1–9.2), `kernel/mysql/*` (pool, transactions with retry, `Table`, `Where`, locks, claim, counters, migrate, the kernel tables), the job queue on `SKIP LOCKED`, the MySQL rate-limit, idempotency, webhook-event and reference-number stores, the purge job that replaces the TTL monitors, the generator's DDL / Kysely types / views / triggers / runtime `TableDef`s, the portable `mysqld` and the one-server test harness, the read-modify-write detector, the store seam (§10.5a), both pilots — **settings** (§10.5b) and **access** (§10.5c) — the boot's choice of kernel store (`KERNEL_STORE`, §10.5d) and §5c of BUILDING-MODULES.md. `check:ddl` applies all 472 tables to a real server and reads back all 5,652 columns.
 
@@ -912,6 +912,75 @@ caller reaches, an `is not null` that only saves a round trip).
   `content/migrations.ts` reaches into catalog's collections in *production* code; it is a MongoDB data
   migration and goes in Y4.
 
+### 10.5g Tranche B: customers, catalog, inventory, sellers, purchasing, workqueues (2026-10-29)
+
+Six modules, 91 tables, **1,623 tests passing on both databases** (customers 183, workqueues 271, catalog
+262, inventory 274, purchasing 169, sellers 464). With the twelve converted modules and the kernel's own data
+in MySQL, `npm run test:http-mysql` passes **1,924 of 1,924** endpoint-contract checks over real TCP, and the
+integration suite passes 53. Five builders worked in worktrees; **four of the nine builder sessions this phase
+were killed by API errors**, which changed the instructions rather than the work: commit after every green
+step, keep the progress log current, and on relaunch read what the dead attempt left rather than starting
+over (two relaunched builders kept all of it; one module's report never arrived at all and its code had to
+speak for itself, which it did).
+
+**What the seam gained, and what each addition cost to find.** Every one came from a repository asking, and
+two of them were silent-wrong-answer bugs in what Y2 had already shipped:
+
+| Added | Why |
+|---|---|
+| `isDuplicateKey(err)` | A repository that races on a unique key had to ask MongoDB's helper or MySQL's, which means knowing which store it has — the one question the seam exists to remove |
+| `{ 'pairs[]': { type, id } }` | "Some **one** element has these fields", which two dotted paths cannot say: `pairs[].type = t` and `pairs[].id = i` may be satisfied by two different elements. `$elemMatch` and `JSON_CONTAINS`, both reading the candidate as a subset |
+| **`offset`, replacing `skip`** | `StoreFindOptions` declared `skip`, the MongoDB facade passed it through, and the MySQL table's option is `offset` — so it compiled and **did nothing**. Written the natural way to find a retention cut-off, MongoDB took the row after the ones kept and MySQL took the newest, and the trim deleted every row it should have kept |
+| **`nullsLast`** | Both tables had implemented it; the seam never declared it, so a repository widened the interface locally and the option arrived only because both facades pass their options object through — one pass-through from the same silence |
+| `contains`, `starts with`, `equals ignoring case` **on a path into a document** | Five sites in sellers alone (a seller's contact email, three fields of an application). A search box inside a JSON document is the same question in both databases, and the port was holding it only because the vocabulary could not say it |
+| **A type guard on every ordering comparison of a path** | MySQL's JSON order puts **null below every number**, so `metrics->'$….value' < 95` is *true* for a seller whose metric is null — where MongoDB's `$lt` is type-bracketed and never matched one. A dispatch-reliability filter was answering with the sellers it knows nothing about |
+
+Two measurements worth keeping from that last row. `JSON_TYPE()` answers a string **in its own collation**,
+which a session running `utf8mb4_0900_bin` refuses to compare with a literal ("Illegal mix of collations for
+operation ' IN '"), so the guard collates its left side — the same trap as `->>` in §10.5b, one function
+along. And `json_expr BETWEEN CAST(? AS JSON) AND CAST(? AS JSON)` **does not compare the way `>=` and `<=`
+do**: `9` is not between `0` and `100`. A range on a path is two comparisons, and it needs no type guard,
+because a range brackets itself — both bounds are of one kind, and JSON orders the kinds, so a value of any
+other kind falls outside one end. (The guard was there first; breaking it changed no answer, which is how it
+came out again.)
+
+**The vocabulary earning its keep, measured in port entries.** sellers' port was nine reads when it was
+written and is **five** now: the two search boxes and the duplicate-application check went back into the
+repository the moment `contains` and `equals ignoring case` worked on a path, and both store implementations
+of them went with it. That is the test of whether an addition belongs in the seam — not whether it is
+convenient, but whether a repository stops needing a per-store file for it.
+
+**Three Appendix C items closed, and all of them the same shape.** The catalog brand race and purchasing's
+receipt counts were the two **Open** rows, and both were a read taken *outside* the transaction that writes
+it — which §11.2 rule 2's detector structurally cannot see, because there is no transaction to attach the
+memory to. Inside transactions the detector was right **thirty-one** times across the tranche (sellers 6,
+customers 5, catalog 2 — one of which no test reached — inventory, workqueues and purchasing between them the
+rest), every one a lost update waiting for a second writer on MongoDB.
+
+**And a column that was too narrow for what the code wrote.** `sellers.performance_events.value` is
+`DECIMAL(14,4)` — ten integer digits — and `onCaseOpened` was packing an epoch **in milliseconds** (thirteen)
+into it. Decimal128 took it; MySQL refused the insert (`ER_WARN_DATA_OUT_OF_RANGE`) and the metric read 0.
+This is §12's lesson again, in a module rather than the kernel: **a hand-written length is a claim about what
+the code writes, and only MySQL ever checks it.**
+
+The fix stayed in the module, which is the decision here rather than the default: the deadline is stored as
+epoch **seconds** with its milliseconds as the fraction (four decimals hold three, so it is lossless until
+the year 5138), commented at the writer and the one reader. Widening the column to `DECIMAL(18,4)` was the
+alternative and is a line whenever a second kind needs the room — but the column is a generic `value` shared
+by fourteen kinds, and widening it is an invitation to pack more into it. What a later phase should actually
+ask is why a *timestamp* lives in a metric's `value` at all; that is a spec change with a MongoDB backfill
+behind it, so it belongs after the cutover rather than inside a conversion.
+
+**Lessons added to the builders' rules for C–G**: a nullable JSON column negates badly (`NOT (… OR
+JSON_LENGTH(col) > 0)` is NULL when the column is, so the row vanishes — it needs `COALESCE`, and no test
+sees it unless a row actually holds SQL NULL); `Table.pageQuery` is the MySQL counterpart of `pageAggregate`,
+for a computed sort key; a port query cannot be inside a transaction, so check an aggregation's callers before
+planning one; a "shape" assertion hides a wrong query (most sabotage misses were tests asserting that a field
+exists rather than which row it came from, or fixtures where every row matched both halves of an `OR`); a
+setting a module reads **can** be stubbed in its tests (`apiStubs: { settings: { get: … } }`); and revert a
+sabotage from a copy rather than with `git checkout --`, which silently took two builders' uncommitted
+comments with it.
+
 ### 10.6 Boundaries
 
 - `ModuleStore.db` is a Kysely instance typed with **only that module's tables** (the generated `src/spec/<module>.ts` exports `<Module>Tables`, built 2026-10-29). A query on another module's table does not compile. A module that reads one of its own views declares that view's row type itself, since the generator does not parse a view's `SELECT` list.
@@ -1082,10 +1151,25 @@ The statements run on the pool, outside any transaction (each pass is its own), 
   - the questions page uses the summary columns;
   - `recomputeSellerSummary` becomes one GROUP BY.
 - **notifications** (converted 2026-10-29, §10.5f): **not** the inbox view, which cannot answer the question (§9.2); the counts are one `LEFT JOIN` with four `SUM(<condition>)` over `GROUP BY group_key`, and the 10 `updateMany` are UPDATEs.
-- **sellers**:
-  - `ROW_NUMBER` for the latest N snapshots;
-  - generated columns on `performance_snapshots.metrics->'$.dispatch_reliability.value'` (the admin list filter);
-  - application JSON paths (Appendix B).
+- **sellers** (converted 2026-10-29, §10.5g):
+  - `ROW_NUMBER` for the latest N snapshots — done, in the queries port;
+  - **the generated columns this line asked for would not help, measured.** `EXPLAIN` of the admin list's
+    `onTimeBelow` filter shows MySQL materialising the whole window (`row_number() OVER (PARTITION BY
+    seller_id ORDER BY computed_at DESC)`) over a **table scan**, and not using
+    `ix_sellers_performance_snapshots_1` for the ordering: the cost is the window, not the JSON path, so
+    indexing the path changes nothing. What would is §9.3's answer — a summary column on `sellers` holding
+    the latest dispatch value and status, one row per seller instead of one per seller per compute run, kept
+    by the job that already writes the snapshot. `countBelowDispatch` behind `/admin/sellers/stats` has the
+    same shape, and the table grows with sellers × compute runs with no retention job, which is the other
+    half of the question. **Y5, with a measurement on real volumes**, not Y2;
+  - application JSON paths (Appendix B) — done in the vocabulary rather than per module: `contains`,
+    `starts with` and `equals ignoring case` work on a path now (§10.5g). The seller search box measured
+    fine: the status filter narrows through an index and the path `LIKE` is a post-filter, which is what
+    §13.1 accepts for a staff list. The FULLTEXT ngram index on `(store_name, legal_name)` is in the spec
+    and `LIKE` does not use it; a search that needs it is a different reader, not a conversion;
+  - **one array that still needs the port**: `business.categoryIds` is a list nested *inside* a JSON
+    document, which the `[]` path cannot reach (its column is `business`, not `business.categoryIds`), so it
+    is `MEMBER OF (business->'$.categoryIds')` in `queries.mysql.ts`. Appendix B lists the site.
 - **audit**:
   - `search_words` gets a multi-valued index;
   - the chain append stays under `lock('audit:chain')`;
@@ -1647,7 +1731,7 @@ Each phase ends with `npm run check` green and a report. The next starts after a
 |---|---|---|
 | **Y0 Prepare on MongoDB** (started 2026-10-23, branch `build/mysql-migration`) | 1. The catalogue exporter of §18.1, run once while MongoDB still holds the 107 real products — **before anything else**. 2. Appendix C concurrency fixes, including the two `departments/service/blogs.ts` writers found on 2026-10-23. 3. Appendix D GraphQL batching fixes + batch-loader cache and cap. 4. **Spec additions — done.** The notation (sizes, `ci`, `cascade`/`nofk`, `appendOnly`, `views`) is in `lib/tables.ts` and `spec.ts` with a test of its own, documented in FORMAT.md and rendered in the module docs. Applied where Y0 could confirm it from the code: 5 append-only tables, 2 `ci` columns, 6 cascades, 2 `mediumtext` bodies. No `nofk` (that waits for Y5 measurements) and no view SQL (Y1, §9.1). 5. Re-run the census (§0) and Appendices A, B, C and E, and keep re-running them whenever modules are added: the 2026-10-22 census went stale within two hours. D4, D10 and D11 were decided at the start of this phase; D3, D6, D7 and D8 are confirmed before Y1. | Check green on MongoDB; `real-products.json` committed and `npm run seed` reproduces the catalogue; census current; no behaviour change |
 | **Y1 Foundations** — **done 2026-10-29** (§10.5a–d) | The §9.2 view SQL, written against the generator and the contract suite that prove it (§9.1). `kernel/mysql/*`: pool, transactions with retry, `Table`, `Where`, locks, claim, counters, migrate, kernel tables. Jobs on MySQL (`SKIP LOCKED`); rate limits; idempotency; webhook log; refs; purge job. Generator → DDL, Kysely types, views, triggers. Portable `mysqld`; test harness; contract suite; read-modify-write detector. During the transition a module chooses `store: 'mongo' \| 'mysql'` (as M1 did). The kernel's own tables and jobs move to MySQL first; each module's inbox claims go to the store of that module's data, so a claim always commits with its effects. Pilots: **settings, access**. | **Met**: the kernel's tests and both pilots pass on MySQL **8.0.45 and 8.4** (§20.1), the full suite passes both ways round, and BUILDING-MODULES.md has §5c |
-| **Y2 Modules in tranches** — started 2026-10-29, **tranche A done** (§10.5e, §10.5f) | 37 modules in seven tranches (tables in brackets). A: identity, audit, media, notifications, backups [45] — **done: 1,051 tests on both databases** · B: customers, catalog, inventory, sellers, purchasing, workqueues [91] · C: offers, promotions, cart, orders, content [56] · D: payments, shipping, checkout, messaging, reviews, finance, returns [100] · E: support, trust, advertising, reports, warehouse [71] · F: wishlist, wallet, fulfillment-service [26] · **G (new): departments, services, software, food, rewards, farm [54]**. Per module: repository rewrite, views, summary columns, tests reading tables. | Each module's tests, contract and `test:http` pass on MySQL with the detector on |
+| **Y2 Modules in tranches** — started 2026-10-29, **tranche A done** (§10.5e, §10.5f) | 37 modules in seven tranches (tables in brackets). A: identity, audit, media, notifications, backups [45] — **done: 1,051 tests on both databases** · B: customers, catalog, inventory, sellers, purchasing, workqueues [91] — **done: 1,623 tests on both databases** · C: offers, promotions, cart, orders, content [56] · D: payments, shipping, checkout, messaging, reviews, finance, returns [100] · E: support, trust, advertising, reports, warehouse [71] · F: wishlist, wallet, fulfillment-service [26] · **G (new): departments, services, software, food, rewards, farm [54]**. Per module: repository rewrite, views, summary columns, tests reading tables. | Each module's tests, contract and `test:http` pass on MySQL with the detector on |
 | **Y3 Search, reports, statistics, SQL speed-ups** | MySQL search engine (§14) + benchmark; reports market-day columns; finance ledger `day`; statistics queries; `EXPLAIN` review of every list; the §9.5 candidates (set-based statements, stored procedures, summary triggers), each with a parity test and a before/after measurement | Engine contract green; bench targets met; financial statistics equal to MongoDB on the same seeded data; each kept §9.5 item shows its gain, the rest stay in TypeScript |
 | **Y4 Remove MongoDB** | Delete `kernel/mongo`, Mongoose (nothing reads MongoDB any more under D10, so it goes here rather than being kept for an ETL), mongodb-memory-server, the Mongo engine, Mongo env vars. Update docs 02, MAINTAINING, README, FORMAT, `.env.example`, BUILDING-MODULES, docs/08, the deploy scripts (`install.sh`, `db-setup`, `backup.sh`, `restore.sh`, `ops.sh`, `check.sh`, the `marketly` command) | Check green with MySQL only |
 | **Y5 Volume and concurrency** | Seeder, load tool, scenarios and invariants (§22); tuning; the decisions on `nofk`, cached counts and audit batching | Targets met, invariants hold, deadlock retries under 2% |

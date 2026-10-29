@@ -384,6 +384,35 @@ describe.each(['mongo', 'mysql'])('%s', (kind) => {
     expect(await ids({ 'meta.by': { op: 'like', value: 'c%' } })).toEqual(['n3', 'n4']);
     // and it ands with the columns beside it
     expect(await ids({ owner: 'ann', 'meta.passed': true })).toEqual(['n1']);
+
+    // **An ordering comparison is bracketed to the value's kind**, which is MongoDB's reading and not SQL's:
+    // a field holding the JSON null, or a string, or nothing at all is *not* "below 5". MySQL's JSON order
+    // puts null under every number, so without the guard this answers with the rows that have no measurement
+    // at all — which is how a dispatch-reliability filter came to list the sellers it knows nothing about
+    // (§10.5f). These rows are added last, because a row with no `passed` field would join the null answers
+    // above and say nothing new about them.
+    await notes().insertMany([note('n7', { meta: { score: null } }), note('n8', { meta: { score: 'none' } })]);
+    expect(await ids({ 'meta.score': { op: '<', value: 5 } })).toEqual(['n2']);
+    expect(await ids({ 'meta.score': { op: '<=', value: 9 } })).toEqual(['n1', 'n2']);
+    expect(await ids({ 'meta.score': { op: 'between', value: [0, 100] } })).toEqual(['n1', 'n2']);
+    // a string compares with strings, and a number is not below one
+    expect(await ids({ 'meta.score': { op: '<', value: 'zzz' } })).toEqual(['n8']);
+
+    // What a search box asks of a field inside a document: five sites in sellers (a seller's contact email,
+    // three fields of an application) and the shape §13.1 counts 60 of. The collation does the case on
+    // MySQL, a case-insensitive regex does it on MongoDB, and both read the term literally and trimmed.
+    await notes().insertMany([note('n9', { meta: { by: 'Nora Vance' } }), note('n10', { meta: { by: 'nora@vance.test' } })]);
+    expect(await ids({ 'meta.by': { op: 'contains', value: 'NORA' } })).toEqual(['n10', 'n9']);
+    expect(await ids({ 'meta.by': { op: 'contains', value: ' vance.test ' } })).toEqual(['n10']);
+    expect(await ids({ 'meta.by': { op: 'starts with', value: 'nora v' } })).toEqual(['n9']);
+    // a term inside the value is not a prefix of it — the assertion that tells "starts with" from "contains",
+    // and the one that tells whether the text was unquoted first (the JSON text begins with a quote mark)
+    expect(await ids({ 'meta.by': { op: 'starts with', value: 'vance' } })).toEqual([]);
+    expect(await ids({ 'meta.by': { op: 'equals ignoring case', value: 'NORA VANCE' } })).toEqual(['n9']);
+    expect(await ids({ 'meta.by': { op: 'equals ignoring case', value: 'nora' } })).toEqual([]);
+    // a number or a null in that field matches no pattern with letters in it, on either store
+    expect(await ids({ 'meta.score': { op: 'contains', value: 'none' } })).toEqual(['n8']);
+    expect(await ids({ 'meta.by': { op: 'contains', value: null } })).toEqual([]);
   });
 
   it('keeps null in a JSON column that cannot be null, and finds it again', async () => {

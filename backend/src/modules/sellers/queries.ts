@@ -30,12 +30,13 @@
  * All of these are reads outside a transaction, which is why none of them takes one: they serve the two admin
  * lists, the duplicate-application check at submission, and the performance job's per-seller facts.
  */
-import type { KeysetOrder, PageRequest } from '../../kernel/lib/pagination.js';
-import type { WhereWithOr } from '../../kernel/store/index.js';
-import type * as common from '../../spec/common.js';
-import type { ApplicationRec, PerformanceFacts, SellerRec, SnapshotRec } from './ports.js';
+import type { PerformanceFacts, SnapshotRec } from './ports.js';
 
-/** What `applicationsMatching` compares a submission against (the repository answers an empty ask itself) */
+/**
+ * What the duplicate check compares a submission against. It lives here because the service builds it and
+ * the repository reads it; the comparison itself is a plain neutral filter now that a path takes a list and
+ * `equals ignoring case` (§10.5e), so it is no longer a query of this port.
+ */
 export interface ApplicationSignals {
   emails: string[];
   tokens: string[];
@@ -44,16 +45,6 @@ export interface ApplicationSignals {
 }
 
 export interface SellersQueries {
-  /**
-   * A page of sellers matching `where` whose **store name, legal name, contact email or reference** contains
-   * `term` (trimmed, ignoring case). `contact.email` is a path inside a JSON document, which is why the whole
-   * search is here; the repository reads the list itself when nothing was typed.
-   */
-  pageSellersMatching(where: WhereWithOr<SellerRec>, term: string, req: PageRequest, order: KeysetOrder): Promise<common.Page<SellerRec>>;
-
-  /** The same filter as `pageSellersMatching`, unpaged: at most `limit` sellers, newest first */
-  findSellersMatching(where: WhereWithOr<SellerRec>, term: string, limit: number): Promise<SellerRec[]>;
-
   /** Ids of the applications whose business lists `categoryId` (`business.categoryIds` holds it) */
   applicationIdsInCategory(categoryId: string): Promise<string[]>;
 
@@ -67,21 +58,6 @@ export interface SellersQueries {
 
   /** Ids of the sellers whose **latest** performance snapshot has a dispatch reliability status in `statuses` */
   sellerIdsWithDispatchStatusIn(statuses: readonly string[]): Promise<string[]>;
-
-  /**
-   * A page of applications matching `where` whose **reference, store name, legal name or contact name**
-   * contains `term`, oldest decision target first. Three of the four are paths inside JSON documents.
-   */
-  pageApplicationsMatching(where: WhereWithOr<ApplicationRec>, term: string, req: PageRequest): Promise<common.Page<ApplicationRec>>;
-
-  /**
-   * Other applications (any state, so closed sellers too, and never `excludeId`) sharing a work email, a
-   * payout destination token, a business or return address, or a tax id hash with the submission. At most 20.
-   *
-   * The work email and the address line are compared ignoring case: `lower(x) = lower(y)` on MongoDB, the
-   * `as_ci` collation on MySQL (§5.2 — the same rule, since both ignore case and not accents).
-   */
-  applicationsMatching(s: ApplicationSignals, excludeId: string): Promise<ApplicationRec[]>;
 
   /**
    * How many performance events of each kind a seller has since `since`, and the exact total of their

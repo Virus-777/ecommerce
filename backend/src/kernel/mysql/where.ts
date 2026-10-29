@@ -148,6 +148,24 @@ function jsonObjectPath(name: string, o: WhereOptions): string | undefined {
 const asJson = (value: unknown): Sql => ({ sql: 'CAST(? AS JSON)', params: [JSON.stringify(value)] });
 
 /**
+ * "…and the field holds a value of this kind", which every **ordering** comparison on a JSON path needs.
+ *
+ * MongoDB compares only inside a type: `$lt: 95` never matches a string, and never matches a null. MySQL's
+ * JSON comparison orders *across* types, and its order puts **null below every number** — so
+ * `metrics->'$.value' < 95` is true for a seller whose metric is null, and a dispatch-reliability filter
+ * quietly answers with the sellers that have no measurement at all (found converting sellers, 2026-10-29).
+ * The type guard is what `$type: 'number'` was saying on the MongoDB side of the same filter.
+ *
+ * `JSON_TYPE()` answers a string in its own collation, which a session running `utf8mb4_0900_bin` refuses to
+ * compare with a literal — "Illegal mix of collations for operation ' IN '" — so the left side is collated.
+ */
+function sameKind(expr: string, value: unknown): string {
+  const kinds =
+    typeof value === 'number' ? "('INTEGER', 'UNSIGNED INTEGER', 'DOUBLE', 'DECIMAL')" : typeof value === 'boolean' ? "('BOOLEAN')" : "('STRING')";
+  return `JSON_TYPE(${expr}) COLLATE utf8mb4_0900_bin IN ${kinds}`;
+}
+
+/**
  * A condition on a path into a JSON object. Everything is compared **as JSON** (`CAST(? AS JSON)`), which is
  * the one form that is neither slow nor wrong: `->>` unquotes to `utf8mb4_bin` and a session running
  * `utf8mb4_0900_bin` then refuses the comparison outright with "Illegal mix of collations" (measured on
@@ -194,18 +212,38 @@ function objectPathSql(name: string, expr: string, cond: unknown): Sql | undefin
     case 'like':
       // the text inside the document, compared in the session's own collation so the comparison is defined
       return value === null ? NOTHING : { sql: `JSON_UNQUOTE(${expr}) COLLATE utf8mb4_0900_bin LIKE ?`, params: [String(value)] };
+    // What a search box asks of a field inside a document — five sites in sellers alone (a seller's contact
+    // email, three fields of an application), and §13.1 counts 60 regex searches across 28 modules. The
+    // collation does the case-insensitivity, as it does for a column (§5.2); `JSON_UNQUOTE` is what takes the
+    // quotes off the text first, and a field holding a number or null unquotes to something no pattern with
+    // letters in it matches, which is what MongoDB's regex on a non-string field also answers.
+    case 'contains':
+      return value === null ? NOTHING : { sql: `JSON_UNQUOTE(${expr}) LIKE ? ${CI}`, params: [`%${escapeLike(String(value).trim())}%`] };
+    case 'starts with':
+      return value === null ? NOTHING : { sql: `JSON_UNQUOTE(${expr}) LIKE ? ${CI}`, params: [`${escapeLike(String(value).trim())}%`] };
+    case 'equals ignoring case':
+      return value === null ? NOTHING : { sql: `JSON_UNQUOTE(${expr}) = ? ${CI}`, params: [String(value)] };
     case 'between': {
       const [low, high] = list ?? [];
       if (low === null || low === undefined || high === null || high === undefined) return NOTHING;
       const [l, h] = [asJson(low), asJson(high)];
-      return { sql: `${expr} BETWEEN ${l.sql} AND ${h.sql}`, params: [...l.params, ...h.params] };
+      // **Two comparisons, not a BETWEEN.** `json_expr BETWEEN CAST(? AS JSON) AND CAST(? AS JSON)` answers
+      // nothing like the same rows — measured on 8.4.13: `9` is not between `0` and `100`, because BETWEEN
+      // does not compare the two sides the way `>=` and `<=` do. It looked right in the first version of this
+      // because every bound in the test was a single digit, where that difference does not show.
+      //
+      // And no `sameKind` guard here, unlike the one-sided comparisons: a range brackets itself. JSON orders
+      // null below every boolean, booleans below numbers and numbers below strings, and both bounds are of
+      // one kind — so a value of any other kind is either under the low bound or over the high one. Adding
+      // the guard would be a line no test could justify (it was there, and breaking it changed nothing).
+      return { sql: `(${expr} >= ${l.sql} AND ${expr} <= ${h.sql})`, params: [...l.params, ...h.params] };
     }
     default: {
-      // JSON values compare by type and then by value, so numbers compare as numbers and strings as strings
+      // an ordering comparison is bracketed to the value's own kind, as MongoDB's is (sameKind)
       if (!COMPARE.has(op)) throw new Error(`where: unsupported condition ${op} on ${name}`);
       if (value === null) return NOTHING;
       const j = asJson(value);
-      return { sql: `${expr} ${op} ${j.sql}`, params: j.params };
+      return { sql: `(${sameKind(expr, value)} AND ${expr} ${op} ${j.sql})`, params: j.params };
     }
   }
 }
