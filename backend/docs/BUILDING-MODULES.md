@@ -197,6 +197,8 @@ vocabulary of filters and patches, which is SQL's reading rather than MongoDB's:
 | `{ status: { $in: list } }`, `{ at: { $lte: now } }` | `{ status: list }`, `{ at: { op: '<=', value: now } }` — a value, a list, `null` or `{ op, value }` (`Cond`) |
 | `{ $or: [a, b] }` | `{ or: [a, b] }`, and `{ and: [a, b] }` where one column needs two conditions that an object cannot hold |
 | `{ 'items.key': k }` (a dotted path into a JSON array) | `{ 'items[].key': k }`, or `{ 'role_keys[]': k }` for the array's own elements. The `[]` is what tells SQL the column is an array (`MEMBER OF`); a value or a list, while an operator or `null` is refused by both stores |
+| `{ pairs: { $elemMatch: { type, id } } }` | `{ 'pairs[]': { type, id } }` — "some **one** element has these fields", which two dotted paths cannot say (they may be satisfied by two different elements). Equalities only, matched as a subset of the element |
+| `catch (err) { if (isDuplicateKey(err)) … }` from a store's own errors | `isDuplicateKey` from `kernel/store/index.js`: it answers for whichever database raised it |
 | `{ $inc: { version: 1 } }`, `$push` | `{ version: inc('version', 1) }`, `{ log: jsonAppend('log', entry) }` — expressions the server computes |
 | `{ 'check_result.passed': false }` (a path into a JSON **object**) | the same spelling, and SQL is told which column is JSON by the table's def. `<>` means "has a value, and it is not this"; `is not` is MongoDB's own `$ne` — "not this, including not set". Pick the one the old filter meant |
 | `{ name: contains(q) }`, `startsWith`, `equalsIgnoringCase` | `{ name: { op: 'contains', value: q } }`, `'starts with'`, `'equals ignoring case'` — the term is matched literally, ignoring case, and trimmed |

@@ -16,7 +16,7 @@
 import { escapeLike } from '../lib/text.js';
 
 export type { Cond, JsonArrayPath, Where, WhereWithOr } from '../mongo/filters.js';
-import { jsonArrayPath, pathValues, type WhereWithOr } from '../mongo/filters.js';
+import { isElementFields, jsonArrayPath, pathValues, type WhereWithOr } from '../mongo/filters.js';
 
 /** A fragment and the values it binds, in order */
 export interface Sql {
@@ -115,6 +115,10 @@ function pathSql(name: string, path: { column: string; field?: string }, cond: u
   // the field goes into the SQL text as part of a JSON path, so it is held to what a field name may be. It
   // comes from the repository's own source and not from a value, and this is what keeps that true.
   if (path.field !== undefined && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(path.field)) throw new Error(`where: ${name} is not a path this store can build: "${path.field}" is not a plain field name`);
+  // an object asks whether some element of the array holds these fields: JSON_CONTAINS, which reads the
+  // candidate as a *subset* of an element, exactly as MongoDB's $elemMatch of equalities does
+  if (!path.field && isElementFields(cond)) return { sql: `JSON_CONTAINS(${q(path.column)}, CAST(? AS JSON))`, params: [JSON.stringify(cond)] };
+  if (path.field && isElementFields(cond)) throw new Error(`where: ${name} is a path to one field, which takes a value and not an object`);
   const array = path.field ? `${q(path.column)}->'$[*].${path.field}'` : q(path.column);
   const values = pathValues(name, cond); // refuses an operator and null, as the MongoDB side does
   if (!values.length) return NOTHING; // "any of none"
