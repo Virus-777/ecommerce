@@ -7,7 +7,7 @@
  * the ones at the end do it from two connections at once, because that is the only way to see a lock.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import type { PoolConnection } from 'mysql2/promise';
+import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import type { MysqlStore } from './index.js';
 import { isLockTimeout } from './errors.js';
 import { testMysql } from '../../testing/mysql.js';
@@ -99,9 +99,31 @@ const PEOPLE: TableDef = {
 };
 
 let store: MysqlStore;
+interface LogRow {
+  id: number;
+  note: string;
+}
+
+/** An append-only table (§6.3): its triggers refuse an update, and a delete unless the session names it */
+const LOG: TableDef = {
+  table: 't_log',
+  key: ['id'],
+  idColumn: 'id',
+  columns: ['id', 'note'],
+  nullable: [],
+  decimal: [],
+  binary: [],
+  dates: [],
+  json: [],
+  booleans: [],
+  identity: 'id',
+  uniqueKeys: [{ name: 'PRIMARY', columns: ['id'] }],
+};
+
 let items: Table<Item>;
 let usage: Table<Usage>;
 let people: Table<Person>;
+let log: Table<LogRow>;
 
 /** What ModuleStore will hand a table outside a transaction: the pool, and a way to get one connection */
 const poolContext = (): TableContext => ({
@@ -123,7 +145,7 @@ const SEED: Partial<Item>[] = [
 beforeAll(async () => {
   store = await testMysql({ kernelTables: false });
   // the database is reused by the next test file in this worker slot, so make the tables from nothing
-  for (const t of ['t_items', 't_usage', 't_people']) await store.pool.query(`DROP TABLE IF EXISTS \`${t}\``);
+  for (const t of ['t_items', 't_usage', 't_people', 't_log']) await store.pool.query(`DROP TABLE IF EXISTS \`${t}\``);
   await store.pool.query(
     'CREATE TABLE `t_items` (' +
       '`id` BIGINT NOT NULL AUTO_INCREMENT, `sku` VARCHAR(32) NOT NULL, `name` VARCHAR(64) NULL, ' +
@@ -140,9 +162,16 @@ beforeAll(async () => {
       '`phone` VARCHAR(32) NOT NULL, `name` VARCHAR(64) NOT NULL, PRIMARY KEY (`id`), ' +
       'UNIQUE KEY `uq_people_email` (`email`), UNIQUE KEY `uq_people_phone` (`phone`)) ENGINE=InnoDB',
   );
+  await store.pool.query('CREATE TABLE `t_log` (`id` BIGINT NOT NULL AUTO_INCREMENT, `note` VARCHAR(32) NOT NULL, PRIMARY KEY (`id`)) ENGINE=InnoDB');
+  // the two triggers the generator writes for an appendOnly table, with this table's name in them
+  await store.pool.query("CREATE TRIGGER `t_log_no_update` BEFORE UPDATE ON `t_log` FOR EACH ROW\n  SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 't_log is append-only'");
+  await store.pool.query(
+    "CREATE TRIGGER `t_log_no_delete` BEFORE DELETE ON `t_log` FOR EACH ROW\nBEGIN\n  IF COALESCE(@marketly_purge, '') <> 't_log' THEN\n    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 't_log is append-only';\n  END IF;\nEND",
+  );
   items = new Table<Item>(poolContext(), ITEMS);
   usage = new Table<Usage>(poolContext(), USAGE);
   people = new Table<Person>(poolContext(), PEOPLE);
+  log = new Table<LogRow>(poolContext(), LOG);
 }, 180_000);
 
 afterAll(async () => {
@@ -153,6 +182,44 @@ beforeEach(async () => {
   await store.pool.query('TRUNCATE TABLE `t_items`');
   await store.pool.query('TRUNCATE TABLE `t_usage`');
   await store.pool.query('TRUNCATE TABLE `t_people`');
+  // TRUNCATE is not a delete, so the append-only trigger has nothing to say about it
+  await store.pool.query('TRUNCATE TABLE `t_log`');
+});
+
+describe('an append-only table (§6.3)', () => {
+  it('refuses an update and a delete, and lets the retention purge through', async () => {
+    const row = await log.insert({ note: 'written' });
+    await expect(log.update(row.id, { note: 'changed' })).rejects.toThrow(/append-only/);
+    await expect(log.deleteMany({ id: row.id })).rejects.toThrow(/append-only/);
+    expect(await log.count()).toBe(1);
+
+    // purgeMany names the table to the session, which is the only way past the trigger
+    expect(await log.purgeMany({ id: row.id })).toBe(1);
+    expect(await log.count()).toBe(0);
+  });
+
+  it('leaves the permission behind it: a pooled connection does not carry it to its next borrower', async () => {
+    const row = await log.insert({ note: 'written' });
+    await log.purgeMany({ id: -1 });
+    // the same pool, the next statement: the variable has to be back to nothing or every delete is allowed
+    await expect(log.deleteMany({ id: row.id })).rejects.toThrow(/append-only/);
+    const [vars] = await store.pool.query<(RowDataPacket & { v: string | null })[]>('SELECT @marketly_purge AS v');
+    expect(vars[0]?.v ?? null).toBeNull();
+  });
+
+  it('is emptied by the test harness all the same, or a slot database would never be clean', async () => {
+    await log.insert({ note: 'left behind' });
+    // what testing/mysql.ts does between files, on one connection
+    const conn = await store.pool.getConnection();
+    try {
+      await conn.query('SET @marketly_purge = ?', ['t_log']);
+      await conn.query('DELETE FROM `t_log`');
+      await conn.query('SET @marketly_purge = NULL');
+    } finally {
+      conn.release();
+    }
+    expect(await log.count()).toBe(0);
+  });
 });
 
 const seed = () => items.insertMany(SEED);

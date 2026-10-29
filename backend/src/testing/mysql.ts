@@ -85,7 +85,13 @@ async function empty(pool: Pool, database: string): Promise<void> {
     // the tables point at each other, so the order would matter; switching the checks off for the wipe is
     // both faster and the only way to do it without a topological sort
     await conn.query('SET FOREIGN_KEY_CHECKS = 0');
-    for (const t of tables) await conn.query(`DELETE FROM \`${t.TABLE_NAME}\``);
+    // an append-only table (§6.3) refuses a delete unless the session names it as the one being purged, and
+    // a database this says it has emptied has to be empty — audit's five tables are the first to need it
+    for (const t of tables) {
+      await conn.query('SET @marketly_purge = ?', [t.TABLE_NAME]);
+      await conn.query(`DELETE FROM \`${t.TABLE_NAME}\``);
+    }
+    await conn.query('SET @marketly_purge = NULL');
     for (const t of tables) if ((t.AUTO_INCREMENT ?? 1) > 1) await conn.query(`ALTER TABLE \`${t.TABLE_NAME}\` AUTO_INCREMENT = 1`);
     await conn.query('SET FOREIGN_KEY_CHECKS = 1');
   } finally {

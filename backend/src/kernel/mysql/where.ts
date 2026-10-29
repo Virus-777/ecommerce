@@ -16,7 +16,7 @@
 import { escapeLike } from '../lib/text.js';
 
 export type { Cond, JsonArrayPath, Where, WhereWithOr } from '../mongo/filters.js';
-import { jsonArrayPath, pathValues, type Where, type WhereWithOr } from '../mongo/filters.js';
+import { jsonArrayPath, pathValues, type WhereWithOr } from '../mongo/filters.js';
 
 /** A fragment and the values it binds, in order */
 export interface Sql {
@@ -246,12 +246,12 @@ export function whereSql<R>(where: WhereWithOr<R> | undefined, o: WhereOptions =
     const part = whereSql(also, o);
     if (part.sql !== EVERYTHING.sql) parts.push({ sql: `(${part.sql})`, params: part.params });
   }
-  const alternatives = (where as { or?: readonly Where<R>[] }).or;
+  const alternatives = (where as { or?: readonly WhereWithOr<R>[] }).or;
   if (alternatives) {
     if (!alternatives.length) {
       parts.push(NOTHING); // an `or` of nothing can be satisfied by nothing
     } else {
-      const branches = alternatives.map((w) => whereSql(w as WhereWithOr<R>, o));
+      const branches = alternatives.map((w) => whereSql(w, o));
       parts.push({
         sql: `(${branches.map((b) => `(${b.sql})`).join(' OR ')})`,
         params: branches.flatMap((b) => b.params),

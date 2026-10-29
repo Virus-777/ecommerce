@@ -81,6 +81,13 @@ export interface StoreTable<R extends object> {
   updateMany(where: WhereWithOr<R>, patch: Patch<R>): Promise<number>;
   delete(id: unknown): Promise<boolean>;
   deleteMany(where: WhereWithOr<R>): Promise<number>;
+  /**
+   * Deletes from an append-only table, which a plain `deleteMany` is refused on (docs/10 §6.3): `audit_entries`,
+   * `audit_entry_targets`, `audit_checkpoints`, `finance_ledger_entries`, `wallet_ledger`. Only a retention job
+   * has any business calling it. On MongoDB, where append-only is a rule the repositories keep rather than one
+   * the server enforces, it deletes like any other write — so the *rule* lives in the name of this method.
+   */
+  purgeMany(where: WhereWithOr<R>): Promise<number>;
 }
 
 /** A module's data, whichever database holds it */

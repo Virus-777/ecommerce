@@ -624,6 +624,29 @@ export class Table<R extends object> {
     return (await this.#run(`DELETE FROM ${q(this.name)} ${w.sql}`, w.params)).affectedRows;
   }
 
+  /**
+   * Deletes from an **append-only** table (§6.3), where the ordinary delete is refused by a trigger. Such a
+   * table lets a delete through only when the session says which table it is purging, and the only writes
+   * entitled to say it are the retention jobs: audit's purge, and nothing else — the ledgers have no purge,
+   * so their trigger always refuses.
+   *
+   * It runs in a transaction because `SET` and `DELETE` have to reach the **same** connection, and on a pool
+   * two statements need not. The variable is cleared again on the way out, so a pooled connection does not
+   * carry the permission to its next borrower.
+   */
+  async purgeMany(where: WhereWithOr<R>, o: ReadOptions = {}): Promise<number> {
+    const w = this.#where(where, o);
+    return this.ctx.transaction(async (conn) => {
+      await conn.query('SET @marketly_purge = ?', [this.name]);
+      try {
+        const [res] = await conn.query<ResultSetHeader>(`DELETE FROM ${q(this.name)} ${w.sql}`, [...w.params]);
+        return res.affectedRows;
+      } finally {
+        await conn.query('SET @marketly_purge = NULL');
+      }
+    });
+  }
+
   /* ---------------------------------------------------------------- write helpers */
 
   /* ---------------------------------------------------------------- the unlocked read-modify-write detector (§11.2 rule 2) */

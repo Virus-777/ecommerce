@@ -97,6 +97,9 @@ function neutralTable<R extends object>(t: MongoTable<R>): StoreTable<R> {
     updateMany: async (where, patch) => t.updateMany(filterOf(where), updateOf(patch)),
     delete: (id) => t.delete(id),
     deleteMany: async (where) => t.deleteMany(filterOf(where)),
+    // MongoDB has no trigger to be let past: the retention purge is the same delete, under a name that says
+    // which table it is allowed on (kernel/mysql/table.ts explains what the name buys on the other store)
+    purgeMany: async (where) => t.deleteMany(filterOf(where)),
   };
 }
 

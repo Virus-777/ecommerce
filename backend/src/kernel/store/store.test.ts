@@ -225,7 +225,7 @@ describe.each(['mongo', 'mysql'])('%s', (kind) => {
   it('filters by value, list, null and an operator', async () => {
     await notes().insertMany([
       note('n1', { status: 'draft', version: 1 }),
-      note('n2', { status: 'live', version: 5, title: 'Two' }),
+      note('n2', { status: 'live', version: 5, title: 'Two', to_at: FEB }),
       note('n3', { status: 'gone', version: 9, owner: 'bo' }),
     ]);
     const ids = async (where: Record<string, unknown>) => (await notes().find(where as never, { sort: { id: 1 } })).map((r) => r.id);
@@ -237,6 +237,12 @@ describe.each(['mongo', 'mysql'])('%s', (kind) => {
     expect(await ids({ version: { op: 'between', value: [2, 8] } })).toEqual(['n2']);
     // `<>` skips nulls, which is what it has always meant here (SQL's reading)
     expect(await ids({ title: { op: '<>', value: 'Two' } })).toEqual([]);
+    // and so do the four comparisons, on **both** stores: MongoDB's query operators are type-bracketed, so
+    // `$lte: <a date>` never matches a document whose field is null. A conversion therefore does not need an
+    // `is not null` beside a date comparison — which is worth having a test say, because the reverse was
+    // written in a comment once and believed (§10.5e)
+    expect(await ids({ to_at: { op: '<=', value: MAR } })).toEqual(['n2']);
+    expect(await ids({ to_at: { op: '>', value: JAN } })).toEqual(['n2']);
     // "is distinct from" does match nulls
     expect(await ids({ title: { op: 'is not', value: 'Two' } })).toEqual(['n1', 'n3']);
     expect(await ids({ status: { op: 'not in', value: ['draft'] } })).toEqual(['n2', 'n3']);

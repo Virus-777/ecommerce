@@ -99,7 +99,7 @@ export function jsonArrayPath(name: string): { column: string; field?: string } 
  * about a section asks twice of the same JSON array (`items[].key`), and `{ a: x, a: y }` is not a thing one
  * can write. An `and` of none adds no condition, because that is what "all of these, and there are none" means.
  */
-export type WhereWithOr<R> = Where<R> & { or?: readonly Where<R>[]; and?: readonly WhereWithOr<R>[] };
+export type WhereWithOr<R> = Where<R> & { or?: readonly WhereWithOr<R>[]; and?: readonly WhereWithOr<R>[] };
 
 const COMPARE: Record<string, string> = { '<': '$lt', '<=': '$lte', '>': '$gt', '>=': '$gte' };
 /** A condition no document meets (SQL: a comparison with null is never true) */
