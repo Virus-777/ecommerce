@@ -1,12 +1,12 @@
-import { decodeCursor, encodeCursor, type PageRequest } from '../../kernel/lib/pagination.js';
-import { contains, type ModuleStore } from '../../kernel/mongo/index.js';
-import type { Filter } from '../../kernel/mongo/table.js';
+import { type PageRequest } from '../../kernel/lib/pagination.js';
+import { inc, type Store, type WhereWithOr } from '../../kernel/store/index.js';
 import type { Page } from '../../spec/common.js';
 import type { MediaDb } from '../../spec/media.js';
 import type { AssetFilter, AssetPatch, AssetRow, OwnerFilter, ProcessingJobRow, RenditionRow, UploadRow, UsageRow } from './ports.js';
+import type { MediaQueries } from './queries.js';
 
 type CounterRow = MediaDb['upload_counters'];
-type Doc = Record<string, unknown>;
+type AssetWhere = WhereWithOr<AssetRow>;
 
 /** Storage objects of an asset whose files were erased (purge-deleted): storage_bucket is set to this */
 export const ERASED_BUCKET = '';
@@ -14,7 +14,7 @@ export const ERASED_BUCKET = '';
 /** check_result stored as plain JSON (dates inside become strings, the way the service reads them back) */
 const json = (v: unknown) => (v === undefined ? undefined : v === null ? null : (JSON.parse(JSON.stringify(v)) as never));
 
-const ownerWhere = (owner: OwnerFilter): Filter => ({ owner_kind: owner.kind, owner_id: owner.id });
+const ownerWhere = (owner: OwnerFilter): AssetWhere => ({ owner_kind: owner.kind, owner_id: owner.id });
 
 const LIVE = ['pending_upload', 'processing', 'ready', 'removed'];
 
@@ -30,20 +30,17 @@ function hamming(a: number, b: number): number {
 }
 
 /**
- * Conditions on an asset's usages (has / has no active usage): the usages of each asset are looked up by the
- * indexed asset_id ($lookup, both collections are this module's), only the fields the condition needs.
+ * media.assets, renditions, uploads, usages, processing_jobs, upload_counters (the files themselves stay in
+ * storage). Written against `ctx.store`, so the module's data runs in either database (docs/10 §10.5); the
+ * four reads that need a join to media.usages are in `queries.ts`, one implementation per store.
  */
-const USAGES = 'media.usages';
-const lookupUsages = (as: string, fields: Doc = { detached_at: 1 }): Doc => ({ $lookup: { from: USAGES, localField: '_id', foreignField: 'asset_id', pipeline: [{ $project: fields }], as } });
-/** No usage with detached_at null */
-const noActiveUse = (as: string): Doc => ({ [as]: { $not: { $elemMatch: { detached_at: null } } } });
-const activeUse = (as: string): Doc => ({ [as]: { $elemMatch: { detached_at: null } } });
-
-/** media.assets, renditions, uploads, usages, processing_jobs, upload_counters (the files themselves stay in storage) */
 export class MediaRepository {
   readonly #t;
 
-  constructor(private readonly store: ModuleStore) {
+  constructor(
+    private readonly store: Store,
+    private readonly queries: MediaQueries,
+  ) {
     this.#t = {
       assets: store.table<AssetRow>('assets'),
       renditions: store.table<RenditionRow>('renditions'),
@@ -56,45 +53,7 @@ export class MediaRepository {
 
   /** Runs fn with a repository bound to one transaction */
   transaction<T>(fn: (tx: MediaRepository) => Promise<T>): Promise<T> {
-    return this.store.transaction((tx) => fn(new MediaRepository(tx)));
-  }
-
-  /** Assets matching `filter` (row fields) and a condition on their usages, in `sort` order (document fields) */
-  async #assetsWithUsages(filter: Filter, usage: Doc, sort: Record<string, 1 | -1>, o: { skip?: number; limit?: number; fields?: Doc } = {}): Promise<AssetRow[]> {
-    const assets = this.#t.assets;
-    const docs = await assets.aggregate<Doc>([
-      { $match: assets.filter(filter) },
-      { $sort: sort },
-      lookupUsages('_u', o.fields),
-      { $match: usage },
-      ...(o.skip ? [{ $skip: o.skip }] : []),
-      ...(o.limit !== undefined ? [{ $limit: o.limit }] : []),
-      { $project: { _u: 0 } },
-    ]);
-    return docs.map((d) => assets.fromDoc(d));
-  }
-
-  /** Table.page for a filter that also needs the usages (created_at desc, id desc) */
-  async #pageWithUsages(filter: Filter, usage: Doc, req: PageRequest): Promise<Page<AssetRow>> {
-    const sort = { created_at: -1, _id: -1 } as const;
-    const cursorOf = (r: AssetRow) => encodeCursor([r.created_at.toISOString(), r.id]);
-    if (req.mode === 'page') {
-      const [counted] = await this.#t.assets.aggregate<{ n: number }>([{ $match: this.#t.assets.filter(filter) }, lookupUsages('_u'), { $match: usage }, { $count: 'n' }]);
-      const total = counted?.n ?? 0;
-      const items = await this.#assetsWithUsages(filter, usage, sort, { skip: (req.page - 1) * req.limit, limit: req.limit });
-      const totalPages = Math.max(1, Math.ceil(total / req.limit));
-      const last = items.at(-1);
-      return { items, nextCursor: req.page < totalPages && last ? cursorOf(last) : null, page: req.page, totalPages, total };
-    }
-    let f = filter;
-    if (req.cursor) {
-      const [at, id] = decodeCursor(req.cursor);
-      const v = new Date(at as string);
-      f = { $and: [filter, { $or: [{ created_at: { $lt: v } }, { created_at: v, id: { $lt: id } }] }] };
-    }
-    const rows = await this.#assetsWithUsages(f, usage, sort, { limit: req.limit + 1 });
-    const items = rows.slice(0, req.limit);
-    return { items, nextCursor: rows.length > req.limit ? cursorOf(items.at(-1)!) : null };
+    return this.store.transaction((tx) => fn(new MediaRepository(tx, this.queries)));
   }
 
   /* ---------------------------------------------------------------- assets */
@@ -119,23 +78,26 @@ export class MediaRepository {
   }
 
   listAssets(f: AssetFilter, page: PageRequest): Promise<Page<AssetRow>> {
-    const and: Filter[] = [];
+    // `and` rather than one object: `owner` and `ownerKind` are both conditions on owner_kind, and one
+    // object cannot hold two of a name
+    const and: AssetWhere[] = [];
     if (f.owner) and.push(ownerWhere(f.owner));
     if (f.ownerKind) and.push({ owner_kind: f.ownerKind });
     if (f.ownerId) and.push({ owner_id: f.ownerId });
     if (f.purpose) and.push({ purpose: f.purpose });
     if (f.kind) and.push({ kind: f.kind });
-    if (f.statuses?.length) and.push({ status: { $in: f.statuses } });
-    // failed: the check result says passed false; not failed: passed, or no result yet
+    if (f.statuses?.length) and.push({ status: f.statuses });
+    // failed: the check result says passed false; not failed: passed, or no result yet. A path into the
+    // document, which is `check_result.passed` on MongoDB and `check_result->'$.passed'` in SQL (§10.5f)
     if (f.failedChecks === true) and.push({ 'check_result.passed': false });
-    if (f.failedChecks === false) and.push({ $or: [{ 'check_result.passed': true }, { 'check_result.passed': null }] });
+    if (f.failedChecks === false) and.push({ or: [{ 'check_result.passed': true }, { 'check_result.passed': null }] });
     if (f.q?.trim()) {
-      const term = contains(f.q);
-      and.push({ $or: [{ file_name: term }, { title: term }, { alt: term }] });
+      const term = { op: 'contains' as const, value: f.q };
+      and.push({ or: [{ file_name: term }, { title: term }, { alt: term }] });
     }
-    const filter = and.length ? { $and: and } : {};
-    if (f.inUse === undefined) return this.#t.assets.page(filter, page, { column: 'created_at', direction: 'desc' });
-    return this.#pageWithUsages(filter, f.inUse ? activeUse('_u') : noActiveUse('_u'), page);
+    const where: AssetWhere = { and };
+    if (f.inUse === undefined) return this.#t.assets.page(where, page, { column: 'created_at', direction: 'desc' });
+    return this.queries.pageByUsage(where, f.inUse ? 'active' : 'none', page);
   }
 
   async findAssetByStorageKey(bucket: string, key: string): Promise<AssetRow | null> {
@@ -148,9 +110,9 @@ export class MediaRepository {
       {
         ...ownerWhere(owner),
         phash,
-        id: { $ne: asset.id },
-        status: { $in: ['processing', 'ready', 'removed'] },
-        $or: [{ created_at: { $lt: asset.createdAt } }, { created_at: asset.createdAt, id: { $lt: asset.id } }],
+        id: { op: '<>', value: asset.id },
+        status: ['processing', 'ready', 'removed'],
+        or: [{ created_at: { op: '<', value: asset.createdAt } }, { created_at: asset.createdAt, id: { op: '<', value: asset.id } }],
       },
       { sort: { created_at: 1 } },
     );
@@ -165,25 +127,11 @@ export class MediaRepository {
     phash: number,
     f: { excludeId: string; maxDistance: number; limit: number; ownerKind?: string; ownerId?: string; usageKinds?: readonly string[] },
   ): Promise<{ asset: AssetRow; distance: number }[]> {
-    // MongoDB 6.0 has no bitwise XOR in queries: the candidates' hashes are read and the distance computed here
-    const filter: Filter = {
-      phash: { $ne: null },
-      id: { $ne: f.excludeId },
-      status: 'ready',
-      kind: 'image',
-      // private files (evidence, documents, originals of private purposes) are never offered
-      visibility: 'public',
-      ...(f.ownerKind ? { owner_kind: f.ownerKind } : {}),
-      ...(f.ownerId ? { owner_id: f.ownerId } : {}),
-    };
-    const kinds = f.usageKinds?.length ? [...f.usageKinds] : null;
-    const candidates = await this.#t.assets.aggregate<{ _id: string; phash: number; created_at: Date }>([
-      { $match: this.#t.assets.filter(filter) },
-      ...(kinds ? [lookupUsages('_u', { detached_at: 1, kind: 1 }), { $match: { _u: { $elemMatch: { detached_at: null, kind: { $in: kinds } } } } }] : []),
-      { $project: { phash: 1, created_at: 1 } },
-    ]);
+    // neither database measures a Hamming distance in a query, so the candidates' hashes are read through
+    // the queries port and compared here
+    const candidates = await this.queries.phashCandidates(f);
     const near = candidates
-      .map((c) => ({ id: c._id, created_at: c.created_at, distance: hamming(phash, Number(c.phash)) }))
+      .map((c) => ({ id: c.id, created_at: c.created_at, distance: hamming(phash, c.phash) }))
       .filter((c) => c.distance <= f.maxDistance)
       .sort((a, b) => a.distance - b.distance || a.created_at.getTime() - b.created_at.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
       .slice(0, f.limit);
@@ -192,67 +140,54 @@ export class MediaRepository {
   }
 
   /** Bytes an owner stores (live files), for the storage quota */
-  async storedBytes(owner: OwnerFilter): Promise<number> {
-    const [r] = await this.#t.assets.aggregate<{ n: number }>([{ $match: { ...ownerWhere(owner), status: { $in: LIVE } } }, { $group: { _id: null, n: { $sum: '$size_bytes' } } }]);
-    return Number(r?.n ?? 0);
+  storedBytes(owner: OwnerFilter): Promise<number> {
+    return this.#t.assets.sum('size_bytes', { ...ownerWhere(owner), status: LIVE });
   }
 
   /** Assets of one owner in the given statuses (account and seller closure) */
   assetsOfOwner(owner: OwnerFilter, statuses: readonly string[]): Promise<AssetRow[]> {
-    return this.#t.assets.find({ ...ownerWhere(owner), status: { $in: [...statuses] } }, { sort: { created_at: 1 } });
+    return this.#t.assets.find({ ...ownerWhere(owner), status: [...statuses] }, { sort: { created_at: 1 } });
   }
 
   /* ---------------------------------------------------------------- job selections, oldest first, bounded */
 
   pendingUploadsBefore(cutoff: Date, limit: number): Promise<AssetRow[]> {
-    return this.#t.assets.find({ status: 'pending_upload', created_at: { $lt: cutoff } }, { sort: { created_at: 1 }, limit });
+    return this.#t.assets.find({ status: 'pending_upload', created_at: { op: '<', value: cutoff } }, { sort: { created_at: 1 }, limit });
   }
 
   /** Ready or rejected, never attached to anything, older than cutoff; or marked for deletion (expires_at passed) and no longer used */
   orphansToSweep(cutoff: Date, now: Date, excludePurposes: readonly string[], limit: number): Promise<AssetRow[]> {
-    return this.#assetsWithUsages(
-      {
-        status: { $in: ['ready', 'rejected'] },
-        $or: [{ retain_until: null }, { retain_until: { $lte: now } }],
-        ...(excludePurposes.length ? { purpose: { $nin: [...excludePurposes] } } : {}),
-      },
-      {
-        $or: [
-          // never attached to anything after the grace period
-          { created_at: { $lt: cutoff }, _u: { $size: 0 } },
-          // marked for deletion (seller or customer account closed) and no longer used
-          { expires_at: { $ne: null, $lte: now }, ...noActiveUse('_u') },
-        ],
-      },
-      { created_at: 1 },
-      { limit },
-    );
+    return this.queries.orphans({ cutoff, now, excludePurposes, limit });
   }
 
   generatedExpired(now: Date, purposes: readonly string[], limit: number): Promise<AssetRow[]> {
-    return this.#assetsWithUsages(
-      { status: 'ready', purpose: { $in: [...purposes] }, expires_at: { $lte: now }, $or: [{ retain_until: null }, { retain_until: { $lte: now } }] },
-      noActiveUse('_u'),
-      { expires_at: 1 },
-      { limit },
-    );
+    return this.queries.expiredGenerated({ now, purposes, limit });
   }
 
   /** Deleted before cutoff whose storage objects still exist */
   deletedToErase(cutoff: Date, limit: number): Promise<AssetRow[]> {
     return this.#t.assets.find(
       {
-        status: { $in: ['deleted', 'expired'] },
-        storage_bucket: { $ne: ERASED_BUCKET },
-        $or: [{ deleted_at: { $lt: cutoff } }, { deleted_at: null, created_at: { $lt: cutoff } }],
+        status: ['deleted', 'expired'],
+        storage_bucket: { op: '<>', value: ERASED_BUCKET },
+        or: [{ deleted_at: { op: '<', value: cutoff } }, { deleted_at: null, created_at: { op: '<', value: cutoff } }],
       },
       { sort: { created_at: 1 }, limit },
     );
   }
 
-  /** Removed evidence whose retention has passed */
+  /**
+   * Removed evidence whose retention has passed. The purge job checks the same two things again inside the
+   * row's lock before it acts, which is what actually enforces them — so breaking either condition here
+   * changes no outcome and no test can see it; it is the selection being honest about what it is for.
+   */
   removedPastRetention(now: Date, limit: number): Promise<AssetRow[]> {
-    return this.#t.assets.find({ status: 'removed', retain_until: { $ne: null, $lte: now } }, { sort: { retain_until: 1 }, limit });
+    // two conditions on retain_until, which one object cannot hold: MongoDB's `$lte` on a date also matches
+    // a null (null sorts before every date), so "it has one, and it has passed" has to say both
+    return this.#t.assets.find(
+      { status: 'removed', and: [{ retain_until: { op: 'is not', value: null } }, { retain_until: { op: '<=', value: now } }] },
+      { sort: { retain_until: 1 }, limit },
+    );
   }
 
   /**
@@ -260,17 +195,19 @@ export class MediaRepository {
    * (no processing_spec), oldest first
    */
   async productImagesToRebuild(spec: { aspectRatio: string; detailWidth: number; thumbnailWidth: number; quality: number }, limit: number): Promise<AssetRow[]> {
+    // `is not` on each path rather than `<>`: a document without that field counts as different, which is
+    // what MongoDB's own `$ne` said here and what "built with another spec" means
     return this.#t.assets.find(
       {
         purpose: 'product_image',
         kind: 'image',
         status: 'ready',
-        $or: [
+        or: [
           { processing_spec: null },
-          { 'processing_spec.aspectRatio': { $ne: spec.aspectRatio } },
-          { 'processing_spec.detailWidth': { $ne: spec.detailWidth } },
-          { 'processing_spec.thumbnailWidth': { $ne: spec.thumbnailWidth } },
-          { 'processing_spec.quality': { $ne: spec.quality } },
+          { 'processing_spec.aspectRatio': { op: 'is not', value: spec.aspectRatio } },
+          { 'processing_spec.detailWidth': { op: 'is not', value: spec.detailWidth } },
+          { 'processing_spec.thumbnailWidth': { op: 'is not', value: spec.thumbnailWidth } },
+          { 'processing_spec.quality': { op: 'is not', value: spec.quality } },
         ],
       },
       { sort: { created_at: 1 }, limit },
@@ -279,7 +216,10 @@ export class MediaRepository {
 
   /** Storage objects the assets know about, in pages (keyset on id) */
   async storageRefs(afterId: string | null, limit: number): Promise<{ id: string; status: string; bucket: string; key: string }[]> {
-    const rows = await this.#t.assets.find({ storage_bucket: { $ne: ERASED_BUCKET }, ...(afterId ? { id: { $gt: afterId } } : {}) }, { sort: { id: 1 }, limit });
+    const rows = await this.#t.assets.find(
+      { storage_bucket: { op: '<>', value: ERASED_BUCKET }, ...(afterId ? { id: { op: '>' as const, value: afterId } } : {}) },
+      { sort: { id: 1 }, limit },
+    );
     return rows.map((r) => ({ id: r.id, status: r.status, bucket: r.storage_bucket, key: r.storage_key }));
   }
 
@@ -287,7 +227,7 @@ export class MediaRepository {
 
   async renditionsOf(assetIds: readonly string[]): Promise<RenditionRow[]> {
     if (!assetIds.length) return [];
-    return this.#t.renditions.find({ asset_id: { $in: [...assetIds] } }, { sort: { width: 1, format: 1 } });
+    return this.#t.renditions.find({ asset_id: [...assetIds] }, { sort: { width: 1, format: 1 } });
   }
 
   async saveRenditions(assetId: string, rows: readonly RenditionRow[]): Promise<void> {
@@ -324,11 +264,17 @@ export class MediaRepository {
 
   async usagesOf(assetIds: readonly string[], opts: { activeOnly?: boolean } = {}): Promise<UsageRow[]> {
     if (!assetIds.length) return [];
-    return this.#t.usages.find({ asset_id: { $in: [...assetIds] }, ...(opts.activeOnly ? { detached_at: null } : {}) }, { sort: { attached_at: 1, id: 1 } });
+    return this.#t.usages.find({ asset_id: [...assetIds], ...(opts.activeOnly ? { detached_at: null } : {}) }, { sort: { attached_at: 1, id: 1 } });
   }
 
-  async activeUsage(assetId: string, u: { module: string; kind: string; refId: string }): Promise<UsageRow | null> {
-    return (await this.#t.usages.findOne({ asset_id: assetId, module: u.module, kind: u.kind, ref_id: u.refId, detached_at: null })) ?? null;
+  /**
+   * The usage of this asset by that record, while it lasts. `forUpdate` locks the row, which attach and
+   * detach both need: each reads this row and then writes it, and the read-modify-write detector of §11.2
+   * rule 1 is right to insist even though the asset's own row is already locked above it — that lock
+   * serialises the two callers today and says nothing about the next caller.
+   */
+  async activeUsage(assetId: string, u: { module: string; kind: string; refId: string }, opts: { forUpdate?: boolean } = {}): Promise<UsageRow | null> {
+    return (await this.#t.usages.findOne({ asset_id: assetId, module: u.module, kind: u.kind, ref_id: u.refId, detached_at: null }, { forUpdate: opts.forUpdate })) ?? null;
   }
 
   insertUsage(row: UsageRow): Promise<UsageRow> {
@@ -355,8 +301,8 @@ export class MediaRepository {
     const claimed: ProcessingJobRow[] = [];
     while (claimed.length < limit) {
       const job = await this.#t.jobs.updateOne(
-        { status: { $in: ['queued', 'running'] }, $or: [{ next_attempt_at: null }, { next_attempt_at: { $lte: now } }] },
-        { $set: { status: 'running', next_attempt_at: leaseUntil }, $inc: { attempts: 1 } },
+        { status: ['queued', 'running'], or: [{ next_attempt_at: null }, { next_attempt_at: { op: '<=', value: now } }] },
+        { status: 'running', next_attempt_at: leaseUntil, attempts: inc('attempts', 1) },
         { sort: { created_at: 1 } },
       );
       if (!job) break;

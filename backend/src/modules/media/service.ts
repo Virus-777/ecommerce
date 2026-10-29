@@ -267,7 +267,7 @@ export class MediaService implements MediaPublicApi {
       const locked = await tx.getAsset(assetId, { forUpdate: true });
       if (!locked) throw notFound();
       if (locked.status !== 'ready') throw notUsable(locked);
-      const existing = await tx.activeUsage(assetId, usage);
+      const existing = await tx.activeUsage(assetId, usage, { forUpdate: true });
       if (existing) {
         if ((usage.refLabel ?? null) !== existing.ref_label && usage.refLabel !== undefined) await tx.updateUsage(existing.id, { ref_label: usage.refLabel ?? null });
       } else {
@@ -299,7 +299,7 @@ export class MediaService implements MediaPublicApi {
     await this.repo.transaction(async (tx) => {
       const asset = await tx.getAsset(assetId, { forUpdate: true });
       if (!asset) return; // unknown file: nothing to detach
-      const active = await tx.activeUsage(assetId, usage);
+      const active = await tx.activeUsage(assetId, usage, { forUpdate: true });
       if (!active) return; // already detached
       await tx.updateUsage(active.id, { detached_at: now });
       // evidence is kept evidenceRetentionDays after its last use

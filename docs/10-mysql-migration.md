@@ -739,9 +739,81 @@ Result: the pilots **and** the kernel on MySQL 8.0.45 — 63 files, **828 tests*
 way round — 431 files, **10,190 tests**, 10 skipped (the 9 `onMongo` migration tests and the OpenSearch
 integration test) — and the whole suite on MongoDB, **10,199 tests**, that one OpenSearch test skipped.
 
+### 10.5e What Y2 asked for that Y1 did not have (built 2026-10-29)
+
+Y1's two pilots needed no aggregation and no search box. The thirty-seven modules of Y2 need both, and the
+census says how often: about 150 `$group` sites, 690 JSON-path conditions (Appendix B), 60 regex searches in
+28 modules, and roughly 100 reads with a join or a window function. Four things were added to the seam for
+them, each because it is the **same question** in both databases; everything else is a module's own.
+
+| Added | Why it is in the vocabulary and not in each module |
+|---|---|
+| `countBy(columns, where)` | "How many per key" is about half of the `$group` sites, and `GROUP BY` and `$group` answer it identically, nulls included |
+| `sum(column, where)` | The other common one. A **DECIMAL column is refused by name on both stores**: a money total would have to be rounded into a number to keep one return type, and that is the one thing a ledger may not do, so those sums stay in a module's own query where the exact string survives |
+| Paths into a JSON **object** (`check_result.passed`) | The half of Appendix B that §10.5a left open. MongoDB's own spelling; SQL is told which column is JSON by the `TableDef`, so a dotted name whose head is not a JSON column is refused rather than sent as a column nobody has |
+| `contains`, `starts with`, `equals ignoring case` | 28 modules have a search box. Case-insensitive regexes on MongoDB, the `as_ci` collation on MySQL (§5.2) — the same rule, and one spelling |
+
+**Comparing inside a JSON document: `CAST(? AS JSON)`, and nothing else.** §10.5b's probe said `->>` would
+not compare with a bound string; the form that works compares two JSON values, which also keeps `true` a
+boolean instead of the string `'true'`. A field that is not there reads as SQL NULL, and the null rules fall
+out of that: `null` matches "absent or JSON null" (MongoDB's reading), `<>` matches neither — the JSON null is
+excluded by hand, because `<>` between the JSON null and a string is perfectly true in SQL — and `is not` is
+"is distinct from", which is MongoDB's own `$ne` and matches both. A repository converting a `$ne` therefore
+has two honest choices and the difference is written down: `<>` for "has a value, and it is not this", `is
+not` for "not this, including not set". These are not indexable without a generated column (Appendix A); the
+first list that needs one will say so with EXPLAIN, and `wallet_gift_card_batches` already has one waiting.
+
+**`ctx.mysql`: a module's own tables in MySQL, there only while its data is.** The generator now writes the
+`<Module>Tables` interfaces §17.2 promised — rows under their MySQL names, keyed as Kysely is keyed, reads
+only (a write goes through `Table`, so there is no `ColumnType<Select, Insert, Update>` to be had from it).
+A view is declared by the module that reads one, because a view's columns come from its `SELECT` list and the
+generator does not parse SQL.
+
+**The queries port: what a module keeps per store.** A read that needs a join, a window function or a
+`GROUP BY` with more than a count is not one sentence in both databases, and the seam deliberately has no
+shape for it (§10.5). Such a module gets three small files beside its repository:
+
+```
+repository.ts     the whole module, in the neutral vocabulary, on ctx.store
+queries.ts        the interface: the few reads that are not the same question in both databases
+queries.mongo.ts  the pipelines, moved as they were
+queries.mysql.ts  the SQL, and Kysely where a projection or a window is wanted
+```
+
+`module.ts` picks one line: `ctx.mysql ? mysqlXQueries(ctx.mysql) : mongoXQueries(ctx.mongo)`. The service
+never learns which it has, the repository passes the port down to its transaction clone, and at the cutover
+`queries.mongo.ts` is deleted whole rather than edited (Y4).
+
+Two things that decided the shape, both from media:
+
+- **Named queries, not a combinator.** Three of media's four joining reads mix an asset condition with a
+  usage condition *inside an OR* (the sweep job: "never attached after the grace period, **or** marked for
+  deletion and no longer used"). A vocabulary able to say that is a query language. Four names are cheaper.
+- **`ReadOptions.and` carries most of them.** Two of the four are an ordinary `Table` read plus one
+  `EXISTS` subquery, so the paging, the keyset cursor and the row conversion stay written once. Only the
+  near-duplicate scan is Kysely, because it wants three columns of many thousands of rows and `Table` reads
+  whole rows.
+
+**The media pilot (the pattern-setter for Y2).** All **300 tests pass on both databases**, the same files and
+the same assertions. What it found:
+
+- **The read-modify-write detector earned its place on the first module.** `attach` and `detach` both read
+  the asset's active usage row and then write it, and the detector refused all seven tests that reach them
+  (§11.2 rule 1). The asset's own row is locked above, which serialises *today's* two callers and says
+  nothing about the next one, so the read now takes `forUpdate`. On MongoDB this was a lost update waiting
+  for a second writer and nothing would have reported it.
+- **§9.3's `usage_count` summary column is not needed yet, and Y2 is not the place to find out.** The
+  in-use and unused filters are an `EXISTS` on `media_usages (asset_id, detached_at)`, which is what §13.1
+  gives a lookup used as a filter. A summary column would be a spec change, a write path to keep it true and
+  a MongoDB backfill that Y4 deletes — all to save a subquery nobody has measured. It stays on Y5's list with
+  the measurement that would justify it.
+- **Y2 changes code, not the schema.** That is the rule for the tranches: a module that cannot answer a query
+  without a new column or a generated one reports it, and it is decided here, with EXPLAIN, rather than in
+  thirty-seven places. It keeps the generated files out of the builders' commits as well (M2's convention).
+
 ### 10.6 Boundaries
 
-- `ModuleStore.db` is a Kysely instance typed with **only that module's tables and views** (the generated `src/spec/<module>.ts` exports `<Module>Tables`). A query on another module's table does not compile.
+- `ModuleStore.db` is a Kysely instance typed with **only that module's tables** (the generated `src/spec/<module>.ts` exports `<Module>Tables`, built 2026-10-29). A query on another module's table does not compile. A module that reads one of its own views declares that view's row type itself, since the generator does not parse a view's `SELECT` list.
 - **Inside a transaction, `db` is built on a pool of exactly one connection: the transaction's** (built 2026-10-27). Kysely takes a connection from a pool per statement, so a `db` built on the real pool would open a *second* connection and see none of the transaction's uncommitted work — and worse, its own writes would commit outside it and survive a rollback. Both are in the tests. Two details make it work: Kysely wants mysql2's **callback** pool, which `mysql2/promise` keeps one level down (`pool.pool`, `connection.connection`, neither in the published types), and the one-connection pool must pass on only the handful of members Kysely asks for — handing it the connection itself lets it `release()` the transaction's connection mid-transaction, and wrapping it in a clone or a prototype breaks mysql2's internals. `release` and `end` do nothing: the connection goes back to the real pool when the transaction ends.
 - The pool's `SET NAMES … COLLATE utf8mb4_0900_bin` reaches Kysely's connections because it uses the same underlying pool, whose `connection` event runs the session setup. A test asks six connections at once what `@@collation_connection` is, rather than one — one connection has been set up by hand since the version check, so asking once passes even when the hook is gone.
 - `check:boundaries` adds two checks:

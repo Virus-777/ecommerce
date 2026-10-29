@@ -198,7 +198,10 @@ vocabulary of filters and patches, which is SQL's reading rather than MongoDB's:
 | `{ $or: [a, b] }` | `{ or: [a, b] }`, and `{ and: [a, b] }` where one column needs two conditions that an object cannot hold |
 | `{ 'items.key': k }` (a dotted path into a JSON array) | `{ 'items[].key': k }`, or `{ 'role_keys[]': k }` for the array's own elements. The `[]` is what tells SQL the column is an array (`MEMBER OF`); a value or a list, while an operator or `null` is refused by both stores |
 | `{ $inc: { version: 1 } }`, `$push` | `{ version: inc('version', 1) }`, `{ log: jsonAppend('log', entry) }` — expressions the server computes |
-| `aggregate`, `pageAggregate`, update pipelines, Kysely | nothing: each belongs to one database. A repository that needs one is not store-neutral and says so by taking the store it needs. `decToZero` and a hand-written `expr` are SQL, and the MongoDB side refuses them by name rather than guessing |
+| `{ 'check_result.passed': false }` (a path into a JSON **object**) | the same spelling, and SQL is told which column is JSON by the table's def. `<>` means "has a value, and it is not this"; `is not` is MongoDB's own `$ne` — "not this, including not set". Pick the one the old filter meant |
+| `{ name: contains(q) }`, `startsWith`, `equalsIgnoringCase` | `{ name: { op: 'contains', value: q } }`, `'starts with'`, `'equals ignoring case'` — the term is matched literally, ignoring case, and trimmed |
+| `aggregate([{ $match }, { $group: { _id: '$k', n: { $sum: 1 } } }])` | `table.countBy(['k'], where)` → `[{ k, n }]`, and `table.sum('bytes', where)` for a total. A money (DECIMAL) column is refused by `sum` on both stores: see §5c's note below |
+| `aggregate`, `pageAggregate`, update pipelines, Kysely | the module's **queries port**, below: each belongs to one database. `decToZero` and a hand-written `expr` are SQL, and the MongoDB side refuses them by name rather than guessing |
 
 Four things the pilots got wrong first:
 
@@ -213,6 +216,33 @@ Four things the pilots got wrong first:
   does that translation: a repository passes and reads `null` either way and never writes `'null'` itself.
 - **`<>` and lists keep SQL's nulls**, as §5b already said: `{ op: '<>', value: x }` does not match a row whose
   column is null, and `{ col: [] }` matches nothing. The rule has not changed; MySQL is where it came from.
+
+**A read that is not the same question in both databases goes in a queries port** (docs/10 §10.5e): a join,
+a window function, a `GROUP BY` with more than a count, a money total, a projection of three columns out of
+forty. Four files, and `media` is the one to copy:
+
+```
+repository.ts     the whole module, in the neutral vocabulary, on ctx.store
+queries.ts        the interface — name the reads ("orphans", "pageByUsage"), do not invent a combinator
+queries.mongo.ts  the pipelines, moved as they were
+queries.mysql.ts  the SQL. `ReadOptions.and` adds one EXISTS to an ordinary Table read, which keeps the
+                  paging and the row conversion written once; ctx.mysql.db is Kysely, typed, for the rest
+```
+
+`module.ts` picks one line — `ctx.mysql ? mysqlXQueries(ctx.mysql) : mongoXQueries(ctx.mongo)` — and the
+repository takes `(ctx.store, queries)` and passes the port to its transaction clone. `ctx.mysql` is there
+only while the module's data is in MySQL, which is what makes that line the whole switch.
+
+**Lock a row before you write it, even where something else already serialises the writers.** Converting
+media turned seven tests red at once: `attach` and `detach` read an asset's usage row and then write it,
+inside a transaction that had already locked the *asset*. The read-modify-write detector (§11.2 rule 1) was
+right — the asset's lock serialises today's two callers and says nothing about the next one — and the fix is
+`{ forUpdate: true }` on the read. On MongoDB that was a lost update waiting for a second writer, with
+nothing to report it.
+
+**A conversion changes code, not the schema.** If a module cannot answer a query without a new column, a
+generated column or an index, say so in the report rather than editing its spec: that decision is made once,
+with EXPLAIN, for all of them (docs/10 §10.5e). Regenerating also touches files every other module shares.
 
 **Tests of a module whose data may be in MySQL read it through the store the app chose** —
 `app.kernel.boot.stores.get('<module>')!.table<Row>('things')` — and so do tests of other modules that reach

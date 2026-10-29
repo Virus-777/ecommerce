@@ -79,6 +79,10 @@ describe('starting an upload', () => {
     const again = await startUpload(t, 'seller', seller, { purpose: 'product_image', sizeBytes: 1000 });
     expect(again.statusCode).toBe(429);
     expect(again.json().error.code).toBe('QUOTA_EXCEEDED');
+
+    // the quota counts the files the seller still has: a deleted one has given its bytes back
+    await mediaTable(t.app, 'assets').update(assetId, { status: 'deleted' });
+    expect((await startUpload(t, 'seller', seller, { purpose: 'product_image', sizeBytes: 1000 })).statusCode).toBe(201);
   });
 
   it('staff uploads belong to the platform, evidence to the staff member', async () => {

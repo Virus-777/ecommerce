@@ -5,9 +5,8 @@ import { fixedClock } from '../../../kernel/lib/clock.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import type { EventEnvelope } from '../../../kernel/events/index.js';
 import type * as audit from '../../../spec/audit.js';
-import type { Table } from '../../../kernel/mongo/index.js';
-import { spec, type MediaAsset, type MediaDb, type UploadRequest, type UploadTicket } from '../../../spec/media.js';
-import { schemas } from '../schema.js';
+import type { StoreTable } from '../../../kernel/store/index.js';
+import { type MediaAsset, type MediaDb, type UploadRequest, type UploadTicket } from '../../../spec/media.js';
 import { auth, buildTestApp, callers } from '../../../testing/app.js';
 import type { DevProcessor } from '../providers/processing/dev.js';
 import type { MemoryStorage } from '../providers/storage/memory.js';
@@ -15,9 +14,14 @@ import type { MediaService } from '../service.js';
 
 export { auth, callers };
 
-/** A collection of the module as its repository reads it (rows in spec shape) */
-export function mediaTable<T extends keyof MediaDb & string>(app: FastifyInstance, name: T): Table<MediaDb[T]> {
-  return app.kernel.mongo.module('media', spec.collections, schemas).table<MediaDb[T]>(name);
+/**
+ * One of the module's tables as its repository reads it (rows in spec shape), **through the store the app
+ * chose** — MongoDB or MySQL, whichever `MYSQL_MODULES` put this module's data in. A helper that built a
+ * MongoDB store of its own would read an empty database the day the module moved, and nothing would say so
+ * (docs/10 §10.5c: that is how twenty-two of access's tests failed at once).
+ */
+export function mediaTable<T extends keyof MediaDb & string>(app: FastifyInstance, name: T): StoreTable<MediaDb[T]> {
+  return app.kernel.boot.stores.get('media')!.table<MediaDb[T]>(name);
 }
 
 export interface MediaTestApp {

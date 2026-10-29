@@ -8,6 +8,8 @@ import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { webhooksRoutes } from './http/webhooks.js';
 import { fileServer } from './http/files.js';
+import { mongoMediaQueries } from './queries.mongo.js';
+import { mysqlMediaQueries } from './queries.mysql.js';
 import { MediaRepository } from './repository.js';
 import { createDevProcessor } from './providers/processing/dev.js';
 import { createSharpProcessor } from './providers/processing/sharp.js';
@@ -41,7 +43,9 @@ export default defineModule({
     // images: sharp decodes and resizes them (MEDIA_IMAGE_PROCESSOR=sharp, the default); dev reads headers only (tests)
     const processor = ctx.config.media.imageProcessor === 'dev' ? createDevProcessor() : createSharpProcessor();
     const providers = { storage, scanner: createDevScanner(), processor };
-    const service = new MediaService({ repo: new MediaRepository(ctx.mongo), ctx, providers });
+    // the repository is store-neutral (ctx.store); its four joining reads are the store's own (queries.ts)
+    const queries = ctx.mysql ? mysqlMediaQueries(ctx.mysql) : mongoMediaQueries(ctx.mongo);
+    const service = new MediaService({ repo: new MediaRepository(ctx.store, queries), ctx, providers });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service), webhooksRoutes(service));
     // GET /files/{bucket}/{key}: the middleware verifies the signed link (auth kind file-link) before this streams the file
