@@ -1,6 +1,8 @@
 import { defineModule } from '../../kernel/module-system/index.js';
 import { spec } from '../../spec/purchasing.js';
 import { adminRoutes } from './http/admin.js';
+import { mongoPurchasingQueries } from './queries.mongo.js';
+import { mysqlPurchasingQueries } from './queries.mysql.js';
 import { PurchasingRepository } from './repository.js';
 import { PurchasingService } from './service.js';
 import { schemas } from './schema.js';
@@ -16,7 +18,10 @@ export default defineModule({
   version: '2.0.0',
   schemas,
   register(ctx) {
-    const service = new PurchasingService({ repo: new PurchasingRepository(ctx.mongo), ctx });
+    // the repository is store-neutral (ctx.store); the two performance aggregations and the two-column
+    // comparison behind "has issues" are the store's own (queries.ts)
+    const queries = ctx.mysql ? mysqlPurchasingQueries(ctx.mysql) : mongoPurchasingQueries(ctx.mongo);
+    const service = new PurchasingService({ repo: new PurchasingRepository(ctx.store, queries), ctx });
     ctx.provide(service);
     ctx.http.routes(adminRoutes(service));
 

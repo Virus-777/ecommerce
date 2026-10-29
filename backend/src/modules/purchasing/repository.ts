@@ -1,6 +1,6 @@
 import type { Page, PageRequest } from '../../kernel/lib/pagination.js';
 import { orThrow } from '../../kernel/lib/or-throw.js';
-import { contains, type Filter, type ModuleStore } from '../../kernel/mongo/index.js';
+import type { Store, WhereWithOr } from '../../kernel/store/index.js';
 import type * as common from '../../spec/common.js';
 import type { ClaimLine, PurchasingDb } from '../../spec/purchasing.js';
 import { actorText, parseActor, SUBMITTED_RECEIPT_STATUSES, type ClaimKind, type ClaimStatus, type DeliveryStatus, type PoStatus, type ReceiptStatus } from './domain/rules.js';
@@ -21,11 +21,16 @@ import type {
   SupplierItemRow,
   SupplierRow,
 } from './ports.js';
+import type { PurchasingQueries } from './queries.js';
 
 type T<K extends keyof PurchasingDb> = PurchasingDb[K];
+/** Conditions on one of this module's tables, in the vocabulary both stores read (BUILDING-MODULES §5c) */
+type W<K extends keyof PurchasingDb> = WhereWithOr<T<K>>;
 
-/** One of `values`, or nothing when the list is empty (an empty IN matches no row) */
-const oneOf = (values: readonly unknown[]) => ({ $in: [...new Set(values)] });
+/** One of `values`, or nothing when the list is empty (an empty IN matches no row, on either store) */
+const oneOf = <V>(values: readonly V[]): readonly V[] => [...new Set(values)];
+/** A search box's term: matched literally, ignoring case, on either store (§10.5e) */
+const contains = (text: string) => ({ op: 'contains', value: text }) as const;
 const num = (v: string | number | null | undefined): number | null => (v === null || v === undefined ? null : Number(v));
 const ids = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 const asDate = (v: Date | string): Date => (v instanceof Date ? v : new Date(v));
@@ -235,13 +240,14 @@ const mapPage = <A, B>(p: Page<A>, f: (a: A) => B): Page<B> => ({ ...p, items: p
 /** Statuses of a purchase order that may still be late or short */
 const OPEN_INCOMING: readonly PoStatus[] = ['sent', 'partly_received'];
 
-function claimFilter(filter: ClaimFilter): Filter {
-  const and: Filter[] = [];
+function claimFilter(filter: ClaimFilter): W<'supplier_claims'> {
+  // `status` and `statuses` are both conditions on one column, which one object cannot hold: hence `and`
+  const and: W<'supplier_claims'>[] = [];
   if (filter.status) and.push({ status: filter.status });
   if (filter.statuses) and.push({ status: oneOf(filter.statuses) });
   if (filter.supplierId) and.push({ supplier_id: filter.supplierId });
   if (filter.purchaseOrderIds) and.push({ purchase_order_id: oneOf(filter.purchaseOrderIds) });
-  return and.length ? { $and: and } : {};
+  return and.length ? { and } : {};
 }
 
 /* ------------------------------------------------------------------ repository */
@@ -251,13 +257,21 @@ type ForUpdate = { forUpdate?: boolean };
 /**
  * purchasing.suppliers, purchasing.supplier_items, purchasing.supplier_performance, purchasing.purchase_orders,
  * purchasing.purchase_order_lines, purchasing.purchase_order_events, purchasing.deliveries, purchasing.receipts,
- * purchasing.receipt_lines, purchasing.supplier_claims (MongoDB, docs/04-mongodb-migration.md). Rows are mapped to
- * the domain terms of ports.ts (camelCase, actors parsed) on the way out.
+ * purchasing.receipt_lines, purchasing.supplier_claims, in **whichever database holds this module's data** —
+ * the store seam decides at boot (BUILDING-MODULES §5c, docs/10 §10.5a). Rows are mapped to the domain terms
+ * of ports.ts (camelCase, actors parsed) on the way out.
+ *
+ * The three reads that are not the same question in both databases — the two halves of the supplier
+ * performance job and the two-column comparison behind "has issues" — are the module's queries port
+ * (queries.ts), which `module.ts` picks per store and which the transaction clone carries down.
  */
 export class PurchasingRepository {
   readonly #t;
 
-  constructor(private readonly store: ModuleStore) {
+  constructor(
+    private readonly store: Store,
+    private readonly queries: PurchasingQueries,
+  ) {
     this.#t = {
       suppliers: store.table<T<'suppliers'>>('suppliers'),
       items: store.table<T<'supplier_items'>>('supplier_items'),
@@ -274,7 +288,7 @@ export class PurchasingRepository {
 
   /** fn with a repository bound to one transaction */
   transaction<R>(fn: (tx: PurchasingRepository) => Promise<R>): Promise<R> {
-    return this.store.transaction((tx) => fn(new PurchasingRepository(tx)));
+    return this.store.transaction((tx) => fn(new PurchasingRepository(tx, this.queries)));
   }
 
   /** Purchase orders late or short (the exists-subqueries as two reads): open, with open units, and partly received, with a delayed delivery or past their expected date */
@@ -304,17 +318,19 @@ export class PurchasingRepository {
       .map((po) => po.id);
   }
 
-  async #receiptFilter(filter: ReceiptFilter): Promise<Filter> {
-    const and: Filter[] = [];
+  async #receiptFilter(filter: ReceiptFilter): Promise<W<'receipts'>> {
+    const and: W<'receipts'>[] = [];
     if (filter.status) and.push({ status: filter.status });
     if (filter.purchaseOrderId) and.push({ purchase_order_id: filter.purchaseOrderId });
-    if (filter.from) and.push({ started_at: { $gte: filter.from } });
-    if (filter.to) and.push({ started_at: { $lt: filter.to } });
+    if (filter.from) and.push({ started_at: { op: '>=', value: filter.from } });
+    if (filter.to) and.push({ started_at: { op: '<', value: filter.to } });
     if (filter.withIssues !== undefined) {
-      const withIssues = await this.#t.receiptLines.distinct<string>('receipt_id', { $or: [{ $expr: { $ne: ['$received', '$expected'] } }, { damaged: { $gt: 0 } }] });
-      and.push({ id: filter.withIssues ? oneOf(withIssues) : { $nin: withIssues } });
+      // `received <> expected` compares two columns of one row, which the vocabulary has no shape for (queries.ts)
+      const withIssues = await this.queries.receiptIdsWithIssues();
+      // `not in` of an empty list leaves the column unfiltered, which is what "no record has an issue" means here
+      and.push({ id: filter.withIssues ? oneOf(withIssues) : { op: 'not in', value: withIssues } });
     }
-    return and.length ? { $and: and } : {};
+    return and.length ? { and } : {};
   }
 
   /* ---------------------------------------------------------------- suppliers */
@@ -355,21 +371,19 @@ export class PurchasingRepository {
   }
 
   async listSuppliers(filter: { q?: string; active?: boolean }, page: PageRequest): Promise<Page<SupplierRow>> {
-    const and: Filter[] = [];
+    const and: W<'suppliers'>[] = [];
     if (filter.active !== undefined) and.push({ active: filter.active });
     const q = filter.q?.trim();
-    if (q) and.push({ $or: [{ name: contains(q) }, { contact_name: contains(q) }, { location: contains(q) }, { email: contains(q) }] });
-    return mapPage(await this.#t.suppliers.page(and.length ? { $and: and } : {}, page, { column: 'name', direction: 'asc' }), toSupplier);
+    if (q) and.push({ or: [{ name: contains(q) }, { contact_name: contains(q) }, { location: contains(q) }, { email: contains(q) }] });
+    return mapPage(await this.#t.suppliers.page(and.length ? { and } : {}, page, { column: 'name', direction: 'asc' }), toSupplier);
   }
 
   async openPurchaseOrderCounts(supplierIds: readonly string[]): Promise<Map<string, number>> {
     const out = new Map<string, number>();
     if (!supplierIds.length) return out;
-    const rows = await this.#t.pos.aggregate<{ _id: string; n: number }>([
-      { $match: { supplier_id: { $in: [...new Set(supplierIds)] }, status: { $in: ['draft', 'sent', 'partly_received'] } } },
-      { $group: { _id: '$supplier_id', n: { $sum: 1 } } },
-    ]);
-    for (const r of rows) out.set(r._id, Number(r.n));
+    // how many rows per key, which is the one $group both stores answer the same way (§10.5e)
+    const rows = await this.#t.pos.countBy(['supplier_id'], { supplier_id: oneOf(supplierIds), status: ['draft', 'sent', 'partly_received'] });
+    for (const r of rows) out.set(r.supplier_id, Number(r.n));
     return out;
   }
 
@@ -399,7 +413,9 @@ export class PurchasingRepository {
   /** Unset preferred on other suppliers' rows for these stock items */
   async clearPreferred(stockItemIds: readonly string[], exceptSupplierId: string): Promise<void> {
     if (!stockItemIds.length) return;
-    await this.#t.items.updateMany({ stock_item_id: oneOf(stockItemIds), supplier_id: { $ne: exceptSupplierId }, preferred: true }, { preferred: false });
+    // supplier_id is NOT NULL (half the primary key), so `<>` and `is not` cannot be told apart here; `<>` is
+    // the spec's reading of "another supplier's row" and no test can distinguish the two
+    await this.#t.items.updateMany({ stock_item_id: oneOf(stockItemIds), supplier_id: { op: '<>', value: exceptSupplierId }, preferred: true }, { preferred: false });
   }
 
   /** Rows of active suppliers for these stock items (all stock items when omitted, preferred only when asked) */
@@ -440,46 +456,23 @@ export class PurchasingRepository {
     });
   }
 
+  /**
+   * The raw sums the performance job turns into percentages and averages, per supplier.
+   *
+   * Both halves are a join plus a `GROUP BY` with four measures, none of them a plain count, so each belongs
+   * to the store that answers it (queries.ts); joining the two halves on the supplier is arithmetic and stays
+   * here. A supplier that appears in only one half keeps the zeros of the other.
+   */
   async performanceInputs(since: Date): Promise<PerformanceInputs[]> {
-    const poCollection = `${this.store.module}.purchase_orders`;
-    const deliveries = await this.#t.deliveries.aggregate<{ _id: string; deliveries: number; on_time: number; lead_ms: number; lead_n: number }>([
-      { $match: { arrived_at: { $gte: since } } },
-      { $lookup: { from: poCollection, localField: 'purchase_order_id', foreignField: '_id', as: 'po' } },
-      { $unwind: '$po' },
-      {
-        $group: {
-          _id: '$po.supplier_id',
-          deliveries: { $sum: 1 },
-          on_time: { $sum: { $cond: [{ $lte: ['$arrived_at', '$window_to'] }, 1, 0] } },
-          lead_ms: { $sum: { $cond: [{ $eq: [{ $ifNull: ['$po.sent_at', null] }, null] }, 0, { $subtract: ['$arrived_at', '$po.sent_at'] }] } },
-          lead_n: { $sum: { $cond: [{ $eq: [{ $ifNull: ['$po.sent_at', null] }, null] }, 0, 1] } },
-        },
-      },
-    ]);
-    const counts = await this.#t.receipts.aggregate<{ _id: string; expected: number; received: number; shortage: number; damaged: number }>([
-      { $match: { status: { $in: [...SUBMITTED_RECEIPT_STATUSES] }, submitted_at: { $gte: since } } },
-      { $lookup: { from: poCollection, localField: 'purchase_order_id', foreignField: '_id', as: 'po' } },
-      { $unwind: '$po' },
-      { $lookup: { from: `${this.store.module}.receipt_lines`, localField: '_id', foreignField: 'receipt_id', as: 'l' } },
-      { $unwind: '$l' },
-      {
-        $group: {
-          _id: '$po.supplier_id',
-          expected: { $sum: '$l.expected' },
-          received: { $sum: '$l.received' },
-          shortage: { $sum: { $max: [{ $subtract: ['$l.expected', '$l.received'] }, 0] } },
-          damaged: { $sum: '$l.damaged' },
-        },
-      },
-    ]);
+    const [deliveries, counts] = await Promise.all([this.queries.deliveryPerformance(since), this.queries.receiptPerformance(since, SUBMITTED_RECEIPT_STATUSES)]);
     const out = new Map<string, PerformanceInputs>();
     const get = (id: string) => {
       let v = out.get(id);
       if (!v) out.set(id, (v = { supplierId: id, deliveries: 0, onTime: 0, leadTimeMsTotal: 0, leadTimeCount: 0, expected: 0, received: 0, shortage: 0, damaged: 0 }));
       return v;
     };
-    for (const d of deliveries) Object.assign(get(d._id), { deliveries: Number(d.deliveries), onTime: Number(d.on_time), leadTimeMsTotal: Number(d.lead_ms), leadTimeCount: Number(d.lead_n) });
-    for (const c of counts) Object.assign(get(c._id), { expected: Number(c.expected), received: Number(c.received), shortage: Number(c.shortage), damaged: Number(c.damaged) });
+    for (const d of deliveries) Object.assign(get(d.supplierId), { deliveries: d.deliveries, onTime: d.onTime, leadTimeMsTotal: d.leadTimeMsTotal, leadTimeCount: d.leadTimeCount });
+    for (const c of counts) Object.assign(get(c.supplierId), { expected: c.expected, received: c.received, shortage: c.shortage, damaged: c.damaged });
     return [...out.values()];
   }
 
@@ -536,22 +529,24 @@ export class PurchasingRepository {
   }
 
   async listPurchaseOrders(filter: PoFilter, page: PageRequest): Promise<Page<PoRow>> {
-    const and: Filter[] = [];
+    const and: W<'purchase_orders'>[] = [];
     if (filter.status) and.push({ status: filter.status });
     if (filter.supplierId) and.push({ supplier_id: filter.supplierId });
-    if (filter.awaitingApproval !== undefined) and.push({ approval_state: filter.awaitingApproval ? 'pending' : { $ne: 'pending' } });
+    // approval_state is nullable, and a purchase order that never needed approval is not awaiting one: so
+    // `is not` (MongoDB's own $ne, "not this, including not set") and not `<>`, which would drop those rows
+    if (filter.awaitingApproval !== undefined) and.push({ approval_state: filter.awaitingApproval ? 'pending' : { op: 'is not', value: 'pending' } });
     const q = filter.q?.trim();
     if (q) {
       // the ref, the supplier's name, or a line's SKU or label
       const suppliers = await this.#t.suppliers.distinct<string>('id', { name: contains(q) });
-      const byLine = await this.#t.lines.distinct<string>('purchase_order_id', { $or: [{ sku: contains(q) }, { label: contains(q) }] });
-      and.push({ $or: [{ ref: contains(q) }, { supplier_id: oneOf(suppliers) }, { id: oneOf(byLine) }] });
+      const byLine = await this.#t.lines.distinct<string>('purchase_order_id', { or: [{ sku: contains(q) }, { label: contains(q) }] });
+      and.push({ or: [{ ref: contains(q) }, { supplier_id: oneOf(suppliers) }, { id: oneOf(byLine) }] });
     }
     if (filter.lateOrShort !== undefined) {
       const late = await this.#lateOrShortIds(filter.today);
-      and.push({ id: filter.lateOrShort ? oneOf(late) : { $nin: late } });
+      and.push({ id: filter.lateOrShort ? oneOf(late) : { op: 'not in', value: late } });
     }
-    return mapPage(await this.#t.pos.page(and.length ? { $and: and } : {}, page, { column: 'created_at', direction: 'desc' }), toPo);
+    return mapPage(await this.#t.pos.page(and.length ? { and } : {}, page, { column: 'created_at', direction: 'desc' }), toPo);
   }
 
   async purchaseOrdersBy(filter: { statuses?: readonly PoStatus[]; supplierId?: string; locationId?: string; limit?: number }): Promise<PoRow[]> {
@@ -664,27 +659,27 @@ export class PurchasingRepository {
   }
 
   async listDeliveries(filter: DeliveryFilter, page: PageRequest): Promise<Page<DeliveryRow>> {
-    const and: Filter[] = [];
+    const and: W<'deliveries'>[] = [];
     if (filter.status) and.push({ status: filter.status });
     if (filter.purchaseOrderId) and.push({ purchase_order_id: filter.purchaseOrderId });
-    if (filter.from) and.push({ window_from: { $gte: filter.from } });
-    if (filter.to) and.push({ window_from: { $lt: filter.to } });
-    return mapPage(await this.#t.deliveries.page(and.length ? { $and: and } : {}, page, { column: 'window_from', direction: 'asc' }), toDelivery);
+    if (filter.from) and.push({ window_from: { op: '>=', value: filter.from } });
+    if (filter.to) and.push({ window_from: { op: '<', value: filter.to } });
+    return mapPage(await this.#t.deliveries.page(and.length ? { and } : {}, page, { column: 'window_from', direction: 'asc' }), toDelivery);
   }
 
   async deliveriesBy(filter: { statuses?: readonly DeliveryStatus[]; from?: Date; to?: Date; windowToBefore?: Date; locationId?: string; limit?: number }): Promise<DeliveryRow[]> {
-    const and: Filter[] = [];
+    const and: W<'deliveries'>[] = [];
     if (filter.statuses) and.push({ status: oneOf(filter.statuses) });
-    if (filter.from) and.push({ window_from: { $gte: filter.from } });
-    if (filter.to) and.push({ window_from: { $lt: filter.to } });
-    if (filter.windowToBefore) and.push({ window_to: { $lt: filter.windowToBefore } });
+    if (filter.from) and.push({ window_from: { op: '>=', value: filter.from } });
+    if (filter.to) and.push({ window_from: { op: '<', value: filter.to } });
+    if (filter.windowToBefore) and.push({ window_to: { op: '<', value: filter.windowToBefore } });
     if (filter.locationId) and.push({ purchase_order_id: oneOf(await this.#t.pos.distinct<string>('id', { ship_to_location_id: filter.locationId })) });
-    const rows = await this.#t.deliveries.find(and.length ? { $and: and } : {}, { sort: { window_from: 1, id: 1 }, ...(filter.limit ? { limit: filter.limit } : {}) });
+    const rows = await this.#t.deliveries.find(and.length ? { and } : {}, { sort: { window_from: 1, id: 1 }, ...(filter.limit ? { limit: filter.limit } : {}) });
     return rows.map(toDelivery);
   }
 
   cancelPendingDeliveries(purchaseOrderId: string, reason: string): Promise<number> {
-    return this.#t.deliveries.updateMany({ purchase_order_id: purchaseOrderId, status: oneOf(['expected', 'delayed']) }, { status: 'cancelled', delay_reason: reason });
+    return this.#t.deliveries.updateMany({ purchase_order_id: purchaseOrderId, status: ['expected', 'delayed'] }, { status: 'cancelled', delay_reason: reason });
   }
 
   /* ---------------------------------------------------------------- receipts */
@@ -748,7 +743,7 @@ export class PurchasingRepository {
         ...(filter.purchaseOrderIds ? { purchase_order_id: oneOf(filter.purchaseOrderIds) } : {}),
         ...(filter.deliveryIds ? { delivery_id: oneOf(filter.deliveryIds) } : {}),
         ...(filter.statuses ? { status: oneOf(filter.statuses) } : {}),
-        ...(filter.submittedFrom ? { submitted_at: { $gte: filter.submittedFrom } } : {}),
+        ...(filter.submittedFrom ? { submitted_at: { op: '>=' as const, value: filter.submittedFrom } } : {}),
         ...(filter.locationId ? { location_id: filter.locationId } : {}),
       },
       { sort: { started_at: 1, id: 1 } },
@@ -767,7 +762,8 @@ export class PurchasingRepository {
 
   async receiptsAfter(filter: ReceiptFilter, after: { startedAt: Date; id: string } | null, limit: number): Promise<ReceiptRow[]> {
     const base = await this.#receiptFilter(filter);
-    const f = after ? { $and: [base, { $or: [{ started_at: { $gt: after.startedAt } }, { started_at: after.startedAt, id: { $gt: after.id } }] }] } : base;
+    // the keyset cursor: a later record, or the same instant and a later id
+    const f: W<'receipts'> = after ? { and: [base, { or: [{ started_at: { op: '>', value: after.startedAt } }, { started_at: after.startedAt, id: { op: '>', value: after.id } }] }] } : base;
     return (await this.#t.receipts.find(f, { sort: { started_at: 1, id: 1 }, limit })).map(toReceipt);
   }
 

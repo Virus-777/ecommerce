@@ -6,9 +6,8 @@
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
-import { spec, type PurchasingPublicApi } from '../../../spec/purchasing.js';
-import { schemas } from '../schema.js';
-import { api, LOCATION, makeStubs, purchasingApp, usd } from './helpers.js';
+import { type PurchasingPublicApi } from '../../../spec/purchasing.js';
+import { api, LOCATION, makeStubs, purchasingApp, purchasingTable, usd } from './helpers.js';
 
 const stubs = makeStubs();
 let app: FastifyInstance;
@@ -64,7 +63,7 @@ describe('supplier_claims.supplier_reference', () => {
     const c = (await call('POST', '/claims', { purchaseOrderId: po.id, kind: 'damage', lines: [{ stockItemId: lamp, sku: 'BRT-LAMP-4', quantity: 1, unitCost: usd(2800) }], notes: 'Cracked shade' })).json();
     const sent = (await call('POST', `/claims/${c.id}/submit`, { supplierReference: 'RMA-77' })).json();
     expect(sent).toMatchObject({ supplierReference: 'RMA-77', notes: 'Cracked shade' });
-    const row = await app.kernel.mongo.module('purchasing', spec.collections, schemas).table<any>('supplier_claims').get(c.id);
+    const row = await purchasingTable(app, 'supplier_claims').get(c.id);
     expect(row).toMatchObject({ supplier_reference: 'RMA-77', notes: 'Cracked shade' });
   });
 });

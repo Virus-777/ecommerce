@@ -16,7 +16,9 @@ import { fixedClock } from '../../../kernel/lib/clock.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { devClaims } from '../../../kernel/auth/dev.js';
 import { devSigner, signAccessToken } from '../../../kernel/auth/tokens.js';
+import type { StoreTable } from '../../../kernel/store/index.js';
 import type { StockItemRef } from '../../../spec/inventory.js';
+import type { PurchasingDb } from '../../../spec/purchasing.js';
 import { auth, buildTestApp, ISSUER, TEST_JWK } from '../../../testing/app.js';
 
 export const NOW = '2026-10-09T17:00:00.000Z'; // 10:00 in Los Angeles
@@ -120,12 +122,16 @@ export async function purchasingApp(stubs: Stubs) {
 
 export const ken = { id: newId(), name: 'Ken Watanabe' };
 const signer = devSigner({ jwk: TEST_JWK });
-/** Staff token signed at the test clock's time (the app verifies tokens against that clock), valid for 60 days */
-export const staffAuth = (who = ken, permissions = ['*']) =>
+/**
+ * Staff token signed at the test clock's time (the app verifies tokens against that clock), valid for 60 days
+ * — or for `ttlDays`, which a test that advances the clock past that has to ask for (the supplier performance
+ * window is 90 days, so proving an old arrival drops out of it means moving more than 60 days forward).
+ */
+export const staffAuth = (who = ken, permissions = ['*'], ttlDays = 60) =>
   auth(
     signAccessToken(signer, { ...devClaims('staff', { permissions }), sub: who.id, dev: { permissions, name: who.name } } as never, {
       issuer: ISSUER,
-      ttlSeconds: 60 * 86_400,
+      ttlSeconds: ttlDays * 86_400,
       now: new Date(new Date(NOW).getTime() - 60_000),
     }),
   );
@@ -143,5 +149,15 @@ export function recordEvents(app: FastifyInstance, names: string[]) {
 }
 
 export const usd = (amount: number) => ({ amount, currency: 'USD' });
+
+/**
+ * One of the module's tables as its repository reads it (rows in spec shape), **through the store the app
+ * chose** — MongoDB or MySQL, whichever `MYSQL_MODULES` put purchasing's data in. A test that built a
+ * MongoDB store of its own would read a database the module no longer writes to: the rows are simply not
+ * there, and nothing in the log says why (docs/10 §10.5c).
+ */
+export function purchasingTable<T extends keyof PurchasingDb & string>(app: FastifyInstance, name: T): StoreTable<PurchasingDb[T]> {
+  return app.kernel.boot.stores.get('purchasing')!.table<PurchasingDb[T]>(name);
+}
 
 export const auditActions = (stubs: Stubs) => stubs.audit.record.mock.calls.map((c) => (c[0] as { action: string }).action);

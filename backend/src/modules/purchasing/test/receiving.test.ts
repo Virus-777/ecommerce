@@ -2,8 +2,9 @@
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
+import { encodeCursor } from '../../../kernel/lib/pagination.js';
 import type { PurchasingPublicApi } from '../../../spec/purchasing.js';
-import { api, auditActions, ken, LOCATION, makeStubs, purchasingApp, recordEvents, usd } from './helpers.js';
+import { api, auditActions, ken, LOCATION, makeStubs, purchasingApp, recordEvents, staffAuth, usd } from './helpers.js';
 
 const stubs = makeStubs();
 let app: FastifyInstance;
@@ -16,7 +17,8 @@ const speaker = stubs.addStock({ sku: 'HAL-PKT-TEAL', label: 'Pocket Bluetooth S
 
 beforeAll(async () => {
   ({ app, clock } = await purchasingApp(stubs));
-  call = api(app);
+  // a token that outlives the 100-day jump the supplier performance window needs (helpers staffAuth)
+  call = api(app, staffAuth(ken, ['*'], 400));
   events = recordEvents(app, [
     'purchasing.delivery.rescheduled',
     'purchasing.delivery.arrived',
@@ -322,5 +324,110 @@ describe('reorder suggestions and public API', () => {
     expect(detail.performance).toMatchObject({ windowDays: 90, deliveries: 1, onTimePct: 100, shortageRatePct: 10, damageRatePct: 0 });
     expect(detail.supplier.onTimePct).toBe(100);
     expect(detail.recentPurchaseOrders[0]).toMatchObject({ id: po.id, status: 'partly_received', lateOrShort: true });
+  });
+});
+
+/**
+ * Assertions added with the MySQL conversion (docs/10 §10.5e), for the readings the suite could not tell
+ * apart: a shortage with no damage, the negative "no issues" filter, the open-order statuses, a delayed
+ * delivery cancelled with the order, the export's keyset, and the performance job's window.
+ */
+describe('conversions the suite could not see', () => {
+  const lineOf = (r: { lines: { sku: string; purchaseOrderLineId: string }[] }, sku: string) => r.lines.find((l) => l.sku === sku)!.purchaseOrderLineId;
+
+  it('a shortage with no damage is an issue, a clean record is not, and an open order counts while partly received', async () => {
+    const { po, supplier } = await sentOrder([{ stockItemId: headphones, quantity: 10, unitCost: usd(9500) }, { stockItemId: speaker, quantity: 10, unitCost: usd(4000) }]);
+    const d = await arrivedDelivery(po.id);
+    const short = (await call('POST', `/deliveries/${d.id}/receipts`)).json();
+    await call('PATCH', `/receipts/${short.id}`, {
+      lines: [
+        { purchaseOrderLineId: lineOf(short, 'HAL-AUR-BLK'), received: 10, damaged: 0 },
+        { purchaseOrderLineId: lineOf(short, 'HAL-PKT-TEAL'), received: 0, damaged: 0 },
+      ],
+    });
+    expect((await call('POST', `/receipts/${short.id}/submit`, {})).statusCode).toBe(200);
+
+    // nothing was damaged, so `received <> expected` is the only condition that can find this record
+    const issues = (await call('GET', `/receipts?withIssues=true&purchaseOrderId=${po.id}`)).json().items as { id: string }[];
+    expect(issues.map((x) => x.id)).toEqual([short.id]);
+    expect((await call('GET', `/receipts?withIssues=false&purchaseOrderId=${po.id}`)).json().items).toEqual([]);
+
+    // a record where every line came up exact is the other side of the same filter
+    const clean = await sentOrder([{ stockItemId: headphones, quantity: 4, unitCost: usd(9500) }]);
+    const cd = await arrivedDelivery(clean.po.id);
+    const exact = (await call('POST', `/deliveries/${cd.id}/receipts`)).json();
+    await call('PATCH', `/receipts/${exact.id}`, { lines: [{ purchaseOrderLineId: lineOf(exact, 'HAL-AUR-BLK'), received: 4, damaged: 0 }] });
+    expect((await call('POST', `/receipts/${exact.id}/submit`, {})).statusCode).toBe(200);
+    const none = (await call('GET', `/receipts?withIssues=false&purchaseOrderId=${clean.po.id}`)).json().items as { id: string }[];
+    expect(none.map((x) => x.id)).toEqual([exact.id]);
+    expect((await call('GET', `/receipts?withIssues=true&purchaseOrderId=${clean.po.id}`)).json().items).toEqual([]);
+
+    // a partly received order is still an open order of its supplier
+    expect((await call('GET', `/suppliers/${supplier.id}`)).json().supplier).toMatchObject({ openPurchaseOrders: 1 });
+    expect((await call('GET', `/purchase-orders/${po.id}`)).json().status).toBe('partly_received');
+  });
+
+  it('closing short cancels a delayed delivery as well as an expected one', async () => {
+    const { po } = await sentOrder([{ stockItemId: headphones, quantity: 10, unitCost: usd(9500) }, { stockItemId: speaker, quantity: 10, unitCost: usd(4000) }]);
+    const first = await arrivedDelivery(po.id);
+    const r = (await call('POST', `/deliveries/${first.id}/receipts`)).json();
+    await call('PATCH', `/receipts/${r.id}`, { lines: [{ purchaseOrderLineId: lineOf(r, 'HAL-AUR-BLK'), received: 10, damaged: 0 }] });
+    await call('POST', `/receipts/${r.id}/submit`, {});
+
+    const expected = (await call('POST', `/purchase-orders/${po.id}/deliveries`, { windowFrom: '2026-10-11T17:00:00Z', windowTo: '2026-10-11T19:00:00Z' })).json();
+    const late = (await call('POST', `/purchase-orders/${po.id}/deliveries`, { windowFrom: '2026-10-12T17:00:00Z', windowTo: '2026-10-12T19:00:00Z' })).json();
+    expect((await call('PATCH', `/deliveries/${late.id}`, { delayed: true, reason: 'Truck broke down' })).json()).toMatchObject({ status: 'delayed' });
+
+    expect((await call('POST', `/purchase-orders/${po.id}/close`, { reason: 'Teal speakers discontinued' })).statusCode).toBe(200);
+    const after = (await call('GET', `/purchase-orders/${po.id}`)).json().deliveries as { id: string; status: string }[];
+    expect(after.find((x) => x.id === expected.id)!.status).toBe('cancelled');
+    // the delayed one is pending too, and goes with the order it belonged to
+    expect(after.find((x) => x.id === late.id)!.status).toBe('cancelled');
+  });
+
+  it('the receiving export pages past the record its cursor names', async () => {
+    const { po } = await sentOrder([{ stockItemId: headphones, quantity: 20, unitCost: usd(9500) }]);
+    const receipt = async (received: number) => {
+      const d = await arrivedDelivery(po.id);
+      const r = (await call('POST', `/deliveries/${d.id}/receipts`)).json();
+      await call('PATCH', `/receipts/${r.id}`, { lines: [{ purchaseOrderLineId: lineOf(r, 'HAL-AUR-BLK'), received, damaged: 0 }] });
+      expect((await call('POST', `/receipts/${r.id}/submit`, {})).statusCode).toBe(200);
+      return (await call('GET', `/receipts/${r.id}`)).json() as { id: string; ref: string; startedAt: string };
+    };
+    const one = await receipt(8);
+    clock.advance(60_000);
+    const two = await receipt(6);
+
+    const refs = async (cursor?: string) =>
+      ((await purchasing().exportRows('purchasing.admin.receiving', { purchaseOrderId: po.id }, { kind: 'staff', accountId: ken.id }, cursor)).rows as { receiptRef: string }[]).map((x) => x.receiptRef);
+    expect(await refs()).toEqual([one.ref, two.ref]);
+    // the cursor means "after this record", so the record it names is not handed out twice
+    expect(await refs(encodeCursor([one.startedAt, one.id]))).toEqual([two.ref]);
+    expect(await refs(encodeCursor([two.startedAt, two.id]))).toEqual([]);
+  });
+
+  it('supplier performance counts only the window, and reports the lead time in days', async () => {
+    // an arrival and a receiving record from before the 90-day window, which must not reach the figures
+    const old = await sentOrder([{ stockItemId: speaker, quantity: 10, unitCost: usd(4000) }]);
+    const oldDelivery = await arrivedDelivery(old.po.id);
+    const oldReceipt = (await call('POST', `/deliveries/${oldDelivery.id}/receipts`)).json();
+    await call('PATCH', `/receipts/${oldReceipt.id}`, { lines: [{ purchaseOrderLineId: lineOf(oldReceipt, 'HAL-PKT-TEAL'), received: 10, damaged: 0 }] });
+    await call('POST', `/receipts/${oldReceipt.id}/submit`, {});
+
+    clock.advance(100 * 86_400_000);
+    const { po, supplier } = await sentOrder([{ stockItemId: speaker, quantity: 40, unitCost: usd(4000) }]);
+    const d = (await call('POST', `/purchase-orders/${po.id}/deliveries`, { windowFrom: '2027-01-17T17:00:00Z', windowTo: '2027-01-17T19:00:00Z' })).json();
+    clock.advance(2 * 86_400_000); // arrives two days after the window closed, and two days after the order went out
+    expect((await call('POST', `/deliveries/${d.id}/arrive`, { dock: '1' })).statusCode).toBe(200);
+    const r = (await call('POST', `/deliveries/${d.id}/receipts`)).json();
+    await call('PATCH', `/receipts/${r.id}`, { lines: [{ purchaseOrderLineId: lineOf(r, 'HAL-PKT-TEAL'), received: 36, damaged: 0 }] });
+    await call('POST', `/receipts/${r.id}/submit`, {});
+
+    await app.kernel.jobs.runNow('purchasing.supplier-performance');
+    const perf = (await call('GET', `/suppliers/${supplier.id}`)).json().performance;
+    // one arrival, late, two days after the order was sent; 4 of 40 units short, nothing damaged
+    expect(perf).toMatchObject({ windowDays: 90, deliveries: 1, onTimePct: 0, avgLeadTimeDays: 2, shortageRatePct: 10, damageRatePct: 0 });
+    // the older supplier's only arrival has dropped out of its window: the figures are empty, not stale
+    expect((await call('GET', `/suppliers/${old.supplier.id}`)).json().performance).toMatchObject({ deliveries: 0, onTimePct: null, avgLeadTimeDays: null, shortageRatePct: null });
   });
 });
