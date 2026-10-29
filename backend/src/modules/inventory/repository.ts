@@ -1,12 +1,17 @@
 import { zonedDayRange } from '../../kernel/lib/clock.js';
 import type { PageRequest } from '../../kernel/lib/pagination.js';
-import { contains, isDuplicateKey, startsWith, type ModuleStore } from '../../kernel/mongo/index.js';
-import type { Filter, Table as Collection } from '../../kernel/mongo/table.js';
+import { isDuplicateKey, type Store, type StoreFindOptions, type StoreTable, type WhereWithOr } from '../../kernel/store/index.js';
 import type { Page } from '../../spec/common.js';
 import type { IdTable, ItemFilter, ItemListFilter, Lock, MovementFilter, NewRow, Patch, Row, Table } from './ports.js';
+import type { InventoryQueries } from './queries.js';
 
-/** One of `values`, or nothing when the list is empty (an empty IN matches no row) */
-const oneOf = (values: readonly unknown[]) => ({ $in: [...values] });
+/**
+ * `nullsLast` — "every row whose column is null sorts after every value" — is implemented by both stores
+ * (`kernel/mongo/table.ts`, `kernel/mysql/table.ts`) with the same meaning, but `StoreFindOptions` does not
+ * name it. It is one read here (`expectations`, undated deliveries last) and two in modules not yet converted
+ * (support, wallet), so it is reported as a kernel ask rather than worked around per store.
+ */
+type ReadOptions = StoreFindOptions & { nullsLast?: readonly string[] };
 
 /**
  * json columns. The service writes some of them as JSON.stringify(…), so a string written to one of these is
@@ -16,15 +21,6 @@ const JSON_COLUMNS: Partial<Record<Table, readonly string[]>> = {
   locations: ['address'],
   stock_movements: ['after'],
   discrepancies: ['photo_media_ids'],
-};
-
-/** The unique key insertIfAbsent checks (on conflict (key) do nothing), per table; a clash on another key still fails */
-const CONFLICT_KEY: Partial<Record<Table, readonly string[]>> = {
-  locations: ['code'],
-  stock_items: ['owner_type', 'seller_id', 'sku'],
-  reservations: ['source', 'key'],
-  inbound_receipts: ['receipt_id'],
-  return_outcomes: ['return_id', 'stock_item_id'],
 };
 
 function jsonValues<T extends Record<string, unknown>>(table: Table, row: T): T {
@@ -45,12 +41,19 @@ export class DuplicateKeyError extends Error {
 /**
  * inventory.locations, stock_items, stock_levels, stock_movements, incoming_expectations, reservations,
  * reservation_lines, adjustments, held_stock, inbound_receipts, inbound_lines, return_outcomes, discrepancies,
- * transfers, transfer_lines, stock_counts, count_lines, valuation_snapshots: one collection per spec table.
+ * transfers, transfer_lines, stock_counts, count_lines, valuation_snapshots: one table per spec table, in
+ * whichever database holds this module's data (`ctx.store`, BUILDING-MODULES §5c).
+ *
+ * The three reads that are not the same question in both databases — the stock list's quantity filters, the
+ * latest ledger rows per item, and units per item by reason code — are the queries port (queries.ts).
  */
 export class InventoryRepository {
   readonly #t;
 
-  constructor(private readonly store: ModuleStore) {
+  constructor(
+    private readonly store: Store,
+    private readonly queries: InventoryQueries,
+  ) {
     const table = <T extends Table>(name: T) => store.table<Row<T>>(name);
     this.#t = {
       locations: table('locations'),
@@ -75,7 +78,7 @@ export class InventoryRepository {
 
   /** Runs fn in one database transaction with a repository bound to it */
   transaction<T>(fn: (tx: InventoryRepository) => Promise<T>): Promise<T> {
-    return this.store.transaction((tx) => fn(new InventoryRepository(tx)));
+    return this.store.transaction((tx) => fn(new InventoryRepository(tx, this.queries)));
   }
 
   /**
@@ -93,17 +96,19 @@ export class InventoryRepository {
 
   /** Writes one market day's valuation per stock group (a second run that day replaces it) */
   async saveValuationSnapshot(rows: Row<'valuation_snapshots'>[]): Promise<void> {
+    // (snapshot_date, stock_group) is the table's whole primary key, so this is "replace that day's row"
     await this.#t.snapshots.upsertMany(rows, { key: ['snapshot_date', 'stock_group'] });
   }
 
   valuationSnapshots(fromDate: string, toDate: string): Promise<Row<'valuation_snapshots'>[]> {
-    return this.#t.snapshots.find({ snapshot_date: { $gte: fromDate, $lte: toDate } }, { sort: { snapshot_date: 1, stock_group: 1 } });
+    // `between` is inclusive at both ends, which is what the pair of $gte / $lte conditions meant
+    return this.#t.snapshots.find({ snapshot_date: { op: 'between', value: [fromDate, toDate] } }, { sort: { snapshot_date: 1, stock_group: 1 } });
   }
 
   /* ---------------------------------------------------------------- rows by id (tables with an id column) */
 
   // generic table access: the row types are checked by the method signatures
-  #table(name: Table): Collection<any> {
+  #table(name: Table): StoreTable<any> {
     return this.store.table(name);
   }
 
@@ -115,9 +120,16 @@ export class InventoryRepository {
     return this.#table(table).insert(jsonValues(table, row as Record<string, unknown>));
   }
 
-  /** Inserts a row unless its table's conflict key (CONFLICT_KEY, else the id) is taken: the row, or undefined */
+  /**
+   * Inserts a row unless one of its table's unique keys is taken: the row, or undefined.
+   *
+   * No key is named, which is the portable spelling (§5c): both stores then check every unique index the spec
+   * gives the table, which is the question every caller here asks ("is it there already?"). Naming one would
+   * also be wrong for `stock_items`, whose unique key is `(owner_type, seller_id, sku)` in the spec but a
+   * *functional* index over `COALESCE(seller_id, …)` in MySQL — the `settings_change_keys` trap of §10.5a.
+   */
   insertIfAbsent<T extends IdTable>(table: T, row: NewRow<T>): Promise<Row<T> | undefined> {
-    return this.#table(table).insertIfAbsent(jsonValues(table, row as Record<string, unknown>), CONFLICT_KEY[table] ?? ['id']);
+    return this.#table(table).insertIfAbsent(jsonValues(table, row as Record<string, unknown>));
   }
 
   /** Throws DuplicateKeyError when a unique index refuses the change */
@@ -137,7 +149,7 @@ export class InventoryRepository {
 
   locations(f: { ownerType?: 'official' | 'seller'; sellerId?: string; sellerIds?: string[]; ids?: string[] }): Promise<Row<'locations'>[]> {
     return this.#t.locations.find(
-      { ...(f.ownerType ? { owner_type: f.ownerType } : {}), ...(f.sellerId ? { seller_id: f.sellerId } : {}), ...(f.sellerIds ? { seller_id: oneOf(f.sellerIds) } : {}), ...(f.ids ? { id: oneOf(f.ids) } : {}) },
+      { ...(f.ownerType ? { owner_type: f.ownerType } : {}), ...(f.sellerId ? { seller_id: f.sellerId } : {}), ...(f.sellerIds ? { seller_id: f.sellerIds } : {}), ...(f.ids ? { id: f.ids } : {}) },
       { sort: { is_default: -1, code: 1 } },
     );
   }
@@ -148,115 +160,65 @@ export class InventoryRepository {
 
   /* ---------------------------------------------------------------- stock items */
 
-  #itemFilter(f: ItemFilter): Filter {
+  #itemFilter(f: ItemFilter): WhereWithOr<Row<'stock_items'>> {
     return {
       ...(f.ownerType ? { owner_type: f.ownerType } : {}),
       ...(f.sellerId ? { seller_id: f.sellerId } : {}),
-      ...(f.ids ? { id: oneOf(f.ids) } : {}),
-      ...(f.skus ? { sku: oneOf(f.skus) } : {}),
-      ...(f.offerIds ? { offer_id: oneOf(f.offerIds) } : {}),
-      ...(f.variantIds ? { variant_id: oneOf(f.variantIds) } : {}),
-      ...(f.productIds ? { product_id: oneOf(f.productIds) } : {}),
+      ...(f.ids ? { id: f.ids } : {}),
+      ...(f.skus ? { sku: f.skus } : {}),
+      ...(f.offerIds ? { offer_id: f.offerIds } : {}),
+      ...(f.variantIds ? { variant_id: f.variantIds } : {}),
+      ...(f.productIds ? { product_id: f.productIds } : {}),
       ...(f.includeArchived ? {} : { archived: false }),
     };
   }
 
   /**
    * Stock items of a list (filters on aggregated quantities): the item filter, and when the list filters by stock
-   * state or group, the ids of the items whose quantities pass (one aggregation over items, their levels and the
-   * levels' locations).
+   * state or group, the ids of the items whose quantities pass — which is a join and a GROUP BY with four
+   * measures, so it belongs to the queries port (queries.ts) and not to the neutral vocabulary.
    */
-  async #itemListFilter(f: ItemListFilter): Promise<Filter> {
-    const t = this.#t;
-    const and: Filter[] = [this.#itemFilter(f)];
+  async #itemListFilter(f: ItemListFilter): Promise<WhereWithOr<Row<'stock_items'>>> {
+    // `and` rather than one object: the item filter may already name `id`, and the location filter names it too
+    const and: WhereWithOr<Row<'stock_items'>>[] = [this.#itemFilter(f)];
     const q = f.q?.trim();
-    if (q) {
-      const like = contains(q);
-      and.push({ $or: [{ sku: like }, { label: like }, { primary_bin_code: like }] });
-    }
+    if (q) and.push({ or: [{ sku: { op: 'contains', value: q } }, { label: { op: 'contains', value: q } }, { primary_bin_code: { op: 'contains', value: q } }] });
     const zone = f.zone?.trim();
-    if (zone) and.push({ primary_bin_code: startsWith(zone) });
-    if (f.locationId) and.push({ id: oneOf(await t.levels.distinct<string>('stock_item_id', { location_id: f.locationId })) });
+    if (zone) and.push({ primary_bin_code: { op: 'starts with', value: zone } });
+    if (f.locationId) and.push({ id: await this.#t.levels.distinct<string>('stock_item_id', { location_id: f.locationId }) });
     const byGroup = f.filter === 'low_or_out' || f.filter === 'has_damaged_or_held' || f.filter === 'has_returned' || f.filter === 'has_incoming';
-    if (!f.state && !byGroup) return { $and: and };
-
-    // sellable rule (domain/rules sellsFrom): a seller item sells from its service location when set, else from its
-    // own location; company stock from company locations
-    const sellable = {
-      $and: [
-        '$$l.sellable',
-        '$$l.active',
-        {
-          $cond: [
-            { $eq: ['$owner_type', 'seller'] },
-            { $cond: [{ $eq: [{ $ifNull: ['$service_location_id', null] }, null] }, { $eq: ['$$l.loc_owner', 'seller'] }, { $eq: ['$$l.loc_id', '$service_location_id'] }] },
-            { $eq: ['$$l.loc_owner', 'official'] },
-          ],
-        },
-      ],
-    };
-    const conditions: Filter[] = [];
-    if (f.state) conditions.push({ _state: f.state });
-    if (f.filter === 'low_or_out') conditions.push({ _state: { $ne: 'in_stock' } });
-    if (f.filter === 'has_damaged_or_held') conditions.push({ _damaged: { $gt: 0 } });
-    if (f.filter === 'has_returned') conditions.push({ _returned: { $gt: 0 } });
-    if (f.filter === 'has_incoming') conditions.push({ _incoming: { $gt: 0 } });
-    const match: Filter = { $and: conditions };
-    const rows = await t.items.aggregate<{ _id: string }>([
-      { $match: t.items.filter({ $and: and }) },
-      {
-        $lookup: {
-          from: t.levels.name,
-          localField: '_id',
-          foreignField: 'stock_item_id',
-          as: 'lv',
-          pipeline: [
-            { $lookup: { from: t.locations.name, localField: 'location_id', foreignField: '_id', as: 'loc' } },
-            { $unwind: '$loc' },
-            { $project: { available: 1, damaged_held: 1, returned: 1, incoming: 1, loc_id: '$loc._id', sellable: '$loc.sellable', active: '$loc.active', loc_owner: '$loc.owner_type' } },
-          ],
-        },
-      },
-      {
-        $addFields: {
-          _sell: { $sum: { $map: { input: { $filter: { input: '$lv', as: 'l', cond: sellable } }, as: 'l', in: '$$l.available' } } },
-          _damaged: { $sum: '$lv.damaged_held' },
-          _returned: { $sum: '$lv.returned' },
-          _incoming: { $sum: '$lv.incoming' },
-          _threshold: { $ifNull: ['$low_stock_threshold', f.defaultThreshold] },
-        },
-      },
-      {
-        $addFields: {
-          _state: {
-            $switch: {
-              branches: [
-                { case: { $lte: ['$_sell', 0] }, then: 'out_of_stock' },
-                { case: { $and: [{ $ne: ['$_threshold', null] }, { $lte: ['$_sell', '$_threshold'] }] }, then: 'low_stock' },
-              ],
-              default: 'in_stock',
-            },
-          },
-        },
-      },
-      { $match: match },
-      { $project: { _id: 1 } },
-    ]);
-    return { id: oneOf(rows.map((r) => r._id)) };
+    if (!f.state && !byGroup) return { and };
+    return { id: await this.queries.itemIdsByQuantities({ and }, { ...(f.state ? { state: f.state } : {}), ...(f.filter ? { filter: f.filter } : {}), defaultThreshold: f.defaultThreshold }) };
   }
 
   items(f: ItemFilter): Promise<Row<'stock_items'>[]> {
     return this.#t.items.find(this.#itemFilter(f), { sort: { sku: 1, id: 1 } });
   }
 
+  /**
+   * These items (archived ones included, unknown ids skipped), **locked** in id order — the primary key, which
+   * is the order §11.2 rule 3 asks for, and the first thing `StockTx` takes before it touches the levels.
+   *
+   * The lock is not optional and not decoration: `StockTx.finish` reads `low_since` to decide whether the
+   * cooldown has passed before writing it, `move` compares `updated_at` before writing it, and `setArchived`
+   * reads `archived` and writes the opposite — three read-modify-writes on the item row, all of which the
+   * read-modify-write detector refused (§11.2 rule 2) and all of which were latent lost updates on MongoDB,
+   * where a second writer conflicted and retried instead.
+   */
+  itemsForUpdate(ids: string[]): Promise<Row<'stock_items'>[]> {
+    if (!ids.length) return Promise.resolve([]);
+    return this.#t.items.getMany([...new Set(ids)].sort(), { forUpdate: true, sort: { id: 1 } });
+  }
+
   /** Archives items matching the filter; returns the ones changed */
   async archiveItems(f: { sellerId?: string; offerId?: string }, at: Date): Promise<Row<'stock_items'>[]> {
     if (!f.sellerId && !f.offerId) return [];
-    const filter = { archived: false, ...(f.sellerId ? { seller_id: f.sellerId } : {}), ...(f.offerId ? { offer_id: f.offerId } : {}) };
+    const filter: WhereWithOr<Row<'stock_items'>> = { archived: false, ...(f.sellerId ? { seller_id: f.sellerId } : {}), ...(f.offerId ? { offer_id: f.offerId } : {}) };
     const rows = await this.#t.items.find(filter);
     if (!rows.length) return [];
-    await this.#t.items.updateMany({ ...filter, id: oneOf(rows.map((r) => r.id)) }, { archived: true, updated_at: at });
-    return this.#t.items.find({ id: oneOf(rows.map((r) => r.id)), archived: true, updated_at: at });
+    const ids = rows.map((r) => r.id);
+    await this.#t.items.updateMany({ ...filter, id: ids }, { archived: true, updated_at: at });
+    return this.#t.items.find({ id: ids, archived: true, updated_at: at });
   }
 
   /** Ids of a page of items (filters on aggregated quantities), sorted by SKU */
@@ -265,30 +227,42 @@ export class InventoryRepository {
     return { ...p, items: p.items.map((r) => ({ id: r.id })) };
   }
 
-  /** Ids for exports and digests, sorted by SKU */
+  /** Ids for exports and digests, sorted by SKU, a page at a time */
   async itemIds(f: ItemListFilter, limit: number, offset: number): Promise<string[]> {
-    return (await this.#t.items.find(await this.#itemListFilter(f), { sort: { sku: 1, id: 1 }, limit, skip: offset })).map((r) => r.id);
+    return (await this.#t.items.find(await this.#itemListFilter(f), { sort: { sku: 1, id: 1 }, limit, offset })).map((r) => r.id);
   }
 
   /* ---------------------------------------------------------------- stock levels */
 
-  /** Levels of these items; with forUpdate the rows are locked in (item, location) order */
+  /**
+   * Levels of these items; with forUpdate the rows are locked in (item, location) order — the table's primary
+   * key order, and the order §11.2 rule 3 names for this module. Two transactions that lock the same rows in
+   * different orders deadlock, so the sort is written out rather than left to the store's default.
+   */
   async levels(itemIds: string[], lock?: Lock): Promise<Row<'stock_levels'>[]> {
     if (!itemIds.length) return [];
-    return this.#t.levels.find({ stock_item_id: oneOf(itemIds) }, { sort: { stock_item_id: 1, location_id: 1 }, forUpdate: lock?.forUpdate });
+    return this.#t.levels.find({ stock_item_id: itemIds }, { sort: { stock_item_id: 1, location_id: 1 }, forUpdate: lock?.forUpdate });
   }
 
   /** Creates a zero level row when missing */
   async ensureLevel(itemId: string, locationId: string, at: Date): Promise<void> {
-    await this.#t.levels.insertIfAbsent(
-      { stock_item_id: itemId, location_id: locationId, available: 0, reserved: 0, incoming: 0, damaged_held: 0, returned: 0, version: 0, updated_at: at },
-      ['stock_item_id', 'location_id'],
-    );
+    await this.#t.levels.insertIfAbsent({
+      stock_item_id: itemId,
+      location_id: locationId,
+      available: 0,
+      reserved: 0,
+      incoming: 0,
+      damaged_held: 0,
+      returned: 0,
+      version: 0,
+      updated_at: at,
+    });
   }
 
   /** Writes quantities if the version still matches; false on a concurrent change */
   async updateLevel(itemId: string, locationId: string, v: Omit<Row<'stock_levels'>, 'stock_item_id' | 'location_id' | 'version'>, expectedVersion: number): Promise<boolean> {
-    // conditional on the version: nothing matches after a concurrent change
+    // conditional on the version: nothing matches after a concurrent change (§11.2 rule 6 — a compare-and-set,
+    // unchanged by the move: on MySQL it is the same guarded WHERE with an affected-rows check)
     const row = await this.#t.levels.updateOne(
       { stock_item_id: itemId, location_id: locationId, version: expectedVersion },
       { available: v.available, reserved: v.reserved, incoming: v.incoming, damaged_held: v.damaged_held, returned: v.returned, updated_at: v.updated_at, version: expectedVersion + 1 },
@@ -300,7 +274,7 @@ export class InventoryRepository {
   async levelTotals(f: { ownerType: 'official' | 'seller'; sellerId?: string; locationId?: string }): Promise<Row<'stock_levels'>[]> {
     const ids = await this.#t.items.distinct<string>('id', { owner_type: f.ownerType, archived: false, ...(f.sellerId ? { seller_id: f.sellerId } : {}) });
     if (!ids.length) return [];
-    return this.#t.levels.find({ stock_item_id: oneOf(ids), ...(f.locationId ? { location_id: f.locationId } : {}) });
+    return this.#t.levels.find({ stock_item_id: ids, ...(f.locationId ? { location_id: f.locationId } : {}) });
   }
 
   /* ---------------------------------------------------------------- movement ledger (append-only) */
@@ -310,34 +284,25 @@ export class InventoryRepository {
   }
 
   async pageMovements(f: MovementFilter, page: PageRequest): Promise<Page<Row<'stock_movements'>>> {
-    const and: Filter[] = [];
-    if (f.stockItemIds) and.push({ stock_item_id: oneOf(f.stockItemIds) });
+    const and: WhereWithOr<Row<'stock_movements'>>[] = [];
+    if (f.stockItemIds) and.push({ stock_item_id: f.stockItemIds });
     if (f.sellerId || f.ownerType || f.sku) {
       // joined with stock_items: archived items included
       const ids = await this.#t.items.distinct<string>('id', { ...(f.sellerId ? { seller_id: f.sellerId } : {}), ...(f.ownerType ? { owner_type: f.ownerType } : {}), ...(f.sku ? { sku: f.sku } : {}) });
-      and.push({ stock_item_id: oneOf(ids) });
+      and.push({ stock_item_id: ids });
     }
     if (f.reasonCode) and.push({ reason_code: f.reasonCode });
     if (f.referenceKind) and.push({ ref_kind: f.referenceKind });
     const days = zonedDayRange(f, f.timeZone ?? 'UTC');
-    if (days.start) and.push({ at: { $gte: days.start } });
-    if (days.end) and.push({ at: { $lt: days.end } });
-    return this.#t.movements.page(and.length ? { $and: and } : {}, page, { column: 'at', direction: 'desc' });
+    // two conditions on `at`, which one object cannot hold
+    if (days.start) and.push({ at: { op: '>=', value: days.start } });
+    if (days.end) and.push({ at: { op: '<', value: days.end } });
+    return this.#t.movements.page(and.length ? { and } : {}, page, { column: 'at', direction: 'desc' });
   }
 
   /** Latest movements per item (limit each) */
-  async recentMovements(itemIds: string[], limit: number): Promise<Row<'stock_movements'>[]> {
-    if (!itemIds.length) return [];
-    const docs = await this.#t.movements.aggregate([
-      { $match: { stock_item_id: { $in: itemIds } } },
-      { $sort: { at: -1, _id: -1 } },
-      // the first `limit` of each item in that order
-      { $group: { _id: '$stock_item_id', rows: { $firstN: { input: '$$ROOT', n: limit } } } },
-      { $unwind: '$rows' },
-      { $replaceRoot: { newRoot: '$rows' } },
-      { $sort: { at: -1, _id: -1 } },
-    ]);
-    return docs.map((d) => this.#t.movements.fromDoc(d));
+  recentMovements(itemIds: string[], limit: number): Promise<Row<'stock_movements'>[]> {
+    return this.queries.recentMovements(itemIds, limit);
   }
 
   /** Ledger rows by id */
@@ -348,50 +313,43 @@ export class InventoryRepository {
 
   async movementsByRef(refKind: string, refIds: string[]): Promise<Row<'stock_movements'>[]> {
     if (!refIds.length) return [];
-    return this.#t.movements.find({ ref_kind: refKind, ref_id: oneOf(refIds) }, { sort: { at: 1, id: 1 } });
+    return this.#t.movements.find({ ref_kind: refKind, ref_id: refIds }, { sort: { at: 1, id: 1 } });
   }
 
   /** Units moved with these reason codes since a time, per item */
-  async unitsByReasonSince(itemIds: string[], since: Date, reasonCodes: string[]): Promise<Map<string, number>> {
-    const out = new Map<string, number>();
-    if (!itemIds.length || !reasonCodes.length) return out;
-    const rows = await this.#t.movements.aggregate<{ _id: string; n: number }>([
-      { $match: { stock_item_id: { $in: itemIds }, reason_code: { $in: reasonCodes }, at: { $gte: since } } },
-      { $group: { _id: '$stock_item_id', n: { $sum: '$quantity' } } },
-    ]);
-    for (const r of rows) out.set(r._id, Number(r.n));
-    return out;
+  unitsByReasonSince(itemIds: string[], since: Date, reasonCodes: string[]): Promise<Map<string, number>> {
+    return this.queries.unitsByReasonSince(itemIds, since, reasonCodes);
   }
 
-  /** An order's replacement and exchange allocations (allocateForOrder: source other than checkout) */
+  /**
+   * An order's replacement and exchange allocations (allocateForOrder: source other than checkout).
+   *
+   * `<>` and not `is not`: `source` is NOT NULL, so no row has none and the two readings pick exactly the same
+   * rows — no test can tell them apart. `<>` is the spec's reading of the condition, and what `$nin: [x, null]`
+   * was spelling by hand.
+   */
   allocationsForShipments(orderId: string): Promise<Row<'reservations'>[]> {
-    return this.#t.reservations.find({ order_id: orderId, source: { $nin: ['checkout', null] } }, { sort: { created_at: 1 } });
+    return this.#t.reservations.find({ order_id: orderId, source: { op: '<>', value: 'checkout' } }, { sort: { created_at: 1 } });
   }
 
   /** Units that left stock through dispatch since a time, per item */
-  async dispatchedSince(itemIds: string[], since: Date): Promise<Map<string, number>> {
-    const out = new Map<string, number>();
-    if (!itemIds.length) return out;
-    const rows = await this.#t.movements.aggregate<{ _id: string; n: number }>([
-      { $match: { stock_item_id: { $in: itemIds }, reason_code: 'dispatched', at: { $gte: since } } },
-      { $group: { _id: '$stock_item_id', n: { $sum: '$quantity' } } },
-    ]);
-    for (const r of rows) out.set(r._id, Number(r.n));
-    return out;
+  dispatchedSince(itemIds: string[], since: Date): Promise<Map<string, number>> {
+    return this.queries.unitsByReasonSince(itemIds, since, ['dispatched']);
   }
 
   /* ---------------------------------------------------------------- incoming */
 
   /** Expected deliveries by expected date (undated last), then id */
   expectations(f: { sourceKind?: string; sourceId?: string; itemIds?: string[]; openOnly?: boolean }, lock?: Lock): Promise<Row<'incoming_expectations'>[]> {
+    const o: ReadOptions = { sort: { expected_date: 1, id: 1 }, nullsLast: ['expected_date'], forUpdate: lock?.forUpdate };
     return this.#t.expectations.find(
       {
-        ...(f.sourceKind ? { source_kind: f.sourceKind } : {}),
+        ...(f.sourceKind ? { source_kind: f.sourceKind as Row<'incoming_expectations'>['source_kind'] } : {}),
         ...(f.sourceId ? { source_id: f.sourceId } : {}),
-        ...(f.itemIds ? { stock_item_id: oneOf(f.itemIds) } : {}),
-        ...(f.openOnly ? { quantity_open: { $gt: 0 } } : {}),
+        ...(f.itemIds ? { stock_item_id: f.itemIds } : {}),
+        ...(f.openOnly ? { quantity_open: { op: '>' as const, value: 0 } } : {}),
       },
-      { sort: { expected_date: 1, id: 1 }, nullsLast: ['expected_date'], forUpdate: lock?.forUpdate },
+      o,
     );
   }
 
@@ -419,34 +377,47 @@ export class InventoryRepository {
 
   async lines(ids: string[], lock?: Lock): Promise<Row<'reservation_lines'>[]> {
     if (!ids.length) return [];
-    return this.#t.lines.find({ reservation_id: oneOf(ids) }, { sort: { id: 1 }, forUpdate: lock?.forUpdate });
+    return this.#t.lines.find({ reservation_id: ids }, { sort: { id: 1 }, forUpdate: lock?.forUpdate });
+  }
+
+  /**
+   * The reservations that have a line on these items in these states — the ids a caller locks *before* reading
+   * the lines it means to write.
+   *
+   * A `distinct` and not a `linesWhere`, on purpose: reading the whole line rows first and locking them after
+   * is what §11.2 rule 2 calls too late, and the detector reports the earlier read however well the second one
+   * is locked ("a value computed from the first read is as stale as it ever was"). The ids are all that step
+   * needs.
+   */
+  lineReservationIds(f: { itemIds: string[]; states: string[] }): Promise<string[]> {
+    return this.#t.lines.distinct<string>('reservation_id', { stock_item_id: f.itemIds, state: f.states });
   }
 
   linesWhere(f: { orderItemIds?: string[]; itemIds?: string[]; states?: string[] }, lock?: Lock): Promise<Row<'reservation_lines'>[]> {
     return this.#t.lines.find(
       {
-        ...(f.orderItemIds ? { order_item_id: oneOf(f.orderItemIds) } : {}),
-        ...(f.itemIds ? { stock_item_id: oneOf(f.itemIds) } : {}),
-        ...(f.states ? { state: oneOf(f.states) } : {}),
+        ...(f.orderItemIds ? { order_item_id: f.orderItemIds } : {}),
+        ...(f.itemIds ? { stock_item_id: f.itemIds } : {}),
+        ...(f.states ? { state: f.states } : {}),
       },
       { sort: { id: 1 }, forUpdate: lock?.forUpdate },
     );
   }
 
   async pageReservations(f: { orderId?: string; stockItemId?: string; state?: string }, page: PageRequest): Promise<Page<Row<'reservations'>>> {
-    const filter: Filter = { ...(f.orderId ? { order_id: f.orderId } : {}), ...(f.state ? { state: f.state } : {}) };
-    if (f.stockItemId) filter.id = oneOf(await this.#t.lines.distinct<string>('reservation_id', { stock_item_id: f.stockItemId }));
-    return this.#t.reservations.page(filter, page, { column: 'created_at', direction: 'desc' });
+    const where: WhereWithOr<Row<'reservations'>> = { ...(f.orderId ? { order_id: f.orderId } : {}), ...(f.state ? { state: f.state } : {}) };
+    if (f.stockItemId) where.id = await this.#t.lines.distinct<string>('reservation_id', { stock_item_id: f.stockItemId });
+    return this.#t.reservations.page(where, page, { column: 'created_at', direction: 'desc' });
   }
 
   /** Held reservations past their expiry */
   dueHolds(now: Date, limit: number): Promise<Row<'reservations'>[]> {
-    return this.#t.reservations.find({ state: 'held', expires_at: { $lte: now } }, { sort: { expires_at: 1 }, limit });
+    return this.#t.reservations.find({ state: 'held', expires_at: { op: '<=', value: now } }, { sort: { expires_at: 1 }, limit });
   }
 
   /** Allocations open since before a time */
   staleAllocations(before: Date, limit: number): Promise<Row<'reservations'>[]> {
-    return this.#t.reservations.find({ state: 'allocated', updated_at: { $lt: before } }, { sort: { updated_at: 1 }, limit });
+    return this.#t.reservations.find({ state: 'allocated', updated_at: { op: '<', value: before } }, { sort: { updated_at: 1 }, limit });
   }
 
   /* ---------------------------------------------------------------- adjustments and held stock */
@@ -456,7 +427,7 @@ export class InventoryRepository {
   }
 
   adjustmentsWhere(f: { itemIds?: string[]; states?: string[] }): Promise<Row<'adjustments'>[]> {
-    return this.#t.adjustments.find({ ...(f.itemIds ? { stock_item_id: oneOf(f.itemIds) } : {}), ...(f.states ? { state: oneOf(f.states) } : {}) }, { sort: { created_at: -1, id: -1 } });
+    return this.#t.adjustments.find({ ...(f.itemIds ? { stock_item_id: f.itemIds } : {}), ...(f.states ? { state: f.states } : {}) }, { sort: { created_at: -1, id: -1 } });
   }
 
   pageAdjustments(f: { state?: string; stockItemId?: string }, page: PageRequest): Promise<Page<Row<'adjustments'>>> {
@@ -468,7 +439,7 @@ export class InventoryRepository {
   }
 
   dueHeld(date: string, limit: number): Promise<Row<'held_stock'>[]> {
-    return this.#t.held.find({ released_at: null, review_date: { $lte: date } }, { sort: { review_date: 1, id: 1 }, limit });
+    return this.#t.held.find({ released_at: null, review_date: { op: '<=', value: date } }, { sort: { review_date: 1, id: 1 }, limit });
   }
 
   /* ---------------------------------------------------------------- inbound receipts */
@@ -479,7 +450,7 @@ export class InventoryRepository {
 
   async inboundLines(ids: string[]): Promise<Row<'inbound_lines'>[]> {
     if (!ids.length) return [];
-    return this.#t.inboundLines.find({ inbound_id: oneOf(ids) }, { sort: { inbound_id: 1, stock_item_id: 1 } });
+    return this.#t.inboundLines.find({ inbound_id: ids }, { sort: { inbound_id: 1, stock_item_id: 1 } });
   }
 
   async insertInboundLines(rows: NewRow<'inbound_lines'>[]): Promise<void> {
@@ -503,7 +474,7 @@ export class InventoryRepository {
 
   /** With forUpdate the rows are locked in inspection order, for a caller that adds to `quantity` */
   returnOutcomesWhere(f: { returnId?: string; ids?: string[] }, lock?: Lock): Promise<Row<'return_outcomes'>[]> {
-    return this.#t.outcomes.find({ ...(f.returnId ? { return_id: f.returnId } : {}), ...(f.ids ? { id: oneOf(f.ids) } : {}) }, { sort: { inspected_at: 1 }, forUpdate: lock?.forUpdate });
+    return this.#t.outcomes.find({ ...(f.returnId ? { return_id: f.returnId } : {}), ...(f.ids ? { id: f.ids } : {}) }, { sort: { inspected_at: 1 }, forUpdate: lock?.forUpdate });
   }
 
   pageReturnOutcomes(f: { state?: string }, page: PageRequest): Promise<Page<Row<'return_outcomes'>>> {
@@ -514,7 +485,7 @@ export class InventoryRepository {
 
   discrepanciesWhere(f: { itemIds?: string[]; states?: string[]; kinds?: string[] }): Promise<Row<'discrepancies'>[]> {
     return this.#t.discrepancies.find(
-      { ...(f.itemIds ? { stock_item_id: oneOf(f.itemIds) } : {}), ...(f.states ? { state: oneOf(f.states) } : {}), ...(f.kinds ? { kind: oneOf(f.kinds) } : {}) },
+      { ...(f.itemIds ? { stock_item_id: f.itemIds } : {}), ...(f.states ? { state: f.states } : {}), ...(f.kinds ? { kind: f.kinds } : {}) },
       { sort: { reported_at: -1, id: -1 } },
     );
   }

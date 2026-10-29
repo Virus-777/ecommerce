@@ -3,6 +3,8 @@ import { spec } from '../../spec/inventory.js';
 import { resolvers } from './graphql/resolvers.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
+import { mongoInventoryQueries } from './queries.mongo.js';
+import { mysqlInventoryQueries } from './queries.mysql.js';
 import { InventoryRepository } from './repository.js';
 import { InventoryService } from './service.js';
 import { schemas } from './schema.js';
@@ -18,7 +20,9 @@ export default defineModule({
   version: '2.0.0',
   schemas,
   register(ctx) {
-    const service = new InventoryService({ repo: new InventoryRepository(ctx.mongo), ctx });
+    // the repository is store-neutral (ctx.store); its three joining and grouping reads are the store's own (queries.ts)
+    const queries = ctx.mysql ? mysqlInventoryQueries(ctx.mysql) : mongoInventoryQueries(ctx.mongo);
+    const service = new InventoryService({ repo: new InventoryRepository(ctx.store, queries), ctx });
     ctx.provide(service);
     ctx.http.routes(sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

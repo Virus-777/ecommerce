@@ -347,7 +347,17 @@ describe('low stock and jobs', () => {
     h.app.kernel.events.publish('warehouse', 'warehouse.bin.assigned', { stockItemId: newId(), binId: newId(), binCode: 'B-07-2', primary: true });
     await h.app.kernel.events.drain();
     expect((await admin(h, 'GET', `/stock-items/${a.id}`)).json().item.binCode).toBe('B-07-1');
-    expect((await admin(h, 'GET', '/stock-items?zone=B-07')).json().items.map((i: { id: string }) => i.id)).toContain(a.id);
+    // a zone is a bin-code *prefix*: an item with no bin at all, and one whose bin merely contains the zone,
+    // are both outside it. Asserted both ways because `toContain` alone passes with the filter removed, and
+    // because "starts with" and "contains" differ by exactly this row
+    const elsewhere = await officialItem(h, loc.id, 1);
+    const deeper = await officialItem(h, loc.id, 1);
+    h.app.kernel.events.publish('warehouse', 'warehouse.bin.assigned', { stockItemId: deeper.id, binId: newId(), binCode: 'A-B-07-9', primary: true });
+    await h.app.kernel.events.drain();
+    const inZone = (await admin(h, 'GET', '/stock-items?zone=B-07&limit=100')).json().items.map((i: { id: string }) => i.id);
+    expect(inZone).toContain(a.id);
+    expect(inZone).not.toContain(elsewhere.id);
+    expect(inZone).not.toContain(deeper.id);
   });
 });
 
