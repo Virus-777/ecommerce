@@ -1,6 +1,6 @@
 /** Categories, attributes, image standards and brands. */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { api, brand, catalogApp, category, newId, uploadImage, type CatalogTestApp } from './helpers.js';
+import { api, brand, catalogApp, catalogTable, category, newId, uploadImage, type CatalogTestApp } from './helpers.js';
 
 let t: CatalogTestApp;
 let a: ReturnType<typeof api>;
@@ -190,5 +190,18 @@ describe('brands', () => {
     expect(list.items.map((b: { id: string; name: string }) => `${b.name} (${b.id})`)).toHaveLength(1);
     expect(list.items[0]).toMatchObject({ status: 'active', sellingPolicy: 'open', authorizedSellerIds: [], requestedBy: { sellerId, changeRequestId } });
     expect((await a.admin('GET', '/brands?q=nope')).json().items).toHaveLength(0);
+  });
+
+  it('an approved brand_request activates a brand already under review under the same name, any case and spacing', async () => {
+    const sellerId = newId();
+    const waiting = await brand(t, 'Orvel Audio');
+    // what a seller's own request leaves behind, and an older row whose name kept the spaces around it
+    await catalogTable(t.app, 'brands').update(waiting.id, { name: '  orvel audio ', status: 'under_review', requested_by_seller_id: sellerId });
+    const changeRequestId = newId();
+    t.app.kernel.events.publish('sellers', 'sellers.change_request.decided', { changeRequestId, sellerId, kind: 'brand_request', approved: true, brandRequest: { brandName: 'Orvel Audio', relationship: 'reseller', categoryIds: [] } });
+    await t.app.kernel.events.drain();
+    const list = (await a.admin('GET', '/brands?requested=true&q=orvel')).json();
+    expect(list.items.map((b: { id: string; name: string }) => `${b.name} (${b.id})`)).toHaveLength(1);
+    expect(list.items[0]).toMatchObject({ brand: { id: waiting.id }, status: 'active', requestedBy: { sellerId, changeRequestId } });
   });
 });

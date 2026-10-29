@@ -1,7 +1,6 @@
-import { contains, isDuplicateKey, type ModuleStore } from '../../kernel/mongo/index.js';
-import type { Filter } from '../../kernel/mongo/table.js';
 import { decodeCursor, encodeCursor, type PageRequest } from '../../kernel/lib/pagination.js';
-import { escapeRegExp } from '../../kernel/lib/text.js';
+import { isDuplicateKey, type Store, type WhereWithOr } from '../../kernel/store/index.js';
+import { normalizeModel } from './domain/rules.js';
 import type * as common from '../../spec/common.js';
 import type {
   AttributeRow,
@@ -27,6 +26,7 @@ import type {
   SubmissionRow,
   VariantRow,
 } from './ports.js';
+import type { CatalogQueries, ContentState } from './queries.js';
 
 /** A variant write refused because another variant already has the GTIN (unique index variants.gtin) */
 export class GtinTakenError extends Error {
@@ -35,21 +35,14 @@ export class GtinTakenError extends Error {
   }
 }
 
-/** One of `values`, or nothing when the list is empty (an empty IN matches no row) */
-const oneOf = (values: readonly unknown[]) => ({ $in: [...new Set(values)] });
-/** All of the conditions (an empty list: every row) */
-const allOf = (conds: Filter[]): Filter => (conds.length === 0 ? {} : conds.length === 1 ? conds[0]! : { $and: conds });
+/** The values with duplicates removed (an empty list matches no row on either store) */
+const oneOf = <T>(values: readonly T[]): T[] => [...new Set(values)];
 
 /**
- * The model number with everything but letters and digits removed, compared with `normalised` (already lower-case
- * alphanumerics): the characters in order with anything else around them. `whole`: equal; otherwise a prefix.
+ * The spec's full-text column `search` is not stored (search is the search module's); rows keep the field,
+ * always null. MySQL's table has no such column and MongoDB's schema does not declare it, so it is stripped
+ * from every write and put back on every read.
  */
-function modelPattern(normalised: string, whole: boolean) {
-  const gap = '[^a-z0-9]*';
-  return { $regex: `^${gap}${[...normalised].join(gap)}${whole ? `${gap}$` : ''}`, $options: 'i' };
-}
-
-/** The spec's full-text column `search` is not stored (search is the search module's); rows keep the field, always null */
 const productOut = (r: ProductRow): ProductRow => ({ ...r, search: null });
 const productOutOpt = (r: ProductRow | undefined) => (r ? productOut(r) : r);
 const productIn = <T extends Partial<ProductRow>>(row: T): Omit<T, 'search'> => {
@@ -62,6 +55,7 @@ async function refusingTakenGtin<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } catch (err) {
+    // the store seam's test, so neither database's error code is named here (kernel/store/index.ts)
     if (isDuplicateKey(err)) throw new GtinTakenError({ cause: err });
     throw err;
   }
@@ -86,17 +80,22 @@ function pageDesc<T>(sorted: { value: number; id: string; item: T }[], req: Page
   return { items: items.map((s) => s.item), nextCursor: rows.length > req.limit ? cursorOf(items.at(-1)!) : null };
 }
 
-const LISTING = 'catalog.listing_stats';
 /** Products customers can buy: approved, active, not merged */
-const LIVE: Filter = { review_state: 'approved', publication: 'active', merged_into_id: null };
-/** The Admin catalog's missing-content tab: a content score under 100, or images to re-crop */
-const MISSING_CONTENT: Filter = { $or: [{ content_score: { $lt: 100 } }, { 'recrop_media_ids.0': { $exists: true } }] };
+const LIVE: WhereWithOr<ProductRow> = { review_state: 'approved', publication: 'active', merged_into_id: null };
 
-/** The catalog module's collections (catalog.*): one Table per spec table; joins run as two reads or a $lookup. */
+/**
+ * The catalog module's tables, whichever database holds them (`ctx.store`, docs/10 §10.5). Joins run as two
+ * reads; the reads that are not the same question in both databases — the joins to `listing_stats`, the
+ * missing-content condition and the model-number pattern — are the module's queries port (queries.ts), which
+ * module.ts picks one implementation of and which the transaction clone carries with it.
+ */
 export class CatalogRepository {
   readonly #t;
 
-  constructor(private readonly store: ModuleStore) {
+  constructor(
+    private readonly store: Store,
+    private readonly queries: CatalogQueries,
+  ) {
     this.#t = {
       categories: store.table<CategoryRow>('categories'),
       attributes: store.table<AttributeRow>('attributes'),
@@ -119,12 +118,17 @@ export class CatalogRepository {
   }
 
   transaction<T>(fn: (tx: CatalogRepository) => Promise<T>): Promise<T> {
-    return this.store.transaction((tx) => fn(new CatalogRepository(tx)));
+    return this.store.transaction((tx) => fn(new CatalogRepository(tx, this.queries)));
   }
 
-  /** Inbox (ctx.mongo.claim): true the first time this key is claimed; commits with the transaction it runs in */
+  /** Inbox (store.claim): true the first time this key is claimed; commits with the transaction it runs in */
   claim(key: string): Promise<boolean> {
     return this.store.claim(key);
+  }
+
+  /** Serialises transactions on a name (§11.2 rule 5), for a check-then-insert with no unique key behind it */
+  lock(name: string): Promise<void> {
+    return this.store.lock(name);
   }
 
   /* ------------------------------------------------ helpers (joins as two reads) */
@@ -134,7 +138,12 @@ export class CatalogRepository {
    * dismissed, or was dismissed for one candidate only (dismissed_matched_product_id set).
    */
   async #duplicateSuspectedIds(): Promise<string[]> {
-    const checks = await this.#t.checks.find({ kind: 'duplicate', result: oneOf(['warn', 'fail']), $or: [{ dismissed_at: null }, { dismissed_matched_product_id: { $ne: null } }] });
+    const checks = await this.#t.checks.find({
+      kind: 'duplicate',
+      result: ['warn', 'fail'],
+      // "dismissed for one candidate only" means the column has a value, which is `is not null`
+      or: [{ dismissed_at: null }, { dismissed_matched_product_id: { op: 'is not', value: null } }],
+    });
     if (!checks.length) return [];
     const subIds = new Set(checks.map((c) => c.submission_id));
     const subs = await this.#t.submissions.getMany([...subIds]);
@@ -142,44 +151,54 @@ export class CatalogRepository {
     return latest.filter((s) => subIds.has(s.id)).map((s) => s.product_id);
   }
 
-  async #productFilter(f: ProductFilter): Promise<Filter> {
-    const conds: Filter[] = [];
+  /**
+   * A product filter in the neutral vocabulary, and separately whether the missing-content condition applies.
+   * That one asks whether a JSON array is non-empty — `recrop_media_ids.0: { $exists: true }` on MongoDB,
+   * `JSON_LENGTH(...) > 0` on MySQL — which `Where` has no shape for, so it travels to the queries port beside
+   * the filter rather than into it (queries.ts).
+   */
+  async #productFilter(f: ProductFilter): Promise<{ where: WhereWithOr<ProductRow>; missing: ContentState }> {
+    const conds: WhereWithOr<ProductRow>[] = [];
     if (!f.includeMerged) conds.push({ merged_into_id: null });
     if (f.q?.trim()) {
       const text = f.q.trim();
-      const any: Filter[] = [{ title: contains(text) }, { ref: text.toUpperCase() }, { model_number: contains(text) }, { mpn: contains(text) }];
+      const any: WhereWithOr<ProductRow>[] = [
+        { title: { op: 'contains', value: text } },
+        { ref: text.toUpperCase() },
+        { model_number: { op: 'contains', value: text } },
+        { mpn: { op: 'contains', value: text } },
+      ];
       if (f.matchGtin) {
         const owners = await this.#t.variants.distinct<string>('product_id', { gtin: text.replace(/\s+/g, '') });
         if (owners.length) any.push({ id: oneOf(owners) });
       }
-      conds.push({ $or: any });
+      conds.push({ or: any });
     }
     if (f.purchasableOnly) conds.push({ review_state: 'approved', publication: 'active' });
-    if (f.updatedSince) conds.push({ updated_at: { $gte: f.updatedSince } });
+    if (f.updatedSince) conds.push({ updated_at: { op: '>=', value: f.updatedSince } });
     if (f.categoryIds) conds.push({ category_id: oneOf(f.categoryIds) });
     if (f.brandId) conds.push({ brand_id: f.brandId });
     if (f.ownerSellerId) conds.push({ owner_seller_id: f.ownerSellerId });
-    if (f.reviewStates?.length) conds.push({ review_state: oneOf(f.reviewStates) });
-    if (f.publication) conds.push({ publication: f.publication });
-    // missing content: a content score under 100, or images to re-crop after a product image ratio change
-    if (f.missingContent === true) conds.push(MISSING_CONTENT);
-    if (f.missingContent === false) conds.push({ $nor: [MISSING_CONTENT] });
+    if (f.reviewStates?.length) conds.push({ review_state: oneOf(f.reviewStates) as ProductRow['review_state'][] });
+    if (f.publication) conds.push({ publication: f.publication as ProductRow['publication'] });
     if (f.duplicateSuspected !== undefined) {
-      const ids = await this.#duplicateSuspectedIds();
-      conds.push({ id: f.duplicateSuspected ? oneOf(ids) : { $nin: ids } });
+      const ids = oneOf(await this.#duplicateSuspectedIds());
+      // `not in` of an empty list leaves the column unfiltered on both stores, which is "none of none"
+      conds.push({ id: f.duplicateSuspected ? ids : { op: 'not in', value: ids } });
     }
-    return allOf(conds);
+    // missing content: a content score under 100, or images to re-crop after a product image ratio change
+    return { where: { and: conds }, missing: f.missingContent };
   }
 
-  #brandFilter(f: BrandFilter): Filter {
-    const conds: Filter[] = [];
-    if (f.q?.trim()) conds.push({ name: contains(f.q) });
-    if (f.statuses?.length) conds.push({ status: oneOf(f.statuses) });
-    if (f.sellingPolicy) conds.push({ selling_policy: f.sellingPolicy });
-    if (f.requested === true) conds.push({ requested_by_seller_id: { $ne: null } });
+  #brandFilter(f: BrandFilter): WhereWithOr<BrandRow> {
+    const conds: WhereWithOr<BrandRow>[] = [];
+    if (f.q?.trim()) conds.push({ name: { op: 'contains', value: f.q } });
+    if (f.statuses?.length) conds.push({ status: oneOf(f.statuses) as BrandRow['status'][] });
+    if (f.sellingPolicy) conds.push({ selling_policy: f.sellingPolicy as BrandRow['selling_policy'] });
+    if (f.requested === true) conds.push({ requested_by_seller_id: { op: 'is not', value: null } });
     if (f.requested === false) conds.push({ requested_by_seller_id: null });
-    if (f.activeOrRequestedBy) conds.push({ $or: [{ status: 'active' }, { status: 'under_review', requested_by_seller_id: f.activeOrRequestedBy }] });
-    return allOf(conds);
+    if (f.activeOrRequestedBy) conds.push({ or: [{ status: 'active' }, { status: 'under_review', requested_by_seller_id: f.activeOrRequestedBy }] });
+    return { and: conds };
   }
 
   /* ================================================================ categories, attributes, image standards */
@@ -201,8 +220,9 @@ export class CatalogRepository {
     return (await this.#t.categories.update(id, patch))!;
   }
 
+  /** `<>` and not `is not`: `id` is the primary key, so no row can tell the two readings apart */
   categorySlugTaken(slug: string, exceptId?: string): Promise<boolean> {
-    return this.#t.categories.exists({ slug, ...(exceptId ? { id: { $ne: exceptId } } : {}) });
+    return this.#t.categories.exists({ slug, ...(exceptId ? { id: { op: '<>' as const, value: exceptId } } : {}) });
   }
 
   async attributesOf(categoryIds: string[]): Promise<AttributeRow[]> {
@@ -241,7 +261,7 @@ export class CatalogRepository {
   }
 
   getBrands(ids: string[]): Promise<BrandRow[]> {
-    return this.#t.brands.getMany([...new Set(ids)]);
+    return this.#t.brands.getMany(oneOf(ids));
   }
 
   getBrandBySlug(slug: string): Promise<BrandRow | undefined> {
@@ -250,15 +270,16 @@ export class CatalogRepository {
 
   /** The same name, any case, ignoring leading and trailing spaces (spaces only, not tabs or new lines) */
   findBrandByName(name: string): Promise<BrandRow | undefined> {
-    return this.#t.brands.findOne({ name: { $regex: `^ *${escapeRegExp(name.replace(/^ +| +$/g, ''))} *$`, $options: 'i' } }, { sort: { created_at: 1 } });
+    return this.queries.brandByName(name);
   }
 
   findBrandByChangeRequest(changeRequestId: string): Promise<BrandRow | undefined> {
     return this.#t.brands.findOne({ requested_change_request_id: changeRequestId });
   }
 
+  /** `<>` and not `is not`: `id` is the primary key, so no row can tell the two readings apart */
   brandSlugTaken(slug: string, exceptId?: string): Promise<boolean> {
-    return this.#t.brands.exists({ slug, ...(exceptId ? { id: { $ne: exceptId } } : {}) });
+    return this.#t.brands.exists({ slug, ...(exceptId ? { id: { op: '<>' as const, value: exceptId } } : {}) });
   }
 
   listBrands(filter: BrandFilter, page: PageRequest): Promise<common.Page<BrandRow>> {
@@ -267,9 +288,9 @@ export class CatalogRepository {
 
   /** Brands ordered by in-stock products from brand_stats (null = all categories), by product_count desc, id desc */
   async listPopularBrands(filter: BrandFilter, categoryId: string | null, page: PageRequest): Promise<common.Page<BrandRow>> {
-    const stats = await this.#t.brandStats.find({ category_id: categoryId, product_count: { $gt: 0 } });
+    const stats = await this.#t.brandStats.find({ category_id: categoryId, product_count: { op: '>', value: 0 } });
     const counts = new Map(stats.map((s) => [s.brand_id, s.product_count]));
-    const brands = counts.size ? await this.#t.brands.find({ $and: [this.#brandFilter(filter), { id: oneOf([...counts.keys()]) }] }) : [];
+    const brands = counts.size ? await this.#t.brands.find({ and: [this.#brandFilter(filter), { id: [...counts.keys()] }] }) : [];
     const sorted = brands
       .map((b) => ({ value: counts.get(b.id)!, id: b.id, item: b }))
       .sort((a, b) => b.value - a.value || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
@@ -278,6 +299,21 @@ export class CatalogRepository {
 
   insertBrand(row: BrandRow): Promise<BrandRow> {
     return this.#t.brands.insert(row);
+  }
+
+  /**
+   * Inserts the brand unless a unique key of `brands` is already taken, in which case the answer is
+   * `undefined`: the insert itself decides, rather than a read before it (Appendix C, the brand race found on
+   * 2026-10-28). `insertIfAbsent` with no key is insert-and-catch outside a transaction on both stores, and
+   * the duplicate-key test it uses is the store seam's, so neither database's code is named here.
+   *
+   * **It only closes the race once `brands.requested_change_request_id` is a unique key**, which is a spec
+   * change and so not this conversion's to make (docs/10 §10.5e). Until then the only unique key an insert can
+   * find taken is `slug`, so a second delivery of the same approval whose slug happens to differ still writes
+   * a second row — which is the bug, unchanged. The caller treats `undefined` as "already handled".
+   */
+  insertBrandIfAbsent(row: BrandRow): Promise<BrandRow | undefined> {
+    return this.#t.brands.insertIfAbsent(row);
   }
 
   async updateBrand(id: string, patch: Partial<BrandRow>): Promise<BrandRow> {
@@ -293,10 +329,12 @@ export class CatalogRepository {
   /** Replaces the staff-added authorized sellers; claim-based entries stay */
   async replaceStaffAuthorizedSellers(brandId: string, sellerIds: string[], addedBy: common.Actor, at: Date): Promise<void> {
     await this.#t.authorized.deleteMany({ brand_id: brandId, source: 'staff' });
-    const unique = [...new Set(sellerIds)];
+    const unique = oneOf(sellerIds);
     if (!unique.length) return;
     const rows: AuthorizedSellerRow[] = unique.map((seller_id) => ({ brand_id: brandId, seller_id, source: 'staff', added_by: addedBy as never, added_at: at }));
-    await this.#t.authorized.insertManyIfAbsent(rows, ['brand_id', 'seller_id']);
+    // no key named: (brand_id, seller_id) is this table's primary key, and with no key both stores check every
+    // unique key the spec gives it, which is the question meant (docs/10 §10.5a)
+    await this.#t.authorized.insertManyIfAbsent(rows);
   }
 
   async brandStats(brandIds: string[], categoryId: string | null): Promise<BrandStatsRow[]> {
@@ -312,23 +350,13 @@ export class CatalogRepository {
   /** Products by brand (not merged), for brand admin counts */
   async productCountsByBrand(brandIds: string[]): Promise<Map<string, number>> {
     if (!brandIds.length) return new Map<string, number>();
-    const rows = await this.#t.products.aggregate<{ _id: string; n: number }>([
-      { $match: { brand_id: oneOf(brandIds), merged_into_id: null } },
-      { $group: { _id: '$brand_id', n: { $sum: 1 } } },
-    ]);
-    return new Map(rows.map((r) => [r._id, r.n]));
+    const rows = await this.#t.products.countBy(['brand_id'], { brand_id: oneOf(brandIds), merged_into_id: null });
+    return new Map(rows.filter((r) => r.brand_id !== null).map((r) => [r.brand_id!, r.n]));
   }
 
   /** Live product counts by brand within the given categories (popular brands of a subcategory) */
-  async liveProductCountsByBrandIn(categoryIds: string[]): Promise<Map<string, number>> {
-    if (!categoryIds.length) return new Map<string, number>();
-    const rows = await this.#t.products.aggregate<{ _id: string; n: number }>([
-      { $match: { category_id: oneOf(categoryIds), brand_id: { $ne: null }, ...LIVE } },
-      { $lookup: { from: LISTING, localField: '_id', foreignField: '_id', as: 'l' } },
-      { $match: { 'l.live_offer_count': { $gt: 0 } } },
-      { $group: { _id: '$brand_id', n: { $sum: 1 } } },
-    ]);
-    return new Map(rows.map((r) => [r._id, r.n]));
+  liveProductCountsByBrandIn(categoryIds: string[]): Promise<Map<string, number>> {
+    return this.queries.liveBrandCountsIn(oneOf(categoryIds));
   }
 
   /* ================================================================ products */
@@ -338,7 +366,7 @@ export class CatalogRepository {
   }
 
   async getProducts(ids: string[]): Promise<ProductRow[]> {
-    return (await this.#t.products.getMany([...new Set(ids)])).map(productOut);
+    return (await this.#t.products.getMany(oneOf(ids))).map(productOut);
   }
 
   async insertProduct(row: ProductRow): Promise<ProductRow> {
@@ -352,25 +380,25 @@ export class CatalogRepository {
   }
 
   async listProducts(filter: ProductFilter, page: PageRequest): Promise<common.Page<ProductRow>> {
-    const p = await this.#t.products.page(await this.#productFilter(filter), page, { column: 'updated_at', direction: 'desc' });
+    const { where, missing } = await this.#productFilter(filter);
+    const p = await this.queries.pageProducts(where, missing, page);
     return { ...p, items: p.items.map(productOut) };
   }
 
   /** Keyset walk over product ids (index rebuilds) */
   async productIdsAfter(filter: ProductFilter, afterId: string | null, limit: number): Promise<string[]> {
-    const f = await this.#productFilter(filter);
-    const rows = await this.#t.products.find(afterId ? { $and: [f, { id: { $gt: afterId } }] } : f, { sort: { id: 1 }, limit });
-    return rows.map((r) => r.id);
+    const { where, missing } = await this.#productFilter(filter);
+    return (await this.queries.productsAfterId(where, missing, afterId, limit)).map((r) => r.id);
   }
 
   /** Keyset batches by id for exports */
   async productBatch(filter: ProductFilter, afterId: string | null, limit: number): Promise<ProductRow[]> {
-    const f = await this.#productFilter(filter);
-    return (await this.#t.products.find(afterId ? { $and: [f, { id: { $gt: afterId } }] } : f, { sort: { id: 1 }, limit })).map(productOut);
+    const { where, missing } = await this.#productFilter(filter);
+    return (await this.queries.productsAfterId(where, missing, afterId, limit)).map(productOut);
   }
 
   async productStats(): Promise<ProductStatsCounts> {
-    const notMerged = { merged_into_id: null };
+    const notMerged: WhereWithOr<ProductRow> = { merged_into_id: null };
     const products = this.#t.products;
     // independent counts, read at once (never called inside a transaction)
     const [all, active, hidden, suspended, missingContent, duplicatesSuspected, inReview, offers] = await Promise.all([
@@ -378,31 +406,30 @@ export class CatalogRepository {
       products.count({ ...notMerged, publication: 'active', review_state: 'approved' }),
       products.count({ ...notMerged, publication: 'hidden' }),
       products.count({ ...notMerged, publication: 'suspended' }),
-      products.count({ ...notMerged, ...MISSING_CONTENT }),
+      this.queries.countProducts(notMerged, true),
       this.#duplicateSuspectedIds().then((ids) => (ids.length ? products.count({ ...notMerged, id: oneOf(ids) }) : 0)),
       this.#t.submissions.count({ state: 'open', paused_at: null }),
-      this.#t.offers.count({ status: { $nin: ['removed', null] } }),
+      // `<>` and not `is not`: it was `$nin: ['removed', null]`, which is what `<>` means. `offer_index.status`
+      // cannot be null, so no row can tell the two readings apart, and this is the one the spec writes
+      this.#t.offers.count({ status: { op: '<>', value: 'removed' } }),
     ]);
     return { all, active, hidden, suspended, missingContent, duplicatesSuspected, inReview, offers };
   }
 
   async productsInCategories(categoryIds: string[], reviewStates: string[]): Promise<ProductRow[]> {
     if (!categoryIds.length) return [];
-    return (await this.#t.products.find({ category_id: oneOf(categoryIds), merged_into_id: null, ...(reviewStates.length ? { review_state: oneOf(reviewStates) } : {}) })).map(productOut);
+    return (await this.#t.products.find({ category_id: oneOf(categoryIds), merged_into_id: null, ...(reviewStates.length ? { review_state: oneOf(reviewStates) as ProductRow['review_state'][] } : {}) })).map(productOut);
   }
 
   async productsOfBrand(brandId: string, reviewStates: string[]): Promise<ProductRow[]> {
-    return (await this.#t.products.find({ brand_id: brandId, merged_into_id: null, ...(reviewStates.length ? { review_state: oneOf(reviewStates) } : {}) })).map(productOut);
+    return (await this.#t.products.find({ brand_id: brandId, merged_into_id: null, ...(reviewStates.length ? { review_state: oneOf(reviewStates) as ProductRow['review_state'][] } : {}) })).map(productOut);
   }
 
   /** Review states of the products sellers submitted */
   async countBySellerAndState(sellerIds: string[]): Promise<{ seller_id: string; review_state: string; n: number }[]> {
     if (!sellerIds.length) return [];
-    const rows = await this.#t.products.aggregate<{ _id: { seller: string; state: string }; n: number }>([
-      { $match: { owner_seller_id: oneOf(sellerIds), merged_into_id: null } },
-      { $group: { _id: { seller: '$owner_seller_id', state: '$review_state' }, n: { $sum: 1 } } },
-    ]);
-    return rows.map((r) => ({ seller_id: r._id.seller, review_state: r._id.state, n: r.n }));
+    const rows = await this.#t.products.countBy(['owner_seller_id', 'review_state'], { owner_seller_id: oneOf(sellerIds), merged_into_id: null });
+    return rows.filter((r) => r.owner_seller_id !== null).map((r) => ({ seller_id: r.owner_seller_id!, review_state: r.review_state, n: r.n }));
   }
 
   /** Approved, not merged products: GTIN, model number and title matches */
@@ -416,16 +443,17 @@ export class CatalogRepository {
     }
     const text = input.q.trim();
     if (text) {
-      const model = text.replace(/[^a-z0-9]/gi, '');
-      const tokens = text.split(/\s+/).map((tk) => tk.replace(/[^a-z0-9]/gi, '')).filter((tk) => tk.length >= 3 && /\d/.test(tk));
-      const prefixes = [...new Set([model, ...tokens].filter((tk) => tk.length >= 3).map((tk) => tk.slice(0, Math.max(3, Math.min(tk.length - 1, 4)))))];
+      const model = normalizeModel(text);
+      const tokens = text.split(/\s+/).map((tk) => normalizeModel(tk)).filter((tk) => tk.length >= 3 && /\d/.test(tk));
+      const prefixes = oneOf([model, ...tokens].filter((tk) => tk.length >= 3).map((tk) => tk.slice(0, Math.max(3, Math.min(tk.length - 1, 4)))));
       if (prefixes.length) {
-        const rows = await this.#t.products.find({ ...LIVE, $or: prefixes.map((pre) => ({ model_number: modelPattern(pre.toLowerCase(), false) })) }, { limit: input.limit * 2 });
+        const rows = await this.queries.productsByModelPrefixes(prefixes, input.limit * 2);
         for (const r of rows) if (!hits.has(r.id)) hits.set(r.id, { product: productOut(r), matchedOn: 'model' });
       }
       const words = text.split(/\s+/).filter((w) => w.length >= 2).slice(0, 6);
       if (words.length) {
-        const rows = await this.#t.products.find({ ...LIVE, $and: words.map((w) => ({ title: contains(w) })) }, { sort: { listed_at: -1 }, limit: input.limit * 2 });
+        // every word, each a condition on `title`, which one object cannot hold twice (§10.5a's `and`)
+        const rows = await this.#t.products.find({ ...LIVE, and: words.map((w) => ({ title: { op: 'contains' as const, value: w } })) }, { sort: { listed_at: -1 }, limit: input.limit * 2 });
         for (const r of rows) if (!hits.has(r.id)) hits.set(r.id, { product: productOut(r), matchedOn: 'title' });
       }
     }
@@ -434,36 +462,19 @@ export class CatalogRepository {
 
   /** Candidates for the duplicate check */
   async duplicateCandidates(input: { productId: string; modelNumber: string | null; gtins: string[]; titleWords: string[] }): Promise<ProductRow[]> {
-    const any: Filter[] = [];
-    if (input.modelNumber) any.push({ model_number: modelPattern(input.modelNumber.toLowerCase().replace(/[^a-z0-9]/g, ''), true) });
-    if (input.gtins.length) {
-      const owners = await this.#t.variants.distinct<string>('product_id', { gtin: oneOf(input.gtins) });
-      if (owners.length) any.push({ id: oneOf(owners) });
-    }
-    if (input.titleWords.length) any.push({ $and: input.titleWords.map((w) => ({ title: contains(w) })) });
-    if (!any.length) return [];
-    const rows = await this.#t.products.find(
-      { $and: [{ id: { $ne: input.productId }, merged_into_id: null, review_state: oneOf(['approved', 'submitted', 'changes_requested']) }, { $or: any }] },
-      { limit: 20 },
-    );
+    const gtinOwnerIds = input.gtins.length ? await this.#t.variants.distinct<string>('product_id', { gtin: oneOf(input.gtins) }) : [];
+    const rows = await this.queries.duplicateCandidates({
+      productId: input.productId,
+      modelNormalised: input.modelNumber ? normalizeModel(input.modelNumber) : null,
+      gtinOwnerIds: oneOf(gtinOwnerIds),
+      titleWords: input.titleWords,
+    });
     return rows.map(productOut);
   }
 
   /** Live products (approved, active, not merged) with their listing stats, for the counts job */
-  async liveCountsSource(): Promise<{ id: string; brand_id: string | null; category_id: string | null; live: boolean; live_offers: number; offers: number }[]> {
-    const rows = await this.#t.products.aggregate<{ _id: string; brand_id: string | null; category_id: string | null; review_state: string; publication: string; l: { live_offer_count: number; offer_count: number }[] }>([
-      { $match: { merged_into_id: null } },
-      { $lookup: { from: LISTING, localField: '_id', foreignField: '_id', as: 'l' } },
-      { $project: { brand_id: 1, category_id: 1, review_state: 1, publication: 1, 'l.live_offer_count': 1, 'l.offer_count': 1 } },
-    ]);
-    return rows.map((r) => ({
-      id: r._id,
-      brand_id: r.brand_id ?? null,
-      category_id: r.category_id ?? null,
-      live: r.review_state === 'approved' && r.publication === 'active',
-      live_offers: r.l[0]?.live_offer_count ?? 0,
-      offers: r.l[0]?.offer_count ?? 0,
-    }));
+  liveCountsSource(): Promise<{ id: string; brand_id: string | null; category_id: string | null; live: boolean; live_offers: number; offers: number }[]> {
+    return this.queries.liveCountsSource();
   }
 
   /* ================================================================ variants */
@@ -478,7 +489,7 @@ export class CatalogRepository {
   }
 
   getVariants(ids: string[]): Promise<VariantRow[]> {
-    return this.#t.variants.getMany([...new Set(ids)]);
+    return this.#t.variants.getMany(oneOf(ids));
   }
 
   /** Throws GtinTakenError when another variant has the GTIN */
@@ -538,10 +549,16 @@ export class CatalogRepository {
     return this.#t.submissions.findOne({ product_id: productId, state: 'open' }, { sort: { submitted_at: -1 }, forUpdate: opts.forUpdate });
   }
 
-  /** Latest submission per product (submitted_at desc, id desc) */
-  async latestSubmissions(productIds: string[]): Promise<SubmissionRow[]> {
+  /**
+   * Latest submission per product (submitted_at desc, id desc).
+   *
+   * `forUpdate` locks the product's submissions while the latest one is picked and written: which row "the
+   * latest" is comes out of this read, so a submission inserted between the read and the write would leave
+   * the stamp on the wrong one (§11.2 rule 1; the detector refused three tests without it).
+   */
+  async latestSubmissions(productIds: string[], opts: { forUpdate?: boolean } = {}): Promise<SubmissionRow[]> {
     if (!productIds.length) return [];
-    const rows = await this.#t.submissions.find({ product_id: oneOf(productIds) }, { sort: { product_id: 1, submitted_at: -1, id: -1 } });
+    const rows = await this.#t.submissions.find({ product_id: oneOf(productIds) }, { sort: { product_id: 1, submitted_at: -1, id: -1 }, forUpdate: opts.forUpdate });
     const out = new Map<string, SubmissionRow>();
     for (const r of rows) if (!out.has(r.product_id)) out.set(r.product_id, r);
     return [...out.values()];
@@ -553,11 +570,14 @@ export class CatalogRepository {
 
   async reviewQueue(filter: QueueFilter, page: PageRequest): Promise<common.Page<SubmissionRow>> {
     // joined to products: merged products leave the queue; a category filter keeps products in those categories
-    const products: Filter = filter.categoryIds
-      ? { product_id: oneOf(filter.categoryIds.length ? await this.#t.products.distinct<string>('id', { category_id: oneOf(filter.categoryIds), merged_into_id: null }) : []) }
-      : { product_id: { $nin: await this.#t.products.distinct<string>('id', { merged_into_id: { $ne: null } }) } };
+    const products: WhereWithOr<SubmissionRow> = filter.categoryIds
+      ? { product_id: filter.categoryIds.length ? await this.#t.products.distinct<string>('id', { category_id: oneOf(filter.categoryIds), merged_into_id: null }) : [] }
+      : { product_id: { op: 'not in', value: await this.#t.products.distinct<string>('id', { merged_into_id: { op: 'is not', value: null } }) } };
+    // `review_due_at is not null` is a guard that **no test covers**, on either store: every open submission
+    // the service writes is given a deadline, so there is no row the condition changes the answer for.
+    // Breaking it changes nothing, and the sabotage pass says so rather than a test pretending otherwise
     return this.#t.submissions.page(
-      { state: 'open', paused_at: null, review_due_at: { $ne: null }, ...(filter.kind ? { kind: filter.kind } : {}), ...products },
+      { state: 'open', paused_at: null, review_due_at: { op: 'is not', value: null }, ...(filter.kind ? { kind: filter.kind as SubmissionRow['kind'] } : {}), ...products },
       page,
       { column: 'review_due_at', direction: 'asc' },
     );
@@ -568,25 +588,15 @@ export class CatalogRepository {
     const productIds = await this.#t.products.distinct<string>('id', { owner_seller_id: sellerId, ...(opts.categoryIds?.length ? { category_id: oneOf(opts.categoryIds) } : {}) });
     if (!productIds.length) return [];
     return this.#t.submissions.find({
-      product_id: oneOf(productIds),
+      product_id: productIds,
       state: 'open',
-      ...(opts.paused === true ? { paused_at: { $ne: null } } : opts.paused === false ? { paused_at: null } : {}),
+      ...(opts.paused === true ? { paused_at: { op: 'is not' as const, value: null } } : opts.paused === false ? { paused_at: null } : {}),
     });
   }
 
-  async pausedCounts(sellerIds: string[]): Promise<Map<string, number>> {
-    const out = new Map<string, number>();
-    if (!sellerIds.length) return out;
-    // only the id and owner of each product (not whole product documents)
-    const owned = await this.#t.products.aggregate<{ _id: string; owner_seller_id: string }>([{ $match: { owner_seller_id: oneOf(sellerIds) } }, { $project: { owner_seller_id: 1 } }]);
-    const owners = new Map(owned.map((p) => [p._id, p.owner_seller_id]));
-    if (!owners.size) return out;
-    const subs = await this.#t.submissions.find({ product_id: oneOf([...owners.keys()]), state: 'open', paused_at: { $ne: null } });
-    for (const s of subs) {
-      const seller = owners.get(s.product_id)!;
-      out.set(seller, (out.get(seller) ?? 0) + 1);
-    }
-    return out;
+  /** Open paused submissions of each seller's products, counted per seller (a join, so the port's) */
+  pausedCounts(sellerIds: string[]): Promise<Map<string, number>> {
+    return this.queries.pausedSubmissionCounts(oneOf(sellerIds));
   }
 
   async insertChecks(rows: CheckRow[]): Promise<void> {
@@ -602,9 +612,12 @@ export class CatalogRepository {
     if (Object.keys(patch).length) await this.#t.checks.update(id, patch);
   }
 
-  /** Per-candidate duplicate dismissals (an existing row for the same candidate is kept) */
+  /**
+   * Per-candidate duplicate dismissals (an existing row for the same candidate is kept). No key named:
+   * (check_id, matched_product_id) is this table's primary key (docs/10 §10.5a).
+   */
   async insertDismissals(rows: CheckDismissalRow[]): Promise<void> {
-    await this.#t.dismissals.insertManyIfAbsent(rows, ['check_id', 'matched_product_id']);
+    await this.#t.dismissals.insertManyIfAbsent(rows);
   }
 
   /** Undo dismissals of a check for these candidates */
@@ -638,8 +651,9 @@ export class CatalogRepository {
     return this.#t.dismissals.find({ check_id: oneOf(checkIds) });
   }
 
+  /** No key named: (submission_id, staff_id) is this table's primary key (docs/10 §10.5a) */
   saveDraft(row: ReviewDraftRow): Promise<ReviewDraftRow> {
-    return this.#t.drafts.upsert(row, { key: ['submission_id', 'staff_id'], update: { decision: row.decision, reason: row.reason, fields: row.fields, saved_at: row.saved_at } });
+    return this.#t.drafts.upsert(row, { update: { decision: row.decision, reason: row.reason, fields: row.fields, saved_at: row.saved_at } });
   }
 
   async draftsOf(submissionIds: string[], staffId: string): Promise<ReviewDraftRow[]> {
@@ -669,13 +683,13 @@ export class CatalogRepository {
   }
 
   listCorrections(filter: { state?: string }, page: PageRequest): Promise<common.Page<CorrectionRow>> {
-    return this.#t.corrections.page(filter.state ? { state: filter.state } : {}, page, { column: 'created_at', direction: 'asc' });
+    return this.#t.corrections.page(filter.state ? { state: filter.state as CorrectionRow['state'] } : {}, page, { column: 'created_at', direction: 'asc' });
   }
 
   /* ================================================================ offer index and listing stats */
 
-  getOffer(offerId: string): Promise<OfferIndexRow | undefined> {
-    return this.#t.offers.get(offerId);
+  getOffer(offerId: string, opts: { forUpdate?: boolean } = {}): Promise<OfferIndexRow | undefined> {
+    return this.#t.offers.get(offerId, opts);
   }
 
   async upsertOffer(row: OfferIndexRow): Promise<void> {
@@ -709,9 +723,12 @@ export class CatalogRepository {
     return this.#t.offers.find({ product_id: oneOf(productIds) }, { sort: { updated_at: 1 } });
   }
 
-  /** Indexed offers (not removed) without a price yet, oldest first */
+  /**
+   * Indexed offers (not removed) without a price yet, oldest first. `<>` and not `is not`: `status` cannot be
+   * null, so no row can tell the two readings apart, and `<>` is the reading the spec's conditions have.
+   */
   offersWithoutPrice(limit: number): Promise<OfferIndexRow[]> {
-    return this.#t.offers.find({ price: null, status: { $ne: 'removed' } }, { sort: { updated_at: 1 }, limit });
+    return this.#t.offers.find({ price: null, status: { op: '<>', value: 'removed' } }, { sort: { updated_at: 1 }, limit });
   }
 
   async offersOfSeller(sellerId: string, productIds: string[]): Promise<OfferIndexRow[]> {
@@ -719,15 +736,19 @@ export class CatalogRepository {
     return this.#t.offers.find({ seller_id: sellerId, product_id: oneOf(productIds) });
   }
 
+  /**
+   * Moves a duplicate's indexed offers to the kept product. The rows are locked as they are read (§11.2 rule
+   * 1): each one's new `variant_id` falls back to the value just read when the merge maps no variant for it.
+   */
   async moveOffers(fromProductId: string, toProductId: string, variantMap: Map<string, string>): Promise<number> {
-    const offers = await this.#t.offers.find({ product_id: fromProductId });
+    const offers = await this.#t.offers.find({ product_id: fromProductId }, { forUpdate: true, sort: { offer_id: 1 } });
     for (const o of offers) await this.#t.offers.update(o.offer_id, { product_id: toProductId, variant_id: variantMap.get(o.variant_id) ?? o.variant_id });
     return offers.length;
   }
 
   async listingStats(productIds: string[]): Promise<ListingStatsRow[]> {
     if (!productIds.length) return [];
-    return this.#t.listing.getMany([...new Set(productIds)]);
+    return this.#t.listing.getMany(oneOf(productIds));
   }
 
   async saveListingStats(row: ListingStatsRow): Promise<void> {

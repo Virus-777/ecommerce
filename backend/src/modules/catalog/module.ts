@@ -4,6 +4,8 @@ import { resolvers } from './graphql/resolvers.js';
 import { storeRoutes } from './http/store.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
+import { mongoCatalogQueries } from './queries.mongo.js';
+import { mysqlCatalogQueries } from './queries.mysql.js';
 import { CatalogRepository } from './repository.js';
 import { CatalogService } from './service.js';
 import { schemas } from './schema.js';
@@ -19,7 +21,10 @@ export default defineModule({
   version: '2.1.1',
   schemas,
   register(ctx) {
-    const service = new CatalogService({ repo: new CatalogRepository(ctx.mongo), ctx });
+    // the repository is store-neutral (ctx.store); the reads that need a join, the missing-content condition
+    // or the model-number pattern are the store's own (queries.ts)
+    const queries = ctx.mysql ? mysqlCatalogQueries(ctx.mysql) : mongoCatalogQueries(ctx.mongo);
+    const service = new CatalogService({ repo: new CatalogRepository(ctx.store, queries), ctx });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

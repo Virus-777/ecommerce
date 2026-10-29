@@ -13,11 +13,23 @@ import type { FastifyInstance } from 'fastify';
 import { vi } from 'vitest';
 import type { EventEnvelope } from '../../../kernel/events/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
+import type { StoreTable } from '../../../kernel/store/index.js';
 import type * as audit from '../../../spec/audit.js';
+import type { CatalogDb } from '../../../spec/catalog.js';
 import { auth, buildTestApp, callers, movingClock } from '../../../testing/app.js';
 import type { CatalogService } from '../service.js';
 
 export { auth, callers, newId };
+
+/**
+ * One of the module's tables as its repository reads it (rows in spec shape), **through the store the app
+ * chose** — MongoDB or MySQL, whichever `MYSQL_MODULES` put catalog's data in. A helper that built a MongoDB
+ * store of its own would read an empty database the day the module moved, and nothing would say so
+ * (docs/10 §10.5c: that is how twenty-two of access's tests failed at once).
+ */
+export function catalogTable<T extends keyof CatalogDb & string>(app: FastifyInstance, name: T): StoreTable<CatalogDb[T]> {
+  return app.kernel.boot.stores.get('catalog')!.table<CatalogDb[T]>(name);
+}
 
 export const stubs = () => ({
   audit: { record: vi.fn(async (_e: audit.RecordInput) => newId()) },
