@@ -4,9 +4,8 @@
  * and this file is deleted with MongoDB at the cutover (docs/10 §23 Y4).
  */
 import type { ModuleStore } from '../../kernel/mongo/index.js';
-import type { Store, WhereWithOr } from '../../kernel/store/index.js';
 import type { AuditDb } from '../../spec/audit.js';
-import type { ActorCount, AppendOnlyTable, AuditQueries } from './queries.js';
+import type { ActorCount, AuditQueries } from './queries.js';
 
 type EntryRow = AuditDb['entries'];
 
@@ -24,11 +23,6 @@ export function mongoAuditQueries(store: ModuleStore): AuditQueries {
         { $limit: limit },
         { $project: { _id: 0, id: '$_id.id', name: 1, n: 1 } },
       ]);
-    },
-
-    /** Append-only is this repository's own rule on MongoDB, so the purge's delete is just a delete */
-    purgeRows<R extends object>(store: Store, table: AppendOnlyTable, where: WhereWithOr<R>): Promise<number> {
-      return store.table<R>(table).deleteMany(where);
     },
   };
 }

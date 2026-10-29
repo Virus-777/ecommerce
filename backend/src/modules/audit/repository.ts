@@ -515,10 +515,10 @@ export class AuditRepository {
     // their related targets carry the entry's at: every target before the cut-off but those of kept (backdated) entries
     const keptBefore = beforeSeq === null ? [] : await this.#t.entries.distinct<string>('id', { ...before, seq: { op: '>=', value: beforeSeq } });
     // entry_id is never null, so `not in` — which skips nulls, as SQL does — is the same set $nin named.
-    // Both deletes go through the port: these two tables are append-only, and on MySQL a delete from one is
-    // refused unless the session says it is the purge (queries.ts, docs/10 §6.3)
-    await this.queries.purgeRows<TargetRow>(this.store, 'entry_targets', { ...before, ...(keptBefore.length ? { entry_id: { op: 'not in', value: keptBefore } } : {}) });
-    return { removed: await this.queries.purgeRows<EntryRow>(this.store, 'entries', doomed) };
+    // `purgeMany`, not `deleteMany`: both tables are append-only, and on MySQL a delete from one is refused
+    // unless the session says it is that table's retention purge (docs/10 §6.3, kernel/mysql/table.ts)
+    await this.#t.targets.purgeMany({ ...before, ...(keptBefore.length ? { entry_id: { op: 'not in', value: keptBefore } } : {}) });
+    return { removed: await this.#t.entries.purgeMany(doomed) };
   }
 
   /* ---------------------------------------------------------------- integrity checks */

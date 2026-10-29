@@ -12,9 +12,8 @@
  */
 import { sql } from 'kysely';
 import type { ModuleStore } from '../../kernel/mysql/module-store.js';
-import type { Store, WhereWithOr } from '../../kernel/store/index.js';
 import type { AuditTables } from '../../spec/audit.js';
-import type { ActorCount, AppendOnlyTable, AuditQueries } from './queries.js';
+import type { ActorCount, AuditQueries } from './queries.js';
 
 export function mysqlAuditQueries(store: ModuleStore<AuditTables>): AuditQueries {
   return {
@@ -35,22 +34,6 @@ export function mysqlAuditQueries(store: ModuleStore<AuditTables>): AuditQueries
       `.execute(store.db);
       // COUNT() is BIGINT, which mysql2 may hand back as a string
       return read.rows.map((r) => ({ id: r.id, name: r.name, n: Number(r.n) }));
-    },
-
-    /**
-     * The retention purge's delete, between the two statements that let it through the append-only trigger
-     * (§6.3). `@marketly_purge` is a session variable, so it is set on the connection the DELETE runs on —
-     * the transaction's, which is the store the repository is bound to and the reason that store is passed in.
-     * It is cleared again straight away, so nothing else on that connection inherits the permission.
-     */
-    async purgeRows<R extends object>(store: Store, table: AppendOnlyTable, where: WhereWithOr<R>): Promise<number> {
-      const db = (store as ModuleStore<AuditTables>).db;
-      await sql`SET @marketly_purge = ${`audit_${table}`}`.execute(db);
-      try {
-        return await store.table<R>(table).deleteMany(where);
-      } finally {
-        await sql`SET @marketly_purge = NULL`.execute(db);
-      }
     },
   };
 }
