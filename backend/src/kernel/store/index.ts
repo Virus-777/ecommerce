@@ -24,7 +24,22 @@
  * `sum` (the total of one integer column). Anything with a join, a window, a second measure or a money
  * column belongs to the queries port, where the SQL and the pipeline can each be what they need to be.
  */
+import { isDuplicateKey as isMongoDuplicateKey } from '../mongo/table.js';
+import { isDuplicateKey as isMysqlDuplicateKey } from '../mysql/errors.js';
 import type { KeysetOrder, PageRequest } from '../lib/pagination.js';
+
+/**
+ * Whether a unique key refused this write, whichever database raised it: MongoDB's 11000 or MySQL's 1062.
+ *
+ * A store-neutral repository that races on a unique key — insert and catch, rather than read and then insert —
+ * cannot ask either store's own helper without knowing which store it has, and "which store do I have" is the
+ * one question the seam exists to remove. The two tests are cheap and neither can match the other's error,
+ * so asking both is the whole of it.
+ *
+ * Inside a transaction, prefer `insertIfAbsent` or `upsert`: on MongoDB a duplicate-key error takes the whole
+ * transaction down with it (§25), which is why the two stores do not spell this the same way underneath.
+ */
+export const isDuplicateKey = (err: unknown): boolean => isMysqlDuplicateKey(err) || isMongoDuplicateKey(err);
 import type { Page } from '../../spec/common.js';
 import type { Patch } from '../mysql/table.js';
 

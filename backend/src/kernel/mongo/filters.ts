@@ -133,6 +133,12 @@ export function whereFilter(where: Readonly<Record<string, unknown>>): Filter {
     if (cond === undefined) continue;
     const path = jsonArrayPath(column);
     if (path) {
+      // an object asks about one element's fields, which is what $elemMatch is for (isElementFields)
+      if (!path.field && isElementFields(cond)) {
+        out[path.column] = { $elemMatch: cond };
+        continue;
+      }
+      if (path.field && isElementFields(cond)) throw new Error(`where: ${column} is a path to one field, which takes a value and not an object`);
       // MongoDB reads items.key as "any element's key", so the path is the name with the [] removed
       const field = path.field ? `${path.column}.${path.field}` : path.column;
       const values = pathValues(column, cond);
@@ -175,6 +181,23 @@ export function pathValues(name: string, cond: unknown): readonly unknown[] {
   if (cond === null || isOperator(cond)) throw new Error(`where: ${name} is a [] path, which takes a value or a list of values, not ${cond === null ? 'null' : `"${(cond as { op: string }).op}"`}`);
   return [cond];
 }
+
+/**
+ * "Some element of the array has **these fields**", as `{ 'related_subjects[]': { type, id } }` — the
+ * `$elemMatch` of two equalities that a dotted path cannot say, because `related_subjects.type = t` and
+ * `related_subjects.id = i` may be satisfied by *different* elements.
+ *
+ * It is in the vocabulary because both stores say it exactly: `$elemMatch` on MongoDB, and
+ * `JSON_CONTAINS(col, CAST(? AS JSON))` on MySQL, which asks whether some element of the array contains the
+ * given object. Equalities only — a comparison inside an element is not something `JSON_CONTAINS` can ask,
+ * and a filter that needs one is not store-neutral.
+ *
+ * The fields are matched as a **subset**: an element with more fields than these still matches, on both
+ * stores. A path with a field (`items[].key`) takes a value, never an object: that path is already about one
+ * field, so an object there would be a mistake rather than a second meaning.
+ */
+export const isElementFields = (cond: unknown): cond is Readonly<Record<string, unknown>> =>
+  typeof cond === 'object' && cond !== null && !Array.isArray(cond) && !(cond instanceof Date) && !('op' in cond);
 
 /** One `{ op, value }` condition as a field condition (undefined: no condition on the field) */
 function operatorFilter(column: string, op: string, value: unknown): unknown {

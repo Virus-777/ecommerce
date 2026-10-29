@@ -22,7 +22,7 @@ import { migrateMongo } from '../mongo/schema.js';
 import { collectionOptions, integer } from '../mongo/schemas.js';
 import type { MysqlStore } from '../mysql/index.js';
 import { migrateMysql } from '../mysql/schema.js';
-import { decToZero, expr, inc, type Store } from './index.js';
+import { decToZero, expr, inc, isDuplicateKey, type Store } from './index.js';
 import { mongoStore } from './mongo.js';
 
 /* ------------------------------------------------------------------ one spec, two stores */
@@ -296,6 +296,29 @@ describe.each(['mongo', 'mysql'])('%s', (kind) => {
     await expect(notes().find({ 'items[].key': null } as never)).rejects.toThrow(/is a \[\] path/);
   });
 
+  it('asks whether one element of a JSON array holds several fields', async () => {
+    // the shape workqueues' related_subjects has: an array of {type, id} pairs, where both have to be true
+    // of the *same* element — `items.type = t AND items.id = i` can be satisfied by two different elements
+    await notes().insertMany([
+      note('n1', { items: [{ key: 'a', n: 1 }, { key: 'b', n: 2 }] as never }),
+      note('n2', { items: [{ key: 'a', n: 2 }] as never }),
+      note('n3', { items: [] }),
+    ]);
+    const ids = async (where: Record<string, unknown>) => (await notes().find(where as never, { sort: { id: 1 } })).map((r) => r.id);
+
+    expect(await ids({ 'items[]': { key: 'a', n: 1 } })).toEqual(['n1']);
+    expect(await ids({ 'items[]': { key: 'b', n: 2 } })).toEqual(['n1']);
+    // n2 has both values, in one element each, and neither element has both
+    expect(await ids({ 'items[]': { key: 'a', n: 2 } })).toEqual(['n2']);
+    expect(await ids({ 'items[]': { key: 'b', n: 1 } })).toEqual([]);
+    // the two dotted paths would answer differently, which is the whole reason this exists
+    expect(await ids({ and: [{ 'items[].key': 'b' }, { 'items[].n': 1 }] })).toEqual(['n1']);
+    // a subset of an element's fields matches it, on both stores
+    expect(await ids({ 'items[]': { key: 'a' } })).toEqual(['n1', 'n2']);
+    // and an object on a path that already names one field is a mistake, not a second meaning
+    await expect(notes().find({ 'items[].key': { key: 'a' } } as never)).rejects.toThrow(/takes a value and not an object/);
+  });
+
   it('takes a dotted path only into a JSON column, on the store that has to know which', async () => {
     await notes().insert(note('n1', { meta: { passed: true } }));
     // MongoDB reads a dotted path on any field and cannot tell a typo from a document; MySQL is given the
@@ -482,6 +505,28 @@ describe.each(['mongo', 'mysql'])('%s', (kind) => {
     await notes().upsert(note('n1', { title: 'Second' }));
     expect(await notes().count()).toBe(1);
     expect((await notes().get('n1'))?.title).toBe('Second');
+  });
+
+  it('says when a unique key refused a write, in the same words for both databases', async () => {
+    await notes().insert(note('n1'));
+    // the shape a repository that races on a unique key uses: insert, and read the error
+    const err = await notes()
+      .insert(note('n1'))
+      .then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+    expect(err, 'a second row with the same primary key is refused').toBeDefined();
+    expect(isDuplicateKey(err)).toBe(true);
+    // and it is not every error: a column the table has not got is a different kind of wrong
+    const other = await notes()
+      .insert({ nope: 1 } as never)
+      .then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+    expect(other).toBeDefined();
+    expect(isDuplicateKey(other)).toBe(false);
   });
 
   it('inserts only what is absent', async () => {
