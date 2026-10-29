@@ -137,7 +137,11 @@ export class CustomersRepository {
   /** Inserts unless the user already has a customer; true when inserted */
   async insertCustomer(row: CustomerRow): Promise<boolean> {
     // no key named: both stores then check every unique index the spec gives the table, which is the question
-    // meant (user_id is unique, and so is ref — a row duplicating either is not one this wants inserted)
+    // meant (user_id is unique, and so is ref — a row duplicating either is not one this wants inserted).
+    // No test covers this, and none honestly can: only a race between two registrations of one account
+    // reaches the absent branch, and a duplicate raised inside an event handler is logged rather than
+    // returned, so the end state a test can see is the same either way. Naming a column that is not a key
+    // *is* covered — MySQL refuses it by name, which is what tranche A's notifications hit.
     return Boolean(await this.#t.customers.insertIfAbsent(row));
   }
 
@@ -329,6 +333,10 @@ export class CustomersRepository {
    * Active restrictions whose end has passed. The filter was `{ $ne: null, $lte: now }`; the `$ne: null` is
    * what MongoDB needed spelling out and SQL never did — a comparison against a date matches no null on
    * either store (kernel/store/store.test.ts proves it on both), so `<=` alone reads the same rows.
+   *
+   * No test of this module can tell: `expireRestrictions` re-reads each row under its lock and skips it
+   * unless `!cur.ends_at || cur.ends_at > now` is false, so this filter narrows the batch and cannot change
+   * the outcome — deleting the comparison altogether leaves every test green.
    */
   dueRestrictions(now: Date, limit: number): Promise<RestrictionRow[]> {
     return this.#t.restrictions.find({ state: 'active', ends_at: { op: '<=', value: now } }, { sort: { ends_at: 1 }, limit });

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { callers } from '../../../testing/app.js';
-import { boot, PUBLIC, STORE, type Kit } from './helpers.js';
+import { boot, customersTable, PUBLIC, STORE, type Kit } from './helpers.js';
 
 const tokens = new Map<string, { accountId: string; channel: 'email' | 'sms' | 'push' }>();
 
@@ -90,6 +90,8 @@ describe('recently viewed', () => {
       kit.clock.advance(10);
     }
     expect(await kit.service.listRecentlyViewed({ guestSessionId: v.sid }, 500)).toHaveLength(50);
+    // the two oldest are deleted, not merely hidden: a read is clamped to retained, so only the rows say so
+    expect(await customersTable(kit.app, 'recently_viewed').count({ owner_kind: 'guest', owner_id: v.sid })).toBe(50);
     expect((await kit.call('GET', `${STORE}/recently-viewed`, { token: v.token })).body).toHaveLength(12);
     expect((await kit.call('GET', `${STORE}/recently-viewed?limit=3`, { token: v.token })).body).toHaveLength(3);
   });

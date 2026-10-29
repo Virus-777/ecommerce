@@ -98,11 +98,18 @@ describe('data export', () => {
     expect(queue.status).toBe(200);
     expect(queue.body.items.find((x: any) => x.request.id === r.id)).toMatchObject({ customerId: c.customerId, customerName: 'Ana Lopez', request: { state: 'failed' } });
 
+    // overdue is "past its SLA **and** still open": a failed export counts, and one that is done does not
+    const overdue = async () => ((await kit.call('GET', `${ADMIN}/data-requests?overdue=true`, { token: kit.staff() })).body.items as any[]).map((x) => x.request.id);
+    expect(await overdue()).not.toContain(r.id);
+    kit.clock.advance(40 * 86_400_000);
+    expect(await overdue()).toContain(r.id);
+
     const retried = await kit.call('POST', `${ADMIN}/data-requests/${r.id}/retry`, { token: kit.staff() });
     expect(retried.body.state).toBe('processing');
     expect((await kit.call('POST', `${ADMIN}/data-requests/${r.id}/retry`, { token: kit.staff() })).status).toBe(409);
     await kit.service.buildDataExports();
     expect((await kit.call('GET', `${STORE}/data-requests`, { token: c.token })).body[0].state).toBe('ready');
+    expect(await overdue()).not.toContain(r.id); // ready is not open, however long ago it was asked for
   });
 });
 
