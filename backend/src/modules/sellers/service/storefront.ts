@@ -323,7 +323,9 @@ export class StorefrontPart extends Part {
           storefrontFields = ['storeName'];
         }
         if (c!.kind === 'tagline' && typeof proposed.tagline === 'string') {
-          const profile = (await tx.getProfile(s.id)) ?? (await this.profileOf(s.id, tx));
+          // the profile is read to be written back, so it is locked (§11.2 rule 1): the change request's own
+          // row, locked above, serialises this flow and says nothing about another writer of the profile
+          const profile = (await tx.getProfile(s.id, { forUpdate: true })) ?? (await this.profileOf(s.id, tx));
           await tx.upsertProfile({ ...profile, tagline: proposed.tagline, updated_at: now });
           storefrontFields = ['tagline'];
         }

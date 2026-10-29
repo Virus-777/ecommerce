@@ -6,6 +6,8 @@ import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { webhooksRoutes } from './http/webhooks.js';
 import { SellersRepository } from './repository.js';
+import { mongoSellersQueries } from './queries.mongo.js';
+import { mysqlSellersQueries } from './queries.mysql.js';
 import { hmacWebhookVerifier } from '../../kernel/http/webhooks.js';
 import { devProviders } from './providers/dev.js';
 import { SellersService } from './service.js';
@@ -22,8 +24,11 @@ export default defineModule({
   version: '2.0.1',
   schemas,
   register(ctx) {
+    // the repository is store-neutral (ctx.store); its windowed, grouped and JSON-path reads are the store's own
+    // (queries.ts). `ctx.mysql` is there only while this module's data is in MySQL, which is the whole switch.
+    const queries = ctx.mysql ? mysqlSellersQueries(ctx.mysql) : mongoSellersQueries(ctx.mongo);
     // KYC/KYB, payout tokenisation and address checks: deterministic dev adapters until real providers are wired
-    const service = new SellersService({ repo: new SellersRepository(ctx.mongo), ctx, providers: devProviders });
+    const service = new SellersService({ repo: new SellersRepository(ctx.store, queries), ctx, providers: devProviders });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service), webhooksRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

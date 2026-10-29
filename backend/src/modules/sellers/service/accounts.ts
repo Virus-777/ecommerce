@@ -483,11 +483,12 @@ export class AccountsPart extends Part {
     await this.repo.transaction(async (tx) => {
       const s = await tx.get('sellers', e.sellerId, { forUpdate: true });
       if (!s || (s.payout_readiness !== 'verification_pending' && s.payout_readiness !== 'change_under_review')) return;
-      const payout = await this.core.payoutState(s, tx);
+      // these rows are decided below, so they are read locked (§11.2 rule 1)
+      const payout = await this.core.payoutState(s, tx, { forUpdate: true });
       const current = payout.pendingChange ? { accountHolderName: payout.pendingChange.accountHolderName, accountType: payout.pendingChange.accountType, label: payout.pendingChange.label, providerDestinationId: payout.pendingChange.providerDestinationId } : payout.current;
       if (payout.pendingChange) {
         // the destination it replaces stops being current
-        for (const old of await tx.find('payout_changes', { seller_id: s.id, state: 'verified' })) await tx.update('payout_changes', old.id, { state: 'replaced' });
+        for (const old of await tx.find('payout_changes', { seller_id: s.id, state: 'verified' }, { forUpdate: true })) await tx.update('payout_changes', old.id, { state: 'replaced' });
         await tx.update('payout_changes', payout.pendingChange.changeId, { state: 'verified', review_id: e.reviewId, decided_at: this.now() });
       }
       await tx.update('sellers', s.id, { payout_readiness: this.core.step(payoutReadinessMachine, s.payout_readiness, 'verified'), payout_destination_label: current?.label ?? s.payout_destination_label, updated_at: this.now() });
@@ -500,7 +501,8 @@ export class AccountsPart extends Part {
     await this.repo.transaction(async (tx) => {
       const s = await tx.get('sellers', e.sellerId, { forUpdate: true });
       if (!s || (s.payout_readiness !== 'verification_pending' && s.payout_readiness !== 'change_under_review')) return;
-      const payout = await this.core.payoutState(s, tx);
+      // the pending row is rejected below, so it is read locked (§11.2 rule 1)
+      const payout = await this.core.payoutState(s, tx, { forUpdate: true });
       const wasChange = s.payout_readiness === 'change_under_review';
       if (payout.pendingChange) await tx.update('payout_changes', payout.pendingChange.changeId, { state: 'rejected', rejection_reason: e.reason, review_id: e.reviewId, decided_at: this.now() });
       await tx.update('sellers', s.id, {

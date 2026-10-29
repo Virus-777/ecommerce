@@ -751,7 +751,7 @@ export class ApplicationsPart extends Part {
       const a = await this.byId(applicationId, tx, true);
       if (a.state !== 'rejected') return;
       await tx.update('applications', a.id, { state: this.core.step(sellerApplicationMachine, a.state, 'reopenOnAppeal'), decision: null, can_reapply_from: null, decision_target_at: target });
-      for (const d of await tx.find('application_documents', { application_id: a.id })) await tx.update('application_documents', d.id, { delete_after: null });
+      for (const d of await tx.find('application_documents', { application_id: a.id }, { forUpdate: true })) await tx.update('application_documents', d.id, { delete_after: null });
       if (a.seller_id) {
         const s = await this.core.seller(a.seller_id, { repo: tx, forUpdate: true });
         if (s.status === 'closed' && s.closed_reason === 'application_rejected') {
@@ -1125,7 +1125,9 @@ export class ApplicationsPart extends Part {
       const sec = this.sections(a);
       const owner = await this.parts.members.createOwner(tx, seller, { accountId: a.applicant_account_id, name: sec.account?.contactName ?? seller.legal_name, email: sec.account?.workEmail ?? '' });
       await this.parts.storefront.createProfile(tx, seller);
-      for (const d of await tx.find('application_documents', { application_id: a.id, kind: 'owner_id' })) await tx.update('application_documents', d.id, { delete_after: this.core.today(addDays(now, retention)) });
+      // locked before they are written (§11.2 rule 1). The application's own row is locked above, which
+      // serialises approve against reject and says nothing about the next writer of these documents.
+      for (const d of await tx.find('application_documents', { application_id: a.id, kind: 'owner_id' }, { forUpdate: true })) await tx.update('application_documents', d.id, { delete_after: this.core.today(addDays(now, retention)) });
       const app = await tx.update('applications', a.id, { state, decision: decision as never, reviewer_id: a.reviewer_id ?? by.actor.id ?? null });
       let payout: Awaited<ReturnType<typeof this.parts.accounts.submitDestination>> | undefined;
       const details = sec.payout?.current;
@@ -1200,7 +1202,8 @@ export class ApplicationsPart extends Part {
       const a = await this.byId(id, tx, true);
       const state = this.core.step(sellerApplicationMachine, a.state, 'reject');
       const row = await tx.update('applications', a.id, { state, decision: decision as never, can_reapply_from: canReapplyFrom, reviewer_id: a.reviewer_id ?? by.actor.id ?? null });
-      for (const d of await tx.find('application_documents', { application_id: a.id })) await tx.update('application_documents', d.id, { delete_after: this.core.today(addDays(now, retention)) });
+      // locked before they are written (§11.2 rule 1), as the approval does with the owner-id documents
+      for (const d of await tx.find('application_documents', { application_id: a.id }, { forUpdate: true })) await tx.update('application_documents', d.id, { delete_after: this.core.today(addDays(now, retention)) });
       if (a.seller_id) {
         const s = await this.core.seller(a.seller_id, { repo: tx, forUpdate: true });
         await tx.update('sellers', s.id, { status: this.core.step(sellerAccountStatusMachine, s.status, 'reject'), status_since: now, closed_reason: 'application_rejected', updated_at: now });
