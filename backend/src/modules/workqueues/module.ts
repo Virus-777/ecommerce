@@ -3,6 +3,8 @@ import { spec } from '../../spec/workqueues.js';
 import { resolvers } from './graphql/resolvers.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
+import { mongoWorkqueuesQueries } from './queries.mongo.js';
+import { mysqlWorkqueuesQueries } from './queries.mysql.js';
 import { WorkqueuesRepository } from './repository.js';
 import { WorkqueuesService } from './service.js';
 import { schemas } from './schema.js';
@@ -18,7 +20,10 @@ export default defineModule({
   version: '2.0.0',
   schemas,
   register(ctx) {
-    const service = new WorkqueuesService({ repo: new WorkqueuesRepository(ctx.mongo), ctx });
+    // the three reads that are not the same question in both databases (queries.ts); `ctx.mysql` is there only
+    // while this module's data is in MySQL, which is what makes this line the whole switch (§10.5e)
+    const queries = ctx.mysql ? mysqlWorkqueuesQueries(ctx.mysql) : mongoWorkqueuesQueries(ctx.mongo);
+    const service = new WorkqueuesService({ repo: new WorkqueuesRepository(ctx.store, queries), ctx });
     ctx.provide(service);
     ctx.http.routes(sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

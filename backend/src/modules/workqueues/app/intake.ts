@@ -19,7 +19,7 @@ export class Intake {
     private readonly items: Items,
   ) {}
 
-  /** Run the table for one event. `eventId` (the envelope id) makes the closing idempotent through the inbox (ctx.mongo.claim). */
+  /** Run the table for one event. `eventId` (the envelope id) makes the closing idempotent through the inbox (store.claim). */
   async handle<N extends Consumed>(name: N, payload: EventPayload<N>, eventId?: string): Promise<void> {
     const core = this.core;
     await core.ensureSeeded();

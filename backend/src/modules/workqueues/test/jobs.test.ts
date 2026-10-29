@@ -182,12 +182,23 @@ describe('day-end review', () => {
       expect(counts.find((c) => c.queue_key === 'shipping.overdue_dispatch')!.open).toBeGreaterThanOrEqual(1);
       const past = await call('GET', '/day-end-reviews?state=missed', lead, WORKER);
       expect(past.json().items.map((r: { id: string }) => r.id)).toContain(review.id);
+      // the date window takes both ends: the review's own day holds it, a window starting after it does not
+      const dayAfter = new Date(`${review.date}T00:00:00Z`);
+      dayAfter.setUTCDate(dayAfter.getUTCDate() + 1);
+      const window = (query: string) => call('GET', `/day-end-reviews?${query}`, lead, WORKER).then((r) => r.json().items.map((x: { id: string }) => x.id));
+      expect(await window(`from=${review.date}&to=${review.date}`)).toContain(review.id);
+      expect(await window(`from=${dayAfter.toISOString().slice(0, 10)}`)).not.toContain(review.id);
       t.clock.advance(24 * H);
       const next = await t.service.dayEnd.current();
       expect(next.items.find((i) => i.key === 'custom')).toMatchObject({ title: "Yesterday's review was missed" });
       // yesterday's unfinished routine checks become late when today's are generated
       await t.app.kernel.jobs.runNow('workqueues.routine-generate');
       expect((await t.service.routines.today()).total).toBe(3);
+      // and they were all of them: marking the earlier dates late again finds none, and today's are left alone
+      expect(await t.service.core.repo.markChecksLate({ beforeDate: review.date })).toBe(0);
+      // openedBetween is a half-open window, so a window that ends before anything was raised is empty
+      const old = new Date(t.clock.now().getTime() - 400 * H);
+      expect(await t.service.core.repo.openedBetween(new Date(old.getTime() - H), old)).toEqual([]);
     } finally {
       t.clock.advance(-48 * H);
     }

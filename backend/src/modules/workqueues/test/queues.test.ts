@@ -64,14 +64,19 @@ describe('queue definitions', () => {
 
   it('lists the queues the caller reaches, with live counts and mine; area filter', async () => {
     await publish(t.app, 'shipping.dispatch.overdue', ev('shipping.dispatch.overdue', { ownerType: 'seller', sellerId: newId(), orderItemIds: [newId()] }));
+    // a second item in the same queue, raised an hour later, so that `oldest` has to be the first of the two
+    const first = (await call('GET', '/items?queueKey=shipping.overdue_dispatch&sort=oldest&limit=1', lead, WORKER)).json().items[0];
+    t.clock.advance(H);
+    await publish(t.app, 'shipping.dispatch.overdue', ev('shipping.dispatch.overdue', { ownerType: 'seller', sellerId: newId(), orderItemIds: [newId()] }));
+    t.clock.advance(-H);
     const res = await call('GET', '/queues', lead, WORKER);
     const keys = res.json().map((q: { key: string }) => q.key);
     expect(keys).toContain('shipping.overdue_dispatch');
     expect(keys).not.toContain('finance.daily_checks');
     const od = res.json().find((q: { key: string }) => q.key === 'shipping.overdue_dispatch');
     expect(od).toMatchObject({ mine: true, screen: 'ops/dispatch' });
-    expect(od.open).toBeGreaterThanOrEqual(1);
-    expect(od.oldest).toMatchObject({ ageLabel: expect.stringContaining('·') });
+    expect(od.open).toBeGreaterThanOrEqual(2);
+    expect(od.oldest).toMatchObject({ itemId: first.id, ageLabel: expect.stringContaining('·') });
     expect((await call('GET', '/queues?area=finance', lead, WORKER)).json()).toEqual([]);
     expect((await call('GET', '/queues?area=moon', lead, WORKER)).statusCode).toBe(400);
     const one = await call('GET', '/queues/shipping.overdue_dispatch', lead, WORKER);
