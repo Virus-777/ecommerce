@@ -82,6 +82,8 @@ function neutralTable<R extends object>(t: MongoTable<R>): StoreTable<R> {
     count: async (where) => t.count(filterOf(where)),
     exists: async (where) => t.exists(filterOf(where)),
     distinct: async <T>(column: string, where?: WhereWithOr<R>) => t.distinct<T>(column, filterOf(where)),
+    countBy: async <K extends keyof R & string>(columns: readonly K[], where?: WhereWithOr<R>) => t.countBy<K>(columns, filterOf(where)),
+    sum: async (column: keyof R & string, where?: WhereWithOr<R>) => t.sum(column, filterOf(where)),
     page: async (where, req: PageRequest, order: KeysetOrder): Promise<Page<R>> => t.page(filterOf(where), req, order),
     insert: (row) => t.insert(row),
     insertMany: (rows) => t.insertMany(rows),

@@ -2335,6 +2335,23 @@ export interface ContentDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface ContentTables {
+  content_home_sections: ContentDb["home_sections"];
+  content_pages: ContentDb["pages"];
+  content_versions: ContentDb["versions"];
+  content_help_categories: ContentDb["help_categories"];
+  content_help_articles: ContentDb["help_articles"];
+  content_article_feedback: ContentDb["article_feedback"];
+  content_policies: ContentDb["policies"];
+  content_policy_versions: ContentDb["policy_versions"];
+  content_policy_approvals: ContentDb["policy_approvals"];
+  content_navigation: ContentDb["navigation"];
+  content_news_categories: ContentDb["news_categories"];
+  content_news_posts: ContentDb["news_posts"];
+  content_content_log: ContentDb["content_log"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

@@ -41,6 +41,46 @@ import { spec as wallet } from './wallet.js';
 import { spec as warehouse } from './warehouse.js';
 import { spec as wishlist } from './wishlist.js';
 import { spec as workqueues } from './workqueues.js';
+import type { AccessTables } from './access.js';
+import type { AdvertisingTables } from './advertising.js';
+import type { AuditTables } from './audit.js';
+import type { BackupsTables } from './backups.js';
+import type { CartTables } from './cart.js';
+import type { CatalogTables } from './catalog.js';
+import type { CheckoutTables } from './checkout.js';
+import type { ContentTables } from './content.js';
+import type { CustomersTables } from './customers.js';
+import type { DepartmentsTables } from './departments.js';
+import type { FarmTables } from './farm.js';
+import type { FinanceTables } from './finance.js';
+import type { FoodTables } from './food.js';
+import type { FulfillmentServiceTables } from './fulfillment-service.js';
+import type { IdentityTables } from './identity.js';
+import type { InventoryTables } from './inventory.js';
+import type { MediaTables } from './media.js';
+import type { MessagingTables } from './messaging.js';
+import type { NotificationsTables } from './notifications.js';
+import type { OffersTables } from './offers.js';
+import type { OrdersTables } from './orders.js';
+import type { PaymentsTables } from './payments.js';
+import type { PromotionsTables } from './promotions.js';
+import type { PurchasingTables } from './purchasing.js';
+import type { ReportsTables } from './reports.js';
+import type { ReturnsTables } from './returns.js';
+import type { ReviewsTables } from './reviews.js';
+import type { RewardsTables } from './rewards.js';
+import type { SearchTables } from './search.js';
+import type { SellersTables } from './sellers.js';
+import type { ServicesTables } from './services.js';
+import type { SettingsTables } from './settings.js';
+import type { ShippingTables } from './shipping.js';
+import type { SoftwareTables } from './software.js';
+import type { SupportTables } from './support.js';
+import type { TrustTables } from './trust.js';
+import type { WalletTables } from './wallet.js';
+import type { WarehouseTables } from './warehouse.js';
+import type { WishlistTables } from './wishlist.js';
+import type { WorkqueuesTables } from './workqueues.js';
 
 export const specs = {
   "access": access,
@@ -87,3 +127,47 @@ export const specs = {
 
 export type ModuleName = keyof typeof specs;
 export const moduleNames = Object.keys(specs) as ModuleName[];
+
+/** Each module's tables as Kysely is keyed, so `ctx.mysql` is typed with the module's own (docs/10 §10.5e) */
+export interface ModuleTableTypes {
+  "access": AccessTables;
+  "advertising": AdvertisingTables;
+  "audit": AuditTables;
+  "backups": BackupsTables;
+  "cart": CartTables;
+  "catalog": CatalogTables;
+  "checkout": CheckoutTables;
+  "content": ContentTables;
+  "customers": CustomersTables;
+  "departments": DepartmentsTables;
+  "farm": FarmTables;
+  "finance": FinanceTables;
+  "food": FoodTables;
+  "fulfillment-service": FulfillmentServiceTables;
+  "identity": IdentityTables;
+  "inventory": InventoryTables;
+  "media": MediaTables;
+  "messaging": MessagingTables;
+  "notifications": NotificationsTables;
+  "offers": OffersTables;
+  "orders": OrdersTables;
+  "payments": PaymentsTables;
+  "promotions": PromotionsTables;
+  "purchasing": PurchasingTables;
+  "reports": ReportsTables;
+  "returns": ReturnsTables;
+  "reviews": ReviewsTables;
+  "rewards": RewardsTables;
+  "search": SearchTables;
+  "sellers": SellersTables;
+  "services": ServicesTables;
+  "settings": SettingsTables;
+  "shipping": ShippingTables;
+  "software": SoftwareTables;
+  "support": SupportTables;
+  "trust": TrustTables;
+  "wallet": WalletTables;
+  "warehouse": WarehouseTables;
+  "wishlist": WishlistTables;
+  "workqueues": WorkqueuesTables;
+}

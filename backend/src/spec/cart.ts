@@ -892,6 +892,16 @@ export interface CartDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface CartTables {
+  cart_carts: CartDb["carts"];
+  cart_cart_items: CartDb["cart_items"];
+  cart_cart_item_notices: CartDb["cart_item_notices"];
+  cart_saved_items: CartDb["saved_items"];
+  cart_cart_merges: CartDb["cart_merges"];
+  cart_recheck_queue: CartDb["recheck_queue"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

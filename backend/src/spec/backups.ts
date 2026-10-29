@@ -275,6 +275,12 @@ export interface BackupsDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface BackupsTables {
+  backups_operations: BackupsDb["operations"];
+  backups_uploads: BackupsDb["uploads"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

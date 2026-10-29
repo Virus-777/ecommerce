@@ -122,6 +122,14 @@ export class Table<R extends object> {
     return v;
   }
 
+  /** One stored value as a row reads it: Decimal128 as its exact digits, binary as bytes */
+  #value(v: unknown): unknown {
+    if (v instanceof Decimal128) return v.toString();
+    if (v instanceof Binary) return new Uint8Array(v.buffer);
+    if (Buffer.isBuffer(v)) return new Uint8Array(v);
+    return v;
+  }
+
   /** A stored document as a row */
   fromDoc(doc: Document): R {
     const out: Record<string, unknown> = {};
@@ -131,10 +139,7 @@ export class Table<R extends object> {
         if (this.def.idField) out[this.def.idField] = v;
         continue;
       }
-      if (v instanceof Decimal128) out[k] = v.toString();
-      else if (v instanceof Binary) out[k] = new Uint8Array(v.buffer);
-      else if (Buffer.isBuffer(v)) out[k] = new Uint8Array(v);
-      else out[k] = v;
+      out[k] = this.#value(v);
     }
     for (const c of this.def.nullable) if (out[c] === undefined) out[c] = null;
     return out as R;
@@ -268,6 +273,49 @@ export class Table<R extends object> {
   /** Raw aggregation: values are not cast (numeric as Decimal128, keys as _id); use fromDoc on whole documents */
   aggregate<T = Document>(pipeline: Document[]): Promise<T[]> {
     return this.model.aggregate<T>(pipeline as never).session(this.#session).exec();
+  }
+
+  /** Columns this collection does not have, refused by name rather than asked of the server */
+  #known(what: string, columns: readonly string[]): void {
+    if (!columns.length) throw new Error(`${this.name}: ${what} needs a column`);
+    const unknown = columns.filter((c) => !this.def.columns.includes(c));
+    if (unknown.length) throw new Error(`${this.name} has no column ${unknown.join(', ')}`);
+  }
+
+  /**
+   * How many rows per key — `$group` with `$sum: 1`, the shape about half the census's aggregations have
+   * (docs/10 §13.1). It is here, and in kernel/mysql/table.ts, rather than written out in each repository,
+   * because it is the one aggregate that means the same thing in both databases.
+   *
+   * A null group key is a key like any other, as it is in SQL. A document *missing* the field reads as null
+   * too — the same fill `fromDoc` does for a nullable column, for the documents written before that column
+   * was in the spec. The schemas in the contract suite write null rather than leaving a field out, so that
+   * last part is consistency with the rest of this file and not something a test here can show.
+   */
+  async countBy<K extends keyof R & string>(columns: readonly K[], f: Filter = {}): Promise<(Pick<R, K> & { n: number })[]> {
+    this.#known('countBy', columns);
+    const rows = await this.aggregate<{ _id: Record<string, unknown>; n: number }>([
+      { $match: this.filter(f) },
+      { $group: { _id: Object.fromEntries(columns.map((c) => [c, `$${this.#field(c)}`])), n: { $sum: 1 } } },
+    ]);
+    return rows.map((r) => {
+      const out: Record<string, unknown> = { n: r.n };
+      for (const c of columns) out[c] = this.#value(r._id[c]) ?? null;
+      return out as Pick<R, K> & { n: number };
+    });
+  }
+
+  /**
+   * The total of one numeric column over the matching documents, 0 when none match.
+   *
+   * A numeric (Decimal128) column is refused, as it is on MySQL: its total would have to be rounded into a
+   * number to keep one return type, and money rounded on its way through a total is what a ledger may not do.
+   */
+  async sum(column: keyof R & string, f: Filter = {}): Promise<number> {
+    this.#known('sum', [column]);
+    if (this.#decimal.has(column)) throw new Error(`${this.name}.${column} is numeric: sum() would round it; total it in the module's own query where the exact value survives`);
+    const [r] = await this.aggregate<{ s: number }>([{ $match: this.filter(f) }, { $group: { _id: null, s: { $sum: `$${this.#field(column)}` } } }]);
+    return Number(r?.s ?? 0);
   }
 
   /**

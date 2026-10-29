@@ -3592,6 +3592,35 @@ export interface SellersDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface SellersTables {
+  sellers_sellers: SellersDb["sellers"];
+  sellers_applications: SellersDb["applications"];
+  sellers_application_documents: SellersDb["application_documents"];
+  sellers_verification_checks: SellersDb["verification_checks"];
+  sellers_information_requests: SellersDb["information_requests"];
+  sellers_risk_reviews: SellersDb["risk_reviews"];
+  sellers_agreement_acceptances: SellersDb["agreement_acceptances"];
+  sellers_store_profiles: SellersDb["store_profiles"];
+  sellers_featured_collections: SellersDb["featured_collections"];
+  sellers_public_claims: SellersDb["public_claims"];
+  sellers_change_requests: SellersDb["change_requests"];
+  sellers_members: SellersDb["members"];
+  sellers_performance_events: SellersDb["performance_events"];
+  sellers_performance_snapshots: SellersDb["performance_snapshots"];
+  sellers_performance_targets: SellersDb["performance_targets"];
+  sellers_warnings: SellersDb["warnings"];
+  sellers_restrictions: SellersDb["restrictions"];
+  sellers_suspensions: SellersDb["suspensions"];
+  sellers_payout_changes: SellersDb["payout_changes"];
+  sellers_pending_changes: SellersDb["pending_changes"];
+  sellers_appeals: SellersDb["appeals"];
+  sellers_seller_notes: SellersDb["seller_notes"];
+  sellers_account_events: SellersDb["account_events"];
+  sellers_template_grants: SellersDb["template_grants"];
+  sellers_seller_invitations: SellersDb["seller_invitations"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

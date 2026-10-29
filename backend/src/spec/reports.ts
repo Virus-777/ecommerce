@@ -1063,6 +1063,35 @@ export interface ReportsDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface ReportsTables {
+  reports_metric_definitions: ReportsDb["metric_definitions"];
+  reports_metric_owner_changes: ReportsDb["metric_owner_changes"];
+  reports_metric_versions: ReportsDb["metric_versions"];
+  reports_metric_suggestions: ReportsDb["metric_suggestions"];
+  reports_report_definitions: ReportsDb["report_definitions"];
+  reports_report_groups: ReportsDb["report_groups"];
+  reports_saved_views: ReportsDb["saved_views"];
+  reports_report_schedules: ReportsDb["report_schedules"];
+  reports_export_datasets: ReportsDb["export_datasets"];
+  reports_export_jobs: ReportsDb["export_jobs"];
+  reports_fact_order_items: ReportsDb["fact_order_items"];
+  reports_fact_refunds: ReportsDb["fact_refunds"];
+  reports_fact_returns: ReportsDb["fact_returns"];
+  reports_fact_marketplace_finance_daily: ReportsDb["fact_marketplace_finance_daily"];
+  reports_fact_company_daily: ReportsDb["fact_company_daily"];
+  reports_fact_seller_balances_daily: ReportsDb["fact_seller_balances_daily"];
+  reports_fact_service_daily: ReportsDb["fact_service_daily"];
+  reports_fact_marketly_fulfillment_daily: ReportsDb["fact_marketly_fulfillment_daily"];
+  reports_fact_discovery_daily: ReportsDb["fact_discovery_daily"];
+  reports_fact_search_misses_daily: ReportsDb["fact_search_misses_daily"];
+  reports_fact_customers: ReportsDb["fact_customers"];
+  reports_fact_campaigns_daily: ReportsDb["fact_campaigns_daily"];
+  reports_open_stockouts: ReportsDb["open_stockouts"];
+  reports_campaign_refs: ReportsDb["campaign_refs"];
+  reports_read_model_checkpoints: ReportsDb["read_model_checkpoints"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

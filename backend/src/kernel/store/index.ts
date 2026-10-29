@@ -16,13 +16,19 @@
  *     not mean the same thing.
  *
  * What is deliberately **not** here: `aggregate` and `pageAggregate` (MongoDB pipelines) and `db`/`pageQuery`
- * (Kysely and SQL). A repository needing either is not store-neutral, and says so by taking the store it needs.
+ * (Kysely and SQL). A repository needing either is not store-neutral, and says so by taking the store it needs
+ * — in Y2 that is a small per-module queries port with one implementation per database (docs/10 §10.5e).
+ *
+ * Two aggregates are the exception, because they are the same question in both databases and between them
+ * cover about half of the census's `$group` sites (docs/10 §13.1): `countBy` (how many rows per key) and
+ * `sum` (the total of one integer column). Anything with a join, a window, a second measure or a money
+ * column belongs to the queries port, where the SQL and the pipeline can each be what they need to be.
  */
 import type { KeysetOrder, PageRequest } from '../lib/pagination.js';
 import type { Page } from '../../spec/common.js';
 import type { Patch } from '../mysql/table.js';
 
-export type { Cond, JsonArrayPath, Where, WhereWithOr } from '../mongo/filters.js';
+export type { Cond, JsonArrayPath, JsonObjectPath, Where, WhereWithOr } from '../mongo/filters.js';
 export type { Expr, Intent, Patch } from '../mysql/table.js';
 export { decToZero, expr, inc, isExpr, jsonAppend } from '../mysql/table.js';
 
@@ -58,6 +64,10 @@ export interface StoreTable<R extends object> {
   count(where?: WhereWithOr<R>): Promise<number>;
   exists(where: WhereWithOr<R>): Promise<boolean>;
   distinct<T = unknown>(column: string, where?: WhereWithOr<R>): Promise<T[]>;
+  /** How many rows per key: `GROUP BY` / `$group` with a count, the one aggregate both stores read the same way */
+  countBy<K extends keyof R & string>(columns: readonly K[], where?: WhereWithOr<R>): Promise<(Pick<R, K> & { n: number })[]>;
+  /** The total of one numeric column (0 when no row matches). A money column is refused: see the implementations */
+  sum(column: keyof R & string, where?: WhereWithOr<R>): Promise<number>;
   page(where: WhereWithOr<R>, req: PageRequest, order: KeysetOrder): Promise<Page<R>>;
   insert(row: Partial<R> | Record<string, unknown>): Promise<R>;
   insertMany(rows: readonly (Partial<R> | Record<string, unknown>)[]): Promise<void>;

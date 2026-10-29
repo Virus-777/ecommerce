@@ -1415,6 +1415,25 @@ export interface NotificationsDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface NotificationsTables {
+  notifications_topics: NotificationsDb["topics"];
+  notifications_templates: NotificationsDb["templates"];
+  notifications_template_versions: NotificationsDb["template_versions"];
+  notifications_notices: NotificationsDb["notices"];
+  notifications_notice_recipients: NotificationsDb["notice_recipients"];
+  notifications_scheduled_notifications: NotificationsDb["scheduled_notifications"];
+  notifications_deliveries: NotificationsDb["deliveries"];
+  notifications_delivery_events: NotificationsDb["delivery_events"];
+  notifications_member_preferences: NotificationsDb["member_preferences"];
+  notifications_invited_members: NotificationsDb["invited_members"];
+  notifications_staff_preferences: NotificationsDb["staff_preferences"];
+  notifications_push_devices: NotificationsDb["push_devices"];
+  notifications_suppressions: NotificationsDb["suppressions"];
+  notifications_broadcasts: NotificationsDb["broadcasts"];
+  notifications_announcements: NotificationsDb["announcements"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

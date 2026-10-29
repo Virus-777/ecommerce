@@ -8,7 +8,7 @@
  * generated Mongoose schemas of its collections (schema.ts).
  */
 import type { FastifyBaseLogger } from 'fastify';
-import type { specs } from '../../spec/index.js';
+import type { ModuleTableTypes, specs } from '../../spec/index.js';
 import type { Config } from '../config/index.js';
 import type { Principal } from '../auth/index.js';
 import type { RateLimitResult } from '../auth/rate-limit.js';
@@ -22,6 +22,7 @@ import type { WebhookVerifier } from '../http/register.js';
 import type { Clock } from '../lib/clock.js';
 import type { RefGenerator } from '../lib/refs.js';
 import type { ModuleSchemas, ModuleStore } from '../mongo/index.js';
+import type { ModuleStore as MysqlModuleStore } from '../mysql/module-store.js';
 import type { Store } from '../store/index.js';
 import type { MongoMigration } from '../mongo/schema.js';
 import type { ModuleSpecDef } from '../spec/define.js';
@@ -63,6 +64,18 @@ export interface ModuleContext<N extends ModuleName> {
    * `ctx.store` is always usable and `ctx.mongo` stays for the modules that have not moved.
    */
   readonly store: Store;
+  /**
+   * This module's tables in MySQL, there only while its data is (`MYSQL_MODULES`), and undefined otherwise.
+   *
+   * It is for the reads the neutral vocabulary has no shape for — a join, a window function, a path into a
+   * JSON object, a `GROUP BY` with more than a count — through `ctx.mysql.db`, Kysely typed with this
+   * module's own tables. `countBy` and `sum` are on `ctx.store` itself and need none of this.
+   *
+   * A repository stays on `ctx.store`, so that it still means the same thing on both databases. What needs
+   * this belongs in the module's per-store queries, where the MongoDB pipeline it replaces lives beside it
+   * and both are deleted together at the cutover (docs/10 §10.5e).
+   */
+  readonly mysql?: MysqlModuleStore<N extends keyof ModuleTableTypes ? ModuleTableTypes[N] : never>;
   readonly clock: Clock;
   /** Publish this module's events, subscribe to the events its spec consumes */
   readonly events: ModuleEvents<OwnEventsOf<N>, ConsumedEventsOf<N>>;

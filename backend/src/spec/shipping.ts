@@ -2719,6 +2719,32 @@ export interface ShippingDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface ShippingTables {
+  shipping_carriers: ShippingDb["carriers"];
+  shipping_carrier_services: ShippingDb["carrier_services"];
+  shipping_methods: ShippingDb["methods"];
+  shipping_zones: ShippingDb["zones"];
+  shipping_profiles: ShippingDb["profiles"];
+  shipping_seller_settings: ShippingDb["seller_settings"];
+  shipping_closures: ShippingDb["closures"];
+  shipping_seller_carriers: ShippingDb["seller_carriers"];
+  shipping_dispatch_targets: ShippingDb["dispatch_targets"];
+  shipping_notices: ShippingDb["notices"];
+  shipping_free_shipping_rules: ShippingDb["free_shipping_rules"];
+  shipping_shipments: ShippingDb["shipments"];
+  shipping_shipment_lines: ShippingDb["shipment_lines"];
+  shipping_tracking_events: ShippingDb["tracking_events"];
+  shipping_tracking_corrections: ShippingDb["tracking_corrections"];
+  shipping_labels: ShippingDb["labels"];
+  shipping_label_quotes: ShippingDb["label_quotes"];
+  shipping_dispatch_watch: ShippingDb["dispatch_watch"];
+  shipping_exceptions: ShippingDb["exceptions"];
+  shipping_exception_log: ShippingDb["exception_log"];
+  shipping_claims: ShippingDb["claims"];
+  shipping_webhook_events: ShippingDb["webhook_events"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

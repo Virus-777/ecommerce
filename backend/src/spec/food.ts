@@ -1470,6 +1470,18 @@ export interface FoodDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface FoodTables {
+  food_categories: FoodDb["categories"];
+  food_restaurants: FoodDb["restaurants"];
+  food_sections: FoodDb["sections"];
+  food_items: FoodDb["items"];
+  food_baskets: FoodDb["baskets"];
+  food_orders: FoodDb["orders"];
+  food_saved_restaurants: FoodDb["saved_restaurants"];
+  food_reviews: FoodDb["reviews"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

@@ -722,6 +722,19 @@ export interface WalletDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface WalletTables {
+  wallet_accounts: WalletDb["accounts"];
+  wallet_lots: WalletDb["lots"];
+  wallet_ledger: WalletDb["ledger"];
+  wallet_holds: WalletDb["holds"];
+  wallet_gift_card_batches: WalletDb["gift_card_batches"];
+  wallet_goodwill_grants: WalletDb["goodwill_grants"];
+  wallet_gift_cards: WalletDb["gift_cards"];
+  wallet_credit_corrections: WalletDb["credit_corrections"];
+  wallet_loyalty_entries: WalletDb["loyalty_entries"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

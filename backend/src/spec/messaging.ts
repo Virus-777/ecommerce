@@ -753,6 +753,18 @@ export interface MessagingDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface MessagingTables {
+  messaging_conversations: MessagingDb["conversations"];
+  messaging_participants: MessagingDb["participants"];
+  messaging_messages: MessagingDb["messages"];
+  messaging_message_reports: MessagingDb["message_reports"];
+  messaging_reply_templates: MessagingDb["reply_templates"];
+  messaging_conversation_aliases: MessagingDb["conversation_aliases"];
+  messaging_staff_access_log: MessagingDb["staff_access_log"];
+  messaging_seller_reply_stats: MessagingDb["seller_reply_stats"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

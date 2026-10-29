@@ -487,6 +487,17 @@ export interface RewardsDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface RewardsTables {
+  rewards_program: RewardsDb["program"];
+  rewards_tasks: RewardsDb["tasks"];
+  rewards_accounts: RewardsDb["accounts"];
+  rewards_entries: RewardsDb["entries"];
+  rewards_progress: RewardsDb["progress"];
+  rewards_rewards: RewardsDb["rewards"];
+  rewards_redemptions: RewardsDb["redemptions"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

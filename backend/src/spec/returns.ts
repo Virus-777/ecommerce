@@ -2860,6 +2860,24 @@ export interface ReturnsDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface ReturnsTables {
+  returns_policy_versions: ReturnsDb["policy_versions"];
+  returns_category_exceptions: ReturnsDb["category_exceptions"];
+  returns_seller_terms: ReturnsDb["seller_terms"];
+  returns_returns: ReturnsDb["returns"];
+  returns_return_items: ReturnsDb["return_items"];
+  returns_return_shipments: ReturnsDb["return_shipments"];
+  returns_inspection_drafts: ReturnsDb["inspection_drafts"];
+  returns_return_evidence: ReturnsDb["return_evidence"];
+  returns_inspections: ReturnsDb["inspections"];
+  returns_refund_requests: ReturnsDb["refund_requests"];
+  returns_refund_request_items: ReturnsDb["refund_request_items"];
+  returns_refund_request_events: ReturnsDb["refund_request_events"];
+  returns_replacements: ReturnsDb["replacements"];
+  returns_return_events: ReturnsDb["return_events"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

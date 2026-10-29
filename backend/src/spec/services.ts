@@ -1727,6 +1727,17 @@ export interface ServicesDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface ServicesTables {
+  services_categories: ServicesDb["categories"];
+  services_providers: ServicesDb["providers"];
+  services_services: ServicesDb["services"];
+  services_requests: ServicesDb["requests"];
+  services_reviews: ServicesDb["reviews"];
+  services_saved_providers: ServicesDb["saved_providers"];
+  services_devices: ServicesDb["devices"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

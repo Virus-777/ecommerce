@@ -1377,6 +1377,22 @@ export interface AccessDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface AccessTables {
+  access_roles: AccessDb["roles"];
+  access_permissions: AccessDb["permissions"];
+  access_role_permissions: AccessDb["role_permissions"];
+  access_role_assignments: AccessDb["role_assignments"];
+  access_role_coverage: AccessDb["role_coverage"];
+  access_approval_actions: AccessDb["approval_actions"];
+  access_approval_limits: AccessDb["approval_limits"];
+  access_limit_changes: AccessDb["limit_changes"];
+  access_approval_requests: AccessDb["approval_requests"];
+  access_approval_decisions: AccessDb["approval_decisions"];
+  access_away_periods: AccessDb["away_periods"];
+  access_away_coverage: AccessDb["away_coverage"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

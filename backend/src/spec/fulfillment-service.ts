@@ -1111,6 +1111,24 @@ export interface FulfillmentServiceDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface FulfillmentServiceTables {
+  fulfillment_service_enrollments: FulfillmentServiceDb["enrollments"];
+  fulfillment_service_sku_enrollments: FulfillmentServiceDb["sku_enrollments"];
+  fulfillment_service_inbound_shipments: FulfillmentServiceDb["inbound_shipments"];
+  fulfillment_service_inbound_lines: FulfillmentServiceDb["inbound_lines"];
+  fulfillment_service_inbound_receipts: FulfillmentServiceDb["inbound_receipts"];
+  fulfillment_service_discrepancies: FulfillmentServiceDb["discrepancies"];
+  fulfillment_service_ownership_ledger: FulfillmentServiceDb["ownership_ledger"];
+  fulfillment_service_fulfillment_requests: FulfillmentServiceDb["fulfillment_requests"];
+  fulfillment_service_service_returns: FulfillmentServiceDb["service_returns"];
+  fulfillment_service_removal_orders: FulfillmentServiceDb["removal_orders"];
+  fulfillment_service_stock_differences: FulfillmentServiceDb["stock_differences"];
+  fulfillment_service_fee_schedules: FulfillmentServiceDb["fee_schedules"];
+  fulfillment_service_fee_charges: FulfillmentServiceDb["fee_charges"];
+  fulfillment_service_storage_snapshots: FulfillmentServiceDb["storage_snapshots"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

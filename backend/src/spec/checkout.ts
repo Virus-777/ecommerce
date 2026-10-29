@@ -1261,6 +1261,16 @@ export interface CheckoutDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface CheckoutTables {
+  checkout_sessions: CheckoutDb["sessions"];
+  checkout_session_lines: CheckoutDb["session_lines"];
+  checkout_session_packages: CheckoutDb["session_packages"];
+  checkout_change_sets: CheckoutDb["change_sets"];
+  checkout_place_requests: CheckoutDb["place_requests"];
+  checkout_session_log: CheckoutDb["session_log"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

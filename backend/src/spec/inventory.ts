@@ -1612,6 +1612,28 @@ export interface InventoryDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface InventoryTables {
+  inventory_locations: InventoryDb["locations"];
+  inventory_stock_items: InventoryDb["stock_items"];
+  inventory_stock_levels: InventoryDb["stock_levels"];
+  inventory_stock_movements: InventoryDb["stock_movements"];
+  inventory_incoming_expectations: InventoryDb["incoming_expectations"];
+  inventory_reservations: InventoryDb["reservations"];
+  inventory_reservation_lines: InventoryDb["reservation_lines"];
+  inventory_adjustments: InventoryDb["adjustments"];
+  inventory_held_stock: InventoryDb["held_stock"];
+  inventory_inbound_receipts: InventoryDb["inbound_receipts"];
+  inventory_inbound_lines: InventoryDb["inbound_lines"];
+  inventory_return_outcomes: InventoryDb["return_outcomes"];
+  inventory_discrepancies: InventoryDb["discrepancies"];
+  inventory_transfers: InventoryDb["transfers"];
+  inventory_transfer_lines: InventoryDb["transfer_lines"];
+  inventory_valuation_snapshots: InventoryDb["valuation_snapshots"];
+  inventory_stock_counts: InventoryDb["stock_counts"];
+  inventory_count_lines: InventoryDb["count_lines"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

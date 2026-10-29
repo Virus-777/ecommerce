@@ -1635,6 +1635,25 @@ export interface ReviewsDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface ReviewsTables {
+  reviews_product_reviews: ReviewsDb["product_reviews"];
+  reviews_seller_feedback: ReviewsDb["seller_feedback"];
+  reviews_seller_responses: ReviewsDb["seller_responses"];
+  reviews_questions: ReviewsDb["questions"];
+  reviews_answers: ReviewsDb["answers"];
+  reviews_question_skips: ReviewsDb["question_skips"];
+  reviews_helpful_votes: ReviewsDb["helpful_votes"];
+  reviews_reports: ReviewsDb["reports"];
+  reviews_moderation_items: ReviewsDb["moderation_items"];
+  reviews_moderation_decisions: ReviewsDb["moderation_decisions"];
+  reviews_referrals: ReviewsDb["referrals"];
+  reviews_appeals: ReviewsDb["appeals"];
+  reviews_product_rating_summaries: ReviewsDb["product_rating_summaries"];
+  reviews_review_invites: ReviewsDb["review_invites"];
+  reviews_seller_feedback_summaries: ReviewsDb["seller_feedback_summaries"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

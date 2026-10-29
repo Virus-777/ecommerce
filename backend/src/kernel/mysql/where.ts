@@ -26,6 +26,12 @@ export interface Sql {
 
 export interface WhereOptions {
   /**
+   * The table's JSON columns. A dotted filter name whose head is one of them is a path into that document
+   * (`check_result.passed` → `check_result->'$.passed'`, §10.5f); a dotted name whose head is not is a
+   * mistake, and is refused by name here rather than sent to the server as a column nobody has.
+   */
+  json?: ReadonlySet<string>;
+  /**
    * Columns where a `null` condition asks about the JSON value null and not about SQL NULL: a JSON column the
    * table says cannot be null (`Table` works them out from its def). Such a column holds `null` as a JSON
    * document — a setting whose default is "no cap" — so `IS NULL` would never match it, while MongoDB, which
@@ -75,6 +81,13 @@ function operatorSql(column: string, op: string, value: unknown, o: WhereOptions
     }
     case 'like':
       return value === null ? NOTHING : { sql: `${col} LIKE ?`, params: [String(value)] };
+    // what a search box asks. The MongoDB side is a case-insensitive regex; here the collation does it (§5.2)
+    case 'contains':
+      return value === null ? NOTHING : contains(column, String(value));
+    case 'starts with':
+      return value === null ? NOTHING : startsWith(column, String(value));
+    case 'equals ignoring case':
+      return value === null ? NOTHING : equalsIgnoringCase(column, String(value));
     case 'between': {
       const [low, high] = list ?? [];
       if (low === null || low === undefined || high === null || high === undefined) return NOTHING;
@@ -108,10 +121,97 @@ function pathSql(name: string, path: { column: string; field?: string }, cond: u
   return { sql: values.length === 1 ? `? MEMBER OF (${array})` : `(${values.map(() => `? MEMBER OF (${array})`).join(' OR ')})`, params: [...values] };
 }
 
+/** A field name that can go into a JSON path in the SQL text. It comes from the repository's own source */
+const FIELD = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * `check_result.passed` → `check_result->'$.passed'`, for a dotted name whose head is a JSON column of this
+ * table. A name with a dot is never a column (no column here has one), so the two cannot be confused; a
+ * dotted name whose head is not a JSON column is the repository's mistake and says so.
+ */
+function jsonObjectPath(name: string, o: WhereOptions): string | undefined {
+  const dot = name.indexOf('.');
+  if (dot < 0) return undefined;
+  const column = name.slice(0, dot);
+  if (!o.json?.has(column)) throw new Error(`where: ${name} reads as a path into a JSON document, but ${column} is not a JSON column of this table`);
+  const fields = name.slice(dot + 1).split('.');
+  const bad = fields.find((f) => !FIELD.test(f));
+  if (bad !== undefined) throw new Error(`where: ${name} is not a path this store can build: "${bad}" is not a plain field name`);
+  return `${q(column)}->'$.${fields.join('.')}'`;
+}
+
+/** The JSON value of a bound parameter: `= CAST(? AS JSON)` compares as JSON and never mixes collations */
+const asJson = (value: unknown): Sql => ({ sql: 'CAST(? AS JSON)', params: [JSON.stringify(value)] });
+
+/**
+ * A condition on a path into a JSON object. Everything is compared **as JSON** (`CAST(? AS JSON)`), which is
+ * the one form that is neither slow nor wrong: `->>` unquotes to `utf8mb4_bin` and a session running
+ * `utf8mb4_0900_bin` then refuses the comparison outright with "Illegal mix of collations" (measured on
+ * 8.4.13, §10.5b), and it would turn `true` into the string `'true'` on the way.
+ *
+ * A field that is not there reads as SQL NULL, which is how the null rules fall out:
+ *
+ *   - `null` matches a field that is absent *or* set to the JSON null, which is what MongoDB matches;
+ *   - `<>` keeps SQL's reading — neither absent nor null matches — so the JSON null is excluded by hand,
+ *     because `<>` between the JSON null and a string is perfectly true in SQL;
+ *   - `is not` is "is distinct from", MongoDB's own `$ne`: absent and null both match.
+ */
+function objectPathSql(name: string, expr: string, cond: unknown): Sql | undefined {
+  if (cond === undefined) return undefined;
+  const nullish: Sql = { sql: `(${expr} IS NULL OR ${expr} = ${JSON_NULL})`, params: [] };
+  const eq = (v: unknown): Sql => {
+    const j = asJson(v);
+    return { sql: `${expr} = ${j.sql}`, params: j.params };
+  };
+  if (cond === null) return nullish;
+  if (Array.isArray(cond)) {
+    const values = cond.filter((v) => v !== null && v !== undefined);
+    if (!values.length) return NOTHING;
+    const parts = values.map(eq);
+    return { sql: parts.length === 1 ? parts[0]!.sql : `(${parts.map((p) => p.sql).join(' OR ')})`, params: parts.flatMap((p) => p.params) };
+  }
+  if (!isOperator(cond)) return eq(cond);
+  const { op, value } = cond;
+  const list = Array.isArray(value) ? (value as unknown[]) : undefined;
+  switch (op) {
+    case 'is not':
+      // "is distinct from": a field that is absent or null is distinct from any value, as $ne says it is
+      if (value === null) return { sql: `(${expr} IS NOT NULL AND ${expr} <> ${JSON_NULL})`, params: [] };
+      return { sql: `NOT (${expr} <=> ${asJson(value).sql})`, params: asJson(value).params };
+    case '<>':
+      if (value === null) return NOTHING;
+      return { sql: `(${expr} <> ${asJson(value).sql} AND ${expr} <> ${JSON_NULL})`, params: asJson(value).params };
+    case 'not in': {
+      if (!list?.length) return undefined;
+      if (list.some((v) => v === null)) return NOTHING;
+      const parts = list.map((v) => asJson(v));
+      return { sql: `(${parts.map((p) => `${expr} <> ${p.sql}`).join(' AND ')} AND ${expr} <> ${JSON_NULL})`, params: parts.flatMap((p) => p.params) };
+    }
+    case 'like':
+      // the text inside the document, compared in the session's own collation so the comparison is defined
+      return value === null ? NOTHING : { sql: `JSON_UNQUOTE(${expr}) COLLATE utf8mb4_0900_bin LIKE ?`, params: [String(value)] };
+    case 'between': {
+      const [low, high] = list ?? [];
+      if (low === null || low === undefined || high === null || high === undefined) return NOTHING;
+      const [l, h] = [asJson(low), asJson(high)];
+      return { sql: `${expr} BETWEEN ${l.sql} AND ${h.sql}`, params: [...l.params, ...h.params] };
+    }
+    default: {
+      // JSON values compare by type and then by value, so numbers compare as numbers and strings as strings
+      if (!COMPARE.has(op)) throw new Error(`where: unsupported condition ${op} on ${name}`);
+      if (value === null) return NOTHING;
+      const j = asJson(value);
+      return { sql: `${expr} ${op} ${j.sql}`, params: j.params };
+    }
+  }
+}
+
 /** One column's condition */
 function condSql(column: string, cond: unknown, o: WhereOptions): Sql | undefined {
   const path = jsonArrayPath(column);
   if (path) return pathSql(column, path, cond);
+  const object = jsonObjectPath(column, o);
+  if (object) return objectPathSql(column, object, cond);
   const col = q(column);
   if (cond === undefined) return undefined;
   if (cond === null) return o.jsonNotNull?.has(column) ? { sql: `${col} = ${JSON_NULL}`, params: [] } : { sql: `${col} IS NULL`, params: [] };

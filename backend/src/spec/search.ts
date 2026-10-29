@@ -1287,6 +1287,21 @@ export interface SearchDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface SearchTables {
+  search_search_documents: SearchDb["search_documents"];
+  search_search_offers: SearchDb["search_offers"];
+  search_suggestion_terms: SearchDb["suggestion_terms"];
+  search_synonyms: SearchDb["synonyms"];
+  search_recent_searches: SearchDb["recent_searches"];
+  search_query_log: SearchDb["query_log"];
+  search_click_log: SearchDb["click_log"];
+  search_product_sales_daily: SearchDb["product_sales_daily"];
+  search_dirty_documents: SearchDb["dirty_documents"];
+  search_reindex_jobs: SearchDb["reindex_jobs"];
+  search_ranking_policies: SearchDb["ranking_policies"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

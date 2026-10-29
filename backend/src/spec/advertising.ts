@@ -2327,6 +2327,24 @@ export interface AdvertisingDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface AdvertisingTables {
+  advertising_placements: AdvertisingDb["placements"];
+  advertising_global_rules: AdvertisingDb["global_rules"];
+  advertising_campaigns: AdvertisingDb["campaigns"];
+  advertising_campaign_items: AdvertisingDb["campaign_items"];
+  advertising_campaign_creatives: AdvertisingDb["campaign_creatives"];
+  advertising_approval_steps: AdvertisingDb["approval_steps"];
+  advertising_creatives: AdvertisingDb["creatives"];
+  advertising_creative_reviews: AdvertisingDb["creative_reviews"];
+  advertising_campaign_log: AdvertisingDb["campaign_log"];
+  advertising_ad_events: AdvertisingDb["ad_events"];
+  advertising_frequency_state: AdvertisingDb["frequency_state"];
+  advertising_attributions: AdvertisingDb["attributions"];
+  advertising_daily_stats: AdvertisingDb["daily_stats"];
+  advertising_ad_charges: AdvertisingDb["ad_charges"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

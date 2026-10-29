@@ -502,6 +502,16 @@ export interface AuditDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface AuditTables {
+  audit_entries: AuditDb["entries"];
+  audit_entry_targets: AuditDb["entry_targets"];
+  audit_approval_states: AuditDb["approval_states"];
+  audit_retention: AuditDb["retention"];
+  audit_checkpoints: AuditDb["checkpoints"];
+  audit_integrity_checks: AuditDb["integrity_checks"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

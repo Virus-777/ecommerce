@@ -1025,6 +1025,20 @@ export interface WorkqueuesDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface WorkqueuesTables {
+  workqueues_queues: WorkqueuesDb["queues"];
+  workqueues_intake_rules: WorkqueuesDb["intake_rules"];
+  workqueues_items: WorkqueuesDb["items"];
+  workqueues_item_events: WorkqueuesDb["item_events"];
+  workqueues_item_notes: WorkqueuesDb["item_notes"];
+  workqueues_saved_filters: WorkqueuesDb["saved_filters"];
+  workqueues_day_end_reviews: WorkqueuesDb["day_end_reviews"];
+  workqueues_routine_templates: WorkqueuesDb["routine_templates"];
+  workqueues_routine_checks: WorkqueuesDb["routine_checks"];
+  workqueues_daily_counts: WorkqueuesDb["daily_counts"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

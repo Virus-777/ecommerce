@@ -2225,6 +2225,20 @@ export interface OffersDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface OffersTables {
+  offers_offers: OffersDb["offers"];
+  offers_offer_price_history: OffersDb["offer_price_history"];
+  offers_price_changes: OffersDb["price_changes"];
+  offers_offer_status_log: OffersDb["offer_status_log"];
+  offers_offer_eligibility: OffersDb["offer_eligibility"];
+  offers_featured_offers: OffersDb["featured_offers"];
+  offers_featured_rules: OffersDb["featured_rules"];
+  offers_bulk_update_jobs: OffersDb["bulk_update_jobs"];
+  offers_bulk_update_rows: OffersDb["bulk_update_rows"];
+  offers_offer_costs: OffersDb["offer_costs"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

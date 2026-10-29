@@ -37,12 +37,20 @@ export function likePattern(pattern: string): { $regex: string } {
   return { $regex: `^${out}$` };
 }
 
-/** One condition of a Where: a value (equals), a list (one of), null (is null), or an operator with a value */
+/**
+ * One condition of a Where: a value (equals), a list (one of), null (is null), or an operator with a value.
+ *
+ * The last three are what a search box asks, and they are conditions rather than per-store helpers because
+ * twenty-eight modules have one: `contains` and `starts with` match the text literally, ignoring case and
+ * trimming what was typed (a typed `.` or `%` is a full stop or a per-cent sign, never a pattern), and
+ * `equals ignoring case` is an exact comparison that ignores case only. On MongoDB they are case-insensitive
+ * regexes; on MySQL the `as_ci` collation does the work (§5.2), which is the same rule either way.
+ */
 export type Cond<V> =
   | V
   | readonly V[]
   | null
-  | { op: '<' | '<=' | '>' | '>=' | '<>' | 'is not' | 'like' | 'not in' | 'between'; value: V | readonly V[] | null };
+  | { op: '<' | '<=' | '>' | '>=' | '<>' | 'is not' | 'like' | 'not in' | 'between' | 'contains' | 'starts with' | 'equals ignoring case'; value: V | readonly V[] | null };
 
 /**
  * A path into a JSON array: `items[].key` is "some element of items has key = …", and `role_keys[]` is "some
@@ -57,8 +65,21 @@ export type Cond<V> =
  */
 export type JsonArrayPath = `${string}[]` | `${string}[].${string}`;
 
+/**
+ * A path into a JSON **object**: `check_result.passed` is "the passed field of the check_result document".
+ * It is MongoDB's own spelling, and the one SQL needs told about — `check_result->'$.passed'` — which is why
+ * the MySQL side is given the table's JSON columns and reads a dotted name whose head is one of them as a
+ * path (kernel/mysql/where.ts). A column name has no dot in it, so nothing is ambiguous; a dotted name whose
+ * head is *not* a JSON column is refused there rather than quoted into a statement.
+ *
+ * Both stores take a value, a list, null, `<>`, `is not`, the four comparisons, `between` and `like` here.
+ * The one meaning worth having in mind: `<>` keeps SQL's reading (a row whose field is missing or null does
+ * not match) and `is not` is MongoDB's `$ne` (it does), which is the pair the sites being converted use.
+ */
+export type JsonObjectPath = `${string}.${string}`;
+
 /** Conditions on a row's columns, all of which must hold (undefined conditions are left out) */
-export type Where<R> = { [K in keyof R]?: Cond<R[K]> } & { [P in JsonArrayPath]?: unknown };
+export type Where<R> = { [K in keyof R]?: Cond<R[K]> } & { [P in JsonArrayPath]?: unknown } & { [P in JsonObjectPath]?: unknown };
 
 /** `items[].key` → `{ column: 'items', field: 'key' }`; undefined when the name is an ordinary column */
 export function jsonArrayPath(name: string): { column: string; field?: string } | undefined {
@@ -168,6 +189,12 @@ function operatorFilter(column: string, op: string, value: unknown): unknown {
       return list.some((v) => v === null) ? NOTHING : { $nin: [...list, null] };
     case 'like':
       return value === null ? NOTHING : likePattern(String(value));
+    case 'contains':
+      return value === null ? NOTHING : contains(String(value));
+    case 'starts with':
+      return value === null ? NOTHING : startsWith(String(value));
+    case 'equals ignoring case':
+      return value === null ? NOTHING : equalsIgnoringCase(String(value));
     case 'between': {
       const [low, high] = list ?? [];
       return low === null || low === undefined || high === null || high === undefined ? NOTHING : { $gte: low, $lte: high };

@@ -1574,6 +1574,27 @@ export interface CatalogDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface CatalogTables {
+  catalog_categories: CatalogDb["categories"];
+  catalog_attributes: CatalogDb["attributes"];
+  catalog_image_standards: CatalogDb["image_standards"];
+  catalog_brands: CatalogDb["brands"];
+  catalog_products: CatalogDb["products"];
+  catalog_variants: CatalogDb["variants"];
+  catalog_review_log: CatalogDb["review_log"];
+  catalog_correction_suggestions: CatalogDb["correction_suggestions"];
+  catalog_submissions: CatalogDb["submissions"];
+  catalog_submission_checks: CatalogDb["submission_checks"];
+  catalog_check_dismissals: CatalogDb["check_dismissals"];
+  catalog_review_drafts: CatalogDb["review_drafts"];
+  catalog_brand_authorized_sellers: CatalogDb["brand_authorized_sellers"];
+  catalog_offer_index: CatalogDb["offer_index"];
+  catalog_listing_stats: CatalogDb["listing_stats"];
+  catalog_category_stats: CatalogDb["category_stats"];
+  catalog_brand_stats: CatalogDb["brand_stats"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

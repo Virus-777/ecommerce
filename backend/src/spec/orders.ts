@@ -2670,6 +2670,21 @@ export interface OrdersDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface OrdersTables {
+  orders_orders: OrdersDb["orders"];
+  orders_order_facts: OrdersDb["order_facts"];
+  orders_seller_groups: OrdersDb["seller_groups"];
+  orders_order_items: OrdersDb["order_items"];
+  orders_item_state_log: OrdersDb["item_state_log"];
+  orders_cancellations: OrdersDb["cancellations"];
+  orders_shipment_refs: OrdersDb["shipment_refs"];
+  orders_timeline: OrdersDb["timeline"];
+  orders_notes: OrdersDb["notes"];
+  orders_documents: OrdersDb["documents"];
+  orders_saved_filters: OrdersDb["saved_filters"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

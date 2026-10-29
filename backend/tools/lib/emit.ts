@@ -2,7 +2,7 @@
  * Emits src/spec/common.ts and src/spec/<module>.ts (generated, never edited by hand) from the spec.
  */
 import { collectionDefs } from './mongo.js';
-import { mysqlTableDefs } from './mysql.js';
+import { mysqlTableDefs, tableName } from './mysql.js';
 import { planTables, tsOfColumn } from './tables.js';
 import { camel, doc, mergeConsumes, pascal, pascalWords, SETTING_APPROVALS, SETTING_TYPES, type CommonSpec, type EndpointScope, type EndpointSpec, type ModuleSpec, type ObjectExpr, type SettingSpec } from './spec.js';
 import { translateSignature, TypeContext, type Parsed } from './types.js';
@@ -127,6 +127,14 @@ export function emitModule(mod: ModuleSpec, common: CommonSpec, byName: Map<stri
     for (const { c, ts } of columns) body.push(`${doc(c.comment ?? undefined, '    ')}    ${c.name}: ${ts};`);
     body.push('  };');
   }
+  body.push('}\n');
+
+  // The same rows under their MySQL names, which is what Kysely is keyed by (ctx.mysql.db, docs/10 §10.5e).
+  // Reads only — a write goes through `Table`, so there is no ColumnType<Select, Insert, Update> to be had
+  // from it and a plain row type says all a join or an aggregate needs to know.
+  body.push(`/** This module's tables under their MySQL names, for the typed Kysely handle \`ctx.mysql.db\` (docs/10 §10.5e). A view is declared by the module that reads it. */`);
+  body.push(`export interface ${P}Tables {`);
+  for (const { table } of columnTypes) body.push(`  ${tableName(mod.name, table.name)}: ${P}Db[${JSON.stringify(table.name)}];`);
   body.push('}\n');
 
   section('endpoints');

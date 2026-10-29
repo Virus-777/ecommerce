@@ -1013,6 +1013,15 @@ export interface SettingsDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface SettingsTables {
+  settings_definitions: SettingsDb["definitions"];
+  settings_values: SettingsDb["values"];
+  settings_changes: SettingsDb["changes"];
+  settings_change_keys: SettingsDb["change_keys"];
+  settings_feature_flags: SettingsDb["feature_flags"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

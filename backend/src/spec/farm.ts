@@ -1042,6 +1042,12 @@ export interface FarmDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface FarmTables {
+  farm_dealers: FarmDb["dealers"];
+  farm_orders: FarmDb["orders"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

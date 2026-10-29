@@ -134,10 +134,13 @@ export async function bootModules(defs: ModuleDefinition[], k: KernelServices): 
     // Naming a module without a MySQL store, or without the generated table defs, is a misconfiguration
     // worth refusing here rather than discovering on its first query.
     let store: Store;
+    // the same store, kept as what it is: a module whose data is in MySQL can also reach Kysely through
+    // ctx.mysql for the reads `Store` has no shape for (§10.5e), and a module in MongoDB has no ctx.mysql
+    let mysqlModule: ReturnType<MysqlStore['module']> | undefined;
     if (!k.config.mysqlModules.includes(name)) store = mongoStore(mongo);
     else if (!k.mysql) throw new Error(`MYSQL_MODULES names ${name}, but this process has no MySQL (MYSQL_URL is not set)`);
     else if (!spec.tables) throw new Error(`MYSQL_MODULES names ${name}, but its spec has no tables; run npm run gen`);
-    else store = k.mysql.module(name, spec.tables);
+    else store = mysqlModule = k.mysql.module(name, spec.tables);
     result.stores.set(name, store);
     const ctx: ModuleContext<any> = {
       name,
@@ -147,6 +150,7 @@ export async function bootModules(defs: ModuleDefinition[], k: KernelServices): 
       log: k.log.child({ module: name }),
       mongo,
       store,
+      mysql: mysqlModule,
       clock: k.clock,
       events: moduleEvents(k.events, spec),
       jobs: {

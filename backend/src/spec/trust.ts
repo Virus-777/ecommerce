@@ -1270,6 +1270,22 @@ export interface TrustDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface TrustTables {
+  trust_reports: TrustDb["reports"];
+  trust_report_subjects: TrustDb["report_subjects"];
+  trust_evidence: TrustDb["evidence"];
+  trust_evidence_requests: TrustDb["evidence_requests"];
+  trust_recommendations: TrustDb["recommendations"];
+  trust_enforcements: TrustDb["enforcements"];
+  trust_enforcement_targets: TrustDb["enforcement_targets"];
+  trust_appeals: TrustDb["appeals"];
+  trust_report_notes: TrustDb["report_notes"];
+  trust_report_events: TrustDb["report_events"];
+  trust_detection_rules: TrustDb["detection_rules"];
+  trust_risk_signals: TrustDb["risk_signals"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

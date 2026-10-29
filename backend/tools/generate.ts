@@ -23,7 +23,7 @@ import { emitMongooseSchemas } from './lib/mongoose.js';
 import { emitMysqlSchema, moduleDdl } from './lib/mysql.js';
 import { planTables } from './lib/tables.js';
 import { scaffoldFiles } from './lib/scaffold.js';
-import { apiDir, backendDir, camel, gqlDir, loadCommon, loadFragment, loadModules, readText, type ModuleSpec } from './lib/spec.js';
+import { apiDir, backendDir, camel, gqlDir, loadCommon, loadFragment, loadModules, pascal, readText, type ModuleSpec } from './lib/spec.js';
 import { TypeContext } from './lib/types.js';
 
 const { values: opts } = parseArgs({ options: { check: { type: 'boolean' }, all: { type: 'boolean' }, only: { type: 'string' } } });
@@ -62,6 +62,7 @@ generated.set(
   `${GENERATED('docs/api/spec')}
 /** Every module spec, keyed by module name. Importing this registers all event and public API types. */
 ${modules.map((m) => `import { spec as ${camel(m.name)} } from './${m.name}.js';`).join('\n')}
+${modules.map((m) => `import type { ${pascal(m.name)}Tables } from './${m.name}.js';`).join('\n')}
 
 export const specs = {
 ${modules.map((m) => `  ${JSON.stringify(m.name)}: ${camel(m.name)},`).join('\n')}
@@ -69,6 +70,11 @@ ${modules.map((m) => `  ${JSON.stringify(m.name)}: ${camel(m.name)},`).join('\n'
 
 export type ModuleName = keyof typeof specs;
 export const moduleNames = Object.keys(specs) as ModuleName[];
+
+/** Each module's tables as Kysely is keyed, so \`ctx.mysql\` is typed with the module's own (docs/10 §10.5e) */
+export interface ModuleTableTypes {
+${modules.map((m) => `  ${JSON.stringify(m.name)}: ${pascal(m.name)}Tables;`).join('\n')}
+}
 `,
 );
 

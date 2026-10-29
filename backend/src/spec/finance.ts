@@ -2544,6 +2544,34 @@ export interface FinanceDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface FinanceTables {
+  finance_seller_accounts: FinanceDb["seller_accounts"];
+  finance_ledger_entries: FinanceDb["ledger_entries"];
+  finance_earnings_lots: FinanceDb["earnings_lots"];
+  finance_fee_rule_sets: FinanceDb["fee_rule_sets"];
+  finance_fee_category_rates: FinanceDb["fee_category_rates"];
+  finance_fee_charges: FinanceDb["fee_charges"];
+  finance_refund_allocations: FinanceDb["refund_allocations"];
+  finance_holds: FinanceDb["holds"];
+  finance_adjustments: FinanceDb["adjustments"];
+  finance_seller_credits: FinanceDb["seller_credits"];
+  finance_amounts_owed: FinanceDb["amounts_owed"];
+  finance_payout_destinations: FinanceDb["payout_destinations"];
+  finance_destination_reviews: FinanceDb["destination_reviews"];
+  finance_payout_runs: FinanceDb["payout_runs"];
+  finance_payouts: FinanceDb["payouts"];
+  finance_statements: FinanceDb["statements"];
+  finance_trading_entries: FinanceDb["trading_entries"];
+  finance_trading_targets: FinanceDb["trading_targets"];
+  finance_recon_days: FinanceDb["recon_days"];
+  finance_recon_items: FinanceDb["recon_items"];
+  finance_captures: FinanceDb["captures"];
+  finance_discount_funding: FinanceDb["discount_funding"];
+  finance_platform_costs: FinanceDb["platform_costs"];
+  finance_store_credit_liability: FinanceDb["store_credit_liability"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

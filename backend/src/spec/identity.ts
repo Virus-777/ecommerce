@@ -1371,6 +1371,26 @@ export interface IdentityDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface IdentityTables {
+  identity_accounts: IdentityDb["accounts"];
+  identity_password_history: IdentityDb["password_history"];
+  identity_two_step_methods: IdentityDb["two_step_methods"];
+  identity_recovery_codes: IdentityDb["recovery_codes"];
+  identity_challenges: IdentityDb["challenges"];
+  identity_password_resets: IdentityDb["password_resets"];
+  identity_devices: IdentityDb["devices"];
+  identity_sessions: IdentityDb["sessions"];
+  identity_seller_access: IdentityDb["seller_access"];
+  identity_invitations: IdentityDb["invitations"];
+  identity_guest_sessions: IdentityDb["guest_sessions"];
+  identity_guest_order_grants: IdentityDb["guest_order_grants"];
+  identity_order_links: IdentityDb["order_links"];
+  identity_security_events: IdentityDb["security_events"];
+  identity_sign_in_attempts: IdentityDb["sign_in_attempts"];
+  identity_reauth_tokens: IdentityDb["reauth_tokens"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

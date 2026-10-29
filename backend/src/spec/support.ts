@@ -1590,6 +1590,19 @@ export interface SupportDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface SupportTables {
+  support_case_categories: SupportDb["case_categories"];
+  support_cases: SupportDb["cases"];
+  support_case_items: SupportDb["case_items"];
+  support_case_messages: SupportDb["case_messages"];
+  support_case_evidence: SupportDb["case_evidence"];
+  support_case_offers: SupportDb["case_offers"];
+  support_case_remedies: SupportDb["case_remedies"];
+  support_case_appeals: SupportDb["case_appeals"];
+  support_case_events: SupportDb["case_events"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

@@ -1160,6 +1160,20 @@ export interface PurchasingDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface PurchasingTables {
+  purchasing_suppliers: PurchasingDb["suppliers"];
+  purchasing_supplier_items: PurchasingDb["supplier_items"];
+  purchasing_supplier_performance: PurchasingDb["supplier_performance"];
+  purchasing_purchase_orders: PurchasingDb["purchase_orders"];
+  purchasing_purchase_order_lines: PurchasingDb["purchase_order_lines"];
+  purchasing_purchase_order_events: PurchasingDb["purchase_order_events"];
+  purchasing_deliveries: PurchasingDb["deliveries"];
+  purchasing_receipts: PurchasingDb["receipts"];
+  purchasing_receipt_lines: PurchasingDb["receipt_lines"];
+  purchasing_supplier_claims: PurchasingDb["supplier_claims"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

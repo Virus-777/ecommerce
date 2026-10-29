@@ -1026,6 +1026,21 @@ export interface WarehouseDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface WarehouseTables {
+  warehouse_bins: WarehouseDb["bins"];
+  warehouse_bin_assignments: WarehouseDb["bin_assignments"];
+  warehouse_fulfillments: WarehouseDb["fulfillments"];
+  warehouse_fulfillment_lines: WarehouseDb["fulfillment_lines"];
+  warehouse_waves: WarehouseDb["waves"];
+  warehouse_scan_log: WarehouseDb["scan_log"];
+  warehouse_box_types: WarehouseDb["box_types"];
+  warehouse_packages: WarehouseDb["packages"];
+  warehouse_package_items: WarehouseDb["package_items"];
+  warehouse_putaway_tasks: WarehouseDb["putaway_tasks"];
+  warehouse_return_parcels: WarehouseDb["return_parcels"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

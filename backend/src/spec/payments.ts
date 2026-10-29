@@ -1635,6 +1635,22 @@ export interface PaymentsDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface PaymentsTables {
+  payments_intents: PaymentsDb["intents"];
+  payments_allocations: PaymentsDb["allocations"];
+  payments_captures: PaymentsDb["captures"];
+  payments_provider_calls: PaymentsDb["provider_calls"];
+  payments_refunds: PaymentsDb["refunds"];
+  payments_refund_items: PaymentsDb["refund_items"];
+  payments_refund_log: PaymentsDb["refund_log"];
+  payments_disputes: PaymentsDb["disputes"];
+  payments_dispute_log: PaymentsDb["dispute_log"];
+  payments_saved_methods: PaymentsDb["saved_methods"];
+  payments_webhook_events: PaymentsDb["webhook_events"];
+  payments_ref_sequences: PaymentsDb["ref_sequences"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

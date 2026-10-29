@@ -173,7 +173,7 @@ export class Table<R extends object> {
     this.#nullable = new Set(def.nullable);
     // a JSON column that cannot be null holds `null` as a JSON document, so a filter asking for null asks of
     // the document and not of SQL NULL — which is the only reading that agrees with MongoDB (#param)
-    this.#whereOptions = { jsonNotNull: new Set(def.json.filter((c) => !this.#nullable.has(c))) };
+    this.#whereOptions = { jsonNotNull: new Set(def.json.filter((c) => !this.#nullable.has(c))), json: this.#json };
     this.#booleans = new Set(def.booleans);
   }
 
@@ -200,16 +200,19 @@ export class Table<R extends object> {
 
   /* ---------------------------------------------------------------- conversion */
 
+  /** One stored value as the row type reads it: the types mysql2 cannot know from the value alone */
+  #value(column: string, v: unknown): unknown {
+    if (v === null || v === undefined) return null;
+    if (this.#binary.has(column)) return v instanceof Uint8Array ? new Uint8Array(v) : v;
+    if (this.#booleans.has(column)) return typeof v === 'boolean' ? v : Boolean(Number(v));
+    if (this.#decimal.has(column)) return String(v);
+    return v;
+  }
+
   /** A stored row as the row type: the types mysql2 cannot know from the value alone, and nulls for what is missing */
   fromRow(raw: Record<string, unknown>): R {
     const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(raw)) {
-      if (v === null || v === undefined) out[k] = null;
-      else if (this.#binary.has(k)) out[k] = v instanceof Uint8Array ? new Uint8Array(v) : v;
-      else if (this.#booleans.has(k)) out[k] = typeof v === 'boolean' ? v : Boolean(Number(v));
-      else if (this.#decimal.has(k)) out[k] = String(v);
-      else out[k] = v;
-    }
+    for (const [k, v] of Object.entries(raw)) out[k] = this.#value(k, v);
     for (const c of this.def.nullable) if (out[c] === undefined) out[c] = null;
     return out as R;
   }
@@ -316,6 +319,52 @@ export class Table<R extends object> {
     const w = this.#where(where, o);
     const rows = await this.#rows(`SELECT DISTINCT ${q(column)} AS v FROM ${q(this.name)} ${w.sql}`, w.params);
     return rows.map((r) => (this.#decimal.has(column) && r.v !== null ? String(r.v) : r.v)) as T[];
+  }
+
+  /** Columns this table does not have, refused by name rather than quoted into a statement */
+  #known(what: string, columns: readonly string[]): void {
+    if (!columns.length) throw new Error(`${this.name}: ${what} needs a column`);
+    const unknown = columns.filter((c) => !this.def.columns.includes(c));
+    if (unknown.length) throw new Error(`${this.name} has no column ${unknown.join(', ')}`);
+  }
+
+  /**
+   * `COUNT(*)` grouped by one or more columns — "how many per key", which is what about half of the census's
+   * `$group` sites ask (docs/10 §13.1) and the one aggregate that reads the same in both databases. It is in
+   * the neutral vocabulary for that reason; anything with a join, a window or a second measure is not, and
+   * belongs to a module's own per-store queries.
+   *
+   * Rows with a null in a group column are one group, as they are in MongoDB. No rows means no rows: a count
+   * of nothing has no key to report it under.
+   */
+  async countBy<K extends keyof R & string>(columns: readonly K[], where: WhereWithOr<R> = {}, o: ReadOptions = {}): Promise<(Pick<R, K> & { n: number })[]> {
+    this.#known('countBy', columns);
+    const w = this.#where(where, o);
+    const list = columns.map(q).join(', ');
+    const rows = await this.#rows(`SELECT ${list}, COUNT(*) AS n FROM ${q(this.name)} ${w.sql} GROUP BY ${list}`, w.params);
+    return rows.map((r) => {
+      const out: Record<string, unknown> = { n: Number(r.n) };
+      for (const c of columns) out[c] = this.#value(c, r[c]);
+      return out as Pick<R, K> & { n: number };
+    });
+  }
+
+  /**
+   * The total of one numeric column over the matching rows, 0 when none match.
+   *
+   * A DECIMAL column is refused: `SUM` of one answers a DECIMAL, which this would have to round into a number
+   * to keep one return type, and money that has been rounded on its way through a total is the one thing a
+   * ledger may not do. Those sums are grouped and compared to stored balances anyway, so they belong to a
+   * module's own per-store queries where the exact string survives.
+   */
+  async sum(column: keyof R & string, where: WhereWithOr<R> = {}, o: ReadOptions = {}): Promise<number> {
+    this.#known('sum', [column]);
+    if (this.#decimal.has(column)) throw new Error(`${this.name}.${column} is DECIMAL: sum() would round it; total it in the module's own query where the exact value survives`);
+    const w = this.#where(where, o);
+    const rows = await this.#rows(`SELECT SUM(${q(column)}) AS s FROM ${q(this.name)} ${w.sql}`, w.params);
+    // an aggregate with no GROUP BY always answers a row, so "no rows matched" arrives here as SUM() = NULL,
+    // and `Number(null)` is 0. MongoDB's `$group` answers nothing at all, which is where its `?? 0` earns its keep
+    return Number(rows[0]?.s ?? 0);
   }
 
   /**

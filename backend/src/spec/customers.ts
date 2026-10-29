@@ -1186,6 +1186,21 @@ export interface CustomersDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface CustomersTables {
+  customers_customers: CustomersDb["customers"];
+  customers_addresses: CustomersDb["addresses"];
+  customers_marketing_preferences: CustomersDb["marketing_preferences"];
+  customers_consent_log: CustomersDb["consent_log"];
+  customers_recently_viewed: CustomersDb["recently_viewed"];
+  customers_account_restrictions: CustomersDb["account_restrictions"];
+  customers_account_actions: CustomersDb["account_actions"];
+  customers_guest_buyers: CustomersDb["guest_buyers"];
+  customers_customer_notes: CustomersDb["customer_notes"];
+  customers_data_requests: CustomersDb["data_requests"];
+  customers_guest_lookup_attempts: CustomersDb["guest_lookup_attempts"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

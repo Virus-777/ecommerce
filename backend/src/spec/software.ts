@@ -1482,6 +1482,17 @@ export interface SoftwareDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface SoftwareTables {
+  software_categories: SoftwareDb["categories"];
+  software_apps: SoftwareDb["apps"];
+  software_packs: SoftwareDb["packs"];
+  software_rails: SoftwareDb["rails"];
+  software_purchases: SoftwareDb["purchases"];
+  software_entitlements: SoftwareDb["entitlements"];
+  software_reviews: SoftwareDb["reviews"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

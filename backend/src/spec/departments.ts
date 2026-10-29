@@ -2246,6 +2246,33 @@ export interface DepartmentsDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface DepartmentsTables {
+  departments_phone_picks: DepartmentsDb["phone_picks"];
+  departments_phones: DepartmentsDb["phones"];
+  departments_blog_topics: DepartmentsDb["blog_topics"];
+  departments_blog_authors: DepartmentsDb["blog_authors"];
+  departments_blog_posts: DepartmentsDb["blog_posts"];
+  departments_blog_reactions: DepartmentsDb["blog_reactions"];
+  departments_blog_replies: DepartmentsDb["blog_replies"];
+  departments_blog_reports: DepartmentsDb["blog_reports"];
+  departments_industries: DepartmentsDb["industries"];
+  departments_companies: DepartmentsDb["companies"];
+  departments_inquiries: DepartmentsDb["inquiries"];
+  departments_games: DepartmentsDb["games"];
+  departments_rankings: DepartmentsDb["rankings"];
+  departments_blog_saves: DepartmentsDb["blog_saves"];
+  departments_blog_follows: DepartmentsDb["blog_follows"];
+  departments_blog_reply_likes: DepartmentsDb["blog_reply_likes"];
+  departments_reviews: DepartmentsDb["reviews"];
+  departments_players: DepartmentsDb["players"];
+  departments_game_keys: DepartmentsDb["game_keys"];
+  departments_scores: DepartmentsDb["scores"];
+  departments_prize_weeks: DepartmentsDb["prize_weeks"];
+  departments_prize_awards: DepartmentsDb["prize_awards"];
+  departments_farm_setup: DepartmentsDb["farm_setup"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({

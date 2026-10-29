@@ -176,6 +176,10 @@ const note = (id: string, o: Partial<Note> = {}): Note => ({
   ...o,
 });
 
+/** Group rows in a stable order: neither store promises one, and the assertion needs to be readable */
+const sortRows = <T extends object>(rows: readonly T[], column: string): T[] =>
+  [...rows].sort((a, b) => String((a as Record<string, unknown>)[column]).localeCompare(String((b as Record<string, unknown>)[column])));
+
 describe.each(['mongo', 'mysql'])('%s', (kind) => {
   let store: Store;
   const notes = () => store.table<Note>('notes');
@@ -286,6 +290,73 @@ describe.each(['mongo', 'mysql'])('%s', (kind) => {
     await expect(notes().find({ 'items[].key': null } as never)).rejects.toThrow(/is a \[\] path/);
   });
 
+  it('takes a dotted path only into a JSON column, on the store that has to know which', async () => {
+    await notes().insert(note('n1', { meta: { passed: true } }));
+    // MongoDB reads a dotted path on any field and cannot tell a typo from a document; MySQL is given the
+    // table's JSON columns, so it refuses one rather than asking for a column nobody has
+    const read = notes().find({ 'owner.passed': true } as never);
+    if (kind === 'mysql') await expect(read).rejects.toThrow(/owner is not a JSON column/);
+    else expect(await read).toEqual([]);
+  });
+
+  it('matches the text a search box was given, ignoring case', async () => {
+    await notes().insertMany([
+      note('n1', { title: 'Spring Sale' }),
+      note('n2', { title: 'spring cleaning' }),
+      note('n3', { title: 'Autumn' }),
+      note('n4'),
+      note('n5', { title: '50% off' }),
+    ]);
+    const ids = async (where: Record<string, unknown>) => (await notes().find(where as never, { sort: { id: 1 } })).map((r) => r.id);
+
+    expect(await ids({ title: { op: 'contains', value: 'SPRING' } })).toEqual(['n1', 'n2']);
+    // spaces around what was typed never mean anything
+    expect(await ids({ title: { op: 'contains', value: '  sale ' } })).toEqual(['n1']);
+    expect(await ids({ title: { op: 'starts with', value: 'spring' } })).toEqual(['n1', 'n2']);
+    expect(await ids({ title: { op: 'starts with', value: 'ale' } })).toEqual([]);
+    expect(await ids({ title: { op: 'equals ignoring case', value: 'autumn' } })).toEqual(['n3']);
+    expect(await ids({ title: { op: 'equals ignoring case', value: 'autum' } })).toEqual([]);
+    // a typed % is a per-cent sign and a typed . is a full stop: the term is matched literally
+    expect(await ids({ title: { op: 'contains', value: '%' } })).toEqual(['n5']);
+    expect(await ids({ title: { op: 'contains', value: '5_%' } })).toEqual([]);
+    // and a title nobody set matches none of them
+    expect(await ids({ title: { op: 'contains', value: 'a' } })).toEqual(['n1', 'n2', 'n3']);
+    expect(await ids({ title: { op: 'contains', value: null } })).toEqual([]);
+  });
+
+  it('asks a path into a JSON object, with the null rules of the operator used', async () => {
+    // the shape media's asset list filters on: a result document with a flag inside it
+    await notes().insertMany([
+      note('n1', { meta: { passed: true, by: 'ann', score: 9 } }),
+      note('n2', { meta: { passed: false, by: 'bo', score: 3 } }),
+      note('n3', { meta: { by: 'cy' } }),
+      note('n4', { meta: { passed: null, by: 'cy' } }),
+      note('n5', { meta: null }),
+      note('n6', { meta: { by: null } }),
+    ]);
+    const ids = async (where: Record<string, unknown>) => (await notes().find(where as never, { sort: { id: 1 } })).map((r) => r.id);
+
+    // a value, and a boolean stays a boolean: `->>` would have made it the string 'true'
+    expect(await ids({ 'meta.passed': true })).toEqual(['n1']);
+    expect(await ids({ 'meta.passed': false })).toEqual(['n2']);
+    expect(await ids({ 'meta.by': ['ann', 'cy'] })).toEqual(['n1', 'n3', 'n4']);
+    // a number compares as a number
+    expect(await ids({ 'meta.score': { op: '>=', value: 5 } })).toEqual(['n1']);
+    expect(await ids({ 'meta.score': { op: 'between', value: [3, 9] } })).toEqual(['n1', 'n2']);
+    // null is "not set, or set to null" — the two MongoDB cannot tell apart, and neither can a filter here
+    expect(await ids({ 'meta.passed': null })).toEqual(['n3', 'n4', 'n5', 'n6']);
+    // `<>` keeps SQL's reading: a field that is missing or null is not "different from true"
+    expect(await ids({ 'meta.passed': { op: '<>', value: true } })).toEqual(['n2']);
+    // `is not` is "is distinct from", which is what MongoDB's own $ne means: those rows do match
+    expect(await ids({ 'meta.passed': { op: 'is not', value: true } })).toEqual(['n2', 'n3', 'n4', 'n5', 'n6']);
+    expect(await ids({ 'meta.passed': { op: 'is not', value: null } })).toEqual(['n1', 'n2']);
+    // `not in` skips a field that is null as well as one that is missing, as it skips a null column
+    expect(await ids({ 'meta.by': { op: 'not in', value: ['ann', 'bo'] } })).toEqual(['n3', 'n4']);
+    expect(await ids({ 'meta.by': { op: 'like', value: 'c%' } })).toEqual(['n3', 'n4']);
+    // and it ands with the columns beside it
+    expect(await ids({ owner: 'ann', 'meta.passed': true })).toEqual(['n1']);
+  });
+
   it('keeps null in a JSON column that cannot be null, and finds it again', async () => {
     // A setting declared with no default is null, and null is a JSON document: the column is `jsonb` with no
     // `?`, so there is nowhere for SQL NULL to go. MongoDB has one null for both and never had to tell them
@@ -326,6 +397,46 @@ describe.each(['mongo', 'mysql'])('%s', (kind) => {
     expect(await notes().count()).toBe(3);
     expect(await notes().exists({ owner: 'cy' })).toBe(false);
     expect((await notes().distinct<string>('owner')).sort()).toEqual(['ann', 'bo']);
+  });
+
+  it('counts rows per key, by one column and by two', async () => {
+    await notes().insertMany([
+      note('n1', { owner: 'ann', status: 'live' }),
+      note('n2', { owner: 'bo', status: 'live' }),
+      note('n3', { owner: 'bo', status: 'draft' }),
+      note('n4', { owner: 'bo', status: 'draft' }),
+    ]);
+    expect(sortRows(await notes().countBy(['owner']), 'owner')).toEqual([
+      { owner: 'ann', n: 1 },
+      { owner: 'bo', n: 3 },
+    ]);
+    // a filter first, then two columns as the key
+    expect(sortRows(await notes().countBy(['owner', 'status'], { owner: 'bo' }), 'status')).toEqual([
+      { owner: 'bo', status: 'draft', n: 2 },
+      { owner: 'bo', status: 'live', n: 1 },
+    ]);
+    // nothing matching is no rows: a count of nothing has no key to report it under
+    expect(await notes().countBy(['owner'], { owner: 'cy' })).toEqual([]);
+  });
+
+  it('counts the rows with no value as one group, and refuses a column the table has not got', async () => {
+    await notes().insertMany([note('n1', { title: 'One' }), note('n2'), note('n3')]);
+    // null is a key like any other, which is SQL's GROUP BY and MongoDB's $group over a missing field
+    expect(sortRows(await notes().countBy(['title']), 'title')).toEqual([
+      { title: null, n: 2 },
+      { title: 'One', n: 1 },
+    ]);
+    await expect(notes().countBy(['nope' as never])).rejects.toThrow(/has no column nope/);
+    await expect(notes().countBy([])).rejects.toThrow(/countBy needs a column/);
+  });
+
+  it('totals an integer column, and refuses a money one', async () => {
+    await notes().insertMany([note('n1', { version: 2 }), note('n2', { version: 40, owner: 'bo' })]);
+    expect(await notes().sum('version')).toBe(42);
+    expect(await notes().sum('version', { owner: 'bo' })).toBe(40);
+    // no rows is 0 — not undefined, and not a row with nothing in it
+    expect(await notes().sum('version', { owner: 'cy' })).toBe(0);
+    await expect(notes().sum('price')).rejects.toThrow(/sum\(\) would round it/);
   });
 
   /* ---------------------------------------------------------------- patches */

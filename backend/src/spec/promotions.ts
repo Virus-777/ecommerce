@@ -2353,6 +2353,26 @@ export interface PromotionsDb {
   };
 }
 
+/** This module's tables under their MySQL names, for the typed Kysely handle `ctx.mysql.db` (docs/10 §10.5e). A view is declared by the module that reads it. */
+export interface PromotionsTables {
+  promotions_campaigns: PromotionsDb["campaigns"];
+  promotions_campaign_targets: PromotionsDb["campaign_targets"];
+  promotions_eligible_offers: PromotionsDb["eligible_offers"];
+  promotions_funding_reviews: PromotionsDb["funding_reviews"];
+  promotions_participations: PromotionsDb["participations"];
+  promotions_participation_offers: PromotionsDb["participation_offers"];
+  promotions_flash_items: PromotionsDb["flash_items"];
+  promotions_coupon_codes: PromotionsDb["coupon_codes"];
+  promotions_coupon_clips: PromotionsDb["coupon_clips"];
+  promotions_evaluations: PromotionsDb["evaluations"];
+  promotions_redemptions: PromotionsDb["redemptions"];
+  promotions_redemption_lines: PromotionsDb["redemption_lines"];
+  promotions_usage_counters: PromotionsDb["usage_counters"];
+  promotions_event_reminders: PromotionsDb["event_reminders"];
+  promotions_campaign_log: PromotionsDb["campaign_log"];
+  promotions_campaign_results_daily: PromotionsDb["campaign_results_daily"];
+}
+
 /* ------------------------------------------------------------------ endpoints */
 
 export const endpoints = defineEndpoints({
