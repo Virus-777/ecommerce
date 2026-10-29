@@ -11,7 +11,7 @@ import type { InventoryQueries } from './queries.js';
  * name it. It is one read here (`expectations`, undated deliveries last) and two in modules not yet converted
  * (support, wallet), so it is reported as a kernel ask rather than worked around per store.
  */
-type ReadOptions = StoreFindOptions & { nullsLast?: readonly string[] };
+type ReadOptions = StoreFindOptions;
 
 /**
  * json columns. The service writes some of them as JSON.stringify(…), so a string written to one of these is

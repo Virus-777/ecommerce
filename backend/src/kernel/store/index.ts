@@ -71,6 +71,16 @@ export interface StoreFindOptions extends StoreReadOptions {
    * it. One name, and it is SQL's, because that is the reading the rest of this vocabulary takes.
    */
   offset?: number;
+  /**
+   * Sort columns whose nulls go **last** rather than first, which is each store's own reading reversed for
+   * exactly these columns: "soonest expected date, and the ones with no date after them". Every name here
+   * must also be in `sort`, and both stores refuse it by name otherwise.
+   *
+   * Declared here because both tables already implement it and inventory's repository passes it — through a
+   * local widening of this interface, which is how `skip` came to be silently ignored. One option that both
+   * stores answer the same way belongs in the vocabulary rather than in a module's type.
+   */
+  nullsLast?: readonly string[];
   forUpdate?: boolean;
 }
 

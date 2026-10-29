@@ -440,6 +440,18 @@ describe.each(['mongo', 'mysql'])('%s', (kind) => {
     expect(await ids({ offset: 0 })).toEqual(['n1', 'n2', 'n3', 'n4']);
   });
 
+  it('sorts the rows with no value last, in either direction', async () => {
+    // "soonest expected date, and the ones with no date after them": a purchase-order line with no date is
+    // not the most urgent, which is what both stores read a null as by default
+    await notes().insertMany([note('n1', { to_at: MAR }), note('n2'), note('n3', { to_at: FEB }), note('n4')]);
+    const ids = async (dir: 1 | -1) => (await notes().find({}, { sort: { to_at: dir, id: 1 }, nullsLast: ['to_at'] })).map((r) => r.id);
+
+    expect(await ids(1)).toEqual(['n3', 'n1', 'n2', 'n4']);
+    expect(await ids(-1)).toEqual(['n1', 'n3', 'n2', 'n4']);
+    // naming a column the sort does not is refused by both, rather than quietly doing nothing
+    await expect(notes().find({}, { sort: { id: 1 }, nullsLast: ['to_at'] })).rejects.toThrow(/nullsLast names to_at/);
+  });
+
   it('counts rows per key, by one column and by two', async () => {
     await notes().insertMany([
       note('n1', { owner: 'ann', status: 'live' }),
