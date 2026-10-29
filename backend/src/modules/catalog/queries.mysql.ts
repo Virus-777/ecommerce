@@ -7,14 +7,12 @@
  * (`EXISTS` on `catalog_listing_stats`, answered by its primary key). Only the two reads that group or project
  * across a join are Kysely, because `Table` reads whole rows of one table.
  */
-import type { PageRequest } from '../../kernel/lib/pagination.js';
 import type { ModuleStore } from '../../kernel/mysql/module-store.js';
 import { raw, whereSql, type Sql } from '../../kernel/mysql/where.js';
 import type { WhereWithOr } from '../../kernel/store/index.js';
-import type * as common from '../../spec/common.js';
 import type { CatalogTables } from '../../spec/catalog.js';
 import type { BrandRow, ProductRow } from './ports.js';
-import { modelPattern, type CatalogQueries, type ContentState, type LiveCountRow } from './queries.js';
+import { modelPattern, type CatalogQueries, type LiveCountRow } from './queries.js';
 
 /** Products customers can buy: approved, active, not merged */
 const LIVE: WhereWithOr<ProductRow> = { review_state: 'approved', publication: 'active', merged_into_id: null };
@@ -27,10 +25,6 @@ const LIVE: WhereWithOr<ProductRow> = { review_state: 'approved', publication: '
  * the row. A product with a full content score and no flagged images belongs in "nothing missing", which is
  * what MongoDB's `$nor` over `recrop_media_ids.0: { $exists: true }` answers.
  */
-const MISSING = '(`content_score` < 100 OR COALESCE(JSON_LENGTH(`recrop_media_ids`), 0) > 0)';
-
-/** The missing-content condition for `ReadOptions.and`, or no condition at all */
-const contentAnd = (missing: ContentState): { and?: Sql } => (missing === undefined ? {} : { and: raw(missing ? MISSING : `NOT ${MISSING}`) });
 
 /** At least one live offer: the `$lookup` + `$match` of the MongoDB side, as the EXISTS of §13.1 */
 const HAS_LIVE_OFFER: Sql = raw('EXISTS (SELECT 1 FROM `catalog_listing_stats` l WHERE l.`product_id` = `catalog_products`.`id` AND l.`live_offer_count` > 0)');
@@ -50,18 +44,6 @@ export function mysqlCatalogQueries(store: ModuleStore<CatalogTables>): CatalogQ
   const brands = store.table<BrandRow>('brands');
 
   return {
-    pageProducts(where, missing: ContentState, req: PageRequest): Promise<common.Page<ProductRow>> {
-      return products.page(where, req, { column: 'updated_at', direction: 'desc' }, contentAnd(missing));
-    },
-
-    productsAfterId(where, missing: ContentState, afterId: string | null, limit: number): Promise<ProductRow[]> {
-      return products.find(afterId ? { and: [where, { id: { op: '>', value: afterId } }] } : where, { ...contentAnd(missing), sort: { id: 1 }, limit });
-    },
-
-    countProducts(where, missing: ContentState): Promise<number> {
-      return products.count(where, contentAnd(missing));
-    },
-
     async liveBrandCountsIn(categoryIds): Promise<Map<string, number>> {
       if (!categoryIds.length) return new Map<string, number>();
       const rows = await products.countBy(['brand_id'], { ...LIVE, category_id: [...new Set(categoryIds)], brand_id: { op: 'is not', value: null } }, { and: HAS_LIVE_OFFER });

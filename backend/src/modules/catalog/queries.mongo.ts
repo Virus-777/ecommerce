@@ -4,14 +4,10 @@
  * order, the same patterns — and this file is deleted with MongoDB at the cutover (docs/10 §23 Y4).
  */
 import { escapeRegExp } from '../../kernel/lib/text.js';
-import type { PageRequest } from '../../kernel/lib/pagination.js';
-import { whereFilter } from '../../kernel/mongo/filters.js';
 import type { ModuleStore } from '../../kernel/mongo/index.js';
 import type { Filter } from '../../kernel/mongo/table.js';
-import type { WhereWithOr } from '../../kernel/store/index.js';
-import type * as common from '../../spec/common.js';
 import type { BrandRow, ProductRow, SubmissionRow } from './ports.js';
-import { modelPattern, type CatalogQueries, type ContentState, type LiveCountRow } from './queries.js';
+import { modelPattern, type CatalogQueries, type LiveCountRow } from './queries.js';
 
 /** catalog.listing_stats, keyed by product id (its `_id`), looked up from a product's own `_id` */
 const LISTING = 'catalog.listing_stats';
@@ -22,34 +18,13 @@ const lookupListing = (as: string, fields: Filter = { live_offer_count: 1, offer
 /** Products customers can buy: approved, active, not merged */
 const LIVE: Filter = { review_state: 'approved', publication: 'active', merged_into_id: null };
 
-/** The Admin catalog's missing-content tab: a content score under 100, or images to re-crop */
-const MISSING_CONTENT: Filter = { $or: [{ content_score: { $lt: 100 } }, { 'recrop_media_ids.0': { $exists: true } }] };
-
-/** `filter`, and the missing-content condition when one is asked for ($nor for "nothing missing") */
-const withContent = (filter: Filter, missing: ContentState): Filter =>
-  missing === undefined ? filter : { $and: [filter, missing ? MISSING_CONTENT : { $nor: [MISSING_CONTENT] }] };
 
 export function mongoCatalogQueries(store: ModuleStore): CatalogQueries {
   const products = store.table<ProductRow>('products');
   const submissions = store.table<SubmissionRow>('submissions');
   const brands = store.table<BrandRow>('brands');
-  /** A neutral filter as a filter on row fields; `find`/`page` translate `id` to `_id` themselves */
-  const filterOf = (where: WhereWithOr<ProductRow>): Filter => whereFilter(where as Readonly<Record<string, unknown>>);
 
   return {
-    pageProducts(where, missing: ContentState, req: PageRequest): Promise<common.Page<ProductRow>> {
-      return products.page(withContent(filterOf(where), missing), req, { column: 'updated_at', direction: 'desc' });
-    },
-
-    productsAfterId(where, missing: ContentState, afterId: string | null, limit: number): Promise<ProductRow[]> {
-      const f = withContent(filterOf(where), missing);
-      return products.find(afterId ? { $and: [f, { id: { $gt: afterId } }] } : f, { sort: { id: 1 }, limit });
-    },
-
-    countProducts(where, missing: ContentState): Promise<number> {
-      return products.count(withContent(filterOf(where), missing));
-    },
-
     async liveBrandCountsIn(categoryIds): Promise<Map<string, number>> {
       if (!categoryIds.length) return new Map<string, number>();
       const rows = await products.aggregate<{ _id: string; n: number }>([

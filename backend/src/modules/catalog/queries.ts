@@ -23,9 +23,6 @@
  *
  * Every read here is outside a transaction, so none of them takes one.
  */
-import type { PageRequest } from '../../kernel/lib/pagination.js';
-import type { WhereWithOr } from '../../kernel/store/index.js';
-import type * as common from '../../spec/common.js';
 import type { BrandRow, ProductRow } from './ports.js';
 
 /**
@@ -59,14 +56,8 @@ export function modelPattern(normalised: string, whole: boolean): string {
 }
 
 export interface CatalogQueries {
-  /** A page of products matching `where` and the missing-content state, newest update first */
-  pageProducts(where: WhereWithOr<ProductRow>, missing: ContentState, req: PageRequest): Promise<common.Page<ProductRow>>;
 
   /** The next `limit` products after `afterId` in primary-key order (index rebuilds and exports) */
-  productsAfterId(where: WhereWithOr<ProductRow>, missing: ContentState, afterId: string | null, limit: number): Promise<ProductRow[]>;
-
-  /** How many products match `where` and the missing-content state */
-  countProducts(where: WhereWithOr<ProductRow>, missing: ContentState): Promise<number>;
 
   /** Live products with at least one live offer, counted by brand, within the given categories */
   liveBrandCountsIn(categoryIds: readonly string[]): Promise<Map<string, number>>;

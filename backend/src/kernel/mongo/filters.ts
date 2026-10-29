@@ -50,7 +50,19 @@ export type Cond<V> =
   | V
   | readonly V[]
   | null
-  | { op: '<' | '<=' | '>' | '>=' | '<>' | 'is not' | 'like' | 'not in' | 'between' | 'contains' | 'starts with' | 'equals ignoring case'; value: V | readonly V[] | null };
+  | { op: '<' | '<=' | '>' | '>=' | '<>' | 'is not' | 'like' | 'not in' | 'between' | 'contains' | 'starts with' | 'equals ignoring case'; value: V | readonly V[] | null }
+  /**
+   * Whether a JSON **array** column holds anything at all. It takes no value, which is why it is its own
+   * shape: `{ media_ids: { op: 'is not empty' } }`.
+   *
+   * Both stores say it, and neither says it the obvious way. MongoDB asks whether the array has a first
+   * element (`col.0`), because a column that is missing, null or `[]` all count as empty and one condition
+   * covers the three. MySQL asks `COALESCE(JSON_LENGTH(col), 0)`, and the `COALESCE` is not decoration:
+   * `JSON_LENGTH(NULL)` is NULL, so `NOT (… OR JSON_LENGTH(col) > 0)` is NULL for a null column and the row
+   * vanishes from the *negative* answer — which is how catalog's "nothing missing" tab silently lost every
+   * product whose column had never been written (§10.5g).
+   */
+  | { op: 'is empty' | 'is not empty' };
 
 /**
  * A path into a JSON array: `items[].key` is "some element of items has key = …", and `role_keys[]` is "some
@@ -105,7 +117,7 @@ const COMPARE: Record<string, string> = { '<': '$lt', '<=': '$lte', '>': '$gt', 
 /** A condition no document meets (SQL: a comparison with null is never true) */
 const NOTHING = { $in: [] };
 
-const isOperator = (v: unknown): v is { op: string; value: unknown } =>
+const isOperator = (v: unknown): v is { op: string; value?: unknown } =>
   typeof v === 'object' && v !== null && !Array.isArray(v) && !(v instanceof Date) && 'op' in v;
 
 /**
@@ -203,6 +215,11 @@ export const isElementFields = (cond: unknown): cond is Readonly<Record<string, 
 function operatorFilter(column: string, op: string, value: unknown): unknown {
   const list = Array.isArray(value) ? (value as unknown[]) : undefined;
   switch (op) {
+    // "the array has a first element", which is also what a missing or null column fails
+    case 'is not empty':
+      return { $exists: true, $ne: null, $not: { $size: 0 } };
+    case 'is empty':
+      return { $in: [null, []] };
     case 'is not':
       return { $ne: value };
     case '<>':

@@ -26,7 +26,7 @@ import type {
   SubmissionRow,
   VariantRow,
 } from './ports.js';
-import type { CatalogQueries, ContentState } from './queries.js';
+import type { CatalogQueries } from './queries.js';
 
 /** A variant write refused because another variant already has the GTIN (unique index variants.gtin) */
 export class GtinTakenError extends Error {
@@ -152,12 +152,11 @@ export class CatalogRepository {
   }
 
   /**
-   * A product filter in the neutral vocabulary, and separately whether the missing-content condition applies.
-   * That one asks whether a JSON array is non-empty — `recrop_media_ids.0: { $exists: true }` on MongoDB,
-   * `JSON_LENGTH(...) > 0` on MySQL — which `Where` has no shape for, so it travels to the queries port beside
-   * the filter rather than into it (queries.ts).
+   * A product filter in the neutral vocabulary, the missing-content condition included. That one asks whether
+   * a JSON array holds anything, which the vocabulary says since reviews became its second caller
+   * (`{ op: 'is not empty' }`, §10.5h); it was a queries-port read in the first version of this conversion.
    */
-  async #productFilter(f: ProductFilter): Promise<{ where: WhereWithOr<ProductRow>; missing: ContentState }> {
+  async #productFilter(f: ProductFilter): Promise<WhereWithOr<ProductRow>> {
     const conds: WhereWithOr<ProductRow>[] = [];
     if (!f.includeMerged) conds.push({ merged_into_id: null });
     if (f.q?.trim()) {
@@ -186,8 +185,13 @@ export class CatalogRepository {
       // `not in` of an empty list leaves the column unfiltered on both stores, which is "none of none"
       conds.push({ id: f.duplicateSuspected ? ids : { op: 'not in', value: ids } });
     }
-    // missing content: a content score under 100, or images to re-crop after a product image ratio change
-    return { where: { and: conds }, missing: f.missingContent };
+    // Missing content: a content score under 100, or images to re-crop after a product image ratio change.
+    // "Nothing missing" is the complement of that pair, which `$nor` said in one word: De Morgan's law, and
+    // sound because `content_score` is NOT NULL (so `>= 100` is exactly "not under 100") while the array
+    // condition folds its own null in — `is empty` is true for a column nobody ever wrote.
+    if (f.missingContent === true) conds.push({ or: [{ content_score: { op: '<', value: 100 } }, { recrop_media_ids: { op: 'is not empty' } }] });
+    if (f.missingContent === false) conds.push({ content_score: { op: '>=', value: 100 } }, { recrop_media_ids: { op: 'is empty' } });
+    return { and: conds };
   }
 
   #brandFilter(f: BrandFilter): WhereWithOr<BrandRow> {
@@ -380,21 +384,24 @@ export class CatalogRepository {
   }
 
   async listProducts(filter: ProductFilter, page: PageRequest): Promise<common.Page<ProductRow>> {
-    const { where, missing } = await this.#productFilter(filter);
-    const p = await this.queries.pageProducts(where, missing, page);
+    const p = await this.#t.products.page(await this.#productFilter(filter), page, { column: 'updated_at', direction: 'desc' });
     return { ...p, items: p.items.map(productOut) };
   }
 
   /** Keyset walk over product ids (index rebuilds) */
   async productIdsAfter(filter: ProductFilter, afterId: string | null, limit: number): Promise<string[]> {
-    const { where, missing } = await this.#productFilter(filter);
-    return (await this.queries.productsAfterId(where, missing, afterId, limit)).map((r) => r.id);
+    return (await this.#productsAfterId(filter, afterId, limit)).map((r) => r.id);
   }
 
   /** Keyset batches by id for exports */
   async productBatch(filter: ProductFilter, afterId: string | null, limit: number): Promise<ProductRow[]> {
-    const { where, missing } = await this.#productFilter(filter);
-    return (await this.queries.productsAfterId(where, missing, afterId, limit)).map(productOut);
+    return (await this.#productsAfterId(filter, afterId, limit)).map(productOut);
+  }
+
+  /** One page of a keyset walk by id, which both callers above read in batches */
+  async #productsAfterId(filter: ProductFilter, afterId: string | null, limit: number): Promise<ProductRow[]> {
+    const where = await this.#productFilter(filter);
+    return this.#t.products.find(afterId ? { and: [where, { id: { op: '>', value: afterId } }] } : where, { sort: { id: 1 }, limit });
   }
 
   async productStats(): Promise<ProductStatsCounts> {
@@ -406,7 +413,7 @@ export class CatalogRepository {
       products.count({ ...notMerged, publication: 'active', review_state: 'approved' }),
       products.count({ ...notMerged, publication: 'hidden' }),
       products.count({ ...notMerged, publication: 'suspended' }),
-      this.queries.countProducts(notMerged, true),
+      products.count({ and: [notMerged, { or: [{ content_score: { op: '<', value: 100 } }, { recrop_media_ids: { op: 'is not empty' } }] }] }),
       this.#duplicateSuspectedIds().then((ids) => (ids.length ? products.count({ ...notMerged, id: oneOf(ids) }) : 0)),
       this.#t.submissions.count({ state: 'open', paused_at: null }),
       // `<>` and not `is not`: it was `$nin: ['removed', null]`, which is what `<>` means. `offer_index.status`

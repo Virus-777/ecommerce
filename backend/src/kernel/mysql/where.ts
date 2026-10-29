@@ -67,6 +67,15 @@ function operatorSql(column: string, op: string, value: unknown, o: WhereOptions
   const list = Array.isArray(value) ? (value as unknown[]) : undefined;
   const jsonNull = o.jsonNotNull?.has(column) ?? false;
   switch (op) {
+    // Whether a JSON array column holds anything. The `COALESCE` is on the **negative** form only, and there
+    // it is load-bearing: `JSON_LENGTH(NULL)` is NULL, so `JSON_LENGTH(col) = 0` is NULL for a column nobody
+    // ever wrote and the row falls out of an answer it belongs in — which is how catalog's "nothing missing"
+    // tab lost every product whose column was never set (§10.5g). On the positive form it would be dead
+    // weight: a NULL comparison excludes the row either way, and breaking it changed no answer.
+    case 'is not empty':
+      return { sql: `JSON_LENGTH(${col}) > 0`, params: [] };
+    case 'is empty':
+      return { sql: `COALESCE(JSON_LENGTH(${col}), 0) = 0`, params: [] };
     // "is distinct from": `is not` null is every non-null value, and `is not` x also matches nulls
     case 'is not':
       if (value === null) return jsonNull ? { sql: `NOT (${col} <=> ${JSON_NULL})`, params: [] } : { sql: `${col} IS NOT NULL`, params: [] };

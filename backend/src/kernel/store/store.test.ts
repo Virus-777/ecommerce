@@ -296,6 +296,24 @@ describe.each(['mongo', 'mysql'])('%s', (kind) => {
     await expect(notes().find({ 'items[].key': null } as never)).rejects.toThrow(/is a \[\] path/);
   });
 
+  it('asks whether a JSON array column holds anything, and answers both ways round', async () => {
+    // catalog's missing-content tab asks this of `recrop_media_ids` and reviews asks it of `media_ids`. The
+    // negative form is the one that bites: a column that was never written is SQL NULL, and
+    // `JSON_LENGTH(NULL)` is NULL, so a row can fall out of *both* answers unless the null is folded in.
+    await notes().insertMany([
+      note('n1', { items: [{ key: 'a', n: 1 }] as never }),
+      note('n2', { items: [] }),
+      note('n3', { items: null }),
+    ]);
+    const ids = async (where: Record<string, unknown>) => (await notes().find(where as never, { sort: { id: 1 } })).map((r) => r.id);
+
+    expect(await ids({ items: { op: 'is not empty' } })).toEqual(['n1']);
+    // the empty array and the column nobody wrote are both empty, which is what "no images to re-crop" means
+    expect(await ids({ items: { op: 'is empty' } })).toEqual(['n2', 'n3']);
+    // and every row is in exactly one of the two answers: that is the property the COALESCE protects
+    expect((await ids({ items: { op: 'is not empty' } })).length + (await ids({ items: { op: 'is empty' } })).length).toBe(3);
+  });
+
   it('asks whether one element of a JSON array holds several fields', async () => {
     // the shape workqueues' related_subjects has: an array of {type, id} pairs, where both have to be true
     // of the *same* element — `items.type = t AND items.id = i` can be satisfied by two different elements
