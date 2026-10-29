@@ -39,7 +39,8 @@
     "prod:db-setup": "node --env-file-if-exists=.env.production dist/tools/db-setup.js",
     "check:ddl": "tsx tools/check-mysql-ddl.ts",
     "test:mysql80": "tsx tools/run-on-mysql80.ts",
-    "test:mysql-modules": "tsx tools/test-mysql-modules.ts"
+    "test:mysql-modules": "tsx tools/test-mysql-modules.ts",
+    "test:http-mysql": "tsx --env-file-if-exists=.env tools/test-http-mysql.ts"
   },
   "dependencies": {
     "@fastify/compress": "^9.2.2",
