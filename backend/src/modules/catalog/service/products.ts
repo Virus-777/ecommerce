@@ -298,7 +298,8 @@ export class CatalogProducts extends CatalogTaxonomy {
             else await tx.insertVariant(v);
           }
         }
-        const latest = (await tx.latestSubmissions([productId]))[0];
+        // locked: which row "the latest" is comes out of this read, and the write goes to it (§11.2 rule 1)
+        const latest = (await tx.latestSubmissions([productId], { forUpdate: true }))[0];
         if (latest) await tx.updateSubmission(latest.id, { last_saved_at: now, last_saved_by: by.actor as never });
         return out;
       });

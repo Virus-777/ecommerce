@@ -433,7 +433,16 @@ export class CatalogTaxonomy extends CatalogViews {
   /** Blocking a requested brand returns its waiting submissions with changes requested (products layer) */
   protected async returnSubmissionsForBlockedBrand(_brand: BrandRow, _reason: string, _by: By): Promise<void> {}
 
-  /** sellers.change_request.decided: an approved brand_request becomes an active brand (or activates the requested one) */
+  /**
+   * sellers.change_request.decided: an approved brand_request becomes an active brand (or activates the
+   * requested one).
+   *
+   * The read below is a fast path only: `kernel/events` delivers a handler's events concurrently, so two
+   * deliveries of the same approval can both pass it, and the **insert** is what decides which one adds the
+   * brand (Appendix C, found on 2026-10-28). The loser answers "already handled", exactly as the fast path
+   * does. This closes the race only once `brands.requested_change_request_id` is a unique key — a spec change
+   * that is not this conversion's to make (`insertBrandIfAbsent` says what it can and cannot do today).
+   */
   protected async brandFromChangeRequest(input: { changeRequestId: string; sellerId: string; brandName: string }) {
     const by: By = { actor: SYSTEM_ACTOR };
     if (await this.repo.findBrandByChangeRequest(input.changeRequestId)) return; // already handled
@@ -457,7 +466,7 @@ export class CatalogTaxonomy extends CatalogViews {
       await this.audit({ action: 'catalog.brand.activate', actionLabel: 'Activated requested brand', category: 'catalog', target: this.brandTarget(after), reason: 'Brand request approved', before: same, after }, by);
       return;
     }
-    const row = await this.repo.insertBrand({
+    const row = await this.repo.insertBrandIfAbsent({
       id: newId(),
       name,
       slug: await this.uniqueSlug(name, (s) => this.repo.brandSlugTaken(s)),
@@ -475,6 +484,12 @@ export class CatalogTaxonomy extends CatalogViews {
       created_at: now,
       updated_at: now,
     });
+    if (!row) {
+      // another delivery of the same approval inserted it first (or took the slug): nothing more to do, and
+      // no event and no audit entry, because this call added nothing
+      this.ctx.log.info({ changeRequestId: input.changeRequestId }, 'catalog: brand from an approved brand request was already added by another delivery');
+      return;
+    }
     this.publishBrand(row, 'created', by);
     await this.audit({ action: 'catalog.brand.create', actionLabel: 'Added brand from an approved brand request', category: 'catalog', target: this.brandTarget(row), after: row }, by);
   }

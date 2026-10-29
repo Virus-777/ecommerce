@@ -3,9 +3,7 @@
  * check_dismissals, the review queue kind content_change, review dates on the settings business calendar.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { spec } from '../../../spec/catalog.js';
-import { schemas } from '../schema.js';
-import { api, auth, brand, callers, category, catalogApp, newId, productInput, sellerProduct, uploadImage, type CatalogTestApp } from './helpers.js';
+import { api, auth, brand, callers, catalogTable, category, catalogApp, newId, productInput, sellerProduct, uploadImage, type CatalogTestApp } from './helpers.js';
 
 const DAY = 86_400_000;
 let t: CatalogTestApp;
@@ -106,7 +104,7 @@ describe('duplicate dismissals', () => {
     const all = (await a.admin('POST', `/products/${p.id}/checks/duplicate/dismiss`, { reason: 'Not a duplicate' })).json();
     expect(dup(all).evidence.filter((e) => e.matchedProductId).every((e) => e.dismissedAt)).toBe(true);
     expect(all).toMatchObject({ duplicateSuspected: false, duplicateCandidates: [] });
-    const rows = await t.app.kernel.mongo.module('catalog', spec.collections, schemas).table<{ matched_product_id: string }>('check_dismissals').find();
+    const rows = await catalogTable(t.app, 'check_dismissals').find();
     const mine = rows.filter((r: { matched_product_id: string }) => [first.id, second.id].includes(r.matched_product_id));
     expect(mine.find((r: { matched_product_id: string }) => r.matched_product_id === first.id)).toMatchObject({ reason: 'Different model year', dismissed_by: { kind: 'staff' } });
     expect(mine.find((r: { matched_product_id: string }) => r.matched_product_id === second.id)).toMatchObject({ reason: 'Not a duplicate' });

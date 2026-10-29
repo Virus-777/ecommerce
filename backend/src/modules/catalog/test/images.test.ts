@@ -5,7 +5,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { EventEnvelope } from '../../../kernel/events/index.js';
-import { api, brand, catalogApp, category, newId, productInput, sellerProduct, uploadImage, type CatalogTestApp } from './helpers.js';
+import { api, brand, catalogApp, catalogTable, category, newId, productInput, sellerProduct, uploadImage, type CatalogTestApp } from './helpers.js';
 
 let t: CatalogTestApp;
 let a: ReturnType<typeof api>;
@@ -60,6 +60,8 @@ describe('images to re-crop', () => {
     const missing = (await a.admin('GET', `/products?missingContent=true&sellerId=${sellerId}`)).json();
     expect(missing.items.map((p: { product: { id: string } }) => p.product.id)).toEqual([id]);
     expect((await a.admin('GET', '/products/stats')).json().missingContent).toBe(statsBefore + 1);
+    // and the other tab leaves it out: "nothing missing" is the negation of both halves at once
+    expect((await a.admin('GET', `/products?missingContent=false&sellerId=${sellerId}`)).json().items).toEqual([]);
     expect(recropNeeded.at(-1)?.payload).toEqual({ sellerId, productIds: [id], imageCount: 1, aspectRatio: '4:5' });
     // the same flag again: no second notice
     const notices = recropNeeded.length;
@@ -72,6 +74,12 @@ describe('images to re-crop', () => {
     await recropChanged(sellerId, [{ assetId: image, productId: id, recrop: false }]);
     expect((await a.seller(sellerId, 'GET', `/products/${id}`)).json().imagesToRecrop).toEqual([]);
     expect((await a.admin('GET', `/products?missingContent=true&sellerId=${sellerId}`)).json().items).toEqual([]);
+    // the flagged list is now empty rather than unset, and an empty list is not "images to re-crop"
+    expect((await a.admin('GET', `/products?missingContent=false&sellerId=${sellerId}`)).json().items.map((p: { product: { id: string } }) => p.product.id)).toEqual([id]);
+    // nor is an unset one: the column is nullable and a row that predates the flag has no list at all
+    await catalogTable(t.app, 'products').update(id, { recrop_media_ids: null });
+    expect((await a.admin('GET', `/products?missingContent=true&sellerId=${sellerId}`)).json().items).toEqual([]);
+    expect((await a.admin('GET', `/products?missingContent=false&sellerId=${sellerId}`)).json().items.map((p: { product: { id: string } }) => p.product.id)).toEqual([id]);
   });
 
   it('a draft keeps only the flagged images it still uses when saved; variant images count too', async () => {

@@ -87,6 +87,18 @@ describe('listing read model and counts', () => {
     await t.app.kernel.jobs.runNow('catalog.refresh-counts');
     expect((await a.admin('GET', `/products/${id}`)).json().bestPrice).toEqual({ amount: 14900, currency: 'USD' });
   });
+
+  it('a subcategory brand list counts only products with a live offer, not products with none', async () => {
+    const other = await brand(t, 'Vantor Mechanical');
+    const sellerId = newId();
+    const { id } = await sellerProduct(t, sellerId, { brandId: other.id, categoryId: cat.id, approve: true, model: 'VN-10' });
+    // one offer, paused: the product has listing stats, and no live offer among them
+    await offerEvents({ productId: id, variantId: await variantOf(id), sellerId, status: 'paused', price: 9900 });
+    expect((await a.admin('GET', `/products/${id}`)).json()).toMatchObject({ offerCount: 1, liveOfferCount: 0 });
+    const brands = (await a.store(`/brands?categorySlug=${cat.slug}`)).json().items.map((b: { id: string }) => b.id);
+    expect(brands).toContain(brandRow.id);
+    expect(brands).not.toContain(other.id);
+  });
 });
 
 describe('catalog matching', () => {
@@ -102,6 +114,8 @@ describe('catalog matching', () => {
     expect(res.json().items).toEqual([expect.objectContaining({ product: expect.objectContaining({ id }), matchedOn: 'model', matchQuality: 'same_model_different_bundle', modelNumber: 'HA-ANC700', myOffers: [expect.objectContaining({ offerId, variantLabel: 'Black', condition: 'new' })] })]);
     expect((await a.seller(sellerId, 'GET', `/match?q=x&gtin=${gtin}`)).json().items[0]).toMatchObject({ matchedOn: 'gtin', matchQuality: 'exact' });
     expect((await a.seller(sellerId, 'GET', '/match?q=Halcyon')).json().items.map((m: { product: { id: string } }) => m.product.id)).toEqual([id]);
+    // every word of the query has to be in the title, not any of them
+    expect((await a.seller(sellerId, 'GET', '/match?q=Halcyon%20Zelkova')).json().items).toEqual([]);
   });
 });
 
