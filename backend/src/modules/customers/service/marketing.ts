@@ -64,7 +64,8 @@ export class Marketing {
   ): Promise<MarketingPreferences> {
     const now = this.core.now();
     const { prefs, changed } = await this.core.repo.transaction(async (repo) => {
-      const cur = (await repo.getPreferences(c.id)) ?? this.defaultPrefs(c.id, c.created_at);
+      // read for update: `next` is this row with the changes, written back below (§11.2 rule 1)
+      const cur = (await repo.getPreferences(c.id, { forUpdate: true })) ?? this.defaultPrefs(c.id, c.created_at);
       const next: PreferencesRow = { ...cur };
       const rows: ConsentRow[] = [];
       for (const k of Object.keys(PREFS) as PrefKey[]) {

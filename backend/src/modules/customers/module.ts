@@ -6,6 +6,8 @@ import { adminRoutes } from './http/admin.js';
 import { publicRoutes } from './http/public.js';
 import { devAddressProvider } from './providers/address.js';
 import { devGeocoder, unconfiguredGeocoder } from './providers/geocoder.js';
+import { mongoCustomersQueries } from './queries.mongo.js';
+import { mysqlCustomersQueries } from './queries.mysql.js';
 import { CustomersRepository } from './repository.js';
 import { CustomersService } from './service.js';
 import { schemas } from './schema.js';
@@ -25,7 +27,9 @@ export default defineModule({
     const addressProvider = ctx.config.devTokens ? devAddressProvider : undefined;
     // Geocoder: built-in ZIP and city centroids in development and tests; production has no provider yet (not configured, no points)
     const geocoder = ctx.config.devTokens ? devGeocoder : unconfiguredGeocoder;
-    const service = new CustomersService({ repo: new CustomersRepository(ctx.mongo), ctx, addressProvider, geocoder });
+    // the repository is store-neutral (ctx.store); the staff search box is the store's own read (queries.ts)
+    const queries = ctx.mysql ? mysqlCustomersQueries(ctx.mysql) : mongoCustomersQueries(ctx.mongo);
+    const service = new CustomersService({ repo: new CustomersRepository(ctx.store, queries), ctx, addressProvider, geocoder });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), adminRoutes(service), publicRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

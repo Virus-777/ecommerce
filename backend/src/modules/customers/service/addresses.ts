@@ -153,7 +153,8 @@ export class Addresses {
       await repo.updateAddress(a.id, { deleted_at: now, is_default: false, updated_at: now });
       if (!a.is_default) return;
       // the most recently used remaining address becomes the default
-      const rest = (await repo.listAddresses(c.id)).sort(
+      // read for update: the one chosen here is written back in this transaction (§11.2 rule 1)
+      const rest = (await repo.listAddresses(c.id, { forUpdate: true })).sort(
         (x, y) => (y.last_used_at?.getTime() ?? -1) - (x.last_used_at?.getTime() ?? -1) || y.created_at.getTime() - x.created_at.getTime(),
       );
       const next = rest[0];
