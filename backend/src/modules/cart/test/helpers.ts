@@ -9,13 +9,25 @@ import type { BuildOptions } from '../../../app.js';
 import type { EventEnvelope } from '../../../kernel/events/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { money } from '../../../kernel/lib/money.js';
+import type { StoreTable } from '../../../kernel/store/index.js';
 import type * as catalog from '../../../spec/catalog.js';
+import type { CartDb } from '../../../spec/cart.js';
 import { spec } from '../../../spec/cart.js';
 import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import type * as offers from '../../../spec/offers.js';
 import { auth, buildTestApp, callers, movingClock } from '../../../testing/app.js';
 
 import type { CartService } from '../service.js';
+
+/**
+ * One of cart's tables as its repository reads it (rows in spec shape), **through the store the app chose** —
+ * MongoDB or MySQL, whichever `MYSQL_MODULES` put cart's data in. A helper that builds a MongoDB store of its
+ * own reads a database the module no longer writes to the day it moves, and nothing says so (docs/10 §10.5c:
+ * that is how twenty-two of access's tests failed at once).
+ */
+export function cartTable<T extends keyof CartDb & string>(app: FastifyInstance, name: T): StoreTable<CartDb[T]> {
+  return app.kernel.boot.stores.get('cart')!.table<CartDb[T]>(name);
+}
 
 export const STORE = '/api/store/cart';
 export const ADMIN = '/api/admin/cart';

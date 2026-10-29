@@ -353,8 +353,10 @@ export class CartChecker {
     const retention = await this.retentionDays(cart.owner_kind);
     const { plans, cartRow } = await this.repo.transaction(async (tx) => {
       const locked = (await tx.getCart(cart.id, { forUpdate: true })) ?? cart;
-      const present = new Set((await tx.listItems(cart.id)).map((i) => i.id));
-      const fresh = groupBy(await tx.listNotices([...present]), (n) => n.item_id);
+      // the lines and their notices are read with a lock because this transaction writes them back (§11.2 rule 1):
+      // the cart's own lock serialises the writers there are today and says nothing about the next one
+      const present = new Set((await tx.listItems(cart.id, { forUpdate: true })).map((i) => i.id));
+      const fresh = groupBy(await tx.listNotices([...present], { forUpdate: true }), (n) => n.item_id);
       const plans = new Map<string, NoticePlan>();
       const inserts: NoticeRow[] = [];
       const resolves: string[] = [];

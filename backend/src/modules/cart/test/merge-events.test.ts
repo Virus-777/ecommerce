@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
-import { ADMIN, boot, lineOf, linesOf, STORE, type Kit } from './helpers.js';
+import { ADMIN, boot, cartTable, lineOf, linesOf, STORE, type Kit } from './helpers.js';
 
 let k: Kit;
 beforeAll(async () => {
@@ -176,5 +176,12 @@ describe('events from other modules and jobs', () => {
     expect((await k.call('GET', `${STORE}/cart`, { token: v.token })).body.itemCount).toBe(0);
     const detail = await k.call('GET', `${ADMIN}/carts/${cart.cart.id}`, { token: k.staff(['cart.carts.view']) });
     expect(detail.body.summary.status).toBe('expired');
+    // an expired cart's lines are nobody's any more: the seller's count ignores them, and an offer event
+    // neither flags them nor queues them. Both are read from the tables, because the support view above
+    // re-checks the cart it shows — a line read that forgets `status = 'active'` fails all three of these.
+    expect(await k.service.countOfferInCarts(offer.id)).toBe(0);
+    await k.publish('offers', 'offers.offer.status_changed', { offerId: offer.id, productId: p.productId, variantId: p.variantIds[0], sellerId: offer.sellerId, ownerType: 'seller', from: 'active', to: 'removed', reasonCode: 'ended_by_seller', reason: 'Ended', stockItemId: offer.stockItemId });
+    expect(await cartTable(k.app, 'cart_item_notices').count({ item_id: cart.itemId, resolved_at: null })).toBe(0);
+    expect(await cartTable(k.app, 'recheck_queue').count({ item_id: cart.itemId })).toBe(0);
   });
 });

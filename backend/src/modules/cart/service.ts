@@ -265,7 +265,8 @@ export class CartService implements CartPublicApi {
     const now = this.now();
     const r = await this.repo.transaction(async (tx) => {
       await tx.getCart(cart.id, { forUpdate: true });
-      const existing = await tx.getItemByOffer(cart.id, f.offer.id);
+      // the line is read with a lock because its quantity is written back from what this read says (§11.2 rule 1)
+      const existing = await tx.getItemByOffer(cart.id, f.offer.id, { forUpdate: true });
       const current = existing?.quantity ?? 0;
       if (current >= f.max) throw this.limitError(f.max, f.limitKind);
       if (!existing && (await tx.countItems(cart.id)) >= maxLines) throw this.ctx.error('CART_FULL', `Your cart can hold ${maxLines} different items. Remove something to add this one.`, { max: maxLines });
@@ -325,6 +326,8 @@ export class CartService implements CartPublicApi {
     }
     const days = await this.retention(s.kind);
     await this.repo.transaction(async (tx) => {
+      // cart lock first (§11.2 rule 3)
+      await tx.getCart(cart.id, { forUpdate: true });
       const locked = await tx.getItem(cart.id, item.id, { forUpdate: true });
       if (!locked) throw notFound();
       // reducing to a lower purchase limit accepts the offer edit that lowered it (its terms version)
@@ -340,6 +343,8 @@ export class CartService implements CartPublicApi {
     const { cart, item } = await this.lineOf(s, itemId);
     const days = await this.retention(s.kind);
     await this.repo.transaction(async (tx) => {
+      // cart lock first (§11.2 rule 3)
+      await tx.getCart(cart.id, { forUpdate: true });
       await tx.deleteItems([item.id]);
       await this.touch(cart.id, days, tx);
     });
@@ -383,6 +388,8 @@ export class CartService implements CartPublicApi {
     if (quantity !== line.eval.item.quantity) patch.quantity = quantity;
     const days = await this.retention(s.kind);
     await this.repo.transaction(async (tx) => {
+      // cart lock first (§11.2 rule 3)
+      await tx.getCart(cart.id, { forUpdate: true });
       const locked = await tx.getItem(cart.id, itemId, { forUpdate: true });
       if (!locked) throw notFound();
       await tx.acceptNotices([...new Set(noticeIds)], this.now());
@@ -406,6 +413,8 @@ export class CartService implements CartPublicApi {
       const quantity = body.quantity ?? item.quantity;
       if (quantity > f.max) throw this.limitError(f.max, f.limitKind);
       await this.repo.transaction(async (tx) => {
+        // cart lock first (§11.2 rule 3)
+        await tx.getCart(cart.id, { forUpdate: true });
         await tx.updateItem(item.id, { quantity, updated_at: now });
         await this.touch(cart.id, days, tx);
       });
@@ -413,12 +422,14 @@ export class CartService implements CartPublicApi {
     }
     const requested = body.quantity ?? Math.min(item.quantity, Math.max(f.max, 1));
     await this.repo.transaction(async (tx) => {
+      // cart lock first (§11.2 rule 3)
+      await tx.getCart(cart.id, { forUpdate: true });
       const locked = await tx.getItem(cart.id, item.id, { forUpdate: true });
       if (!locked) throw notFound();
-      const other = await tx.getItemByOffer(cart.id, f.offer.id);
+      const other = await tx.getItemByOffer(cart.id, f.offer.id, { forUpdate: true });
       const quantity = requested + (other?.quantity ?? 0);
       if (quantity > f.max) throw this.limitError(f.max, f.limitKind);
-      const notices = (await tx.listNotices([item.id])).filter((n) => !n.resolved_at).map((n) => n.id);
+      const notices = (await tx.listNotices([item.id], { forUpdate: true })).filter((n) => !n.resolved_at).map((n) => n.id);
       await tx.resolveNotices(notices, now);
       if (other) {
         // the chosen offer is already a line: the switched line joins it
@@ -458,6 +469,8 @@ export class CartService implements CartPublicApi {
     if (gone.length) {
       const days = await this.retention(s.kind);
       await this.repo.transaction(async (tx) => {
+        // cart lock first (§11.2 rule 3)
+        await tx.getCart(cart.id, { forUpdate: true });
         await tx.deleteItems(gone.map((i) => i.id));
         await this.touch(cart.id, days, tx);
       });
@@ -516,6 +529,10 @@ export class CartService implements CartPublicApi {
       const view = await this.viewFor(s);
       return { cart: view, result: { code, status: 'rejected', amount: null, label: code, fundedBy: null, reason: 'Add items to your cart to use this code.', coverage: [], notCovered: [] } };
     }
+    // NOTE (docs/10 Appendix C's shape): coupon_codes is read here and written below with no transaction
+    // around the pair, so two codes applied at once keep only one. It cannot simply be wrapped: the write is
+    // followed by a full re-check, which calls promotions and shipping (§11.2 rule 7 keeps those out of a
+    // transaction). Reported with Y2 tranche C.
     const codes = storedCoupons(cart.coupon_codes);
     const known = codes.some((c) => c.code === code);
     const fresh = known ? cart : await this.repo.updateCart(cart.id, { coupon_codes: [...codes, { code, covered: [] }] as never });
@@ -552,7 +569,7 @@ export class CartService implements CartPublicApi {
     const s = await this.shopperOf(scope);
     if (s.kind !== 'customer' || !s.accountId) throw new AppError('UNAUTHORIZED', 'Sign in to merge your cart');
     // ownership proof: only a visitor session this account claimed at sign-in or registration; knowing its id is not enough
-    if (!isUuid(guestSessionId) || !(await this.ctx.mongo.seen(this.claimKey(guestSessionId, s.accountId)))) throw notFound('Guest cart');
+    if (!isUuid(guestSessionId) || !(await this.ctx.store.seen(this.claimKey(guestSessionId, s.accountId)))) throw notFound('Guest cart');
     const report = await this.merge(s, guestSessionId, by);
     if (!report) throw notFound('Guest cart');
     return { cart: await this.viewFor(s), report };
@@ -580,6 +597,11 @@ export class CartService implements CartPublicApi {
       return moved ? { mergedFromCartId: null, lines: [], savedItemsMoved: moved, message: `We moved ${plural(moved, 'saved item')} from before you signed in.` } : null;
     }
 
+    // NOTE (docs/10 Appendix C's shape): the guest's lines are read here, before the transaction below locks
+    // the guest cart, and their quantities are written inside it. A guest adding to the same session between
+    // these two points has their change overwritten — a read-modify-write the detector cannot see, because the
+    // read is outside the transaction that writes it. Reported with Y2 tranche C rather than fixed inside a
+    // conversion: the quantities feed `evaluateLine`, which needs the offer facts gathered below.
     const guestItems = await this.repo.listItems(guest.id);
     const target = await this.ensureCart(s);
     const facts = await this.checker.gather(guestItems, this.checker.destinationOf(target)?.postalCode ?? this.checker.destinationOf(guest)?.postalCode, s.customerId);
@@ -596,7 +618,8 @@ export class CartService implements CartPublicApi {
       if (!lockedGuest || lockedGuest.status !== 'active') return { done: false as const };
       const into = (await tx.getCart(target.id, { forUpdate: true }))!;
       // the customer's lines, read once: guest lines have distinct offers, so each customer line is matched at most once
-      const intoLines = await tx.listItems(into.id);
+      // locked: a customer line's quantity is written back from what this read says (§11.2 rule 1)
+      const intoLines = await tx.listItems(into.id, { forUpdate: true });
       const intoByOffer = new Map(intoLines.map((x) => [x.offer_id, x]));
       const intoVariants = new Set(intoLines.map((x) => x.variant_id));
       let lineCount = intoLines.length;
@@ -700,7 +723,9 @@ export class CartService implements CartPublicApi {
     const now = this.now();
     const days = await this.retention(s.kind);
     await this.repo.transaction(async (tx) => {
-      const existing = await tx.findSavedByOffer(s.owner, item.offer_id);
+      // cart lock first (§11.2 rule 3)
+      await tx.getCart(cart.id, { forUpdate: true });
+      const existing = await tx.findSavedByOffer(s.owner, item.offer_id, { forUpdate: true });
       if (existing) await tx.updateSaved(existing.id, { saved_at: now });
       else
         await tx.insertSaved({
@@ -886,7 +911,7 @@ export class CartService implements CartPublicApi {
           this.ctx.log.warn({ cartId, offerId: line.offerId }, 'cart: offer of a restored line no longer exists');
           continue;
         }
-        const existing = await tx.getItemByOffer(target.id, offer.id);
+        const existing = await tx.getItemByOffer(target.id, offer.id, { forUpdate: true });
         if (existing) {
           if (existing.quantity < line.quantity) await tx.updateItem(existing.id, { quantity: line.quantity, updated_at: now });
           continue;
@@ -1036,7 +1061,7 @@ export class CartService implements CartPublicApi {
   async onGuestSessionClaimedFromIdentity(event: EventPayload<'identity.guest_session.claimed'>): Promise<void> {
     if (!isUuid(event.guestSessionId) || !isUuid(event.accountId)) return;
     // the claim is the proof POST /cart/merge asks for: recorded once, and kept even if the merge below has to be retried
-    await this.ctx.mongo.claim(this.claimKey(event.guestSessionId, event.accountId));
+    await this.ctx.store.claim(this.claimKey(event.guestSessionId, event.accountId));
     const customerId = await this.customerKey(event.accountId);
     const s: Shopper = { owner: { kind: 'customer', customerId }, kind: 'customer', customerId, guestSessionId: null, accountId: event.accountId };
     await this.merge(s, event.guestSessionId, { actor: { kind: 'customer', id: event.accountId } });

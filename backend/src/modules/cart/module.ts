@@ -18,7 +18,7 @@ export default defineModule({
   version: '2.0.1',
   schemas,
   register(ctx) {
-    const service = new CartService({ repo: new CartRepository(ctx.mongo), ctx });
+    const service = new CartService({ repo: new CartRepository(ctx.store), ctx });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
