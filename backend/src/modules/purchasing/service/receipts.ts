@@ -192,6 +192,8 @@ export class Receipts {
       // (purchase order, then its lines — docs/10 §11.2 rules 1 and 3), and add this count to the current
       // value. Appendix C left this site open for Y2 because the fix is this restructuring, not a lock: the
       // `curPo.status` compare-and-set above only catches a concurrent receipt that moves the PO's status.
+      // No test can tell: with one writer the stale base and the locked one hold the same numbers, and putting
+      // the old version back leaves all 169 green. What it prevents is two receipts of one order losing units.
       const fresh = new Map((await tx.linesOf([po.id], { forUpdate: true })).map((l) => [l.id, l]));
       for (const l of afterLines) {
         const c = counted.get(l.id);

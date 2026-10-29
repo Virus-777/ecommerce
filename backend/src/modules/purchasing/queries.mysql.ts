@@ -91,10 +91,17 @@ export function mysqlPurchasingQueries(store: ModuleStore<PurchasingTables>): Pu
           'v.supplier_id',
           sql<string>`SUM(v.\`expected\`)`.as('expected'),
           sql<string>`SUM(v.\`received\`)`.as('received'),
-          // a line that was over-received does not cancel another line's shortage, which is the pipeline's $max
+          // a line that was over-received does not cancel another line's shortage, which is the pipeline's $max.
+          // No test covers the clamp and none of this module's can: `expected` is the line's open quantity when
+          // counting started and `checkOverReceipt` refuses more than that, so `received > expected` needs
+          // `overReceiptAllowedPct` above its default of 0 — a setting the module's test app has no settings
+          // module to change. Dropping the GREATEST leaves every test green.
           sql<string>`SUM(GREATEST(v.\`expected\` - v.\`received\`, 0))`.as('shortage'),
           sql<string>`SUM(v.\`damaged\`)`.as('damaged'),
         ])
+        // the status list cannot change an answer and no test can tell it is here: `submitted_at` is set only by
+        // `submit`, and the Receipt machine cancels only from in_progress, so every row with a submitted_at is
+        // already awaiting_confirmation or confirmed. It stays because it says what the figures are *about*.
         .where('v.receipt_status', 'in', [...statuses])
         .where('rc.submitted_at', '>=', since)
         .groupBy('v.supplier_id')

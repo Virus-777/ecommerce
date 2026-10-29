@@ -280,3 +280,37 @@ describe('purchase orders', () => {
     expect(s).toMatchObject({ incomingUnits: expect.any(Number), lowStockItems: 3 });
   });
 });
+
+/**
+ * Assertions added with the MySQL conversion (docs/10 §10.5e), for the readings the suite could not tell
+ * apart: the two list filters read the negative way round, and a search term in the middle of a name.
+ */
+describe('conversions the suite could not see', () => {
+  it('the negative list filters keep what has no approval and nothing late, and the search matches mid-name', async () => {
+    const s = await supplier({ name: 'Westbridge Pacific Imports' });
+    const plain = await draft(s.id, [{ stockItemId: headphones, quantity: 2, unitCost: usd(9500) }]);
+    const pending = await draft(s.id, [{ stockItemId: headphones, quantity: 300, unitCost: usd(9500) }]); // over $25,000
+    expect((await call('POST', `/purchase-orders/${pending.id}/send`, {})).json()).toMatchObject({ status: 'draft', approval: { required: true } });
+    const late = await draft(s.id, [{ stockItemId: speaker, quantity: 5, unitCost: usd(4000) }], { expectedDate: '2026-10-01' });
+    expect((await call('POST', `/purchase-orders/${late.id}/send`, {})).json()).toMatchObject({ status: 'sent' });
+
+    const ids = async (qs: string) => ((await call('GET', `/purchase-orders?supplierId=${s.id}&${qs}`)).json().items as { id: string }[]).map((r) => r.id);
+
+    // approval_state is null on an order that never needed approval, and "not awaiting approval" has to keep
+    // it: `is not 'pending'` does, SQL's `<>` would drop every one of them
+    expect(await ids('awaitingApproval=true')).toEqual([pending.id]);
+    const noApproval = await ids('awaitingApproval=false');
+    expect(noApproval).toEqual(expect.arrayContaining([plain.id, late.id]));
+    expect(noApproval).not.toContain(pending.id);
+
+    // the same the other way round for "late or short", which is an id list and its complement
+    expect(await ids('lateOrShort=true')).toEqual([late.id]);
+    const onTime = await ids('lateOrShort=false');
+    expect(onTime).toEqual(expect.arrayContaining([plain.id, pending.id]));
+    expect(onTime).not.toContain(late.id);
+
+    // the supplier's name is searched for the term anywhere in it, not only at the front
+    expect(await ids('q=pacific')).toEqual(expect.arrayContaining([plain.id, pending.id, late.id]));
+    expect(((await call('GET', '/suppliers?q=pacific')).json().items as { id: string }[]).map((x) => x.id)).toEqual([s.id]);
+  });
+});

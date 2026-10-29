@@ -122,12 +122,16 @@ export async function purchasingApp(stubs: Stubs) {
 
 export const ken = { id: newId(), name: 'Ken Watanabe' };
 const signer = devSigner({ jwk: TEST_JWK });
-/** Staff token signed at the test clock's time (the app verifies tokens against that clock), valid for 60 days */
-export const staffAuth = (who = ken, permissions = ['*']) =>
+/**
+ * Staff token signed at the test clock's time (the app verifies tokens against that clock), valid for 60 days
+ * — or for `ttlDays`, which a test that advances the clock past that has to ask for (the supplier performance
+ * window is 90 days, so proving an old arrival drops out of it means moving more than 60 days forward).
+ */
+export const staffAuth = (who = ken, permissions = ['*'], ttlDays = 60) =>
   auth(
     signAccessToken(signer, { ...devClaims('staff', { permissions }), sub: who.id, dev: { permissions, name: who.name } } as never, {
       issuer: ISSUER,
-      ttlSeconds: 60 * 86_400,
+      ttlSeconds: ttlDays * 86_400,
       now: new Date(new Date(NOW).getTime() - 60_000),
     }),
   );
