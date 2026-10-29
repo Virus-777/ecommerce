@@ -3,7 +3,7 @@
  * per line, the rest of the cart is kept, and a seller is never switched silently.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { boot, lineOf, STORE, type Kit } from './helpers.js';
+import { ADMIN, boot, lineOf, STORE, type Kit } from './helpers.js';
 
 let k: Kit;
 beforeAll(async () => {
@@ -50,6 +50,11 @@ describe('scenario 2: changed offers', () => {
     expect(accepted.status, JSON.stringify(accepted.body)).toBe(200);
     expect(lineOf(accepted.body, offers[0]!.id)).toMatchObject({ state: 'ok', acceptedUnitPrice: { amount: 9999 }, notices: [] });
     expect(accepted.body.checkoutReady).toBe(true);
+    // the accepted notice is resolved rather than deleted, so the badge and the support view must both stop
+    // counting it: an "open notices" read that forgets `resolved_at is null` answers 1 here
+    expect((await k.call('GET', `${STORE}/cart/badge`, { token: v.token })).body).toEqual({ itemCount: 2, attentionCount: 0 });
+    const summary = await k.call('GET', `${ADMIN}/carts/${view.id}`, { token: k.staff(['cart.carts.view']) });
+    expect(summary.body.summary).toMatchObject({ openNotices: 0, itemCount: 2 });
     const again = await k.call('POST', `${STORE}/cart/items/${line.id}/accept`, { token: v.token, body: { noticeIds: [n.id] } });
     expect(again.status).toBe(409);
     expect(again.body.error.code).toBe('CONFLICT');

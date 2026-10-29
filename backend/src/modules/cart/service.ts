@@ -529,6 +529,10 @@ export class CartService implements CartPublicApi {
       const view = await this.viewFor(s);
       return { cart: view, result: { code, status: 'rejected', amount: null, label: code, fundedBy: null, reason: 'Add items to your cart to use this code.', coverage: [], notCovered: [] } };
     }
+    // NOTE (docs/10 Appendix C's shape): coupon_codes is read here and written below with no transaction
+    // around the pair, so two codes applied at once keep only one. It cannot simply be wrapped: the write is
+    // followed by a full re-check, which calls promotions and shipping (§11.2 rule 7 keeps those out of a
+    // transaction). Reported with Y2 tranche C.
     const codes = storedCoupons(cart.coupon_codes);
     const known = codes.some((c) => c.code === code);
     const fresh = known ? cart : await this.repo.updateCart(cart.id, { coupon_codes: [...codes, { code, covered: [] }] as never });
@@ -593,6 +597,11 @@ export class CartService implements CartPublicApi {
       return moved ? { mergedFromCartId: null, lines: [], savedItemsMoved: moved, message: `We moved ${plural(moved, 'saved item')} from before you signed in.` } : null;
     }
 
+    // NOTE (docs/10 Appendix C's shape): the guest's lines are read here, before the transaction below locks
+    // the guest cart, and their quantities are written inside it. A guest adding to the same session between
+    // these two points has their change overwritten — a read-modify-write the detector cannot see, because the
+    // read is outside the transaction that writes it. Reported with Y2 tranche C rather than fixed inside a
+    // conversion: the quantities feed `evaluateLine`, which needs the offer facts gathered below.
     const guestItems = await this.repo.listItems(guest.id);
     const target = await this.ensureCart(s);
     const facts = await this.checker.gather(guestItems, this.checker.destinationOf(target)?.postalCode ?? this.checker.destinationOf(guest)?.postalCode, s.customerId);

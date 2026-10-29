@@ -104,6 +104,10 @@ export class CartRepository {
    * Active carts idle past their expiry. `expires_at` is NOT NULL, so "has no expiry" is not a case here; and a
    * date comparison matches no null on either store anyway (MongoDB's query operators are type-bracketed), so
    * this needs no `is not null` beside it.
+   *
+   * It is a pre-filter: `expireIdle` reads each cart again under its own lock and checks `expires_at > now`
+   * there, so a comparison too generous here expires nothing it should not, and no test can tell it from this
+   * one. A comparison the wrong way round is caught, because then a due cart is never listed at all.
    */
   listExpiredCarts(now: Date, limit: number): Promise<CartRow[]> {
     return this.#t.carts.find({ status: 'active', expires_at: { op: '<=', value: now } }, { sort: { expires_at: 1 }, limit });
@@ -178,7 +182,11 @@ export class CartRepository {
     return this.#t.items.getMany(itemIds);
   }
 
-  /** Lines of active carts matching any of the given ids */
+  /**
+   * Lines of active carts matching any of the given ids. Every caller today asks about one kind of id (an
+   * offer, a stock item, a seller or a product), so the `or` has one branch in every test there is; it is
+   * written as an `or` because the event handlers' shape invites a second one.
+   */
   async findActiveItems(match: ItemMatch): Promise<ItemRow[]> {
     const or: Where<ItemRow>[] = [];
     if (match.offerIds?.length) or.push({ offer_id: match.offerIds });
