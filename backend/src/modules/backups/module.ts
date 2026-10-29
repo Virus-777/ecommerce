@@ -23,7 +23,7 @@ export default defineModule({
     const ops = ctx.config.backups
       ? fileOps(ctx.config.backups)
       : unavailableOps('Backups are made by the production server’s backup service (deploy/linux). This server has none (BACKUP_OPS_DIR is not set).');
-    const service = new BackupsService({ repo: new BackupsRepository(ctx.mongo), ctx, ops });
+    const service = new BackupsService({ repo: new BackupsRepository(ctx.store), ctx, ops });
     ctx.provide(service);
     ctx.http.routes(adminRoutes(service));
     if (ops.available) ctx.http.files(backupFiles(service));

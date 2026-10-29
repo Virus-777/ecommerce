@@ -1,15 +1,20 @@
-import type { ModuleStore } from '../../kernel/mongo/index.js';
+import type { Store } from '../../kernel/store/index.js';
 import type { OperationRow, OperationState, UploadRow } from './ports.js';
 
 /**
- * The backups module's collections: backups.operations, backups.uploads. One Table per spec table
- * (store.table(name)); the kernel helpers are listed in backend/docs/BUILDING-MODULES.md §5b.
+ * The backups module's two tables: operations and uploads. Written against `ctx.store`, so the module's data
+ * runs in either database (docs/10 §10.5); every read here is a key, a list or a sort, so there is nothing
+ * this module needs a per-store query for.
+ *
+ * What a *backup* is made of is another question entirely, and not this module's: the dump and restore
+ * commands are the server's backup service (deploy/linux), reached through BACKUP_OPS_DIR, and they change
+ * with the database at the cutover (docs/10 §23 Y4) rather than here.
  */
 export class BackupsRepository {
   readonly #operations;
   readonly #uploads;
 
-  constructor(private readonly store: ModuleStore) {
+  constructor(private readonly store: Store) {
     this.#operations = store.table<OperationRow>('operations');
     this.#uploads = store.table<UploadRow>('uploads');
   }
@@ -33,7 +38,7 @@ export class BackupsRepository {
   }
 
   operationsIn(states: readonly OperationState[], kinds?: readonly OperationRow['kind'][]) {
-    return this.#operations.find({ state: { $in: [...states] }, ...(kinds ? { kind: { $in: [...kinds] } } : {}) }, { sort: { requested_at: 1, id: 1 } });
+    return this.#operations.find({ state: [...states], ...(kinds ? { kind: [...kinds] } : {}) }, { sort: { requested_at: 1, id: 1 } });
   }
 
   recentOperations(limit: number) {

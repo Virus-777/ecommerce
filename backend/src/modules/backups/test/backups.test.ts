@@ -136,6 +136,24 @@ describe('the list of backups', () => {
     for (const n of await requestsWritten()) if ((await readRequest(n.replace('.json', ''))).kind === 'schedule') after.push(n);
     expect(after).toHaveLength(0);
   });
+
+  it('still asks for the schedule while a backup is running: a backup is not a schedule request', async () => {
+    await rm(join(dirs.opsDir, 'schedule.json'), { force: true });
+    const started = await call('POST', '', { note: 'While the schedule is unapplied' });
+    expect(started.statusCode, started.body).toBe(202);
+    await app.kernel.jobs.runNow('backups.watch-operations');
+    const kinds: Record<string, string> = {};
+    for (const n of await requestsWritten()) {
+      const r = await readRequest(n.replace('.json', ''));
+      kinds[r.kind] = r.id;
+    }
+    expect(Object.keys(kinds).sort()).toEqual(['backup', 'schedule']);
+    // and the file is left as the other tests expect it: the backup finished, the schedule applied
+    await report(kinds.backup!, { state: 'done', backupId: 'bk-sched', finishedAt: clock.now().toISOString() });
+    await scheduleApplied();
+    await report(kinds.schedule!, { state: 'done', finishedAt: clock.now().toISOString() });
+    await app.kernel.jobs.runNow('backups.watch-operations');
+  });
 });
 
 describe('back up now', () => {
