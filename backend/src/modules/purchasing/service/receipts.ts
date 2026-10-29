@@ -187,9 +187,17 @@ export class Receipts {
       const status = receiptMachine.next(cur.status, 'submit');
       const curPo = (await tx.getPurchaseOrder(po.id, { forUpdate: true }))!;
       if (curPo.status !== po.status) throw new AppError('CONFLICT', 'The purchase order changed meanwhile; reload and try again.');
+      // `afterLines` was built from lines read before the purchase order was locked, so their qtyReceived and
+      // qtyDamaged may be stale: read them again under the lock, in the same order closePurchaseOrder takes
+      // (purchase order, then its lines — docs/10 §11.2 rules 1 and 3), and add this count to the current
+      // value. Appendix C left this site open for Y2 because the fix is this restructuring, not a lock: the
+      // `curPo.status` compare-and-set above only catches a concurrent receipt that moves the PO's status.
+      const fresh = new Map((await tx.linesOf([po.id], { forUpdate: true })).map((l) => [l.id, l]));
       for (const l of afterLines) {
         const c = counted.get(l.id);
-        if (c && (c.received || c.damaged)) await tx.updateLine(l.id, { qtyReceived: l.qtyReceived, qtyDamaged: l.qtyDamaged });
+        if (!c || !(c.received || c.damaged)) continue;
+        const base = fresh.get(l.id) ?? { qtyReceived: l.qtyReceived - c.received, qtyDamaged: l.qtyDamaged - c.damaged };
+        await tx.updateLine(l.id, { qtyReceived: base.qtyReceived + c.received, qtyDamaged: base.qtyDamaged + c.damaged });
       }
       const curDelivery = (await tx.getDelivery(delivery.id, { forUpdate: true }))!;
       await tx.updateDelivery(delivery.id, { status: deliveryMachine.next(curDelivery.status, hasIssues ? 'completeWithIssues' : 'complete') });
