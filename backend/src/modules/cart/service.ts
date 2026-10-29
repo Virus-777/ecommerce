@@ -265,7 +265,8 @@ export class CartService implements CartPublicApi {
     const now = this.now();
     const r = await this.repo.transaction(async (tx) => {
       await tx.getCart(cart.id, { forUpdate: true });
-      const existing = await tx.getItemByOffer(cart.id, f.offer.id);
+      // the line is read with a lock because its quantity is written back from what this read says (§11.2 rule 1)
+      const existing = await tx.getItemByOffer(cart.id, f.offer.id, { forUpdate: true });
       const current = existing?.quantity ?? 0;
       if (current >= f.max) throw this.limitError(f.max, f.limitKind);
       if (!existing && (await tx.countItems(cart.id)) >= maxLines) throw this.ctx.error('CART_FULL', `Your cart can hold ${maxLines} different items. Remove something to add this one.`, { max: maxLines });
@@ -415,10 +416,10 @@ export class CartService implements CartPublicApi {
     await this.repo.transaction(async (tx) => {
       const locked = await tx.getItem(cart.id, item.id, { forUpdate: true });
       if (!locked) throw notFound();
-      const other = await tx.getItemByOffer(cart.id, f.offer.id);
+      const other = await tx.getItemByOffer(cart.id, f.offer.id, { forUpdate: true });
       const quantity = requested + (other?.quantity ?? 0);
       if (quantity > f.max) throw this.limitError(f.max, f.limitKind);
-      const notices = (await tx.listNotices([item.id])).filter((n) => !n.resolved_at).map((n) => n.id);
+      const notices = (await tx.listNotices([item.id], { forUpdate: true })).filter((n) => !n.resolved_at).map((n) => n.id);
       await tx.resolveNotices(notices, now);
       if (other) {
         // the chosen offer is already a line: the switched line joins it
@@ -596,7 +597,8 @@ export class CartService implements CartPublicApi {
       if (!lockedGuest || lockedGuest.status !== 'active') return { done: false as const };
       const into = (await tx.getCart(target.id, { forUpdate: true }))!;
       // the customer's lines, read once: guest lines have distinct offers, so each customer line is matched at most once
-      const intoLines = await tx.listItems(into.id);
+      // locked: a customer line's quantity is written back from what this read says (§11.2 rule 1)
+      const intoLines = await tx.listItems(into.id, { forUpdate: true });
       const intoByOffer = new Map(intoLines.map((x) => [x.offer_id, x]));
       const intoVariants = new Set(intoLines.map((x) => x.variant_id));
       let lineCount = intoLines.length;
@@ -700,7 +702,7 @@ export class CartService implements CartPublicApi {
     const now = this.now();
     const days = await this.retention(s.kind);
     await this.repo.transaction(async (tx) => {
-      const existing = await tx.findSavedByOffer(s.owner, item.offer_id);
+      const existing = await tx.findSavedByOffer(s.owner, item.offer_id, { forUpdate: true });
       if (existing) await tx.updateSaved(existing.id, { saved_at: now });
       else
         await tx.insertSaved({
@@ -886,7 +888,7 @@ export class CartService implements CartPublicApi {
           this.ctx.log.warn({ cartId, offerId: line.offerId }, 'cart: offer of a restored line no longer exists');
           continue;
         }
-        const existing = await tx.getItemByOffer(target.id, offer.id);
+        const existing = await tx.getItemByOffer(target.id, offer.id, { forUpdate: true });
         if (existing) {
           if (existing.quantity < line.quantity) await tx.updateItem(existing.id, { quantity: line.quantity, updated_at: now });
           continue;
