@@ -139,6 +139,11 @@ export function mysqlSellersQueries(store: ModuleStore<SellersTables>): SellersQ
     applicationsMatching(s: ApplicationSignals, excludeId: string): Promise<ApplicationRec[]> {
       const t = applications.name;
       const parts: Sql[] = [];
+      // `as_ci` here is belt and braces, and **no test can tell it from `bin`**: the application steps store
+      // `account.workEmail` as `trim().toLowerCase()` (service/applications.ts), so both sides of this
+      // comparison are already lower case — which is what §5.2 says about the emails in this module. The
+      // MongoDB side's `$toLower` is redundant for the same reason. Making either case-sensitive on purpose
+      // leaves every test passing, so it is written down here instead of asserted somewhere misleading.
       if (s.emails.length) parts.push({ sql: `JSON_UNQUOTE(${q(t)}.${q('account')}->'$.workEmail') ${CI} IN (${s.emails.map(() => '?').join(', ')})`, params: [...s.emails] });
       // the payout tokens and the tax id hashes are plain conditions: the vocabulary says them, so it says them here
       if (s.tokens.length) parts.push(whereSql({ 'payout.current.providerDestinationId': [...s.tokens] }, appWhere), whereSql({ 'payout.pendingChange.providerDestinationId': [...s.tokens] }, appWhere));
@@ -173,7 +178,11 @@ export function mysqlSellersQueries(store: ModuleStore<SellersTables>): SellersQ
            WHERE s.\`seller_id\` IN (${sql.join([...new Set(sellerIds)])})) AS r
          WHERE r.\`_rn\` <= ${perSeller}
          ORDER BY r.\`seller_id\` ASC, r.\`computed_at\` DESC`.execute(store.db);
-      // `_rn` is the window's own column and no column of the table: it is dropped before the row is built
+      // Which snapshots come back is asserted (`performance.test.ts`: a seller with an older below-target
+      // snapshot and a newer good one). The **order among them** is not: the only caller that asks for more
+      // than one is `autoWarningsFor`, which takes the first two and wants the newest two — and its test
+      // gives a seller three snapshots that all miss, so reversing this `DESC` changes none of its answers.
+      // `_rn` is the window's own column and no column of the table: it is dropped before the row is built.
       return rows.map(({ _rn, ...row }) => snapshots.fromRow(row));
     },
   };

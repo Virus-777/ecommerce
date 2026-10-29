@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { auth } from '../../../testing/app.js';
-import { ADMIN, approvedSeller, boot, customer, restrictionInput, SELLER, staff, STORE, submitted, type Kit } from './helpers.js';
+import { ADMIN, approvedSeller, boot, customer, restrictionInput, SELLER, sellersTable, staff, STORE, submitted, type Kit } from './helpers.js';
 
 let kit: Kit;
 beforeAll(async () => {
@@ -53,6 +53,9 @@ describe('performance', () => {
     // facts for unknown sellers are ignored
     await kit.emit('returns', 'returns.return.requested', { returnId: newId(), ref: 'RT-2', orderId: newId(), orderRef: 'MK-1', ownerType: 'seller', sellerId: newId(), fulfilledBy: 'seller', orderItemIds: [], reason: 'x', responseDueAt: kit.clock.now().toISOString() });
 
+    // a fact older than the performance window is not counted (the facts are grouped per kind *since* a time)
+    await sellersTable(kit.app, 'performance_events').insert({ id: newId(), seller_id: s.sellerId, kind: 'return_requested', subject_id: newId(), value: null, occurred_at: new Date(kit.clock.now().getTime() - 400 * 86_400_000), category_id: null });
+
     await kit.svc.computePerformance();
     await kit.app.kernel.events.drain();
     const perf = await kit.call('GET', `${SELLER}/performance`, s.sellerToken);
@@ -77,6 +80,50 @@ describe('performance', () => {
     const list = await kit.call('GET', `${ADMIN}/sellers?onTimeBelow=95&limit=100`, staff());
     expect(list.body.items.some((r: any) => r.id === s.sellerId && r.onTimeDispatchPct === 70)).toBe(true);
     kit.clock.advance(-3 * 3_600_000);
+  });
+
+  /**
+   * Three readings of the dispatch metric that are easy to get wrong and that nothing else here pins down:
+   * the filters look at each seller's **latest** snapshot and no other (one `$group $first` / one
+   * `ROW_NUMBER() … = 1`), a metric with no number is not below any figure (MongoDB's `$lt` never matched a
+   * null; in MySQL a JSON null sorts *below* every number, so the type is asked about by hand), and the
+   * stats count only a seller who is still selling. The snapshots go straight into the module's table,
+   * through whichever store the app chose, because what is being tested is which row the query picks.
+   */
+  it('the dispatch filters read the latest snapshot only, skip a metric with no number, and count live sellers', async () => {
+    const snapshot = (sellerId: string, minutesAgo: number, metric: { value: number | null; status: string }) =>
+      sellersTable(kit.app, 'performance_snapshots').insert({
+        id: newId(),
+        seller_id: sellerId,
+        computed_at: new Date(kit.clock.now().getTime() - minutesAgo * 60_000),
+        window_from: '2026-10-01',
+        window_to: '2026-10-29',
+        order_count: 10,
+        metrics: { dispatch_reliability: { key: 'dispatch_reliability', label: 'On-time dispatch', unit: 'percent', numerator: null, denominator: null, detail: '', target: null, ...metric } } as never,
+        overall: metric.status === 'below' ? 'action_needed' : 'meets',
+      });
+    const listed = async (figure: number) => (await kit.call('GET', `${ADMIN}/sellers?onTimeBelow=${figure}&limit=100`, staff())).body.items.map((r: any) => r.id) as string[];
+
+    const improved = await approvedSeller(kit);
+    await snapshot(improved.sellerId, 60, { value: 70, status: 'below' }); // was below
+    await snapshot(improved.sellerId, 1, { value: 99, status: 'meets' }); // and is not any more
+    const unmeasured = await approvedSeller(kit);
+    await snapshot(unmeasured.sellerId, 1, { value: null, status: 'unknown' });
+
+    expect(await listed(95)).not.toContain(improved.sellerId);
+    expect(await listed(100)).toContain(improved.sellerId); // the newest value, and the filter is not vacuous
+    expect(await listed(95)).not.toContain(unmeasured.sellerId);
+    // the seller's own page reads the same newest snapshot
+    expect(await kit.svc.getPerformance(improved.sellerId)).toMatchObject({ overall: 'meets' });
+
+    // the stats count the sellers whose latest snapshot is below or needs action, and only while they sell
+    const belowTarget = async () => (await kit.call('GET', `${ADMIN}/sellers/stats`, staff())).body.belowDispatchTarget as number;
+    const before = await belowTarget();
+    const live = await approvedSeller(kit);
+    await snapshot(live.sellerId, 1, { value: 70, status: 'below' });
+    expect(await belowTarget()).toBe(before + 1);
+    await sellersTable(kit.app, 'sellers').update(live.sellerId, { status: 'closed' });
+    expect(await belowTarget()).toBe(before);
   });
 
   it('automatic warnings for repeated misses and restriction proposals, never restrictions', async () => {

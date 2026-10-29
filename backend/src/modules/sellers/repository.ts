@@ -228,6 +228,10 @@ export class SellersRepository {
       await events.insert(row);
       return true;
     }
+    // No key is named, so both stores check every unique index the spec gives the table — here the one above,
+    // which is the question meant (§5c). Replacing this with a plain `insert` fails no test, because the
+    // unique index refuses the duplicate either way: what `insertIfAbsent` adds is a quiet `false` in place
+    // of a thrown duplicate-key error inside the event subscriber, and nothing asserts on that difference.
     return Boolean(await events.insertIfAbsent(row));
   }
 

@@ -49,12 +49,16 @@ describe('submitApplication: hashes and duplicate checks', () => {
   });
 
   /**
-   * Each of the four signals is asked for on its own, which the test above cannot say: its two applications
-   * share all of them, so the match is found whichever one of them is asked about. The work email and the
-   * address line are the two compared **ignoring case inside a JSON document** — `lower()` on MongoDB, the
-   * `as_ci` collation on MySQL — so each is matched here against a differently cased copy of itself.
+   * Each signal is asked for on its own, which the test above cannot say: its two applications share all
+   * four, so the match is still found whichever one of them the query stops asking about.
+   *
+   * The address line is compared **ignoring case inside a JSON document** — `lower()` on MongoDB, the
+   * `as_ci` collation on MySQL — so it is matched here against a differently cased copy of itself. The work
+   * email is compared the same way, but the step that saves an application lower-cases it first, so nothing
+   * this test writes can tell `as_ci` from a case-sensitive comparison there; the comment in
+   * `queries.mysql.ts` says so where the code is.
    */
-  it('a shared work email alone, and a shared address alone, each make a duplicate (either case)', async () => {
+  it('a shared work email alone, and a shared address alone, each make a duplicate', async () => {
     let n = 20;
     // a 9-digit EIN and a 12-digit account, both unlike the helper's defaults and unlike each other's
     const unique = () => ({ taxId: `${++n}-${String(1_000_000 + n)}`, payoutAccount: `000${String(200_000_000 + n)}` });
