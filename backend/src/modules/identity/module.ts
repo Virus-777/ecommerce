@@ -8,6 +8,8 @@ import { SESSION_COOKIE_ENDPOINTS } from './http/client.js';
 import { publicRoutes } from './http/public.js';
 import { devExternalIdentityVerifier } from './providers/external-id.js';
 import { mongoMigrations } from './migrations.js';
+import { mongoIdentityQueries } from './queries.mongo.js';
+import { mysqlIdentityQueries } from './queries.mysql.js';
 import { IdentityRepository } from './repository.js';
 import { schemas } from './schema.js';
 import { IdentityService } from './service.js';
@@ -26,7 +28,10 @@ export default defineModule({
   register(ctx) {
     // Google / Apple ID tokens: the deterministic dev verifier in development and tests; no provider is wired for production yet
     const externalIds = ctx.config.devTokens ? devExternalIdentityVerifier : undefined;
-    const service = new IdentityService({ repo: new IdentityRepository(ctx.mongo), ctx, externalIds });
+    // the repository is store-neutral (ctx.store); the window function and the computed expiry are the
+    // store's own (queries.ts), and `ctx.mysql` is there only while this module's data is in MySQL
+    const queries = ctx.mysql ? mysqlIdentityQueries(ctx.mysql) : mongoIdentityQueries(ctx.mongo);
+    const service = new IdentityService({ repo: new IdentityRepository(ctx.store, queries), ctx, externalIds });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service), publicRoutes(service));
     // responses that set or clear the website's refresh cookie (http/client.ts send()): browsers call them with credentials

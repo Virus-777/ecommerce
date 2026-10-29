@@ -201,7 +201,8 @@ export class Invitations {
       await repo.updateInvitation(i.id, { status: invitationMachine.next('pending', 'accept'), accepted_at: now, account_id: account.id });
       // seller access arrives when sellers consumes identity.invitation.accepted (grantSellerContext);
       // until then the session has no seller and the app picks it with POST /session/seller-context
-      const access = i.context_ref ? await repo.getSellerAccess(account.id, i.context_ref) : undefined;
+      // openSession stamps last_used_at on this row, so it is locked when it is read (§11.2 rule 1)
+      const access = i.context_ref ? await repo.getSellerAccess(account.id, i.context_ref, { forUpdate: true }) : undefined;
       const opened = await this.core.openSession(
         repo,
         account,

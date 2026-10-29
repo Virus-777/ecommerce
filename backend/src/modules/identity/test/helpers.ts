@@ -1,9 +1,8 @@
 /** Test helpers for identity: boot, capture events, and walk the real sign-in flows over HTTP. */
 import type { FastifyInstance } from 'fastify';
 import { expect } from 'vitest';
-import type { Table } from '../../../kernel/mongo/index.js';
-import { spec, type IdentityDb } from '../../../spec/identity.js';
-import { schemas } from '../schema.js';
+import type { StoreTable } from '../../../kernel/store/index.js';
+import type { IdentityDb } from '../../../spec/identity.js';
 import type { EventEnvelope } from '../../../kernel/events/index.js';
 import { fixedClock } from '../../../kernel/lib/clock.js';
 import type { BuildOptions } from '../../../app.js';
@@ -72,9 +71,14 @@ export async function boot(opts: BuildOptions & { only?: string[] } = {}): Promi
   return kit;
 }
 
-/** A collection of the module as its repository reads it (rows in spec shape) */
-export function identityTable<T extends keyof IdentityDb & string>(app: FastifyInstance, name: T): Table<IdentityDb[T]> {
-  return app.kernel.mongo.module('identity', spec.collections, schemas).table<IdentityDb[T]>(name);
+/**
+ * One of the module's tables as its repository reads it (rows in spec shape), **through the store the app
+ * chose** — MongoDB or MySQL, whichever `MYSQL_MODULES` put identity's data in. A helper that built a
+ * MongoDB store of its own would read a database the module no longer writes to: the rows are simply not
+ * there, and nothing in the log says why (docs/10 §10.5c, where that cost access twenty-two tests at once).
+ */
+export function identityTable<T extends keyof IdentityDb & string>(app: FastifyInstance, name: T): StoreTable<IdentityDb[T]> {
+  return app.kernel.boot.stores.get('identity')!.table<IdentityDb[T]>(name);
 }
 
 const safeJson = (s: string) => {

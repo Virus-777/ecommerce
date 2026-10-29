@@ -281,6 +281,21 @@ describe('guest sessions and order links', () => {
     await expect(identity.grantGuestOrderAccess(v.sessionId, newId(), 'buyer@example.com', 'checkout')).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 
+  it('the purge keeps a visitor session past its TTL while a live order grant still names it', async () => {
+    const spoken = await visitor(kit);
+    await identity.grantGuestOrderAccess(spoken.sessionId, newId(), 'buyer@example.com', 'checkout');
+    const plain = await visitor(kit);
+    const guests = identityTable(kit.app, 'guest_sessions');
+    // both are past their TTL; only one of them is still spoken for, and that one has to survive — a visitor
+    // who can still look up their order must not lose the session the grant hangs on
+    const past = new Date(kit.clock.now().getTime() - 1000);
+    await guests.update(spoken.sessionId, { expires_at: past });
+    await guests.update(plain.sessionId, { expires_at: past });
+    await kit.app.kernel.jobs.runNow('identity.purge-expired');
+    expect(await guests.get(spoken.sessionId)).toBeDefined();
+    expect(await guests.get(plain.sessionId)).toBeUndefined();
+  });
+
   it('identity.guest_session.claimed always names the visitor session (registration claims it too)', async () => {
     const v = await visitor(kit);
     const email = uniqueEmail('claim');
@@ -436,6 +451,11 @@ describe('jobs', () => {
 
       await k.app.kernel.jobs.runNow('identity.expire-sessions');
       expect(await table('sessions').count({ revoked_at: null })).toBe(0);
+      // each one is revoked at the moment it ran out — least(expires_at, absolute_expires_at, now) — and not
+      // at `now`, which is eight days later
+      const ranOut = await table('sessions').find({ revoke_reason: 'expired' });
+      expect(ranOut.length).toBeGreaterThan(0);
+      for (const x of ranOut) expect(x.revoked_at!.getTime()).toBe(Math.min(x.expires_at.getTime(), x.absolute_expires_at.getTime()));
       expect((await k.call('POST', `${PUBLIC}/sessions/refresh`, { body: { refreshToken: c.tokens.refreshToken } })).status).toBe(401);
 
       await k.app.kernel.jobs.runNow('identity.purge-expired');

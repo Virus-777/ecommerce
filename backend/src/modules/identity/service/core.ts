@@ -431,10 +431,11 @@ export class Core {
   async deviceFor(repo: IdentityRepository, accountId: string, info: DeviceInfo, client: ClientInfo, now: Date) {
     const label = deviceLabel(info, client.userAgent);
     const installationId = info.installationId?.trim() || null;
+    // forUpdate: the device recognised here is stamped just below (§11.2 rule 1)
     const existing = installationId
-      ? await repo.findDeviceByInstallation(accountId, installationId)
+      ? await repo.findDeviceByInstallation(accountId, installationId, { forUpdate: true })
       : info.kind === 'web'
-        ? await repo.findWebDevice(accountId, client.userAgent)
+        ? await repo.findWebDevice(accountId, client.userAgent, { forUpdate: true })
         : undefined;
     if (existing) {
       const patch = { label, user_agent: client.userAgent, app_version: info.appVersion ?? null, last_ip: client.ip, last_active_at: now };
@@ -464,7 +465,8 @@ export class Core {
   async trustedDevice(repo: IdentityRepository, accountId: string, info: DeviceInfo, now: Date) {
     const iid = info.installationId?.trim();
     if (!iid) return false;
-    const d = await repo.findDeviceByInstallation(accountId, iid);
+    // forUpdate: the sign-in this answers for goes on to stamp the same device row (§11.2 rule 1)
+    const d = await repo.findDeviceByInstallation(accountId, iid, { forUpdate: true });
     return Boolean(d?.two_step_trusted_until && d.two_step_trusted_until > now);
   }
 
@@ -603,7 +605,8 @@ export class Core {
     let seller: SellerAccessRow | null = null;
     let contexts: SellerAccessRow[] = [];
     if (o.audience === 'seller') {
-      contexts = await repo.activeSellerAccess(account.id);
+      // openSession stamps last_used_at on the context it picks, so the rows are locked here (§11.2 rule 1)
+      contexts = await repo.activeSellerAccess(account.id, { forUpdate: true });
       if (!contexts.length) throw new AppError('NO_SELLER_ACCESS', 'This account does not act for any seller yet');
       seller = contexts.length === 1 ? contexts[0]! : (contexts.find((c) => c.seller_id === o.sellerId) ?? null);
     }

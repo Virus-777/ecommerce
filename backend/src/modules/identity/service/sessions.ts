@@ -201,7 +201,8 @@ export class Sessions {
     const out = await this.core.repo.transaction(async (repo) => {
       const session = sid && isUuid(sid) ? await repo.getSession(sid, { forUpdate: true }) : undefined;
       if (!session || session.account_id !== a.id || !this.sessionLive(session, s, now)) throw new AppError('NOT_FOUND', 'Session not found');
-      const access = await repo.getSellerAccess(a.id, sellerId);
+      // last_used_at is stamped on this row below, so it is locked when it is read (§11.2 rule 1)
+      const access = await repo.getSellerAccess(a.id, sellerId, { forUpdate: true });
       if (!access || access.revoked_at) throw new AppError('NO_SELLER_ACCESS', 'You cannot act for that seller');
       // new refresh token; the old one simply stops working (it is not kept as "previous", so a
       // stale copy in another tab is refused (the middleware answers 401 UNAUTHORIZED token_invalid) instead of ending the session)
@@ -229,7 +230,8 @@ export class Sessions {
     await this.core.repo.transaction(async (repo) => {
       const a = isUuid(input.accountId) ? await repo.getAccount(input.accountId) : undefined;
       if (!a || a.realm !== 'member') throw new AppError('NOT_FOUND', 'Member account not found');
-      const prior = await repo.getSellerAccess(a.id, input.sellerId);
+      // the row read here is the row upserted below (§11.2 rule 1)
+      const prior = await repo.getSellerAccess(a.id, input.sellerId, { forUpdate: true });
       const fresh = !prior || prior.revoked_at !== null;
       await repo.upsertSellerAccess({
         account_id: a.id,
@@ -252,7 +254,8 @@ export class Sessions {
   async revokeSellerContext(accountId: string, sellerId: string, reason: string): Promise<void> {
     const now = this.core.now();
     await this.core.repo.transaction(async (repo) => {
-      const access = isUuid(accountId) ? await repo.getSellerAccess(accountId, sellerId) : undefined;
+      // revoked_at is written on this row below (§11.2 rule 1)
+      const access = isUuid(accountId) ? await repo.getSellerAccess(accountId, sellerId, { forUpdate: true }) : undefined;
       if (!access || access.revoked_at) return;
       await repo.updateSellerAccess(accountId, sellerId, { revoked_at: now });
       const ids = await repo.revokeSessions({ accountId, sellerId }, 'seller_access_revoked', now);
@@ -265,7 +268,8 @@ export class Sessions {
     if (!isUuid(accountId)) return 0;
     const now = this.core.now();
     return this.core.repo.transaction(async (repo) => {
-      if (!(await repo.getAccount(accountId))) return 0;
+      // an account-wide revocation writes tokens_valid_after on this row (§11.2 rule 1)
+      if (!(await repo.getAccount(accountId, { forUpdate: true }))) return 0;
       const ids = await this.core.revoke(repo, { accountId, audience }, reason, now, !audience);
       await this.core.securityEvent(repo, accountId, audience ? 'session_revoked' : 'signed_out_everywhere', 'completed', { audience: audience ?? null, actor: { kind: 'system' }, reason, detail: { sessions: ids.length } });
       return ids.length;

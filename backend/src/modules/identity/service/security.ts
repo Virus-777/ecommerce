@@ -121,7 +121,8 @@ export class Security {
       row = { id: newId(), account_id: a.id, method: 'totp', secret_encrypted: sealed, phone_e164_encrypted: null, phone_masked: null, confirmed_at: now, last_used_at: now, last_used_step: step, removed_at: null };
     }
     // one method of each kind: a new authenticator replaces the old one
-    for (const m of await repo.activeMethods([a.id])) if (m.method === row.method) await repo.updateMethod(m.id, { removed_at: now });
+    // forUpdate: the rows read here are the rows marked removed (§11.2 rule 1)
+    for (const m of await repo.activeMethods([a.id], { forUpdate: true })) if (m.method === row.method) await repo.updateMethod(m.id, { removed_at: now });
     await repo.insertMethod(row);
     await repo.updateChallenge(c.id, { status: 'completed', completed_at: now });
     return row;
@@ -383,7 +384,8 @@ export class Security {
       // this session has now passed 2-step: its next refresh carries twoStepAt
       const sid = caller.principal?.sessionId;
       if (sid && isUuid(sid)) {
-        const session = await repo.getSession(sid);
+        // the session row is written below, so it is locked when it is read (§11.2 rule 1)
+        const session = await repo.getSession(sid, { forUpdate: true });
         if (session && session.account_id === a.id) await repo.updateSession(sid, { two_step_verified_at: now });
       }
       await this.core.securityEvent(repo, a.id, 'two_step_enabled', 'completed', { client: caller.client, audience: caller.principal?.audience, detail: { method: m.method } });

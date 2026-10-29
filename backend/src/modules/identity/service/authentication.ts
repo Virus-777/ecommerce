@@ -120,7 +120,8 @@ export class Authentication {
         after = f.after;
         return { error: f.locked ? this.lockedError(f.account) : new AppError('INVALID_CREDENTIALS', "Email and password don't match", { attemptsLeft: f.attemptsLeft, lockoutMinutes: s.lockoutMinutes }) };
       }
-      if (a.status === 'disabled' || (a.status === 'closed' && (body.audience !== 'seller' || !(await repo.activeSellerAccess(a.id)).length))) {
+      // forUpdate: a sign-in that gets past this stamps last_used_at on one of these rows (§11.2 rule 1)
+      if (a.status === 'disabled' || (a.status === 'closed' && (body.audience !== 'seller' || !(await repo.activeSellerAccess(a.id, { forUpdate: true })).length))) {
         await this.core.securityEvent(repo, a.id, 'sign_in_blocked', 'blocked', { client: caller.client, audience: body.audience, detail: { cause: 'disabled' } });
         return { error: new AppError('ACCOUNT_DISABLED', 'This account is disabled') };
       }
@@ -225,7 +226,9 @@ export class Authentication {
   /** Checks a 2-step code (TOTP, SMS or recovery code) for an account; marks what it used. */
   async checkSecondFactor(repo: IdentityRepository, a: AccountRow, method: 'totp' | 'sms' | 'recovery_code', code: string, now: Date, smsChallenge?: ChallengeRow): Promise<TwoStepMethodRow | 'recovery' | null> {
     if (method === 'recovery_code') return (await repo.useRecoveryCode(a.id, this.core.recoveryHash(a.id, code), now)) ? 'recovery' : null;
-    const methods = await repo.activeMethods([a.id]);
+    // forUpdate: the method that answers is written below, and the TOTP branch writes `last_used_step`,
+    // which it worked out from the value it just read — the replay guard would be the thing lost (§11.2 rule 1)
+    const methods = await repo.activeMethods([a.id], { forUpdate: true });
     if (method === 'sms') {
       const m = methods.find((x) => x.method === 'sms');
       if (!m || !smsChallenge?.code_hash || !safeEqual(smsChallenge.code_hash, this.core.codeHash(smsChallenge.id, code))) return null;
@@ -337,7 +340,8 @@ export class Authentication {
       if (a) {
         a = await this.liftExpiredLock(repo, a, now);
         if (lockInForce(a, now)) return { error: this.lockedError(a) };
-        if (a.status === 'disabled' || (a.status === 'closed' && (body.audience !== 'seller' || !(await repo.activeSellerAccess(a.id)).length))) return { error: new AppError('ACCOUNT_DISABLED', 'This account is disabled') };
+        // forUpdate, as in signIn above: the sign-in that follows writes one of these rows (§11.2 rule 1)
+        if (a.status === 'disabled' || (a.status === 'closed' && (body.audience !== 'seller' || !(await repo.activeSellerAccess(a.id, { forUpdate: true })).length))) return { error: new AppError('ACCOUNT_DISABLED', 'This account is disabled') };
         if (a.status === 'pending_verification') {
           // the provider proves the email; a password chosen by an unconfirmed registration is dropped
           a = await repo.updateAccount(a.id, { status: accountStatusMachine.next('pending_verification', 'verifyEmail'), email_verified_at: now, password_hash: null });

@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type * as audit from '../../../spec/audit.js';
 import type { IdentityPublicApi } from '../../../spec/identity.js';
 import { newId } from '../../../kernel/lib/ids.js';
-import { callers } from '../../../testing/app.js';
+import { callers, mysqlModulesUnderTest } from '../../../testing/app.js';
 import { staffWithoutTwoStep } from '../migrations.js';
 import type { IdentityService } from '../service.js';
 import { ADMIN, android, boot, customer, enableTotp, identityTable, PUBLIC, signIn, STORE, uniqueEmail, visitor, type TestKit } from './helpers.js';
@@ -16,6 +16,17 @@ import { ADMIN, android, boot, customer, enableTotp, identityTable, PUBLIC, sign
 const recorded: audit.RecordInput[] = [];
 /** Staff permissions the stubbed access module grants to real (non-dev) staff tokens */
 let granted = new Set(['identity.accounts.view', 'identity.accounts.manage', 'identity.staff-accounts.manage']);
+
+/**
+ * The one test of this module's MongoDB **data migration** (migrations.ts) runs on MongoDB only.
+ *
+ * `staffWithoutTwoStep.up(db)` takes the MongoDB driver and rewrites identity's collections directly, to
+ * upgrade an install that already has staff with an authenticator. A MySQL database starts empty (D10: no
+ * ETL), so there is nothing for one to upgrade and no MySQL counterpart to write, and it goes with MongoDB
+ * in Y4. Skipping it when this run keeps identity's data in MySQL is not avoiding a failure: the subject of
+ * the test is not there (docs/10 §10.5c, the same reading as access's nine).
+ */
+const onMongo = mysqlModulesUnderTest().includes('identity') ? it.skip : it;
 
 let kit: TestKit;
 let identity: IdentityPublicApi;
@@ -145,6 +156,10 @@ describe('staff invitations', () => {
     const failures = (await identityTable(kit.app, 'security_events').find({ account_id: account.id, kind: 'sign_in_failed' })).map((e) => e.detail);
     expect(failures).toHaveLength(5);
     expect(failures.at(-1)).toMatchObject({ reason: 'invitation_pass_code', revoked: true });
+    // the batched security view takes the newest `activityLimit` events per account and no more, however
+    // many there are (row_number() over (partition by account_id …) <= limit, $topN on the other store)
+    const capped = (await identity.accountSecurityOf([account.id], { activityLimit: 2 })).get(account.id) as { recentActivity(o: { limit: number }): unknown[] };
+    expect(capped.recentActivity({ limit: 50 })).toHaveLength(2);
 
     // npm run staff-link: a new link and pass code for the same invitation
     const again = await service().invitations.resendInvitation(issued.invitation.id, operator);
@@ -257,7 +272,7 @@ describe('staff invitations', () => {
     expect((await kit.call('POST', `${ADMIN}/invitations/${'01900000-0000-7000-8000-00000000abcd'}/resend`, { token: staffToken(), body: { reauthToken: devReauth } })).status).toBe(404);
   });
 
-  it('the 2026-10-14 migration removes the 2-step of staff accounts only, and can run again', async () => {
+  onMongo('the 2026-10-14 migration removes the 2-step of staff accounts only, and can run again', async () => {
     const s = await staffMember('Mia Migrated');
     const c = await customer(kit);
     await enableTotp(kit, c.tokens.accessToken, c.password);
@@ -347,6 +362,7 @@ describe('staff session idle timeout (checked on every admin request)', () => {
 describe('account tools', () => {
   it('locks (revoking sessions) and unlocks a member account', async () => {
     const c = await customer(kit);
+    const versionBefore = (await identityTable(kit.app, 'accounts').get(c.accountId))!.version;
     const res = await kit.call('POST', `${ADMIN}/accounts/${c.accountId}/lock`, { token: staffToken(), body: { reason: 'Suspected compromise' } });
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body).toMatchObject({ account: { status: 'locked' }, lockedUntil: null, lockReason: 'Suspected compromise' });
@@ -367,6 +383,13 @@ describe('account tools', () => {
     const activity = await kit.call('GET', `${ADMIN}/accounts/${c.accountId}/security-activity?kind=account_locked`, { token: staffToken() });
     expect(activity.body.items).toHaveLength(1);
     expect(activity.body.items[0]).toMatchObject({ kind: 'account_locked', reason: 'Suspected compromise', actor: { kind: 'staff' } });
+    // `to` is the last market day included, so yesterday leaves today's lock out and tomorrow takes it in
+    const day = (shift: number) => new Date(kit.clock.now().getTime() + shift * 86_400_000).toISOString().slice(0, 10);
+    const upTo = (shift: number) => kit.call('GET', `${ADMIN}/accounts/${c.accountId}/security-activity?kind=account_locked&to=${day(shift)}`, { token: staffToken() });
+    expect((await upTo(-1)).body.items).toHaveLength(0);
+    expect((await upTo(1)).body.items).toHaveLength(1);
+    // every change to the account row bumps its version (the compare-and-set column of §11.2 rule 6)
+    expect((await identityTable(kit.app, 'accounts').get(c.accountId))!.version).toBeGreaterThan(versionBefore);
   });
 
   it('forces a password reset: sessions end, sign-in asks for a new password', async () => {
@@ -449,6 +472,10 @@ describe('account tools', () => {
     expect(res.status).toBe(200);
     expect(res.body.items.map((i: any) => i.account.id)).toContain(c.accountId);
     expect(res.body.items[0]).toMatchObject({ mustResetPassword: false, sellerCount: 0 });
+    // the box matches anywhere in the address, not only its start (`contains`)
+    const tail = c.email.split('@')[0]!.slice(-8);
+    const middle = await kit.call('GET', `${ADMIN}/accounts?realm=member&q=${encodeURIComponent(tail)}&page=1&limit=50`, { token: staffToken() });
+    expect(middle.body.items.map((i: any) => i.account.id)).toContain(c.accountId);
     const twoStep = await kit.call('GET', `${ADMIN}/accounts?realm=member&q=findme&twoStepEnabled=true`, { token: staffToken() });
     expect(twoStep.body.items.map((i: any) => i.account.id)).not.toContain(c.accountId);
     const detail = await kit.call('GET', `${ADMIN}/accounts/${c.accountId}`, { token: staffToken() });
@@ -457,5 +484,13 @@ describe('account tools', () => {
     expect(detail.body.devices).toHaveLength(1);
     expect(detail.body.recentActivity.map((e: any) => e.kind)).toEqual(expect.arrayContaining(['signed_in']));
     expect((await kit.call('GET', `${ADMIN}/accounts/01900000-0000-7000-8000-00000000ffff`, { token: staffToken() })).status).toBe(404);
+
+    // sellerCount counts the live accesses only: a revoked one is not one of them (last, so the detail above
+    // still sees an account with no seller context)
+    const gone = newId();
+    for (const [sellerId, name] of [[newId(), 'Shop One'], [gone, 'Shop Two']] as const) await identity.grantSellerContext({ accountId: c.accountId, sellerId, memberId: newId(), sellerName: name, roleLabel: 'Owner', isOwner: true });
+    await identity.revokeSellerContext(c.accountId, gone, 'Shop closed');
+    const counted = await kit.call('GET', `${ADMIN}/accounts?realm=member&q=findme&page=1&limit=50`, { token: staffToken() });
+    expect(counted.body.items.find((i: any) => i.account.id === c.accountId)).toMatchObject({ sellerCount: 1 });
   });
 });
