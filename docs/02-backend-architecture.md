@@ -180,7 +180,7 @@ The next tick of each schedule is kept in `kernel.job_schedules`; the instance t
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `JOBS_BACKEND` | `mongo` with `MONGODB_URI`, else `inprocess` | `inprocess` runs timers in each process (development and tests; every instance runs every job) |
+| `JOBS_BACKEND` | `KERNEL_STORE`, else `mongo` with `MONGODB_URI`, else `inprocess` | `mongo` / `mysql` is a queue in the database, each run once across instances; `inprocess` runs timers in each process (development and tests; every instance runs every job) |
 | `JOBS_ENABLED` | `false` | This instance works the queues and keeps the schedules. Instances without it only enqueue (`runNow`), so web and worker instances can be split |
 | `DEPLOY_ID` | - | The deployment (image tag, commit); `on boot` jobs run once per value and module set |
 
@@ -188,8 +188,9 @@ The next tick of each schedule is kept in `kernel.job_schedules`; the instance t
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `RATE_LIMIT_STORE` | `mongo` with `MONGODB_URI`, else `memory` | `memory` counts per process (development and tests) |
+| `RATE_LIMIT_STORE` | `KERNEL_STORE`, else `mongo` with `MONGODB_URI`, else `memory` | `mongo` / `mysql` share the windows between instances; `memory` counts per process (development and tests) |
 | `RATE_LIMITS` | `true` | Off only for contract and load tests (refused in production); modules' business limits apply either way |
+| `KERNEL_STORE` | `mongo` | Where the kernel keeps its own data — reference numbers, idempotency keys, the webhook log, rate-limit windows, the queue, counters, locks, the event inbox. `mysql` needs `MYSQL_URL` and moves all of them together, with their own tables created at boot and `kernel.purge-expired` in place of the TTL indexes (docs/10 §12) |
 
 ### Audit history
 

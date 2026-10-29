@@ -75,10 +75,16 @@ export const kernelTableDdl: Record<KernelTable, string> = {
   KEY \`ix_kernel_processed_events_at\` (\`at\`)
 ) ${SUFFIX}`,
 
-  // begin = INSERT, or on a duplicate a locked read and a compare, as today. Purged after 24 h
+  // begin = INSERT, or on a duplicate a locked read and a compare, as today. Purged after 24 h.
+  //
+  // The two lengths are measured, not guessed, because MongoDB had none and a column too short is a 500 on a
+  // perfectly good request: `scope` is `<operationId>:<kind>:<accountId>:<sellerId>` (register.ts), whose
+  // longest form today is 43 + 1 + 8 + 1 + 36 + 1 + 36 = 126 characters, and `key` is the Idempotency-Key
+  // header, which the route schema admits up to 255. VARCHAR(64) was the first spelling and it refused every
+  // checkout in the suite the moment the kernel's data moved here.
   kernel_idempotency_keys: `CREATE TABLE \`kernel_idempotency_keys\` (
-  \`scope\` VARCHAR(64) NOT NULL,
-  \`key\` VARCHAR(190) NOT NULL,
+  \`scope\` VARCHAR(190) NOT NULL,
+  \`key\` VARCHAR(255) NOT NULL,
   \`request_hash\` VARCHAR(64) NOT NULL,
   \`status\` VARCHAR(16) NOT NULL,
   \`response_status\` SMALLINT NULL,
@@ -98,10 +104,13 @@ export const kernelTableDdl: Record<KernelTable, string> = {
   KEY \`ix_kernel_webhook_events_received_at\` (\`received_at\`)
 ) ${SUFFIX}`,
 
-  // one statement both counts and says "refused" (§12); the purge job deletes ended windows
+  // one statement both counts and says "refused" (§12); the purge job deletes ended windows.
+  // `scope` is `http` or a module name; `key` is composed, and its longest form is a sign-in class with an
+  // address in it — `password-reset:email:<254>`, 275 characters, since an email address is 254 at the RFC
+  // maximum and `z.email()` sets no shorter limit.
   kernel_rate_limits: `CREATE TABLE \`kernel_rate_limits\` (
   \`scope\` VARCHAR(64) NOT NULL,
-  \`key\` VARCHAR(190) NOT NULL,
+  \`key\` VARCHAR(320) NOT NULL,
   \`window_start\` DATETIME(3) NOT NULL,
   \`window_end\` DATETIME(3) NOT NULL,
   \`count\` BIGINT NOT NULL,

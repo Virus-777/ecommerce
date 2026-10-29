@@ -17,6 +17,8 @@ import { mysqlStore, SESSION_SETUP, type MysqlStore } from '../kernel/mysql/inde
 import { CLIENT_OPTIONS } from '../kernel/mysql/portable.js';
 
 const free: string[] = [];
+/** The databases this process has already set up in this run (see testMysql) */
+const prepared = new Set<string>();
 let made = 0;
 
 /** The databases this file creates; global-setup drops them at the end of a run on a real server */
@@ -116,6 +118,12 @@ export async function testMysql(o: TestMysqlOptions = {}): Promise<MysqlStore> {
       free.push(name);
     },
   });
-  if (o.kernelTables !== false) await store.createKernelTables();
+  // A database this process did not set up in this run may hold the kernel tables of an older
+  // kernel-tables.ts: a slot name is `t<pool id>_<n>`, and a pool id comes round again in the next run.
+  // `CREATE TABLE IF NOT EXISTS` would keep them without a word, which is how three kernel columns that
+  // were too short for what the middleware writes went on refusing writes after the DDL was fixed. So they
+  // are dropped and made again, once per database per run; the rows are deleted either way.
+  if (o.kernelTables !== false) await store.createKernelTables({ dropFirst: !prepared.has(name) });
+  prepared.add(name);
   return store;
 }

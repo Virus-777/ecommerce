@@ -5,6 +5,12 @@
  * `TEST_MYSQL_MODULES=settings` runs those modules' data on MySQL instead, in every app a test builds
  * (docs/10-mysql-migration.md §10.5a). A store-neutral module must pass its own tests either way, and the way to
  * know it does is to run them both ways rather than to read the repository again: `npm run test:mysql-modules`.
+ *
+ * `TEST_KERNEL_STORE=mysql` does the same for the kernel's own data — reference numbers, Idempotency-Key rows,
+ * the webhook log and the rate-limit windows (§12). The job queue is left on the in-process timers either way:
+ * it is the one kernel service whose behaviour depends on its backend (a queue runs each schedule once across
+ * instances, timers run it in every process), so moving it is a test change rather than a store change, and
+ * mysql-jobs.test.ts holds the MySQL queue to the MongoDB runner's promises test for test instead.
  */
 import type { FastifyInstance } from 'fastify';
 import { buildApp, type BuildOptions } from '../app.js';
@@ -22,6 +28,9 @@ export const mysqlModulesUnderTest = (env: Record<string, string | undefined> = 
     .map((m) => m.trim())
     .filter(Boolean);
 
+/** Does this run keep the kernel's own data in MySQL (TEST_KERNEL_STORE)? */
+export const kernelOnMysqlUnderTest = (env: Record<string, string | undefined> = process.env): boolean => env.TEST_KERNEL_STORE === 'mysql';
+
 /** One dev key per test process */
 export const TEST_JWK = newDevJwk();
 const signer = devSigner({ jwk: TEST_JWK });
@@ -34,14 +43,26 @@ export async function buildTestApp(opts: BuildOptions & { only?: string[] } = {}
   // would stop the boot, and a test that runs a few modules should not have to know about the setting at all
   const modules = opts.modules ?? (opts.only ? withDependencies(opts.only) : undefined);
   const onMysql = mysqlModulesUnderTest().filter((m) => !modules || modules.includes(m));
-  const mysql = opts.mysql ?? (onMysql.length ? await testMysql() : undefined);
+  const kernelOnMysql = kernelOnMysqlUnderTest();
+  const mysql = opts.mysql ?? (onMysql.length || kernelOnMysql ? await testMysql() : undefined);
   const app = await buildApp({
-    env: { NODE_ENV: 'test' },
+    // TEST_LOG_LEVEL is forwarded, since `env` replaces the environment rather than adding to it: without
+    // this the variable that exists to show a 500's cause does nothing for the apps the tests build
+    env: { NODE_ENV: 'test', ...(process.env.TEST_LOG_LEVEL ? { TEST_LOG_LEVEL: process.env.TEST_LOG_LEVEL } : {}) },
     ...opts,
     mongo,
     ...(mysql ? { mysql } : {}),
     modules,
-    config: { devTokens: true, devSigning: { file: '', jwk: TEST_JWK }, migrateOnStart: true, responseValidation: true, ...(onMysql.length ? { mysqlModules: onMysql } : {}), ...opts.config },
+    config: {
+      devTokens: true,
+      devSigning: { file: '', jwk: TEST_JWK },
+      migrateOnStart: true,
+      responseValidation: true,
+      ...(onMysql.length ? { mysqlModules: onMysql } : {}),
+      // set here and not through KERNEL_STORE, so the queue keeps the in-process timers the tests expect
+      ...(kernelOnMysql ? { kernelStore: 'mysql' as const, rateLimitStore: 'mysql' as const } : {}),
+      ...opts.config,
+    },
   }).catch(async (err) => {
     await Promise.all([opts.mongo ? undefined : mongo.close(), opts.mysql || !mysql ? undefined : mysql.close()]);
     throw err;

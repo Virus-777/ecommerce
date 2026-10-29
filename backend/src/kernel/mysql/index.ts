@@ -67,7 +67,8 @@ export interface MysqlStore {
   /** The next n values in order, taken in one update (none for n = 0) */
   nextValues(counter: string, n: number): Promise<number[]>;
   /** Creates the kernel_* tables if they are not there yet */
-  createKernelTables(): Promise<void>;
+  /** The eleven kernel tables. `dropFirst`: the test harness's disposable databases, see the implementation */
+  createKernelTables(o?: { dropFirst?: boolean }): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -186,12 +187,23 @@ export function mysqlStore(pool: Pool, o: { watch?: TransactionWatch; slowAcquir
       }
     },
 
-    async createKernelTables() {
+    /**
+     * The eleven kernel tables, created where they are absent.
+     *
+     * **`IF NOT EXISTS` says nothing about a table that exists and differs**, so a change to kernel-tables.ts
+     * reaches a new database and no other: it needs the ALTER the kernel change comes with (§12 — the modules'
+     * tables get theirs from `alterTable`, and the kernel's do not have that yet). `dropFirst` is the test
+     * harness's way out, for a database it did not create itself and whose contents are disposable either way.
+     */
+    async createKernelTables(o = {}) {
       const conn = await acquire();
       try {
-        for (const ddl of kernelDdl()) {
-          await conn.query(ddl.replace('CREATE TABLE', 'CREATE TABLE IF NOT EXISTS'));
+        if (o.dropFirst) {
+          await conn.query('SET FOREIGN_KEY_CHECKS = 0');
+          for (const t of KERNEL_TABLES) await conn.query(`DROP TABLE IF EXISTS \`${t}\``);
+          await conn.query('SET FOREIGN_KEY_CHECKS = 1');
         }
+        for (const ddl of kernelDdl()) await conn.query(ddl.replace('CREATE TABLE', 'CREATE TABLE IF NOT EXISTS'));
       } finally {
         conn.release();
       }

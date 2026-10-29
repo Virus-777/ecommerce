@@ -73,6 +73,17 @@ describe.each([
     expect((await store.hit('cart', 'other', l)).allowed).toBe(true);
   });
 
+  it('takes the longest key a limit class can produce', async () => {
+    now = Date.parse('2026-05-04T14:30:00Z');
+    // `password-reset:email:<address>`, and an address is 254 characters at the RFC maximum while `z.email()`
+    // sets no shorter limit: 275 in all. The MySQL column is sized from this arithmetic
+    const key = `password-reset:email:${'a'.repeat(64)}@${'b'.repeat(181)}.example`;
+    expect(key.length).toBe(275);
+    const l = { limit: 1, windowMs: HOUR };
+    expect((await store.hit('http', key, l)).allowed).toBe(true);
+    expect((await store.hit('http', key, l)).allowed).toBe(false);
+  });
+
   it('purges windows that have ended', async () => {
     now = Date.parse('2026-05-04T15:00:00Z');
     await store.hit('test', 'p', { limit: 5, windowMs: 60_000 });

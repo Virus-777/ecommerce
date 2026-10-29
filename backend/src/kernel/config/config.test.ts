@@ -94,3 +94,28 @@ describe('development tokens guard', () => {
     expect(isLocalMongo('not a url')).toBe(false);
   });
 });
+
+describe('where the kernel keeps its own data (KERNEL_STORE)', () => {
+  it('stays on MongoDB unless asked', () => {
+    const c = loadConfig({ NODE_ENV: 'test' });
+    expect(c.kernelStore).toBe('mongo');
+    expect(c.jobsBackend).toBe('inprocess');
+    expect(c.rateLimitStore).toBe('memory');
+    expect(loadConfig({ NODE_ENV: 'test', MONGODB_URI: 'mongodb://127.0.0.1:27017/marketly' })).toMatchObject({ kernelStore: 'mongo', jobsBackend: 'mongo', rateLimitStore: 'mongo' });
+  });
+
+  it('takes the queue and the rate-limit windows with it', () => {
+    // one setting moves the kernel: a queue left in a database nothing else uses is the silent split §12 warns of
+    const c = loadConfig({ NODE_ENV: 'test', KERNEL_STORE: 'mysql', MYSQL_URL: 'mysql://root@127.0.0.1:3306/marketly' });
+    expect(c.kernelStore).toBe('mysql');
+    expect(c.jobsBackend).toBe('mysql');
+    expect(c.rateLimitStore).toBe('mysql');
+  });
+
+  it('lets each of the two be said on its own', () => {
+    const c = loadConfig({ NODE_ENV: 'test', KERNEL_STORE: 'mysql', JOBS_BACKEND: 'inprocess', RATE_LIMIT_STORE: 'memory' });
+    expect(c).toMatchObject({ kernelStore: 'mysql', jobsBackend: 'inprocess', rateLimitStore: 'memory' });
+    // and a queue or a window store in MySQL does not move the rest of the kernel there
+    expect(loadConfig({ NODE_ENV: 'test', JOBS_BACKEND: 'mysql' })).toMatchObject({ kernelStore: 'mongo', jobsBackend: 'mysql' });
+  });
+});

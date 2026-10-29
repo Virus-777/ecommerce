@@ -50,6 +50,29 @@ describe('the kernel schema', () => {
   });
 });
 
+describe('a database made by an older version of this file', () => {
+  // `CREATE TABLE IF NOT EXISTS` is silent about a table that exists and differs, so the DDL here reaches a
+  // new database and no other. That is what hid three columns that were too short for what the kernel writes:
+  // the fix was in this file and the test databases kept the old tables. `dropFirst` is the way out for a
+  // database whose contents are disposable, and the only caller is the test harness (testing/mysql.ts).
+  const widthOf = async (table: string, column: string) =>
+    Number(
+      (
+        await conn.query<any[]>(
+          `SELECT CHARACTER_MAXIMUM_LENGTH n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '${table}' AND COLUMN_NAME = '${column}'`,
+        )
+      )[0][0].n,
+    );
+
+  it('keeps a table that differs, and replaces it when told to', async () => {
+    const width = await widthOf('kernel_idempotency_keys', 'scope');
+    await conn.query('ALTER TABLE `kernel_idempotency_keys` MODIFY `scope` VARCHAR(64) NOT NULL');
+    await store.createKernelTables();
+    expect(await widthOf('kernel_idempotency_keys', 'scope'), 'IF NOT EXISTS cannot fix a column').toBe(64);
+    await store.createKernelTables({ dropFirst: true });
+    expect(await widthOf('kernel_idempotency_keys', 'scope')).toBe(width);
+  });
+});
 describe('kernel_jobs: one queued and one running per name', () => {
   const insert = (id: number, name: string, state: string) =>
     conn.query('INSERT INTO kernel_jobs (id, name, state, run_at, created_at) VALUES (?, ?, ?, NOW(3), NOW(3))', [uuid(id), name, state]);

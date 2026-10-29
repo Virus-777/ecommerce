@@ -6,8 +6,8 @@ import swaggerUi from '@fastify/swagger-ui';
 import type { FastifyInstance } from 'fastify';
 import { createHash } from 'node:crypto';
 import { moduleAuthorities, type Authorities } from './kernel/auth/authorities.js';
-import { mongoWebhookEventLog, REFRESH_COOKIE_AUDIENCES, refreshCookieName, refreshCookieScheme, refreshCookieText, type AuthChain, type WebhookVerifier } from './kernel/auth/chain.js';
-import { memoryRateLimitStore, mongoRateLimitStore, PURGE_RATE_LIMITS_JOB } from './kernel/auth/rate-limit.js';
+import { mongoWebhookEventLog, mysqlWebhookEventLog, REFRESH_COOKIE_AUDIENCES, refreshCookieName, refreshCookieScheme, refreshCookieText, type AuthChain, type WebhookVerifier } from './kernel/auth/chain.js';
+import { memoryRateLimitStore, mongoRateLimitStore, mysqlRateLimitStore, PURGE_RATE_LIMITS_JOB } from './kernel/auth/rate-limit.js';
 import { fileLinkSecret } from './kernel/auth/file-links.js';
 import { createAuthChain } from './kernel/auth/setup.js';
 import type { Principal } from './kernel/auth/index.js';
@@ -19,17 +19,18 @@ import { registerGraphQL, unusablePersistedQueries } from './kernel/graphql/inde
 import { installCompression } from './kernel/http/compression.js';
 import { registerDevRoutes } from './kernel/http/dev-routes.js';
 import { registerFileRoutes } from './kernel/http/files.js';
-import { mongoIdempotencyStore } from './kernel/http/idempotency.js';
+import { mongoIdempotencyStore, mysqlIdempotencyStore, type IdempotencyStore } from './kernel/http/idempotency.js';
 import { createOpenApiObjectTransform, createOpenApiTransform } from './kernel/http/openapi.js';
 import { registerEndpoints } from './kernel/http/register.js';
 import { createServer } from './kernel/http/server.js';
 import type { PublicApiMap } from './kernel/module-system/public-apis.js';
 import { createJobScheduler, type JobScheduler } from './kernel/jobs/index.js';
 import { systemClock, type Clock } from './kernel/lib/clock.js';
-import { mongoRefGenerator } from './kernel/lib/refs.js';
+import { mongoRefGenerator, mysqlRefGenerator, type RefGenerator } from './kernel/lib/refs.js';
 import { connectMongo, type MongoStore } from './kernel/mongo/index.js';
 import { migrateMongo, mongoUnits } from './kernel/mongo/schema.js';
 import { connectMysql, type MysqlStore } from './kernel/mysql/index.js';
+import { purgeExpired, purgeSummary, PURGE_EXPIRED_JOB } from './kernel/mysql/purge.js';
 import { migrateMysql } from './kernel/mysql/schema.js';
 import { bootModules, type BootResult } from './kernel/module-system/boot.js';
 import { allSpecs, loadDefinitions } from './kernel/module-system/loader.js';
@@ -67,6 +68,9 @@ export interface Kernel {
   mysql?: MysqlStore;
   events: EventBus;
   jobs: JobScheduler;
+  /** The kernel's own stores as KERNEL_STORE chose them (docs/10 §12), so the boot's choice can be seen and used */
+  refs: RefGenerator;
+  idempotency: IdempotencyStore;
   modules: string[];
   boot: BootResult;
   auth: AuthChain;
@@ -126,14 +130,33 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
     loadDefinitions(opts.modules ?? config.modules ?? enabledModules, moduleLoaders),
   ]);
 
-  // MySQL, for the modules whose data has moved (docs/10 §23 Y1). No module named, no connection: a process
-  // that needs none opens none, which is what keeps the two databases side by side rather than both required.
-  const needsMysql = config.mysqlModules.length > 0;
+  // MySQL, for the modules whose data has moved and for the kernel's own data where KERNEL_STORE says so
+  // (docs/10 §12, §23 Y1). Nothing pointed there, no connection: a process that needs none opens none, which
+  // is what keeps the two databases side by side rather than both required.
+  const kernelOnMysql = config.kernelStore === 'mysql';
+  // what points the kernel's own data there, for the error below. A module named in MYSQL_MODULES also needs a
+  // connection, but it is bootModules that refuses that one, naming the module (§10.5a)
+  const kernelAskedBy = [
+    kernelOnMysql ? 'KERNEL_STORE=mysql' : '',
+    config.jobsBackend === 'mysql' ? 'JOBS_BACKEND=mysql' : '',
+    config.rateLimitStore === 'mysql' ? 'RATE_LIMIT_STORE=mysql' : '',
+  ].filter(Boolean);
   const mysql =
     opts.mysql ??
-    (needsMysql && config.mysql
+    ((config.mysqlModules.length || kernelAskedBy.length) && config.mysql
       ? await connectMysql({ url: config.mysql.url, poolSize: config.mysql.poolSize, watch: { log: app.log, slowMs: config.mysql.slowTransactionMs } })
       : undefined);
+  const mysqlDb = (): MysqlStore => {
+    if (!mysql) throw new Error(`${kernelAskedBy.join(' and ')} keeps the kernel's data in MySQL, but MYSQL_URL is not set`);
+    return mysql;
+  };
+  // asked for it, got no connection: stop here, naming the setting. Left to fail where the store is first used
+  // it would come out of the job scheduler or of the auth chain's first rate-limit check, as something else
+  if (kernelAskedBy.length) mysqlDb();
+  // The eleven kernel tables are the kernel's own prerequisite, not a schema migration: a module's table
+  // missing means `npm run migrate` was not run, while a kernel table missing means nothing works at all.
+  // Eleven IF NOT EXISTS statements, whichever way MIGRATE_ON_START is set.
+  if (mysql) await mysql.createKernelTables();
 
   /* ---------------------------------------------------------------- OpenAPI (generated from the same Zod schemas); Swagger UI in development */
   await app.register(swagger, {
@@ -163,6 +186,7 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
     timeZone: config.market.timeZone,
     clock,
     mongo,
+    mysql,
     workers: config.jobsEnabled,
     // "on boot" jobs (registries synced from the enabled modules) run again when the deploy or the module set changes
     deployId: createHash('sha256')
@@ -170,11 +194,19 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
       .digest('hex')
       .slice(0, 16),
   });
-  const refs = mongoRefGenerator(mongo, clock, config.market.timeZone);
-  // rate-limit windows: in MongoDB every instance counts together; ended windows are purged by a kernel job
-  const rateLimits = config.rateLimitStore === 'mongo' ? mongoRateLimitStore(mongo, clock) : memoryRateLimitStore(clock);
+  const refs = kernelOnMysql ? mysqlRefGenerator(mysqlDb(), clock, config.market.timeZone) : mongoRefGenerator(mongo, clock, config.market.timeZone);
+  // rate-limit windows: in a database every instance counts together; ended windows are purged by a kernel job
+  const rateLimits =
+    config.rateLimitStore === 'mysql' ? mysqlRateLimitStore(mysqlDb(), clock) : config.rateLimitStore === 'mongo' ? mongoRateLimitStore(mongo, clock) : memoryRateLimitStore(clock);
   jobs.declare(PURGE_RATE_LIMITS_JOB);
   jobs.handle('kernel', PURGE_RATE_LIMITS_JOB.name, () => rateLimits.purge());
+  // MongoDB expired its own rows with TTL indexes; MySQL has nothing of the kind, so one kernel job deletes
+  // them in batches (§12). Declared wherever this process has MySQL at all, not only with the kernel there:
+  // finished job runs and claimed event keys start landing in those tables as soon as anything does.
+  if (mysql) {
+    jobs.declare(PURGE_EXPIRED_JOB);
+    jobs.handle('kernel', PURGE_EXPIRED_JOB.name, async () => app.log.info(purgeSummary(await purgeExpired(mysql, clock))));
+  }
   for (const spec of Object.values(allSpecs)) registerErrorCodes(spec.name, spec.errorCodes);
   events.registerSpecs(Object.values(allSpecs));
 
@@ -217,7 +249,7 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
     config,
     clock,
     log: app.log,
-    webhookEvents: mongoWebhookEventLog(mongo),
+    webhookEvents: kernelOnMysql ? mysqlWebhookEventLog(mysqlDb()) : mongoWebhookEventLog(mongo),
     authorities: moduleAuthorities((m) => boot.apis.get(m) as never),
     wrap: opts.authorities,
     webhookVerifiers: boot.webhookVerifiers,
@@ -230,7 +262,8 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
   for (const name of ['access.role.changed', 'access.coverage.changed', 'access.away.started', 'access.away.ended']) events.subscribe('kernel', name, () => auth.invalidate('permissions'));
   for (const name of ['sellers.member.permissions_changed', 'sellers.member.removed', 'sellers.seller.closed']) events.subscribe('kernel', name, () => auth.invalidate('members'));
 
-  registerEndpoints(app, boot.endpoints, { config, auth, idempotency: mongoIdempotencyStore(mongo, clock), sessionCookie: boot.sessionCookie });
+  const idempotency = kernelOnMysql ? mysqlIdempotencyStore(mysqlDb(), clock) : mongoIdempotencyStore(mongo, clock);
+  registerEndpoints(app, boot.endpoints, { config, auth, idempotency, sessionCookie: boot.sessionCookie });
   registerFileRoutes(app, fileRoutes);
   // test tooling under /api/dev: only with development tokens (never in production), hidden from OpenAPI
   if (config.devTokens) registerDevRoutes(app, boot.devRoutes);
@@ -252,6 +285,8 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
     mysql,
     events,
     jobs,
+    refs,
+    idempotency,
     modules: defs.map((d) => d.spec.name),
     boot,
     auth,

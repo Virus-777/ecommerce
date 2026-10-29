@@ -2,9 +2,9 @@
 
 Status: **Y0 done; Y1 in progress** on branch `build/mysql-migration` (last updated 2026-10-29). Each phase in §23 starts only after the owner approves it. Decided by the owner on 2026-10-22: D1 (MySQL 8.0 or later), D2 (ids as readable text), D5 (MySQL search engine), D9 (portable `mysqld`); D11 (geographic points, §3) is new and open; the other decisions in §3 are still open.
 
-**Where Y1 stands.** Built and tested: the ten views (§9.1–9.2), `kernel/mysql/*` (pool, transactions with retry, `Table`, `Where`, locks, claim, counters, migrate, the kernel tables), the job queue on `SKIP LOCKED`, the MySQL rate-limit, idempotency and webhook-event stores, the purge job that replaces the TTL monitors, the generator's DDL / Kysely types / views / triggers / runtime `TableDef`s, the portable `mysqld` and the one-server test harness, the read-modify-write detector, the store seam (§10.5a) and the **settings pilot** (§10.5b). `check:ddl` applies all 472 tables to a real server and reads back all 5,652 columns.
+**Y1 is done** (2026-10-29), and waits on the owner's approval before Y2. Built and tested: the ten views (§9.1–9.2), `kernel/mysql/*` (pool, transactions with retry, `Table`, `Where`, locks, claim, counters, migrate, the kernel tables), the job queue on `SKIP LOCKED`, the MySQL rate-limit, idempotency, webhook-event and reference-number stores, the purge job that replaces the TTL monitors, the generator's DDL / Kysely types / views / triggers / runtime `TableDef`s, the portable `mysqld` and the one-server test harness, the read-modify-write detector, the store seam (§10.5a), both pilots — **settings** (§10.5b) and **access** (§10.5c) — the boot's choice of kernel store (`KERNEL_STORE`, §10.5d) and §5c of BUILDING-MODULES.md. `check:ddl` applies all 472 tables to a real server and reads back all 5,652 columns.
 
-Left in Y1: `app.ts` choosing the MySQL kernel stores it does not yet choose (idempotency, the webhook log and the rate limits are still wired to MongoDB, and `config.jobsBackend`/`rateLimitStore` have no `'mysql'` option), with `kernel.purge-expired` registered and the kernel tables created at boot; the MySQL section of BUILDING-MODULES.md; and re-running the 8.0 half of the §20.1 gate over both pilots. **Both pilots are done** — settings (§10.5b) and access (§10.5c).
+The Y1 exit criterion is met: the kernel's tests and both pilots pass on **MySQL 8.0.45 and 8.4** (§20.1) — 63 files, 822 tests with the pilots and the kernel's own data in MySQL — and the full suite passes both ways round, on MongoDB and with those in MySQL.
 
 **Re-census of 2026-10-23.** The first census was taken at 01:04 on 2026-10-22, from commit `3dcf7961`. The whole ten-Departments programme (six modules: departments, services, software, food, rewards, farm) landed between 02:29 and 23:37 that same day, followed by the advertising and API work of 10-23. Every count below was therefore re-measured on `d27cc18e`. The drift is **additive**: six new modules, 54 tables and about 1,800 lines of repository, with no new kind of data access. Every file:line reference this plan makes into the modules it first analysed (orders, finance, search, sellers, support, payments, promotions) still resolves to the same code, except the two noted in Appendix C. Nothing of the design changes; the numbers, the tranches and four appendix lists do.
 
@@ -557,7 +557,7 @@ Three decisions worth keeping:
 - **The write methods reject rather than throw.** They are typed to return a Promise, so a caller's
   `try/catch` around an `await` sees a refusal either way.
 
-**Running a module's own tests on either database.** `TEST_MYSQL_MODULES=settings` puts those modules' data in
+**Running a module's own tests on either database** (and `TEST_KERNEL_STORE=mysql` for the kernel's own data, §10.5d). `TEST_MYSQL_MODULES=settings` puts those modules' data in
 MySQL in **every** app a test builds (`testing/app.ts`, which also skips a named module the test is not running,
 so a test of three modules need not know about the setting). `npm run test:mysql-modules` is the suite that way
 round, and it reads the same variable as `npm run test:mysql80`, so the pilots can be run on the version the
@@ -661,6 +661,83 @@ the module's data is in MySQL, each with the reason written where it is skipped.
 *seed* path, which does work on MySQL — that much coverage is lost in the MySQL run and kept by the "new install"
 tests beside them.
 
+### 10.5d The kernel's own data on MySQL (built 2026-10-29)
+
+`app.ts` now chooses where the kernel keeps its own data, which it did not: idempotency, the webhook log, the
+rate-limit windows and the reference numbers were wired to MongoDB however the rest was configured, and
+`config.jobsBackend` / `rateLimitStore` had no `'mysql'` to offer.
+
+**One setting, `KERNEL_STORE=mongo|mysql`**, for all eleven kernel tables — migrations, counters, reference
+counters, locks, claimed event keys, idempotency keys, the webhook log, rate-limit windows, the queue, the
+schedules and the boot records. Splitting them would buy nothing and would take `kernel.purge-expired` out of
+reach of half of what it exists to purge. `JOBS_BACKEND` and `RATE_LIMIT_STORE` keep their own names (they also
+have `inprocess` and `memory`, which belong to neither database) and **default from `KERNEL_STORE`**: a queue
+left in a database nothing else uses is the same silent split the pilots kept running into. The default is
+`mongo` until MongoDB goes in Y4.
+
+What the boot does with it:
+
+- `mysqlRefGenerator`, `mysqlIdempotencyStore`, `mysqlWebhookEventLog`, `mysqlRateLimitStore`, and `mysql`
+  passed to `createJobScheduler` so `JOBS_BACKEND=mysql` can reach a store at all;
+- **`kernel.purge-expired` declared wherever the process has MySQL**, not only with the kernel there: finished
+  job runs and claimed event keys start landing in those tables as soon as any module's data does;
+- **the eleven tables created at boot**, whichever way `MIGRATE_ON_START` is set. A module's missing table means
+  `npm run migrate` was not run; a missing kernel table means nothing works at all, so it is a prerequisite and
+  not a migration. Eleven `IF NOT EXISTS` statements;
+- **a setting that points at MySQL without `MYSQL_URL` stops the boot, naming the setting.** Left to fail where
+  the store is first used it came out as `JOBS_BACKEND=mysql needs MySQL` — a consequence rather than the cause.
+  A module named in `MYSQL_MODULES` is still refused by `bootModules`, which names the module (§10.5a); one
+  message per question, one owner each.
+
+**`mysqlRefGenerator` had to be written** — it was the one kernel store with no MySQL counterpart, and
+`MK-YYMMDD-NNNNN` and its kind are minted at **32 sites in 17 modules**. It is the `kernel_counters`
+statement again, on `kernel_ref_counters`: `INSERT … VALUES (?, ?, 1) ON DUPLICATE KEY UPDATE value = LAST_INSERT_ID(value + 1)`,
+the new number riding back on `insertId` with no second read, and the same trap — on the **insert** branch
+(`affectedRows === 1`) a plain INSERT sets no `LAST_INSERT_ID`, so `insertId` still holds whatever the last
+statement on that pooled connection left behind. The first reference of a period is 1 by definition, which is
+what that branch returns. Taking the branch out fails five of the ten tests.
+
+Those ten tests are new: **the reference generator had no test at all**, on either database. It now has a
+contract test of its own (`kernel/lib/refs.test.ts`), run over both stores like the other kernel stores —
+numbering from 1, per prefix, padded, restarting each market day, continuing across days when `daily: false`,
+and 25 concurrent callers getting 25 different numbers.
+
+**Why there is an `app.mysql.test.ts`.** Both stores pass the same contract, so a line still wired to MongoDB
+passes every other test in the suite — nothing else in 10,000 tests can see the difference. That file boots an
+app with `kernelStore: 'mysql'` and asserts, for each of the four stores, that the row is **in MySQL and not
+in MongoDB**; then that `kernel.purge-expired` is declared, handled, and deletes a day-old idempotency key while
+leaving a fresh one; then that a boot with a setting pointing at MySQL and no `MYSQL_URL` stops, naming the
+setting; then that a database stripped of the eleven tables has them again after a boot with
+`migrateOnStart: false`. Each of the seven tests was checked by reverting the line it covers: each fails, and
+only its own test fails. `refs` and `idempotency` are on `app.kernel` for this, beside `mongo` and `mysql`.
+
+**`TEST_KERNEL_STORE=mysql`** does for the kernel what `TEST_MYSQL_MODULES` does for a module: every app a test
+builds keeps the kernel's own data in MySQL. `npm run test:mysql-modules` now sets both (and
+`TEST_KERNEL_STORE=mongo` separates them again). The **queue stays on the in-process timers** either way, and
+that is deliberate: it is the one kernel service whose behaviour depends on its backend — an instance without
+`JOBS_ENABLED` only enqueues, and `runNow` then waits for a worker that no test app has — so moving the tests
+onto it would be a test change, not a store change. `mysql-jobs.test.ts` holds the MySQL queue to the MongoDB
+runner's promises test for test instead.
+
+**What the whole-suite run found, and nothing smaller could have.** With the kernel's data in MySQL, **341
+tests in 74 files failed** — checkouts, payments, returns, every flow that sends an Idempotency-Key — all of
+them on one error: `Data too long for column 'scope'`. `kernel_idempotency_keys.scope` was `VARCHAR(64)` and
+the middleware writes `<operationId>:<kind>:<accountId>:<sellerId>`, 126 characters at its longest. Two more
+of the same kind were beside it: `key` is the Idempotency-Key header, which the route schema admits up to 255,
+and the rate limits' `key` can be `password-reset:email:<254-character address>`. The lengths in §12 were
+written from the table in this plan and never measured against what the code puts in them — MongoDB has no
+lengths, so nothing had ever said otherwise. All three are now sized from the arithmetic, with the arithmetic
+in the comment, and the two contract suites store the longest value each column can receive.
+
+**And the thing that exists to diagnose a 500 was not reaching the apps under test.** `TEST_LOG_LEVEL` goes
+through `loadConfig(opts.env ?? process.env)`, and `buildTestApp` passes `env: { NODE_ENV: 'test' }` — which
+**replaces** the environment rather than adding to it, so the variable was silently dropped for every app a
+test builds. It is forwarded now. Until it was, these 341 failures showed as `INTERNAL_ERROR` and nothing
+else, which is how a one-line schema fault can look like 74 broken test files.
+
+Result: the pilots **and** the kernel on MySQL 8.0.45 — 63 files, 822 tests, 9 skipped — and the full suite that
+way round beside the full suite on MongoDB.
+
 ### 10.6 Boundaries
 
 - `ModuleStore.db` is a Kysely instance typed with **only that module's tables and views** (the generated `src/spec/<module>.ts` exports `<Module>Tables`). A query on another module's table does not compile.
@@ -724,12 +801,30 @@ InnoDB does the opposite: the second writer **waits** for the first to commit an
 | `kernel_ref_counters` | `(prefix, period) PK`, `value` | `MK-YYMMDD-NNNNN`, same numbering |
 | `kernel_locks` | `name PK`, `n` | §11.2 rule 5 |
 | `kernel_processed_events` | `(module, \`key\`) PK`, `at` + index `(at)` | `claim()` = `INSERT`; a duplicate (1062) means already claimed, and only the statement fails, so the handler's transaction goes on. Purged after 90 days (D6) |
-| `kernel_idempotency_keys` | `(scope, \`key\`) PK`, request_hash, status, response_status, `response_body MEDIUMTEXT`, created_at, completed_at; index `(created_at)` | `begin` = `INSERT`, or on a duplicate `SELECT … FOR UPDATE` and compare, as today |
+| `kernel_idempotency_keys` | `(scope VARCHAR(190), \`key\` VARCHAR(255)) PK`, request_hash, status, response_status, `response_body MEDIUMTEXT`, created_at, completed_at; index `(created_at)` | `begin` = `INSERT`, or on a duplicate `SELECT … FOR UPDATE` and compare, as today. **Both lengths are measured, and this row first said `VARCHAR(64)` / `VARCHAR(190)`**: `scope` is `<operationId>:<kind>:<accountId>:<sellerId>` (126 characters at its longest today) and `key` is the Idempotency-Key header, which the route schema admits up to 255. MongoDB has no lengths, so the first full run with the kernel here answered **500 to every checkout** |
 | `kernel_webhook_events` | `(provider, event_id) PK`, received_at; index | purge after 90 days |
-| `kernel_rate_limits` | `(scope, \`key\`, window_start) PK`, window_end, count | One statement that both counts the attempt and says whether it was allowed — the busiest statement in the system, since every HTTP request passes through it. **Not** as this row first had it (`count + 1000000` as the refusal): that corrupts the stored count, permanently and by a million a time. What works, written 2026-10-27:<br>`INSERT … VALUES (…, LAST_INSERT_ID(1)) ON DUPLICATE KEY UPDATE count = IF(count < ?, count + LAST_INSERT_ID(1), count + LAST_INSERT_ID(0))`<br>Only the taken branch of an `IF` is evaluated, so `LAST_INSERT_ID` ends up 1 for allowed and 0 for refused, a refused attempt adds nothing (the rule MongoDB kept), and the answer rides back on `insertId` in the same packet — no second `SELECT`. **`LAST_INSERT_ID(1)` in the VALUES is not optional**: a plain INSERT sets nothing, so the first request of a new window would be judged by whatever the last statement on that pooled connection left behind — after any refusal that is 0, and every new window would open refused. Taking it out makes four tests fail; leaving it out would have made a bug nobody could see. The existing `kernel.purge-rate-limits` job deletes ended windows |
+| `kernel_rate_limits` | `(scope VARCHAR(64), \`key\` VARCHAR(320), window_start) PK`, window_end, count; `key` is composed, and its longest form is `password-reset:email:<address>` — 275 characters, since an address is 254 at the RFC maximum and `z.email()` sets no shorter limit | One statement that both counts the attempt and says whether it was allowed — the busiest statement in the system, since every HTTP request passes through it. **Not** as this row first had it (`count + 1000000` as the refusal): that corrupts the stored count, permanently and by a million a time. What works, written 2026-10-27:<br>`INSERT … VALUES (…, LAST_INSERT_ID(1)) ON DUPLICATE KEY UPDATE count = IF(count < ?, count + LAST_INSERT_ID(1), count + LAST_INSERT_ID(0))`<br>Only the taken branch of an `IF` is evaluated, so `LAST_INSERT_ID` ends up 1 for allowed and 0 for refused, a refused attempt adds nothing (the rule MongoDB kept), and the answer rides back on `insertId` in the same packet — no second `SELECT`. **`LAST_INSERT_ID(1)` in the VALUES is not optional**: a plain INSERT sets nothing, so the first request of a new window would be judged by whatever the last statement on that pooled connection left behind — after any refusal that is 0, and every new window would open refused. Taking it out makes four tests fail; leaving it out would have made a bug nobody could see. The existing `kernel.purge-rate-limits` job deletes ended windows |
 | `kernel_jobs` | id, name, state, run_at, attempts, max_attempts, lease_until, started_at, finished_at, error, created_at; **`uq_queued ((IF(state='queued', name, NULL)))`**, **`uq_active ((IF(state='active', name, NULL)))`**, `ix (state, run_at)`, `ix (finished_at)` | same rules: one waiting and one running per job. The states are `queued`, `active`, `completed`, `failed` — the words the MongoDB runner already writes. The CHECK first said `done`, which would have been a difference between the two runners for no reason |
 | `kernel_job_schedules` | `job PK`, `schedule`, next_run_at | "once across instances": `UPDATE … SET next_run_at = ? WHERE job = ? AND next_run_at = ?`, and only the instance with `affectedRows = 1` enqueues. **The `schedule` column was missing** from this row and from the DDL until the runner was written (2026-10-27): the key column was named `schedule` but held the job name, and the phrase from the spec had nowhere to live. The runner compares the stored phrase with the spec's to notice that a job's schedule has been edited — without it an edited job would keep firing on its old clock until something else happened to rewrite the row. There is a test that edits a schedule and waits for the new one |
 | `kernel_job_boots` | `job_deploy PK`, at | boot jobs once per deploy |
+
+**The other text columns were measured too**, after the three above were found wrong (2026-10-29): claim keys
+reach about 125 characters at their longest (`billed-click:<uuid>:<day>:<uuid>`) against `VARCHAR(190)`, lock
+names 56, job names 45, counter and migration ids well under that, reference prefixes 4 and periods 6. Only
+the provider-supplied `kernel_webhook_events.event_id` is a guess rather than an arithmetic — 190 against the
+~30 characters Stripe and PayPal send — and it is the one column here whose content this codebase does not
+decide.
+
+**Changing a kernel table is not yet a migration.** These eleven are hand-written here and applied with
+`CREATE TABLE IF NOT EXISTS`, which says nothing about a table that exists and differs — so a change to that
+file reaches a new database and no other. The modules' tables get their `ALTER`s from `alterTable` (§10.1)
+because they arrive from the spec as a `TableSchema`; the kernel's are DDL strings, and giving them the same
+treatment means parsing them into that shape. **Open item for Y6**, whose cutover creates everything fresh
+anyway: until then a change here comes with a hand-written `ALTER`, or with dropping a database that holds
+nothing worth keeping. The test harness takes the second way — `createKernelTables({ dropFirst })` for any
+database it did not set up in this run (`testing/mysql.ts`), since a worker slot name comes round again in the
+next run and its tables would otherwise outlive the DDL that made them. That is exactly how the two
+idempotency columns went on refusing writes for a run after they had been widened.
 
 **Job claim** (replaces `findOneAndUpdate`):
 
@@ -746,7 +841,7 @@ COMMIT;
 
 Two tests are MySQL's own, because the MongoDB runner has nothing to compare them with. One holds a row with `FOR UPDATE` from another connection and insists the **next** job in the same pass still runs: without `SKIP LOCKED` the claim would wait on the held row for the full `innodb_lock_wait_timeout` and the whole queue would wait with it (checked by taking `SKIP LOCKED` out — the test then times out). The other has one instance already running a job and insists a second instance treats the 1062 on `uq_active` as "someone else has it" rather than as an error.
 
-**TTL indexes → one purge job** (`kernel/mysql/purge.ts`, built 2026-10-28). `kernel.purge-expired` runs every 10 min and replaces MongoDB's TTL monitor. Each table is purged in batches (`DELETE … WHERE <column> < ? ORDER BY <column> LIMIT 5000`, repeated until a pass deletes fewer rows than it asked for), so locks stay short and replication-friendly:
+**TTL indexes → one purge job** (`kernel/mysql/purge.ts`, built 2026-10-28; registered by `app.ts` wherever the process has MySQL, §10.5d). `kernel.purge-expired` runs every 10 min and replaces MongoDB's TTL monitor. Each table is purged in batches (`DELETE … WHERE <column> < ? ORDER BY <column> LIMIT 5000`, repeated until a pass deletes fewer rows than it asked for), so locks stay short and replication-friendly:
 - idempotency keys after 24 h;
 - webhook events after 90 d;
 - finished jobs after 7 d;
@@ -1377,7 +1472,7 @@ Each phase ends with `npm run check` green and a report. The next starts after a
 | Phase | Work | Done when |
 |---|---|---|
 | **Y0 Prepare on MongoDB** (started 2026-10-23, branch `build/mysql-migration`) | 1. The catalogue exporter of §18.1, run once while MongoDB still holds the 107 real products — **before anything else**. 2. Appendix C concurrency fixes, including the two `departments/service/blogs.ts` writers found on 2026-10-23. 3. Appendix D GraphQL batching fixes + batch-loader cache and cap. 4. **Spec additions — done.** The notation (sizes, `ci`, `cascade`/`nofk`, `appendOnly`, `views`) is in `lib/tables.ts` and `spec.ts` with a test of its own, documented in FORMAT.md and rendered in the module docs. Applied where Y0 could confirm it from the code: 5 append-only tables, 2 `ci` columns, 6 cascades, 2 `mediumtext` bodies. No `nofk` (that waits for Y5 measurements) and no view SQL (Y1, §9.1). 5. Re-run the census (§0) and Appendices A, B, C and E, and keep re-running them whenever modules are added: the 2026-10-22 census went stale within two hours. D4, D10 and D11 were decided at the start of this phase; D3, D6, D7 and D8 are confirmed before Y1. | Check green on MongoDB; `real-products.json` committed and `npm run seed` reproduces the catalogue; census current; no behaviour change |
-| **Y1 Foundations** (pilots done 2026-10-29: §10.5b, §10.5c) | The §9.2 view SQL, written against the generator and the contract suite that prove it (§9.1). `kernel/mysql/*`: pool, transactions with retry, `Table`, `Where`, locks, claim, counters, migrate, kernel tables. Jobs on MySQL (`SKIP LOCKED`); rate limits; idempotency; webhook log; refs; purge job. Generator → DDL, Kysely types, views, triggers. Portable `mysqld`; test harness; contract suite; read-modify-write detector. During the transition a module chooses `store: 'mongo' \| 'mysql'` (as M1 did). The kernel's own tables and jobs move to MySQL first; each module's inbox claims go to the store of that module's data, so a claim always commits with its effects. Pilots: **settings, access**. | Kernel tests and the two pilots pass on MySQL **8.0 and 8.4** (§20.1); BUILDING-MODULES.md gets the MySQL section |
+| **Y1 Foundations** — **done 2026-10-29** (§10.5a–d) | The §9.2 view SQL, written against the generator and the contract suite that prove it (§9.1). `kernel/mysql/*`: pool, transactions with retry, `Table`, `Where`, locks, claim, counters, migrate, kernel tables. Jobs on MySQL (`SKIP LOCKED`); rate limits; idempotency; webhook log; refs; purge job. Generator → DDL, Kysely types, views, triggers. Portable `mysqld`; test harness; contract suite; read-modify-write detector. During the transition a module chooses `store: 'mongo' \| 'mysql'` (as M1 did). The kernel's own tables and jobs move to MySQL first; each module's inbox claims go to the store of that module's data, so a claim always commits with its effects. Pilots: **settings, access**. | **Met**: the kernel's tests and both pilots pass on MySQL **8.0.45 and 8.4** (§20.1), the full suite passes both ways round, and BUILDING-MODULES.md has §5c |
 | **Y2 Modules in tranches** | 37 modules in seven tranches (tables in brackets). A: identity, audit, media, notifications, backups [45] · B: customers, catalog, inventory, sellers, purchasing, workqueues [91] · C: offers, promotions, cart, orders, content [56] · D: payments, shipping, checkout, messaging, reviews, finance, returns [100] · E: support, trust, advertising, reports, warehouse [71] · F: wishlist, wallet, fulfillment-service [26] · **G (new): departments, services, software, food, rewards, farm [54]**. Per module: repository rewrite, views, summary columns, tests reading tables. | Each module's tests, contract and `test:http` pass on MySQL with the detector on |
 | **Y3 Search, reports, statistics, SQL speed-ups** | MySQL search engine (§14) + benchmark; reports market-day columns; finance ledger `day`; statistics queries; `EXPLAIN` review of every list; the §9.5 candidates (set-based statements, stored procedures, summary triggers), each with a parity test and a before/after measurement | Engine contract green; bench targets met; financial statistics equal to MongoDB on the same seeded data; each kept §9.5 item shows its gain, the rest stay in TypeScript |
 | **Y4 Remove MongoDB** | Delete `kernel/mongo`, Mongoose (nothing reads MongoDB any more under D10, so it goes here rather than being kept for an ETL), mongodb-memory-server, the Mongo engine, Mongo env vars. Update docs 02, MAINTAINING, README, FORMAT, `.env.example`, BUILDING-MODULES, docs/08, the deploy scripts (`install.sh`, `db-setup`, `backup.sh`, `restore.sh`, `ops.sh`, `check.sh`, the `marketly` command) | Check green with MySQL only |

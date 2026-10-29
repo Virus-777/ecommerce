@@ -25,7 +25,6 @@
  */
 import { createHash } from 'node:crypto';
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
-import { kernelDdl } from './kernel-tables.js';
 import { createOpsViews, OPS_VIEWS } from './ops-views.js';
 import type { MysqlStore } from './index.js';
 import { q } from './where.js';
@@ -284,9 +283,10 @@ export async function migrateMysql(store: MysqlStore, units: readonly MysqlUnit[
       await conn.query(sql);
     };
 
-    // the kernel's own tables are hand-written (kernel-tables.ts) and are created if absent; a change to one
-    // of them is a change to the kernel and comes with its own migration
-    for (const ddl of kernelDdl()) await run(ddl.replace('CREATE TABLE', 'CREATE TABLE IF NOT EXISTS'));
+    // the kernel's own tables are hand-written (kernel-tables.ts) and are created if absent, through the one
+    // door that also refuses a database an older version of that file created (a change to one of them is a
+    // change to the kernel and comes with its own migration)
+    await store.createKernelTables();
 
     let existing = await readExisting(conn);
     const recorded = async (id: string): Promise<string | undefined> => {

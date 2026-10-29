@@ -74,6 +74,17 @@ describe.each([
     expect(await store.begin('payments.charge', 'shared', hash)).toBeNull();
   });
 
+  it('takes the longest scope and key a request can arrive with', async () => {
+    // scope = `<operationId>:<kind>:<accountId>:<sellerId>` (register.ts), key = the Idempotency-Key header,
+    // which the route schema admits up to 255 characters. MongoDB has no lengths; MySQL's columns are sized
+    // from this, and were both too short at first — every checkout in the suite answered 500
+    const scope = `fulfillment-service.listFulfillmentRequests:customer:${'a'.repeat(36)}:${'b'.repeat(36)}`;
+    const key = 'k'.repeat(255);
+    expect(await store.begin(scope, key, hash)).toBeNull();
+    await store.complete(scope, key, 201, { id: 'o-long' });
+    expect(await store.begin(scope, key, hash)).toEqual({ status: 201, body: { id: 'o-long' } });
+  });
+
   it('lets a key be used again once it is older than a day', async () => {
     now = Date.parse('2026-05-04T10:00:00Z');
     expect(await store.begin('orders.create', 'k5', hash)).toBeNull();

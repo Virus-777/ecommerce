@@ -170,7 +170,62 @@ export class ThingRepository {
   `t.page` already runs its count and read one after another inside a transaction.
 - **Inbox, locks, counters:** `store.claim(key)` inside the transaction of the effects (true the first time); `store.lock(name)` serialises transactions on a name; `store.nextValue(name)` for sequences and identity columns, `store.nextValues(name, n)` to number a batch in one round trip (`t.insertMany` does this for identity columns).
 - **Seed data** lives in code (`domain/seed.ts`), applied on boot. A schema change is a spec change (`npm run gen`; the kernel syncs validators and indexes); data changes after launch (backfills, renames) are `mongoMigrations: [{ id, up(db) }]` in the manifest, each run once.
-- **Tests** read a module's collections the way its repository does: `app.kernel.mongo.module(name, spec.collections, schemas).table(t)`.
+- **Tests** read a module's collections the way its repository does: `app.kernel.mongo.module(name, spec.collections, schemas).table(t)`, and a module that may have moved to MySQL through `app.kernel.boot.stores` instead (§5c).
+
+## 5c. Repositories on either database (docs/10-mysql-migration.md §10.5)
+
+The database is moving to MySQL 8.0, one module at a time. A module whose turn has come writes its repository
+against `ctx.store`, the seam both databases are behind (`kernel/store/index.ts`); `MYSQL_MODULES` then decides
+at boot which one it is. Nothing else in the module changes, and the module's own tests are run both ways to
+prove it (`npm run test:mysql-modules`). `settings` and `access` are the two pilots to copy.
+
+```ts
+// module.ts: ctx.store instead of ctx.mongo. The generated `schemas` stay (the modules still on MongoDB need them)
+const service = new ThingService({ repo: new ThingRepository(ctx.store), ctx });
+```
+```ts
+// repository.ts: the class of §5b with `Store` in place of `ModuleStore`, and `tx` still its own repository
+constructor(private readonly store: Store) { this.#things = store.table<ThingRow>('things'); }
+```
+
+`Store` has the methods of §5b with the same meanings (`get`, `find`, `page`, `insertIfAbsent`, `upsert`,
+`increment`, `update`, `updateMany`, `transaction`, `lock`, `claim`, `nextValue` …). What differs is the
+vocabulary of filters and patches, which is SQL's reading rather than MongoDB's:
+
+| Instead of | Write |
+|---|---|
+| `{ status: { $in: list } }`, `{ at: { $lte: now } }` | `{ status: list }`, `{ at: { op: '<=', value: now } }` — a value, a list, `null` or `{ op, value }` (`Cond`) |
+| `{ $or: [a, b] }` | `{ or: [a, b] }`, and `{ and: [a, b] }` where one column needs two conditions that an object cannot hold |
+| `{ 'items.key': k }` (a dotted path into a JSON array) | `{ 'items[].key': k }`, or `{ 'role_keys[]': k }` for the array's own elements. The `[]` is what tells SQL the column is an array (`MEMBER OF`); a value or a list, while an operator or `null` is refused by both stores |
+| `{ $inc: { version: 1 } }`, `$push` | `{ version: inc('version', 1) }`, `{ log: jsonAppend('log', entry) }` — expressions the server computes |
+| `aggregate`, `pageAggregate`, update pipelines, Kysely | nothing: each belongs to one database. A repository that needs one is not store-neutral and says so by taking the store it needs. `decToZero` and a hand-written `expr` are SQL, and the MongoDB side refuses them by name rather than guessing |
+
+Four things the pilots got wrong first:
+
+- **`insertIfAbsent` with no `key`** is the portable spelling. A `key` names one unique index, and the two
+  databases do not spell the same index the same way: `settings_change_keys` is unique on `(key)` while the row
+  is open, which is a functional index on `(key)` in MySQL and a partial one in MongoDB — `(key, open)` is not a
+  key of the MySQL table at all, and `(key)` alone would make MongoDB's upsert match a closed row as well. With
+  no key named, both stores check every unique index the spec gives the table, which is the question meant.
+- **A patch that depends on the row it writes** is not one `updateMany`. `supersedeDecisions` writes
+  `superseded_<decision>` per row, so it is one `updateMany` per decision value rather than one `$in`.
+- **A JSON column that cannot be null still holds `null`** — as a JSON document, not as SQL NULL. The table
+  does that translation: a repository passes and reads `null` either way and never writes `'null'` itself.
+- **`<>` and lists keep SQL's nulls**, as §5b already said: `{ op: '<>', value: x }` does not match a row whose
+  column is null, and `{ col: [] }` matches nothing. The rule has not changed; MySQL is where it came from.
+
+**Tests of a module whose data may be in MySQL read it through the store the app chose** —
+`app.kernel.boot.stores.get('<module>')!.table<Row>('things')` — and so do tests of other modules that reach
+into its tables. A test that builds its own `app.kernel.mongo.module(…)` reads a database the module no longer
+writes to: the rows are simply not there, and nothing in the log says why (22 of access's tests failed that way
+at once, and the repository was not the problem).
+
+**The kernel's own data** — reference numbers, Idempotency-Key rows, the webhook log, rate-limit windows, the
+job queue, counters, locks and the event inbox — moves with `KERNEL_STORE=mysql`, independently of any module,
+and `JOBS_BACKEND` / `RATE_LIMIT_STORE` follow it unless they are set. Modules notice nothing: `ctx.refs.next`,
+`store.claim`, `store.lock` and `store.nextValue` mean the same thing either way. MySQL has no TTL indexes, so
+`kernel.purge-expired` deletes in batches what used to expire by itself (docs/10 §12); a module with retention
+rules of its own keeps its own job, as before.
 
 ## 6. Approvals and limits (money and enforcement actions)
 

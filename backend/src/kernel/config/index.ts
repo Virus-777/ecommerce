@@ -48,6 +48,13 @@ const schema = z.object({
   MYSQL_MODULES: z.string().optional(),
   /** §10.2: every pool in every process together must stay under the server's max_connections */
   MYSQL_POOL_SIZE: z.coerce.number().int().min(1).max(500).optional(),
+  /**
+   * Where the kernel keeps its own data (docs/10 §12): migrations, counters, reference numbers, locks, claimed
+   * event keys, idempotency keys, the webhook log, rate-limit windows and the job queue. One setting for all of
+   * them, because splitting them between two databases buys nothing and loses the purge job's reach. `mysql`
+   * needs MYSQL_URL, and makes JOBS_BACKEND and RATE_LIMIT_STORE default to mysql as well.
+   */
+  KERNEL_STORE: z.enum(['mongo', 'mysql']).optional(),
   /** Apply the MongoDB schema and pending data migrations when the server starts (production runs `npm run migrate` instead) */
   MIGRATE_ON_START: flag,
   /** Plan ch. 20: endpoints of a later phase answer NOT_IMPLEMENTED. Phases 1–2 are designed for launch. */
@@ -61,8 +68,8 @@ const schema = z.object({
   RESPONSE_VALIDATION: flag,
   /** Work jobs and keep their schedules in this process */
   JOBS_ENABLED: flag,
-  /** mongo: queue in MongoDB, each run once across instances; inprocess: timers in each process. Default mongo with MONGODB_URI */
-  JOBS_BACKEND: z.enum(['inprocess', 'mongo']).optional(),
+  /** mongo/mysql: a queue in the database, each run once across instances; inprocess: timers in each process. Default: KERNEL_STORE, else mongo with MONGODB_URI */
+  JOBS_BACKEND: z.enum(['inprocess', 'mongo', 'mysql']).optional(),
   /** Identifies a deployment (image tag, commit): "on boot" jobs run once per deploy and module set */
   DEPLOY_ID: z.string().optional(),
   /** Store and seller GraphQL accept persisted query ids only (on in production) */
@@ -104,8 +111,8 @@ const schema = z.object({
   DEV_SIGNING_KEY_FILE: z.string().default('.data/dev-signing-key.json'),
   /** Rate limits by IP, caller and sign-in style classes (off only for contract tests and load tests) */
   RATE_LIMITS: flag,
-  /** Where rate-limit windows are counted: mongo (shared by every instance) or memory (per process). Default mongo with MONGODB_URI */
-  RATE_LIMIT_STORE: z.enum(['memory', 'mongo']).optional(),
+  /** Where rate-limit windows are counted: mongo or mysql (shared by every instance) or memory (per process). Default: KERNEL_STORE, else mongo with MONGODB_URI */
+  RATE_LIMIT_STORE: z.enum(['memory', 'mongo', 'mysql']).optional(),
   /** gzip or brotli for the text and JSON answers over COMPRESSION_THRESHOLD bytes; off where a proxy in front already compresses */
   COMPRESSION: flag,
   /** Answers below this many bytes go out as they are: the encoding costs more than the few bytes it would save */
@@ -145,12 +152,14 @@ export interface Config {
   mysql: { url: string; poolSize: number | undefined; slowTransactionMs: number } | null;
   /** The modules whose data is in MySQL rather than MongoDB; empty while nothing has moved */
   mysqlModules: readonly string[];
+  /** Where the kernel's own eleven tables live (docs/10 §12); mysql needs `mysql` above */
+  kernelStore: 'mongo' | 'mysql';
   migrateOnStart: boolean;
   launchPhase: number;
   market: { timeZone: string; currency: string; defaultLocation: { postalCode: string; label: string } };
   responseValidation: boolean;
   jobsEnabled: boolean;
-  jobsBackend: 'inprocess' | 'mongo';
+  jobsBackend: 'inprocess' | 'mongo' | 'mysql';
   deployId: string | undefined;
   graphqlPersistedOnly: boolean;
   /** Event streams (kernel/http/event-stream.ts): a `: ping` and a sign-in check this often. Not an env setting; tests make it short */
@@ -171,7 +180,7 @@ export interface Config {
   devTokens: boolean;
   devSigning: { file: string; jwk?: Jwk };
   rateLimits: boolean;
-  rateLimitStore: 'memory' | 'mongo';
+  rateLimitStore: 'memory' | 'mongo' | 'mysql';
   /** gzip/brotli on the way out, with the smallest answer worth encoding (COMPRESSION_THRESHOLD); null = every answer goes out as it is */
   compression: { threshold: number } | null;
   trustProxy: boolean | number | string[];
@@ -209,6 +218,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const e = parsed.data;
   const prod = e.NODE_ENV === 'production';
   const devTokens = !prod && (e.DEV_TOKENS ?? true);
+  // read before the config literal, because two other settings default from it. `overrides` replaces values
+  // and does not recompute them, as everywhere else here: an override of kernelStore leaves the other two as
+  // the environment left them, which is what testing/app.ts wants (the queue stays on the in-process timers).
+  const kernelStore = e.KERNEL_STORE ?? 'mongo';
   const config: Config = {
     env: e.NODE_ENV,
     host: e.HOST ?? (prod ? '0.0.0.0' : '127.0.0.1'),
@@ -236,7 +249,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     },
     responseValidation: e.RESPONSE_VALIDATION ?? !prod,
     jobsEnabled: e.JOBS_ENABLED ?? false,
-    jobsBackend: e.JOBS_BACKEND ?? (e.MONGODB_URI ? 'mongo' : 'inprocess'),
+    kernelStore,
+    // the kernel's queue and its windows follow its data unless the env says otherwise: a queue in a database
+    // nothing else uses is the silent split this migration keeps running into
+    jobsBackend: e.JOBS_BACKEND ?? (kernelStore === 'mysql' ? 'mysql' : e.MONGODB_URI ? 'mongo' : 'inprocess'),
     deployId: e.DEPLOY_ID || undefined,
     graphqlPersistedOnly: e.GRAPHQL_PERSISTED_ONLY ?? prod,
     // under the 30–60 s idle timeouts of common proxies and firewalls
@@ -259,7 +275,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     devTokens,
     devSigning: { file: e.DEV_SIGNING_KEY_FILE },
     rateLimits: e.RATE_LIMITS ?? true,
-    rateLimitStore: e.RATE_LIMIT_STORE ?? (e.MONGODB_URI ? 'mongo' : 'memory'),
+    rateLimitStore: e.RATE_LIMIT_STORE ?? (kernelStore === 'mysql' ? 'mysql' : e.MONGODB_URI ? 'mongo' : 'memory'),
     compression: (e.COMPRESSION ?? true) ? { threshold: e.COMPRESSION_THRESHOLD } : null,
     trustProxy: parseTrustProxy(e.TRUST_PROXY),
     cors: { store: e.CORS_STORE_ORIGINS, seller: e.CORS_SELLER_ORIGINS, admin: e.CORS_ADMIN_ORIGINS },
