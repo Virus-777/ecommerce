@@ -45,9 +45,15 @@ const connectionOf = (u: URL, database?: string) => ({
  * would be one per worker process with nothing to close it — vitest's global teardown runs in the main
  * process, not the workers — and the run then ends with "something prevents N Vite servers from exiting".
  */
-async function createDatabase(u: URL, name: string): Promise<void> {
+async function createDatabase(u: URL, name: string, o: { fresh?: boolean } = {}): Promise<void> {
   const conn = await createConnection(connectionOf(u));
   try {
+    // `fresh`: a slot's name comes round again in the next run, and what the last run left in it was built
+    // from the spec as it was then. A changed column is not something migrate will rewrite by itself (§17.3,
+    // and rightly: on a real server that is a migration), so it refuses at start-up and every test file in
+    // that slot fails to boot — which is how `bigserial` gaining AUTO_INCREMENT turned eight files red.
+    // One statement rather than a sweep of DROPs: a database with all forty modules in it holds 483 tables.
+    if (o.fresh) await conn.query(`DROP DATABASE IF EXISTS \`${name}\``);
     await conn.query(`CREATE DATABASE IF NOT EXISTS \`${name}\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin`);
   } finally {
     await conn.end();
@@ -109,7 +115,8 @@ export interface TestMysqlOptions {
 export async function testMysql(o: TestMysqlOptions = {}): Promise<MysqlStore> {
   const u = baseUrl();
   const name = free.pop() ?? `t${process.env.VITEST_POOL_ID ?? process.pid}_${++made}`;
-  await createDatabase(u, name);
+  // the first file to take this name in this run starts from nothing; the rest reuse its tables
+  await createDatabase(u, name, { fresh: !prepared.has(name) });
 
   const pool = createPool({ ...connectionOf(u, name), connectionLimit: 8 });
   pool.on('connection', (conn) => {
@@ -125,12 +132,11 @@ export async function testMysql(o: TestMysqlOptions = {}): Promise<MysqlStore> {
       free.push(name);
     },
   });
-  // A database this process did not set up in this run may hold the kernel tables of an older
-  // kernel-tables.ts: a slot name is `t<pool id>_<n>`, and a pool id comes round again in the next run.
-  // `CREATE TABLE IF NOT EXISTS` would keep them without a word, which is how three kernel columns that
-  // were too short for what the middleware writes went on refusing writes after the DDL was fixed. So they
-  // are dropped and made again, once per database per run; the rows are deleted either way.
-  if (o.kernelTables !== false) await store.createKernelTables({ dropFirst: !prepared.has(name) });
+  // The database is new to this run (dropped above), so the kernel tables are made rather than kept: a
+  // `CREATE TABLE IF NOT EXISTS` over an older kernel-tables.ts would keep them without a word, which is how
+  // three kernel columns that were too short for what the middleware writes went on refusing writes after
+  // the DDL was fixed.
+  if (o.kernelTables !== false) await store.createKernelTables();
   prepared.add(name);
   return store;
 }

@@ -14,8 +14,12 @@
  */
 import { spawnSync } from 'node:child_process';
 
-/** The modules this run keeps in MySQL. Each pilot joins the list as it is converted */
-const MODULES = process.env.TEST_MYSQL_MODULES || 'settings,access';
+/**
+ * The modules this run keeps in MySQL: everything converted so far, so that a plain run is the whole of what
+ * has moved. Y1's two pilots, then a tranche at a time (§23); the list ends as all forty at the cutover.
+ */
+const CONVERTED = ['settings', 'access', 'identity', 'audit', 'media', 'notifications', 'backups'];
+const MODULES = process.env.TEST_MYSQL_MODULES || CONVERTED.join(',');
 /** And the kernel's own tables, unless this run is only about the modules */
 const KERNEL = process.env.TEST_KERNEL_STORE || 'mysql';
 

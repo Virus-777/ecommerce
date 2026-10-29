@@ -375,7 +375,4 @@ export const unit: MysqlUnit = {
       triggers: [],
     },
   ],
-  views: [
-    {"name":"notifications_v_inbox","ddl":"CREATE OR REPLACE ALGORITHM=MERGE SQL SECURITY INVOKER VIEW `notifications_v_inbox` AS\nSELECT nr.*,\n  n.topic_key, n.audience, n.address_kind, n.address_id, n.seller_id, n.group_key, n.title, n.body,\n  n.icon, n.tone, n.link, n.linked_ref, n.action_required, n.deadline_at, n.resolved_at,\n  n.created_at AS notice_created_at, n.expires_at, n.expired_at\nFROM notifications_notice_recipients nr\nJOIN notifications_notices n ON n.id = nr.notice_id"},
-  ],
 };
