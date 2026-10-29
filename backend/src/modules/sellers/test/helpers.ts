@@ -9,10 +9,22 @@ import { fixedClock } from '../../../kernel/lib/clock.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { withDependencies } from '../../../kernel/module-system/loader.js';
 import { devClaims } from '../../../kernel/auth/dev.js';
+import type { StoreTable } from '../../../kernel/store/index.js';
 import { auth, buildTestApp, token } from '../../../testing/app.js';
 import type * as access from '../../../spec/access.js';
 import type * as audit from '../../../spec/audit.js';
+import type { SellersDb } from '../../../spec/sellers.js';
 import type { SellersService } from '../service.js';
+
+/**
+ * One of the module's tables as its repository reads it (rows in spec shape), **through the store the app
+ * chose** — MongoDB or MySQL, whichever `MYSQL_MODULES` put this module's data in. A helper that built a
+ * MongoDB store of its own would read a database the module no longer writes to: the rows are simply not
+ * there, and nothing in the log says why (docs/10 §10.5c).
+ */
+export function sellersTable<T extends keyof SellersDb & string>(app: FastifyInstance, name: T): StoreTable<SellersDb[T]> {
+  return app.kernel.boot.stores.get('sellers')!.table<SellersDb[T]>(name);
+}
 
 export const STORE = '/api/store/sellers';
 export const SELLER = '/api/seller/sellers';
