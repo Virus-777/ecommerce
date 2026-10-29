@@ -1011,7 +1011,7 @@
         "selling_policy": "text (open|authorized_list|official_only)",
         "requested_by_seller_id": "uuid?",
         "requested_for_product_id": "uuid?",
-        "requested_change_request_id": "uuid?",
+        "requested_change_request_id": "uuid? unique",
         "created_at": "timestamptz",
         "updated_at": "timestamptz"
       },

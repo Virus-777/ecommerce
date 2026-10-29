@@ -2,7 +2,7 @@
 
 import type { MysqlUnit } from '../../kernel/mysql/schema.js';
 
-/** catalog: 17 tables, 171 columns, 23 keys, 17 foreign keys. The readable form of the same thing is docs/api/db/catalog.sql. */
+/** catalog: 17 tables, 171 columns, 24 keys, 17 foreign keys. The readable form of the same thing is docs/api/db/catalog.sql. */
 export const unit: MysqlUnit = {
   module: "catalog",
   tables: [
@@ -89,6 +89,7 @@ export const unit: MysqlUnit = {
       primaryKey: ["id"],
       keys: [
         {"name":"uq_catalog_brands_slug","ddl":"UNIQUE KEY `uq_catalog_brands_slug` (`slug`)"},
+        {"name":"uq_catalog_brands_requested_change_request_id","ddl":"UNIQUE KEY `uq_catalog_brands_requested_change_request_id` (`requested_change_request_id`)"},
         {"name":"ix_catalog_brands_1","ddl":"KEY `ix_catalog_brands_1` (`status`, `name`)"},
       ],
       checks: [

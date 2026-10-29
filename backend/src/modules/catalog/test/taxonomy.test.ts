@@ -192,6 +192,43 @@ describe('brands', () => {
     expect((await a.admin('GET', '/brands?q=nope')).json().items).toHaveLength(0);
   });
 
+  it('keeps one brand per approved change request, and lets every other brand have none', async () => {
+    // The structural half of the race of Appendix C: two deliveries of one approval can both pass the
+    // handler's "already handled" read, and the unique key on requested_change_request_id is what decides
+    // which one adds the brand. Asserted at the table, because that is where the guarantee lives — and on
+    // both stores, where it is spelled differently: a functional unique key on MySQL, a *partial* index on
+    // MongoDB, which is what lets every staff-created brand go on sharing a null.
+    const brands = catalogTable(t.app, 'brands');
+    const changeRequestId = newId();
+    const row = (name: string) => ({
+      id: newId(),
+      name,
+      slug: name.toLowerCase().replace(/ /g, '-'),
+      logo_media_id: null,
+      description: null,
+      banner_media_id: null,
+      status: 'active',
+      status_reason: null,
+      flag_note: null,
+      trust_report_id: null,
+      selling_policy: 'open',
+      requested_by_seller_id: null,
+      requested_for_product_id: null,
+      requested_change_request_id: null,
+      created_at: t.clock.now(),
+      updated_at: t.clock.now(),
+    });
+
+    expect(await brands.insertIfAbsent({ ...row('Race One'), requested_change_request_id: changeRequestId })).toBeTruthy();
+    // the second delivery's insert: the key refuses it, and `insertIfAbsent` says so by answering nothing
+    expect(await brands.insertIfAbsent({ ...row('Race Two'), requested_change_request_id: changeRequestId })).toBeUndefined();
+    expect(await brands.count({ requested_change_request_id: changeRequestId })).toBe(1);
+    // and a brand that came from no change request is one of many, not a duplicate of them
+    expect(await brands.insertIfAbsent(row('No Request One'))).toBeTruthy();
+    expect(await brands.insertIfAbsent(row('No Request Two'))).toBeTruthy();
+    expect(await brands.count({ requested_change_request_id: null })).toBeGreaterThan(1);
+  });
+
   it('an approved brand_request activates a brand already under review under the same name, any case and spacing', async () => {
     const sellerId = newId();
     const waiting = await brand(t, 'Orvel Audio');

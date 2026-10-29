@@ -55,6 +55,7 @@ CREATE TABLE `catalog_brands` (
   `updated_at` DATETIME(3) NOT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_catalog_brands_slug` (`slug`),
+  UNIQUE KEY `uq_catalog_brands_requested_change_request_id` (`requested_change_request_id`),
   KEY `ix_catalog_brands_1` (`status`, `name`),
   CONSTRAINT `ck_catalog_brands_status` CHECK (`status` IN ('active', 'under_review', 'blocked')),
   CONSTRAINT `ck_catalog_brands_selling_policy` CHECK (`selling_policy` IN ('open', 'authorized_list', 'official_only'))

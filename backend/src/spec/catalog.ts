@@ -3232,6 +3232,18 @@ export const spec = defineModuleSpec({
           "unique": true
         },
         {
+          "name": "brands_requested_change_request_id_725871",
+          "key": {
+            "requested_change_request_id": 1
+          },
+          "unique": true,
+          "partial": {
+            "requested_change_request_id": {
+              "$gte": ""
+            }
+          }
+        },
+        {
           "name": "brands_status_name_91fbee",
           "key": {
             "status": 1,
@@ -4875,6 +4887,13 @@ export const spec = defineModuleSpec({
           "columns": [
             "slug"
           ]
+        },
+        {
+          "name": "uq_catalog_brands_requested_change_request_id",
+          "columns": [
+            "requested_change_request_id"
+          ],
+          "partial": true
         }
       ]
     },

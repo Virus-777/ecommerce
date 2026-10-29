@@ -82,6 +82,7 @@ const brands = new Schema(
   collectionOptions("catalog.brands"),
 );
 brands.index({"slug":1}, {"name":"brands_slug_549e08","unique":true});
+brands.index({"requested_change_request_id":1}, {"name":"brands_requested_change_request_id_725871","unique":true,"partialFilterExpression":{"requested_change_request_id":{"$gte":""}}});
 brands.index({"status":1,"name":1}, {"name":"brands_status_name_91fbee"});
 
 /** Shared content; owner is the Official Store or the submitting seller */
