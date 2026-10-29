@@ -11,10 +11,10 @@ import type * as access from '../../../spec/access.js';
 import type * as audit from '../../../spec/audit.js';
 import type * as customers from '../../../spec/customers.js';
 import type * as identity from '../../../spec/identity.js';
+import type { StoreTable } from '../../../kernel/store/index.js';
 import { auth, buildTestApp, token } from '../../../testing/app.js';
-import { spec } from '../../../spec/notifications.js';
+import type { NotificationsDb } from '../../../spec/notifications.js';
 import { devOutbox } from '../providers/dev-outbox.js';
-import { schemas } from '../schema.js';
 import type { NotificationsService } from '../service.js';
 
 export interface Person {
@@ -204,5 +204,13 @@ export const emailsTo = (address: string) => devOutbox.emailsTo(address);
 export const money = (amount: number) => ({ amount, currency: 'USD' });
 export { devOutbox, newId };
 
-/** This module's collections, read and written the way the repository does */
-export const tables = (app: FastifyInstance) => app.kernel.mongo.module('notifications', spec.collections, schemas);
+/**
+ * This module's tables, read and written the way the repository does — **through the store the app chose**,
+ * MongoDB or MySQL, whichever `MYSQL_MODULES` put this module's data in. A helper that built a MongoDB store
+ * of its own would read an empty database the day the module moved, with nothing in the log to say why
+ * (docs/10 §10.5c: that is how twenty-two of access's tests failed at once).
+ */
+export const tables = (app: FastifyInstance) => {
+  const store = app.kernel.boot.stores.get('notifications')!;
+  return { table: <T extends keyof NotificationsDb & string>(name: T): StoreTable<NotificationsDb[T]> => store.table<NotificationsDb[T]>(name) };
+};

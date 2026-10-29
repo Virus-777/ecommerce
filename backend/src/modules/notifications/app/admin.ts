@@ -317,13 +317,15 @@ export class Admin {
   async publish(templateId: string, versionId: string, body: { note?: string | null }, by: By): Promise<TemplateVersion> {
     const { t, topic } = await this.#template(templateId);
     const { before, after } = await this.core.repo.transaction(async (tx) => {
+      // lock order: the template first, then its versions — the order refreshDefaultTemplates takes them in, so
+      // two transactions publishing versions of one template cannot deadlock (docs/10 §11.2 rule 3)
+      const template = (await tx.getTemplate(templateId, { forUpdate: true }))!;
       const v = await tx.getVersion(versionId, { forUpdate: true });
       if (!v || v.template_id !== templateId) throw notFound('Template version');
       const status = templateVersionMachine.next(v.status as 'draft', 'publish');
       const validation = validateContent(topic, t.channel as Channel, v.content as unknown as TemplateContent);
       if (!validation.ok) throw new AppError('TEMPLATE_INVALID', 'Fix the blocking issues before publishing.', { issues: validation.issues.filter((i) => i.severity === 'blocking') });
       const now = this.core.now();
-      const template = (await tx.getTemplate(templateId))!;
       const previous = template.live_version_id ? await tx.getVersion(template.live_version_id, { forUpdate: true }) : undefined;
       if (previous && previous.status === 'published') await tx.updateVersion(previous.id, { status: templateVersionMachine.next('published', 'supersede') });
       const published = await tx.updateVersion(v.id, { status, published_by: actorText(by.actor), published_at: now, ...(body.note ? { note: body.note } : {}) });

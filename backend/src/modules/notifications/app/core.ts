@@ -184,7 +184,9 @@ export class Core {
       if (!live || sameContent(live.content, content)) continue;
       const done = await this.repo.transaction(async (tx) => {
         const now = this.now();
-        const current = await tx.getTemplate(t.id);
+        // the template is locked before it is written, and before its versions: that is this module's lock
+        // order, and publish() takes the two the same way round (docs/10 §11.2 rules 1 and 3)
+        const current = await tx.getTemplate(t.id, { forUpdate: true });
         if (current?.live_version_id !== live.id) return false; // changed meanwhile
         const prev = await tx.getVersion(live.id, { forUpdate: true });
         if (prev?.status === 'published') await tx.updateVersion(live.id, { status: templateVersionMachine.next('published', 'supersede') });

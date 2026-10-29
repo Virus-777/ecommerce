@@ -234,6 +234,14 @@ describe('seller preferences', () => {
     expect(other.statusCode).toBe(403);
     const unknown = await app.inject({ method: 'PUT', url: `/api/seller/notifications/preferences/members/${newId()}`, headers: as.seller(owner), payload: { groups: {}, channel: 'email' } });
     expect(unknown.statusCode).toBe(404);
+
+    // who a seller broadcast reaches is read from the member's own promotions flag inside the groups document
+    const promos = async () => (await service.admin.broadcastTargets('sellers', 'email')).map((t: any) => t.accountId);
+    expect(await promos()).not.toContain(agent.accountId);
+    const on = await app.inject({ method: 'PUT', url: `/api/seller/notifications/preferences/members/${agent.memberId}`, headers: as.seller(agent), payload: { groups: { promotions: true }, channel: 'email' } });
+    expect(on.statusCode, on.body).toBe(200);
+    expect(on.json()).toMatchObject({ groups: { promotions: true } });
+    expect(await promos()).toContain(agent.accountId);
   });
 });
 

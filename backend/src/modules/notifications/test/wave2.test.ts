@@ -5,7 +5,7 @@
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { NotificationsService } from '../service.js';
-import { as, bootWorld, newId, publish, type World } from './harness.js';
+import { as, bootWorld, newId, publish, tables, type World } from './harness.js';
 
 let app: FastifyInstance;
 let world: World;
@@ -25,8 +25,8 @@ const ok = async (method: 'GET' | 'POST' | 'PUT', url: string, headers: Record<s
   return res.json();
 };
 const welcome = (accountId: string) => service.notify({ topic: 'customer.account.welcome', recipients: [{ kind: 'customer', accountId }], link: { kind: 'account', id: accountId, screen: 'account/overview' }, context: {}, dedupeKey: `w2:${newId()}` });
-const mention = (accountId: string, actionRequired = false) =>
-  service.notify({ topic: 'staff.mention', recipients: [{ kind: 'staff_member', accountId }], link: { kind: 'payout', id: newId(), screen: 'admin/payouts' }, context: { mention: { by: 'Theo Grant', text: 'Check this' } }, dedupeKey: `w2:${newId()}`, actionRequired });
+const mention = (accountId: string, actionRequired = false, dedupeKey = `w2:${newId()}`) =>
+  service.notify({ topic: 'staff.mention', recipients: [{ kind: 'staff_member', accountId }], link: { kind: 'payout', id: newId(), screen: 'admin/payouts' }, context: { mention: { by: 'Theo Grant', text: 'Check this' } }, dedupeKey, actionRequired });
 
 describe('inbox archive (G62)', () => {
   it('a customer archives one notice and all the rest; archived notices leave the inbox and its counts', async () => {
@@ -79,6 +79,24 @@ describe('inbox archive (G62)', () => {
     expect((await ok('GET', '/api/admin/notifications/inbox', h)).items.map((n: any) => n.id)).toEqual([action]);
     expect((await ok('GET', '/api/admin/notifications/inbox?archived=true', h)).items.map((n: any) => n.id)).toEqual([info]);
     expect((await ok('GET', '/api/admin/notifications/inbox/summary', h)).unread).toBe(1);
+  });
+
+  it('an action notice can be archived once it is resolved or expired, but not while its work is open', async () => {
+    const s = world.staff();
+    const h = as.staff(s);
+    const key = `w2:${newId()}`;
+    const [open] = (await mention(s.accountId, true)).noticeIds;
+    const [resolved] = (await mention(s.accountId, true, key)).noticeIds;
+    const [expired] = (await mention(s.accountId, true)).noticeIds;
+    // resolved through the public path; expired the way the expiry job leaves a notice with no deadline
+    expect(await service.resolve(key)).toBe(1);
+    await tables(app).table('notices').update(expired!, { expired_at: new Date() });
+
+    // archive-all takes the two whose work is done and leaves the open one, which is still refused one by one
+    expect(await ok('POST', '/api/admin/notifications/inbox/archive-all', h, {})).toEqual({ updated: 2 });
+    expect((await ok('GET', '/api/admin/notifications/inbox', h)).items.map((n: any) => n.id)).toEqual([open]);
+    expect((await ok('GET', '/api/admin/notifications/inbox?archived=true', h)).items.map((n: any) => n.id).sort()).toEqual([expired, resolved].sort());
+    expect((await call('POST', `/api/admin/notifications/inbox/${open}/archive`, h)).json().error.code).toBe('NOTICE_ACTION_OPEN');
   });
 
   it('a seller member archives for themselves only', async () => {

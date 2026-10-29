@@ -84,8 +84,11 @@ export class Preferences {
       invalidated_at: null,
     };
     const row = await repo.transaction(async (tx) => {
-      const byToken = await tx.pushDeviceByHash(hash);
-      const byInstall = input.installationId ? await tx.pushDeviceByInstallation(owner.accountId, owner.audience, input.installationId) : undefined;
+      // both rows are written below, so both are locked as they are read — by token first and then by
+      // installation, always that way round, so two registrations cannot take them in opposite orders
+      // (docs/10 §11.2 rules 1 and 3)
+      const byToken = await tx.pushDeviceByHash(hash, { forUpdate: true });
+      const byInstall = input.installationId ? await tx.pushDeviceByInstallation(owner.accountId, owner.audience, input.installationId, { forUpdate: true }) : undefined;
       if (byInstall && byToken && byInstall.id !== byToken.id) {
         // the installation got a new token that another row holds: keep one row
         await tx.updatePushDevice(byToken.id, { token_hash: `${byToken.token_hash}:replaced:${newId()}`, invalidated_at: now, enabled: false });

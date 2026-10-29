@@ -5,6 +5,8 @@
 import type { AddressInfo } from 'node:net';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { Patch } from '../../../kernel/store/index.js';
+import type { IdentityDb } from '../../../spec/identity.js';
 import { buildTestApp, movingClock } from '../../../testing/app.js';
 import { flows } from '../../../testing/flows.js';
 import type { NotificationsService } from '../service.js';
@@ -153,9 +155,12 @@ describe('the heartbeat re-checks real staff sessions, without counting as activ
   let app: FastifyInstance;
   let base: string;
   let owner: { email: string; password: string };
-  /** identity's sessions collection (another module's: read and written directly, as a test only may) */
-  const sessions = () => app.kernel.mongo.db.collection<{ _id: string; last_active_at: Date }>('identity.sessions');
-  const setSession = (sid: string, patch: Record<string, unknown>) => sessions().updateOne({ _id: sid }, { $set: patch });
+  /**
+   * identity's sessions table (another module's: read and written directly, as a test only may), through the
+   * store the app chose for it — so this keeps working when identity's data moves to MySQL in its own tranche.
+   */
+  const sessions = () => app.kernel.boot.stores.get('identity')!.table<IdentityDb['sessions']>('sessions');
+  const setSession = (sid: string, patch: Patch<IdentityDb['sessions']>) => sessions().update(sid, patch);
   /** A new Admin Center session of the owner (password sign-in) */
   const signIn = async () => {
     const r = await flows(app, clock).signIn({ email: owner.email, password: owner.password, audience: 'admin' });
@@ -192,7 +197,7 @@ describe('the heartbeat re-checks real staff sessions, without counting as activ
       await settle(3 * HEARTBEAT_MS);
     }
     expect(s.ended).toBe(false);
-    expect((await sessions().findOne({ _id: sid }))!.last_active_at.getTime()).toBe(tenMinutesAgo.getTime());
+    expect((await sessions().get(sid))!.last_active_at.getTime()).toBe(tenMinutesAgo.getTime());
     // past staffIdleMinutes (30) without a request
     await setSession(sid, { last_active_at: new Date(clock.now().getTime() - 31 * 60_000) });
     clock.advance(6_000);

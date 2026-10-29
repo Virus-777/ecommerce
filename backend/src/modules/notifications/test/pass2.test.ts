@@ -84,6 +84,12 @@ describe('external recipients', () => {
     expect(mail[0]!.message.text).toContain('Deliver to: Reno, NV warehouse, 100 Industrial Way, Reno, NV 89502, US');
     const log = await deliveries(`topicKey=supplier.purchase_order.sent&address=${encodeURIComponent(supplierEmail)}`);
     expect(log).toMatchObject([{ status: 'delivered', noticeId: null, accountId: null, linkedRef: po.ref }]);
+    // the log's date filter is bounded at both ends and inclusive at both: a window that ends before the send is empty
+    const sent = new Date(log[0].createdAt as string).getTime();
+    const at = (ms: number) => new Date(sent + ms).toISOString();
+    expect(await deliveries(`address=${encodeURIComponent(supplierEmail)}&from=${at(-1000)}&to=${at(1000)}`)).toHaveLength(1);
+    expect(await deliveries(`address=${encodeURIComponent(supplierEmail)}&from=${at(0)}&to=${at(0)}`)).toHaveLength(1);
+    expect(await deliveries(`address=${encodeURIComponent(supplierEmail)}&from=${at(-2000)}&to=${at(-1000)}`)).toHaveLength(0);
     const row = await service.core.repo.getDelivery(log[0].id);
     expect(row?.recipient_kind).toBe('external_email');
 
