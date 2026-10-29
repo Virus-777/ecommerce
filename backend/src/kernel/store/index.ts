@@ -63,7 +63,14 @@ export interface StoreReadOptions {
 
 export interface StoreFindOptions extends StoreReadOptions {
   sort?: Readonly<Record<string, 1 | -1>>;
-  skip?: number;
+  /**
+   * Rows to pass over before the ones wanted — SQL's `OFFSET`, which MongoDB spells `skip` and the facade
+   * translates. It was called `skip` here until 2026-10-29, which meant the MySQL table (whose option is
+   * `offset`) **silently ignored it**: a read written `{ skip: keep, limit: 1 }` to find a retention cut-off
+   * took the newest row instead and a trim deleted everything the owner had, with nothing in the log about
+   * it. One name, and it is SQL's, because that is the reading the rest of this vocabulary takes.
+   */
+  offset?: number;
   forUpdate?: boolean;
 }
 
