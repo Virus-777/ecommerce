@@ -58,6 +58,17 @@ describe('finding a server', () => {
   });
 });
 
+/**
+ * This file starts servers of its own and **stops them**, which `stop()` does by connecting to the port and
+ * asking the server there to shut down. A fixed port therefore makes this file a hazard to the one server the
+ * rest of the run shares (testing/mysql.ts): choosing the run's own port for a full-suite run, as happened on
+ * 2026-10-29, had this file shut that server down six minutes in and 236 files then failed to connect.
+ *
+ * So the port is derived from the run's rather than written down: a hundred above it, which cannot be the
+ * run's own and leaves room for the four or five builders a tranche has going at once (§23).
+ */
+const PORT = Number(process.env.MYSQL_PORT ?? 3307) + 100;
+
 describe('starting one', () => {
   const dataDir = join(tmpdir(), 'marketly-portable-test');
   let server: PortableMysql | undefined;
@@ -69,12 +80,12 @@ describe('starting one', () => {
 
   it('initialises, serves queries, and stops cleanly', async () => {
     rmSync(dataDir, { recursive: true, force: true });
-    server = await startPortableMysql({ dataDir, port: 3399, forTests: true });
-    expect(server.url).toBe('mysql://root@127.0.0.1:3399');
+    server = await startPortableMysql({ dataDir, port: PORT, forTests: true });
+    expect(server.url).toBe(`mysql://root@127.0.0.1:${PORT}`);
     expect(server.version).toMatch(/^\d+\.\d+\.\d+$/);
 
     const { createConnection } = await import('mysql2/promise');
-    const conn = await createConnection({ host: '127.0.0.1', port: 3399, user: 'root', charset: CONNECT_CHARSET });
+    const conn = await createConnection({ host: '127.0.0.1', port: PORT, user: 'root', charset: CONNECT_CHARSET });
     await conn.query(SESSION_COLLATION);
     // the session defaults of §20 are what makes this server behave like production
     const [rows] = await conn.query<any[]>(
@@ -89,14 +100,14 @@ describe('starting one', () => {
   }, 180_000);
 
   it('cannot be connected with the collation as the handshake charset, which is why SESSION_COLLATION exists', async () => {
-    server = await startPortableMysql({ dataDir, port: 3399, forTests: true });
+    server = await startPortableMysql({ dataDir, port: PORT, forTests: true });
     const { createConnection } = await import('mysql2/promise');
     // the handshake carries the collation in one byte and utf8mb4_0900_bin is id 309, so this never reaches the
     // server. If this test ever stops throwing, mysql2 has grown a wider field and §10.2 can be simplified.
-    await expect(createConnection({ host: '127.0.0.1', port: 3399, user: 'root', charset: 'utf8mb4_0900_bin' })).rejects.toThrow(/out of range|ERR_OUT_OF_RANGE/i);
+    await expect(createConnection({ host: '127.0.0.1', port: PORT, user: 'root', charset: 'utf8mb4_0900_bin' })).rejects.toThrow(/out of range|ERR_OUT_OF_RANGE/i);
 
     // the two-step form gives the session the collation that §5.2 depends on
-    const conn = await createConnection({ host: '127.0.0.1', port: 3399, user: 'root', charset: CONNECT_CHARSET });
+    const conn = await createConnection({ host: '127.0.0.1', port: PORT, user: 'root', charset: CONNECT_CHARSET });
     await conn.query(SESSION_COLLATION);
     const [rows] = await conn.query<any[]>("SELECT @@collation_connection coll, ('ABC' = 'abc') AS abc_eq");
     expect(rows[0]).toMatchObject({ coll: 'utf8mb4_0900_bin', abc_eq: 0 });
@@ -130,9 +141,9 @@ describe('starting one', () => {
   }, 180_000);
 
   it('reuses the data directory on a second start, without initialising again', async () => {
-    server = await startPortableMysql({ dataDir, port: 3399, forTests: true });
+    server = await startPortableMysql({ dataDir, port: PORT, forTests: true });
     const { createConnection } = await import('mysql2/promise');
-    const conn = await createConnection({ host: '127.0.0.1', port: 3399, user: 'root' });
+    const conn = await createConnection({ host: '127.0.0.1', port: PORT, user: 'root' });
     await conn.query('CREATE DATABASE IF NOT EXISTS reuse_check');
     const [dbs] = await conn.query<any[]>("SHOW DATABASES LIKE 'reuse_check'");
     expect(dbs).toHaveLength(1);

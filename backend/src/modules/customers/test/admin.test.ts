@@ -84,6 +84,31 @@ describe('customer list and detail', () => {
     expect(paged.body.total).toBeGreaterThan(0);
   });
 
+  it('filters on the verification state and finds a customer by the digits of their phone', async () => {
+    const tag = `Zv${Date.now().toString(36)}`;
+    const [plain, verified] = [await kit.customer({ lastName: `${tag}a` }), await kit.customer({ lastName: `${tag}b` })];
+    const list = async (qs: string) =>
+      ((await kit.call('GET', `${ADMIN}/customers?q=${tag}&sort=name&${qs}`, { token: kit.staff(['customers.accounts.view']) })).body.items as any[]).map((x) => x.id);
+    expect(await list('verification=not_verified')).toEqual([plain.customerId, verified.customerId]);
+
+    const at = kit.clock.now().toISOString();
+    await kit.publish('identity', 'identity.user.verified', { accountId: verified.accountId, channel: 'email', email: verified.email, at });
+    expect(await list('verification=email_only')).toEqual([verified.customerId]);
+    expect(await list('verification=not_verified')).toEqual([plain.customerId]);
+    expect(await list('verification=email_and_phone')).toEqual([]);
+
+    await kit.publish('identity', 'identity.user.verified', { accountId: verified.accountId, channel: 'phone', email: verified.email, phone: '+15550127788', at });
+    expect(await list('verification=email_and_phone')).toEqual([verified.customerId]);
+    expect(await list('verification=email_only')).toEqual([]);
+
+    // the phone search: four or more typed digits match the number whatever separates them
+    const byPhone = async (q: string) =>
+      ((await kit.call('GET', `${ADMIN}/customers?q=${encodeURIComponent(q)}`, { token: kit.staff(['customers.accounts.view']) })).body.items as any[]).map((x) => x.id);
+    expect(await byPhone('555 012 7788')).toEqual([verified.customerId]);
+    expect(await byPhone('(555) 012-7788')).toEqual([verified.customerId]);
+    expect(await byPhone('5550199999')).toEqual([]);
+  });
+
   it('hasOpenCases and hasAbuseReports filter before paging: full pages and the right total', async () => {
     const tag = `Zf${Date.now().toString(36)}`;
     const [a, b, c] = [await kit.customer({ lastName: `${tag}a` }), await kit.customer({ lastName: `${tag}b` }), await kit.customer({ lastName: `${tag}c` })];

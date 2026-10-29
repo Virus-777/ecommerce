@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { distanceMiles } from '../../../kernel/lib/geo.js';
 import { CITY_CENTROIDS, ZIP_CENTROIDS, zipState } from '../providers/geocoder-data.js';
 import { cityKey, devGeocoder, lookupCentroid, unconfiguredGeocoder } from '../providers/geocoder.js';
-import { address, boot, STORE, type Kit } from './helpers.js';
+import { address, boot, customersTable, STORE, type Kit } from './helpers.js';
 
 let kit: Kit;
 beforeAll(async () => {
@@ -10,7 +10,9 @@ beforeAll(async () => {
 });
 afterAll(() => kit.app.close());
 
-const addresses = () => (kit.app.kernel as any).mongo.db.collection('customers.addresses');
+// the addresses table through the store the app chose (MongoDB or MySQL), not a store of this test's own
+const addresses = () => customersTable(kit.app, 'addresses');
+const addressRow = async (id: string) => (await addresses().get(id))!;
 const PIONEER_SQUARE = { lat: 45.5189, lng: -122.6793 };
 
 describe('dev geocoder (built-in centroids)', () => {
@@ -57,7 +59,7 @@ describe('customer location', () => {
     const res = await kit.call('POST', `${STORE}/addresses`, { token: c.token, body: { label: 'Home', address: address({ line1: '1120 SW 5th Ave', postalCode: '97204' }) } });
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     expect(JSON.stringify(res.body)).not.toMatch(/lat|lng|geocod/);
-    const row = await addresses().findOne({ _id: res.body.id });
+    const row = await addressRow(res.body.id);
     expect(row.geocode_precision).toBe('zip');
     expect(row.geocoded_at).toBeInstanceOf(Date);
 
@@ -81,7 +83,7 @@ describe('customer location', () => {
     expect((await kit.service.customerLocation(c.customerId))?.city).toBe('Woodburn');
     await kit.call('PATCH', `${STORE}/addresses/${work.body.id}`, { token: c.token, body: { label: 'Work', address: address({ line1: '1 Main St', city: 'Millbrook', region: 'NY', postalCode: '12545' }) } });
     expect(await kit.service.customerLocation(c.customerId)).toBeNull(); // not placed: the city is shown without a distance
-    const notPlaced = await addresses().findOne({ _id: work.body.id });
+    const notPlaced = await addressRow(work.body.id);
     expect([notPlaced.lat, notPlaced.lng, notPlaced.geocode_precision]).toEqual([null, null, null]);
     expect(notPlaced.geocoded_at).toBeInstanceOf(Date);
   });
@@ -97,13 +99,14 @@ describe('customer location', () => {
   it('backfills addresses saved before geocoding existed (customers.geocode-addresses), defaults first, and only once', async () => {
     const c = await kit.customer();
     const res = await kit.call('POST', `${STORE}/addresses`, { token: c.token, body: { address: address({ line1: '1120 SW 5th Ave', postalCode: '97204' }) } });
-    // as stored before: no geo fields at all
-    await addresses().updateOne({ _id: res.body.id }, { $unset: { lat: '', lng: '', geocoded_at: '', geocode_precision: '' } });
-    const updatedAt = (await addresses().findOne({ _id: res.body.id })).updated_at;
+    // as stored before geocoding existed: nothing placed. (This was a MongoDB `$unset` of the four fields;
+    // the store vocabulary has one null, and MongoDB's own table reads a missing field back as null.)
+    await addresses().update(res.body.id, { lat: null, lng: null, geocoded_at: null, geocode_precision: null });
+    const updatedAt = (await addressRow(res.body.id)).updated_at;
     await kit.app.kernel.jobs.runNow('customers.geocode-addresses');
-    const row = await addresses().findOne({ _id: res.body.id });
+    const row = await addressRow(res.body.id);
     expect(row.geocode_precision).toBe('zip');
-    expect(Number(row.lat.toString())).toBeCloseTo(ZIP_CENTROIDS['97204']![0], 4);
+    expect(Number(row.lat)).toBeCloseTo(ZIP_CENTROIDS['97204']![0], 4);
     expect(row.updated_at).toEqual(updatedAt); // the address itself did not change
     expect((await kit.service.customerLocation(c.customerId))?.addressId).toBe(res.body.id);
 
@@ -114,8 +117,8 @@ describe('customer location', () => {
   it('places a default address never geocoded when its location is first asked for', async () => {
     const c = await kit.customer();
     const res = await kit.call('POST', `${STORE}/addresses`, { token: c.token, body: { address: address({ line1: '2122 NE Broadway St', postalCode: '97232' }) } });
-    await addresses().updateOne({ _id: res.body.id }, { $set: { lat: null, lng: null, geocoded_at: null, geocode_precision: null } });
+    await addresses().update(res.body.id, { lat: null, lng: null, geocoded_at: null, geocode_precision: null });
     expect(await kit.service.customerLocation(c.customerId)).toMatchObject({ addressId: res.body.id, precision: 'zip' });
-    expect((await addresses().findOne({ _id: res.body.id })).geocoded_at).toBeInstanceOf(Date);
+    expect((await addressRow(res.body.id)).geocoded_at).toBeInstanceOf(Date);
   });
 });

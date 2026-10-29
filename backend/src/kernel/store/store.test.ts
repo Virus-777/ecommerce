@@ -428,6 +428,18 @@ describe.each(['mongo', 'mysql'])('%s', (kind) => {
     expect((await notes().distinct<string>('owner')).sort()).toEqual(['ann', 'bo']);
   });
 
+  it('passes over the first rows of a read, by the same name on both stores', async () => {
+    await notes().insertMany([note('n1'), note('n2'), note('n3'), note('n4')]);
+    const ids = async (o: Record<string, unknown>) => (await notes().find({}, { sort: { id: 1 }, ...o } as never)).map((r) => r.id);
+
+    expect(await ids({ offset: 1 })).toEqual(['n2', 'n3', 'n4']);
+    expect(await ids({ offset: 2, limit: 1 })).toEqual(['n3']);
+    // the shape that found this: "the row after the ones we keep", which decides a retention cut-off
+    expect(await ids({ offset: 3, limit: 1 })).toEqual(['n4']);
+    expect(await ids({ offset: 9 })).toEqual([]);
+    expect(await ids({ offset: 0 })).toEqual(['n1', 'n2', 'n3', 'n4']);
+  });
+
   it('counts rows per key, by one column and by two', async () => {
     await notes().insertMany([
       note('n1', { owner: 'ann', status: 'live' }),

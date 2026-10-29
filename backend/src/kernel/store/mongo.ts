@@ -77,7 +77,8 @@ function neutralTable<R extends object>(t: MongoTable<R>): StoreTable<R> {
   return {
     get: (id, o) => t.get(id, o),
     findOne: async (where, o) => t.findOne(filterOf(where), o),
-    find: async (where, o: StoreFindOptions = {}) => t.find(filterOf(where), o),
+    // `offset` is SQL's name for it and this vocabulary's; MongoDB's own option is `skip`
+    find: async (where, o: StoreFindOptions = {}) => t.find(filterOf(where), { ...o, ...(o.offset === undefined ? {} : { skip: o.offset }) }),
     getMany: (ids, o) => t.getMany(ids, o),
     count: async (where) => t.count(filterOf(where)),
     exists: async (where) => t.exists(filterOf(where)),

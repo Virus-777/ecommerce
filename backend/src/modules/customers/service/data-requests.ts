@@ -225,7 +225,8 @@ export class DataRequests {
       if (o.anonymise) await repo.anonymiseAddresses(c.id, now);
       await repo.deleteViews({ kind: 'customer', id: c.id });
       // promotional consent stops with the account (essential notices for open obligations stay with notifications)
-      const prefs = (await repo.getPreferences(c.id)) ?? this.marketing.defaultPrefs(c.id, now);
+      // read for update: the row is upserted from what it holds, a few lines down (§11.2 rule 1)
+      const prefs = (await repo.getPreferences(c.id, { forUpdate: true })) ?? this.marketing.defaultPrefs(c.id, now);
       const consent: ConsentRow[] = [];
       for (const k of Object.keys(PREFS) as PrefKey[]) {
         const [col, channel] = PREFS[k];
@@ -233,7 +234,8 @@ export class DataRequests {
       }
       await repo.upsertPreferences({ ...prefs, email_promotions: false, sms_promotions: false, push_promotions: false, wishlist_alerts: false, personalized_recommendations: false, recent_searches: false, updated_at: now });
       await repo.insertConsent(consent);
-      const open = await repo.openDataRequest(c.id, 'closure');
+      // read for update: the next state is computed from open.state and written back (§11.2 rule 1)
+      const open = await repo.openDataRequest(c.id, 'closure', { forUpdate: true });
       if (open) {
         await repo.updateDataRequest(open.id, { state: dataRequestMachine.next(open.state as never, 'completeClosure'), completed_at: now, failure: null });
       }
