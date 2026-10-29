@@ -44,7 +44,11 @@ async function startMysql(project: TestProject): Promise<PortableMysql | undefin
       project.provide('mysqlUrl', process.env.TEST_MYSQL_URL);
       return undefined;
     }
-    const mysql = await startPortableMysql({ dataDir: join(tmpdir(), 'marketly-test-mysql'), forTests: true });
+    // One data directory and one port per test run, so two runs can go at once: Y2's builders each convert
+    // a module in a worktree of their own and run that module's tests both ways while the others do too.
+    // `MYSQL_PORT` is read by startPortableMysql; a second server on one data directory is refused by the
+    // first one's lock file, which is why the directory has to move with the port.
+    const mysql = await startPortableMysql({ dataDir: process.env.TEST_MYSQL_DIR ?? join(tmpdir(), 'marketly-test-mysql'), forTests: true });
     project.provide('mysqlUrl', mysql.url);
     return mysql;
   } catch (err) {
