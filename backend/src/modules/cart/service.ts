@@ -326,6 +326,8 @@ export class CartService implements CartPublicApi {
     }
     const days = await this.retention(s.kind);
     await this.repo.transaction(async (tx) => {
+      // cart lock first (§11.2 rule 3)
+      await tx.getCart(cart.id, { forUpdate: true });
       const locked = await tx.getItem(cart.id, item.id, { forUpdate: true });
       if (!locked) throw notFound();
       // reducing to a lower purchase limit accepts the offer edit that lowered it (its terms version)
@@ -341,6 +343,8 @@ export class CartService implements CartPublicApi {
     const { cart, item } = await this.lineOf(s, itemId);
     const days = await this.retention(s.kind);
     await this.repo.transaction(async (tx) => {
+      // cart lock first (§11.2 rule 3)
+      await tx.getCart(cart.id, { forUpdate: true });
       await tx.deleteItems([item.id]);
       await this.touch(cart.id, days, tx);
     });
@@ -384,6 +388,8 @@ export class CartService implements CartPublicApi {
     if (quantity !== line.eval.item.quantity) patch.quantity = quantity;
     const days = await this.retention(s.kind);
     await this.repo.transaction(async (tx) => {
+      // cart lock first (§11.2 rule 3)
+      await tx.getCart(cart.id, { forUpdate: true });
       const locked = await tx.getItem(cart.id, itemId, { forUpdate: true });
       if (!locked) throw notFound();
       await tx.acceptNotices([...new Set(noticeIds)], this.now());
@@ -407,6 +413,8 @@ export class CartService implements CartPublicApi {
       const quantity = body.quantity ?? item.quantity;
       if (quantity > f.max) throw this.limitError(f.max, f.limitKind);
       await this.repo.transaction(async (tx) => {
+        // cart lock first (§11.2 rule 3)
+        await tx.getCart(cart.id, { forUpdate: true });
         await tx.updateItem(item.id, { quantity, updated_at: now });
         await this.touch(cart.id, days, tx);
       });
@@ -414,6 +422,8 @@ export class CartService implements CartPublicApi {
     }
     const requested = body.quantity ?? Math.min(item.quantity, Math.max(f.max, 1));
     await this.repo.transaction(async (tx) => {
+      // cart lock first (§11.2 rule 3)
+      await tx.getCart(cart.id, { forUpdate: true });
       const locked = await tx.getItem(cart.id, item.id, { forUpdate: true });
       if (!locked) throw notFound();
       const other = await tx.getItemByOffer(cart.id, f.offer.id, { forUpdate: true });
@@ -459,6 +469,8 @@ export class CartService implements CartPublicApi {
     if (gone.length) {
       const days = await this.retention(s.kind);
       await this.repo.transaction(async (tx) => {
+        // cart lock first (§11.2 rule 3)
+        await tx.getCart(cart.id, { forUpdate: true });
         await tx.deleteItems(gone.map((i) => i.id));
         await this.touch(cart.id, days, tx);
       });
@@ -702,6 +714,8 @@ export class CartService implements CartPublicApi {
     const now = this.now();
     const days = await this.retention(s.kind);
     await this.repo.transaction(async (tx) => {
+      // cart lock first (§11.2 rule 3)
+      await tx.getCart(cart.id, { forUpdate: true });
       const existing = await tx.findSavedByOffer(s.owner, item.offer_id, { forUpdate: true });
       if (existing) await tx.updateSaved(existing.id, { saved_at: now });
       else

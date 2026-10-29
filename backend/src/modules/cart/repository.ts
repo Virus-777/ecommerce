@@ -13,6 +13,12 @@ const ownerFilter = (owner: OwnerKey): Where<CartRow> & Where<SavedRow> =>
  * in the one vocabulary both databases understand (BUILDING-MODULES.md §5c): `ctx.store` is MongoDB or MySQL,
  * decided at boot by MYSQL_MODULES, and this file reads the same either way. No read here needs a join, a
  * window, a group with more than a count or a money total, so cart has no per-store queries port (docs/10 §10.5e).
+ *
+ * **Lock order (§11.2 rule 3): the cart, then its lines, then their notices and queue entries.** Every
+ * transaction that writes a cart's lines locks the cart row first, even the ones that only delete a line and
+ * stamp the cart afterwards, so two writers of one cart never hold half of each other's rows. The one place
+ * that goes the other way is `deleteItems`, where the foreign keys refuse to let a line go while a notice or a
+ * queue entry points at it — the cart's lock above it is what keeps that from meeting the order written here.
  */
 export class CartRepository {
   readonly #t;
