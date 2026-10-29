@@ -67,7 +67,12 @@ export function parseColumn(name: string, notation: string, where: string, probl
   const refOption = (refM?.[2] as 'cascade' | 'nofk' | undefined) ?? 'restrict';
   if (!refM && refOption !== 'restrict') problems.push(`${where}: "${refOption}" needs a reference (→ table) in "${notation}"`);
   let enumValues: string[] | null = null;
-  let identity = false;
+  // `bigserial` *is* an identity column: PostgreSQL numbered it from a sequence, MongoDB numbers it from a
+  // kernel counter and MySQL from AUTO_INCREMENT. Only `(identity)` used to say so, which left the one
+  // bigserial in the spec (identity.sign_in_attempts.id) as a plain BIGINT that every insert had to fill —
+  // 1364 on MySQL, and before that a hand-numbered column inside a transaction, which is a pool deadlock
+  // waiting to happen (docs/10 §10.5e, audit's seq).
+  let identity = /^(?:big)?serial\b/.test(sqlType);
   let check = checkM ? `${name} ${checkM[1]!.trim()}` : null;
   const kept: string[] = [];
   for (const c of comments) {

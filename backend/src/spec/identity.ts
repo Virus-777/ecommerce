@@ -5592,7 +5592,7 @@ export const spec = defineModuleSpec({
       "booleans": [
         "succeeded"
       ],
-      "identity": null,
+      "identity": "id",
       "uniqueKeys": [
         {
           "name": "PRIMARY",

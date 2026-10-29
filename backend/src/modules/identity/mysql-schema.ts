@@ -395,7 +395,7 @@ export const unit: MysqlUnit = {
     {
       name: "identity_sign_in_attempts",
       columns: [
-        {"name":"id","ddl":"`id` BIGINT NOT NULL"},
+        {"name":"id","ddl":"`id` BIGINT NOT NULL AUTO_INCREMENT"},
         {"name":"email_normalized","ddl":"`email_normalized` VARCHAR(255) NOT NULL"},
         {"name":"ip","ddl":"`ip` VARCHAR(45) CHARACTER SET ascii COLLATE ascii_bin NOT NULL"},
         {"name":"succeeded","ddl":"`succeeded` TINYINT(1) NOT NULL"},

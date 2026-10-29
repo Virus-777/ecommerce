@@ -505,10 +505,10 @@ export class IdentityRepository {
 
   /* ---------------------------------------------------------------- sign-in attempts */
   async insertSignInAttempt(row: SignInAttemptInsert): Promise<void> {
-    // `id` is the spec's one `bigserial`, and the generator gives MySQL a plain BIGINT for it rather than an
-    // AUTO_INCREMENT (its `TableDef.identity` is null), so the row has to arrive numbered. The counter named
-    // here is the one MongoDB's own `Table` took its numbers from, so the sequence is unbroken either way.
-    await this.#t.signInAttempts.insert({ ...row, id: await this.store.nextValue('sign_in_attempts.id') });
+    // `id` is the spec's one `bigserial`: the store numbers it, from a kernel counter on MongoDB and from
+    // AUTO_INCREMENT on MySQL. Numbering it here instead is what Y2's first pass did, and audit measured
+    // what that costs inside a transaction (docs/10 §10.5e)
+    await this.#t.signInAttempts.insert(row);
   }
 
   async failedAttemptsSince(email: string, since: Date): Promise<Date[]> {

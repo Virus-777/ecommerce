@@ -350,7 +350,8 @@ export function collectionDefs(mod: ModuleSpec, plans: TablePlan[], problems: st
       decimal: stored.filter((c) => c.sqlType.startsWith('numeric')).map((c) => c.name),
       binary: stored.filter((c) => c.sqlType === 'bytea').map((c) => c.name),
       dates: stored.filter((c) => /^timestamp/.test(c.sqlType)).map((c) => c.name),
-      identity: stored.find((c) => c.identity || c.sqlType === 'bigserial')?.name ?? null,
+      // `bigserial` is parsed as an identity column (tools/lib/tables.ts), so there is one question to ask
+      identity: stored.find((c) => c.identity)?.name ?? null,
       validator: { $jsonSchema: { bsonType: 'object', required, properties, additionalProperties: false } },
       indexes,
       unenforced,

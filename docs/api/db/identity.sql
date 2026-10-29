@@ -269,7 +269,7 @@ CREATE TABLE `identity_security_events` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_bin;
 
 CREATE TABLE `identity_sign_in_attempts` (
-  `id` BIGINT NOT NULL,
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
   `email_normalized` VARCHAR(255) NOT NULL,
   `ip` VARCHAR(45) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   `succeeded` TINYINT(1) NOT NULL,
