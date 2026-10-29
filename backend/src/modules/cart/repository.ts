@@ -1,17 +1,23 @@
 import type { Page, PageRequest } from '../../kernel/lib/pagination.js';
 import { orThrow } from '../../kernel/lib/or-throw.js';
-import type { Filter, ModuleStore } from '../../kernel/mongo/index.js';
+import type { Store, Where } from '../../kernel/store/index.js';
 import { groupBy } from './domain/rules.js';
 import type { AdminCartFilter, CartAggregate, CartRow, ItemMatch, ItemRow, Lock, MergeRow, NoticeRow, OwnerKey, QueueRow, SavedRow } from './ports.js';
 
-const ownerFilter = (owner: OwnerKey): Filter =>
+/** The owner's columns, shared by carts and saved_items (both carry owner_kind, customer_id and guest_session_id) */
+const ownerFilter = (owner: OwnerKey): Where<CartRow> & Where<SavedRow> =>
   owner.kind === 'customer' ? { owner_kind: 'customer', customer_id: owner.customerId } : { owner_kind: 'guest', guest_session_id: owner.guestSessionId };
 
-/** cart.carts, cart.cart_items, cart.cart_item_notices, cart.saved_items, cart.cart_merges, cart.recheck_queue (MongoDB, docs/04-mongodb-migration.md) */
+/**
+ * cart.carts, cart.cart_items, cart.cart_item_notices, cart.saved_items, cart.cart_merges, cart.recheck_queue,
+ * in the one vocabulary both databases understand (BUILDING-MODULES.md §5c): `ctx.store` is MongoDB or MySQL,
+ * decided at boot by MYSQL_MODULES, and this file reads the same either way. No read here needs a join, a
+ * window, a group with more than a count or a money total, so cart has no per-store queries port (docs/10 §10.5e).
+ */
 export class CartRepository {
   readonly #t;
 
-  constructor(private readonly store: ModuleStore) {
+  constructor(private readonly store: Store) {
     this.#t = {
       carts: store.table<CartRow>('carts'),
       items: store.table<ItemRow>('cart_items'),
@@ -30,8 +36,8 @@ export class CartRepository {
   /** Line count, subtotal of lines without an open blocking notice and open notice count per cart (two reads instead of the subqueries) */
   async #aggregates(carts: CartRow[]): Promise<CartAggregate[]> {
     if (!carts.length) return [];
-    const items = await this.#t.items.find({ cart_id: { $in: carts.map((c) => c.id) } });
-    const open = items.length ? await this.#t.notices.find({ item_id: { $in: items.map((i) => i.id) }, resolved_at: null }) : [];
+    const items = await this.#t.items.find({ cart_id: carts.map((c) => c.id) });
+    const open = items.length ? await this.#t.notices.find({ item_id: items.map((i) => i.id), resolved_at: null }) : [];
     const blocked = new Set(open.filter((n) => n.severity === 'blocking').map((n) => n.item_id));
     const openPerItem = new Map<string, number>();
     for (const n of open) openPerItem.set(n.item_id, (openPerItem.get(n.item_id) ?? 0) + 1);
@@ -63,7 +69,7 @@ export class CartRepository {
 
   /** The most recent cart of a guest session in any status (active first) */
   async getGuestCart(guestSessionId: string, lock?: Lock): Promise<CartRow | undefined> {
-    const owner = { owner_kind: 'guest', guest_session_id: guestSessionId };
+    const owner = { owner_kind: 'guest' as const, guest_session_id: guestSessionId };
     return (
       (await this.#t.carts.findOne({ ...owner, status: 'active' }, { sort: { updated_at: -1 }, forUpdate: lock?.forUpdate })) ??
       this.#t.carts.findOne(owner, { sort: { updated_at: -1 }, forUpdate: lock?.forUpdate })
@@ -73,6 +79,12 @@ export class CartRepository {
   /**
    * undefined when the owner already has an active cart: one active cart per owner (unique partial indexes), so
    * two first adds racing for the same owner create one cart.
+   *
+   * No key is named, which is the portable spelling (§5c): both indexes are partial — `unique (customer_id)
+   * where status = 'active'` — which the two databases spell differently (a functional unique index in MySQL,
+   * a partial one in MongoDB), so naming `['customer_id']` would be no key of the MySQL table and would make
+   * MongoDB match a cart that is no longer active. With none named, both stores check every unique index the
+   * spec gives the table.
    */
   insertCart(row: CartRow): Promise<CartRow | undefined> {
     return this.#t.carts.insertIfAbsent(row);
@@ -82,9 +94,13 @@ export class CartRepository {
     return orThrow(await this.#t.carts.update(id, patch), `cart: cart ${id}`);
   }
 
-  /** Active carts idle past their expiry */
+  /**
+   * Active carts idle past their expiry. `expires_at` is NOT NULL, so "has no expiry" is not a case here; and a
+   * date comparison matches no null on either store anyway (MongoDB's query operators are type-bracketed), so
+   * this needs no `is not null` beside it.
+   */
   listExpiredCarts(now: Date, limit: number): Promise<CartRow[]> {
-    return this.#t.carts.find({ status: 'active', expires_at: { $lte: now } }, { sort: { expires_at: 1 }, limit });
+    return this.#t.carts.find({ status: 'active', expires_at: { op: '<=', value: now } }, { sort: { expires_at: 1 }, limit });
   }
 
   async listCartsAdmin(filter: AdminCartFilter, page: PageRequest): Promise<Page<CartAggregate>> {
@@ -107,16 +123,16 @@ export class CartRepository {
 
   /* ---------------------------------------------------------------- lines */
 
-  listItems(cartId: string): Promise<ItemRow[]> {
-    return this.#t.items.find({ cart_id: cartId }, { sort: { added_at: 1, id: 1 } });
+  listItems(cartId: string, lock?: Lock): Promise<ItemRow[]> {
+    return this.#t.items.find({ cart_id: cartId }, { sort: { added_at: 1, id: 1 }, forUpdate: lock?.forUpdate });
   }
 
   getItem(cartId: string, itemId: string, lock?: Lock): Promise<ItemRow | undefined> {
     return this.#t.items.findOne({ cart_id: cartId, id: itemId }, { forUpdate: lock?.forUpdate });
   }
 
-  getItemByOffer(cartId: string, offerId: string): Promise<ItemRow | undefined> {
-    return this.#t.items.findOne({ cart_id: cartId, offer_id: offerId });
+  getItemByOffer(cartId: string, offerId: string, lock?: Lock): Promise<ItemRow | undefined> {
+    return this.#t.items.findOne({ cart_id: cartId, offer_id: offerId }, { forUpdate: lock?.forUpdate });
   }
 
   countItems(cartId: string): Promise<number> {
@@ -134,21 +150,21 @@ export class CartRepository {
   /** Stamps the check time on lines that need no other change (one write for all of them) */
   async markChecked(itemIds: string[], at: Date): Promise<void> {
     if (!itemIds.length) return;
-    await this.#t.items.updateMany({ id: { $in: itemIds } }, { last_checked_at: at });
+    await this.#t.items.updateMany({ id: itemIds }, { last_checked_at: at });
   }
 
   /** Moves lines to another cart (merge) */
   async moveItems(itemIds: string[], toCartId: string, at: Date): Promise<void> {
     if (!itemIds.length) return;
-    await this.#t.items.updateMany({ id: { $in: itemIds } }, { cart_id: toCartId, updated_at: at });
+    await this.#t.items.updateMany({ id: itemIds }, { cart_id: toCartId, updated_at: at });
   }
 
-  /** Deletes lines with their notices and queue entries */
+  /** Deletes lines with their notices and queue entries (children first: both carry a foreign key to the line) */
   async deleteItems(itemIds: string[]): Promise<void> {
     if (!itemIds.length) return;
-    await this.#t.queue.deleteMany({ item_id: { $in: itemIds } });
-    await this.#t.notices.deleteMany({ item_id: { $in: itemIds } });
-    await this.#t.items.deleteMany({ id: { $in: itemIds } });
+    await this.#t.queue.deleteMany({ item_id: itemIds });
+    await this.#t.notices.deleteMany({ item_id: itemIds });
+    await this.#t.items.deleteMany({ id: itemIds });
   }
 
   /** Lines by id (any cart) */
@@ -158,27 +174,27 @@ export class CartRepository {
 
   /** Lines of active carts matching any of the given ids */
   async findActiveItems(match: ItemMatch): Promise<ItemRow[]> {
-    const or: Filter[] = [];
-    if (match.offerIds?.length) or.push({ offer_id: { $in: match.offerIds } });
-    if (match.stockItemIds?.length) or.push({ stock_item_id: { $in: match.stockItemIds } });
-    if (match.sellerIds?.length) or.push({ seller_id: { $in: match.sellerIds } });
-    if (match.productIds?.length) or.push({ product_id: { $in: match.productIds } });
+    const or: Where<ItemRow>[] = [];
+    if (match.offerIds?.length) or.push({ offer_id: match.offerIds });
+    if (match.stockItemIds?.length) or.push({ stock_item_id: match.stockItemIds });
+    if (match.sellerIds?.length) or.push({ seller_id: match.sellerIds });
+    if (match.productIds?.length) or.push({ product_id: match.productIds });
     if (!or.length) return [];
-    const items = await this.#t.items.find({ $or: or });
+    const items = await this.#t.items.find({ or });
     if (!items.length) return [];
-    const active = new Set(await this.#t.carts.distinct<string>('id', { id: { $in: [...new Set(items.map((i) => i.cart_id))] }, status: 'active' }));
+    const active = new Set(await this.#t.carts.distinct<string>('id', { id: [...new Set(items.map((i) => i.cart_id))], status: 'active' }));
     return items.filter((i) => active.has(i.cart_id));
   }
 
   async countActiveCartsWithOffer(offerId: string): Promise<number> {
     const cartIds = await this.#t.items.distinct<string>('cart_id', { offer_id: offerId });
-    return cartIds.length ? this.#t.carts.count({ id: { $in: cartIds }, status: 'active' }) : 0;
+    return cartIds.length ? this.#t.carts.count({ id: cartIds, status: 'active' }) : 0;
   }
 
   /* ---------------------------------------------------------------- notices */
 
-  listNotices(itemIds: string[]): Promise<NoticeRow[]> {
-    return this.#t.notices.find({ item_id: { $in: itemIds } }, { sort: { detected_at: 1, id: 1 } });
+  listNotices(itemIds: string[], lock?: Lock): Promise<NoticeRow[]> {
+    return this.#t.notices.find({ item_id: itemIds }, { sort: { detected_at: 1, id: 1 }, forUpdate: lock?.forUpdate });
   }
 
   insertNotices(rows: NoticeRow[]): Promise<void> {
@@ -187,19 +203,19 @@ export class CartRepository {
 
   async resolveNotices(ids: string[], at: Date): Promise<void> {
     if (!ids.length) return;
-    await this.#t.notices.updateMany({ id: { $in: ids }, resolved_at: null }, { resolved_at: at });
+    await this.#t.notices.updateMany({ id: ids, resolved_at: null }, { resolved_at: at });
   }
 
   async acceptNotices(ids: string[], at: Date): Promise<void> {
     if (!ids.length) return;
-    await this.#t.notices.updateMany({ id: { $in: ids }, resolved_at: null }, { accepted_at: at, resolved_at: at });
+    await this.#t.notices.updateMany({ id: ids, resolved_at: null }, { accepted_at: at, resolved_at: at });
   }
 
   /** The badge: units in the cart and lines with an open warning or blocking notice (two reads) */
   async badgeCounts(cartId: string): Promise<{ itemCount: number; attentionCount: number }> {
     const items = await this.#t.items.find({ cart_id: cartId });
     if (!items.length) return { itemCount: 0, attentionCount: 0 };
-    const attention = await this.#t.notices.distinct<string>('item_id', { item_id: { $in: items.map((i) => i.id) }, resolved_at: null, severity: { $in: ['warning', 'blocking'] } });
+    const attention = await this.#t.notices.distinct<string>('item_id', { item_id: items.map((i) => i.id), resolved_at: null, severity: ['warning', 'blocking'] });
     return { itemCount: items.reduce((s, i) => s + i.quantity, 0), attentionCount: attention.length };
   }
 
@@ -214,7 +230,7 @@ export class CartRepository {
   }
 
   listMerges(cartId: string): Promise<MergeRow[]> {
-    return this.#t.merges.find({ $or: [{ from_cart_id: cartId }, { into_cart_id: cartId }] }, { sort: { at: -1 } });
+    return this.#t.merges.find({ or: [{ from_cart_id: cartId }, { into_cart_id: cartId }] }, { sort: { at: -1 } });
   }
 
   /* ---------------------------------------------------------------- recheck queue */
@@ -230,7 +246,7 @@ export class CartRepository {
 
   async dequeue(itemIds: string[]): Promise<void> {
     if (!itemIds.length) return;
-    await this.#t.queue.deleteMany({ item_id: { $in: itemIds } });
+    await this.#t.queue.deleteMany({ item_id: itemIds });
   }
 
   /* ---------------------------------------------------------------- saved for later */
@@ -243,8 +259,8 @@ export class CartRepository {
     return this.#t.saved.findOne({ id, ...ownerFilter(owner) });
   }
 
-  findSavedByOffer(owner: OwnerKey, offerId: string): Promise<SavedRow | undefined> {
-    return this.#t.saved.findOne({ offer_id: offerId, ...ownerFilter(owner) });
+  findSavedByOffer(owner: OwnerKey, offerId: string, lock?: Lock): Promise<SavedRow | undefined> {
+    return this.#t.saved.findOne({ offer_id: offerId, ...ownerFilter(owner) }, { forUpdate: lock?.forUpdate });
   }
 
   countSaved(owner: OwnerKey): Promise<number> {
@@ -270,7 +286,7 @@ export class CartRepository {
   async moveGuestSaved(guestSessionId: string, customerId: string): Promise<number> {
     const guest = { owner_kind: 'guest', guest_session_id: guestSessionId };
     const customerOffers = await this.#t.saved.distinct<string>('offer_id', { owner_kind: 'customer', customer_id: customerId });
-    if (customerOffers.length) await this.#t.saved.deleteMany({ ...guest, offer_id: { $in: customerOffers } });
+    if (customerOffers.length) await this.#t.saved.deleteMany({ ...guest, offer_id: customerOffers });
     return this.#t.saved.updateMany(guest, { owner_kind: 'customer', customer_id: customerId, guest_session_id: null });
   }
 }

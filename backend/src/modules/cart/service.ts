@@ -552,7 +552,7 @@ export class CartService implements CartPublicApi {
     const s = await this.shopperOf(scope);
     if (s.kind !== 'customer' || !s.accountId) throw new AppError('UNAUTHORIZED', 'Sign in to merge your cart');
     // ownership proof: only a visitor session this account claimed at sign-in or registration; knowing its id is not enough
-    if (!isUuid(guestSessionId) || !(await this.ctx.mongo.seen(this.claimKey(guestSessionId, s.accountId)))) throw notFound('Guest cart');
+    if (!isUuid(guestSessionId) || !(await this.ctx.store.seen(this.claimKey(guestSessionId, s.accountId)))) throw notFound('Guest cart');
     const report = await this.merge(s, guestSessionId, by);
     if (!report) throw notFound('Guest cart');
     return { cart: await this.viewFor(s), report };
@@ -1036,7 +1036,7 @@ export class CartService implements CartPublicApi {
   async onGuestSessionClaimedFromIdentity(event: EventPayload<'identity.guest_session.claimed'>): Promise<void> {
     if (!isUuid(event.guestSessionId) || !isUuid(event.accountId)) return;
     // the claim is the proof POST /cart/merge asks for: recorded once, and kept even if the merge below has to be retried
-    await this.ctx.mongo.claim(this.claimKey(event.guestSessionId, event.accountId));
+    await this.ctx.store.claim(this.claimKey(event.guestSessionId, event.accountId));
     const customerId = await this.customerKey(event.accountId);
     const s: Shopper = { owner: { kind: 'customer', customerId }, kind: 'customer', customerId, guestSessionId: null, accountId: event.accountId };
     await this.merge(s, event.guestSessionId, { actor: { kind: 'customer', id: event.accountId } });
