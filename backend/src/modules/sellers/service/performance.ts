@@ -68,7 +68,15 @@ export class PerformancePart extends Part {
   }
 
   async onCaseOpened(e: EventPayload<'support.case.opened'>) {
-    await this.fact(e.sellerId, 'case_opened', e.caseId, null, e.nextResponseDueAt ? new Date(e.nextResponseDueAt).getTime() : null);
+    // the case's response deadline, carried in `value` as **epoch seconds with its milliseconds as the
+    // fraction** (`repository.unresolvedCasesPastDeadline` reads it back). It was epoch milliseconds until
+    // the MySQL conversion, and `performance_events.value` is `DECIMAL(14,4)`: ten integer digits, which an
+    // epoch in milliseconds has thirteen of, so MySQL refused the insert outright ("Out of range value for
+    // column 'value'") where Decimal128 took it. Dividing by a thousand loses nothing — four decimals hold
+    // three — and the one reader multiplies it back. If the spec ever widens the column, this and that
+    // reader go back to milliseconds together.
+    const dueAt = e.nextResponseDueAt ? new Date(e.nextResponseDueAt).getTime() / 1000 : null;
+    await this.fact(e.sellerId, 'case_opened', e.caseId, null, dueAt);
   }
 
   async onCaseResolved(e: EventPayload<'support.case.resolved'>) {

@@ -232,9 +232,14 @@ export class Core {
     });
   }
 
-  /** The seller's payout destinations (payout_changes: the verified one is current, the pending one) and blocked reasons */
-  async payoutState(s: SellerRec, repo: SellersRepository = this.repo): Promise<StoredPayout> {
-    const rows = await repo.find('payout_changes', { seller_id: s.id }, { orderBy: [['requested_at', 'desc']] });
+  /**
+   * The seller's payout destinations (payout_changes: the verified one is current, the pending one) and
+   * blocked reasons. `forUpdate` locks the rows read, for the callers that decide one of them in the same
+   * transaction (§11.2 rule 1): they all lock the seller's own row first, so the lock order is the same for
+   * every one of them.
+   */
+  async payoutState(s: SellerRec, repo: SellersRepository = this.repo, o: { forUpdate?: boolean } = {}): Promise<StoredPayout> {
+    const rows = await repo.find('payout_changes', { seller_id: s.id }, { orderBy: [['requested_at', 'desc']], forUpdate: o.forUpdate });
     const details = (r: PayoutChangeRec) => ({ accountHolderName: r.account_holder_name, accountType: r.account_type, label: r.label, providerDestinationId: r.provider_destination_id });
     const current = rows.find((r) => r.state === 'verified');
     const pending = rows.find((r) => r.state === 'pending');

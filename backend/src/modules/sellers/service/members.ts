@@ -344,7 +344,9 @@ export class MembersPart extends Part {
       const changed = await this.repo.transaction(async (tx) => {
         const grant = await tx.get('template_grants', g.id, { forUpdate: true });
         if (!grant || grant.applied_at) return [];
-        const members = await tx.find('members', { role: g.template, status: OPEN, is_owner: false });
+        // each member's permissions array is rewritten from what it already holds, so the rows are locked as
+        // they are read (§11.2 rule 1), in primary key order; the grant's own row is held above for the pass
+        const members = await tx.find('members', { role: g.template, status: OPEN, is_owner: false }, { forUpdate: true });
         const out: { sellerId: string; memberId: string; permissions: string[] }[] = [];
         for (const m of members) {
           const permissions = stringList(m.permissions);

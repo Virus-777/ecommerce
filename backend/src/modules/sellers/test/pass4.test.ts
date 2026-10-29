@@ -5,9 +5,8 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
-import { spec } from '../../../spec/sellers.js';
-import { schemas } from '../schema.js';
-import { ADMIN, approvedSeller, boot, type Kit, payoutInput, restrictionInput, SELLER, staff } from './helpers.js';
+import type { StoreTable } from '../../../kernel/store/index.js';
+import { ADMIN, approvedSeller, boot, type Kit, payoutInput, restrictionInput, SELLER, sellersTable, staff } from './helpers.js';
 
 let kit: Kit;
 beforeAll(async () => {
@@ -17,7 +16,8 @@ afterAll(async () => {
   await kit?.close();
 });
 
-const table = (name: string) => kit.app.kernel.mongo.module('sellers', spec.collections, schemas).table<any>(name);
+/** The module's tables through the store the app chose (helpers.sellersTable), not a MongoDB store of our own */
+const table = (name: 'payout_changes' | 'sellers' | 'suspensions' | 'pending_changes') => sellersTable(kit.app, name) as StoreTable<any>;
 const futureDate = (days: number) => new Date(kit.clock.now().getTime() + days * 86_400_000).toISOString().slice(0, 10);
 
 describe('payout_changes', () => {

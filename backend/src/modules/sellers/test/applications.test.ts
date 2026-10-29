@@ -293,6 +293,26 @@ describe('application', () => {
     expect(row).toMatchObject({ invited: true, applicantName: 'Ana Lopez', checks: { passed: 6, failed: 0 } });
     const targets = res.body.items.map((r: any) => r.deadline.dueAt);
     expect([...targets].sort()).toEqual(targets);
+    // the search box reaches account.storeName, a path inside a JSON document, and ignores case
+    const account = (await kit.svc.core.repo.get('applications', s.id))!.account as { storeName: string };
+    const byName = await kit.call('GET', `${ADMIN}/applications?q=${encodeURIComponent(account.storeName.toLowerCase())}&limit=100`, staff());
+    expect(byName.body.items.map((r: any) => r.id)).toEqual([s.id]);
+    // overdue and not overdue are the two halves of the queue: "open and past its target", and everything
+    // else. Each half is asked for with a row that belongs in it, because the second is the one the neutral
+    // vocabulary has no single word for (`$nor`) and De Morgan's law is easy to get half right.
+    const queue = async (overdue: boolean) => (await kit.call('GET', `${ADMIN}/applications?overdue=${overdue}&limit=100`, staff())).body.items.map((r: any) => r.id) as string[];
+    const decided = await submitted(kit);
+    await kit.call('POST', `${ADMIN}/applications/${decided.id}/start-review`, staff());
+    await kit.call('POST', `${ADMIN}/applications/${decided.id}/reject`, staff(), { reasonCode: 'duplicate_account', explanation: 'Same bank account as another seller', reapply: 'not_eligible' });
+    // this one's target is business days away; the decided one is not open, whatever its target says
+    expect(await queue(false)).toContain(s.id);
+    expect(await queue(false)).toContain(decided.id);
+    expect(await queue(true)).not.toContain(s.id);
+    kit.clock.advance(30 * 86_400_000);
+    expect(await queue(true)).toContain(s.id);
+    expect(await queue(false)).not.toContain(s.id);
+    expect(await queue(false)).toContain(decided.id); // still not overdue: a decided application never is
+    kit.clock.advance(-30 * 86_400_000);
   });
 
   it('webhook results update the check by provider reference and lapse the label of an approved seller', async () => {

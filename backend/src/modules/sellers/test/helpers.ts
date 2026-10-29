@@ -9,10 +9,22 @@ import { fixedClock } from '../../../kernel/lib/clock.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { withDependencies } from '../../../kernel/module-system/loader.js';
 import { devClaims } from '../../../kernel/auth/dev.js';
+import type { StoreTable } from '../../../kernel/store/index.js';
 import { auth, buildTestApp, token } from '../../../testing/app.js';
 import type * as access from '../../../spec/access.js';
 import type * as audit from '../../../spec/audit.js';
+import type { SellersDb } from '../../../spec/sellers.js';
 import type { SellersService } from '../service.js';
+
+/**
+ * One of the module's tables as its repository reads it (rows in spec shape), **through the store the app
+ * chose** — MongoDB or MySQL, whichever `MYSQL_MODULES` put this module's data in. A helper that built a
+ * MongoDB store of its own would read a database the module no longer writes to: the rows are simply not
+ * there, and nothing in the log says why (docs/10 §10.5c).
+ */
+export function sellersTable<T extends keyof SellersDb & string>(app: FastifyInstance, name: T): StoreTable<SellersDb[T]> {
+  return app.kernel.boot.stores.get('sellers')!.table<SellersDb[T]>(name);
+}
 
 export const STORE = '/api/store/sellers';
 export const SELLER = '/api/seller/sellers';
@@ -225,13 +237,21 @@ export async function invitation(kit: Kit, email = `shop.${newId().slice(-6)}@ex
   return { id: res.body.invitation.id as string, code: res.body.code as string };
 }
 
-/** Starts and completes every step, then submits. Returns the application and the applicant. */
-export async function submitted(kit: Kit, o: { legalName?: string; storeName?: string; accountId?: string; plannedProducts?: string } = {}) {
+/**
+ * Starts and completes every step, then submits. Returns the application and the applicant.
+ *
+ * `workEmail`, `taxId`, `payoutAccount` and `address` are the four details the duplicate check at submission
+ * compares (`repository.applicationsMatching`), so a test can make two applications share exactly one of them.
+ */
+export async function submitted(
+  kit: Kit,
+  o: { legalName?: string; storeName?: string; accountId?: string; plannedProducts?: string; workEmail?: string; taxId?: string; payoutAccount?: string; address?: typeof address } = {},
+) {
   const accountId = o.accountId ?? newId();
   const token = customer(accountId);
   const { code } = await invitation(kit);
   const storeName = o.storeName ?? `Northwind ${newId().slice(-5)}`;
-  const start = await kit.call('POST', `${STORE}/applications`, token, accountInput(storeName, code));
+  const start = await kit.call('POST', `${STORE}/applications`, token, { ...accountInput(storeName, code), ...(o.workEmail ? { workEmail: o.workEmail } : {}) });
   expect(start.status, JSON.stringify(start.body)).toBe(201);
   const id = start.body.id as string;
   const patch = async (body: object) => {
@@ -239,14 +259,14 @@ export async function submitted(kit: Kit, o: { legalName?: string; storeName?: s
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     return r.body;
   };
-  await patch({ step: 'business', business: { ...businessInput(o.legalName, storeName), ...(o.plannedProducts ? { plannedProducts: o.plannedProducts } : {}) } });
-  const v = await patch({ step: 'verification', verification: { owners: [{ name: 'Ana Lopez', ownershipPct: 100, isPrimary: true, idDocumentIds: [] }], taxIdType: 'ein', taxId: '12-3456789', w9Method: 'online' } });
+  await patch({ step: 'business', business: { ...businessInput(o.legalName, storeName), ...(o.address ? { address: o.address } : {}), ...(o.plannedProducts ? { plannedProducts: o.plannedProducts } : {}) } });
+  const v = await patch({ step: 'verification', verification: { owners: [{ name: 'Ana Lopez', ownershipPct: 100, isPrimary: true, idDocumentIds: [] }], taxIdType: 'ein', taxId: o.taxId ?? '12-3456789', w9Method: 'online' } });
   const ownerId = v.verification.owners[0].id;
   for (const [kind, extra] of [['owner_id', { ownerId }], ['business_registration', {}]] as const) {
     const d = await kit.call('POST', `${STORE}/applications/${id}/documents`, token, { mediaId: newId(), kind, ...extra });
     expect(d.status, JSON.stringify(d.body)).toBe(201);
   }
-  await patch({ step: 'payout', payout: payoutInput() });
+  await patch({ step: 'payout', payout: payoutInput(o.payoutAccount) });
   await patch({ step: 'return_address', returnAddress: { sameAsBusiness: true, contactName: 'Ana Lopez', phone: '+15035550101' } });
   const draft = (await kit.call('GET', `${STORE}/applications/current`, token)).body;
   const acceptances = draft.agreementsRequired.map((a: any) => ({ key: a.key, versionLabel: a.versionLabel }));
