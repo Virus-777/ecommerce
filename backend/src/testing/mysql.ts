@@ -86,6 +86,13 @@ async function empty(pool: Pool, database: string): Promise<void> {
     [database],
   );
   if (!tables.length) return;
+  // `kernel_migrations` keeps its rows: they say which schema the tables that are *still here* were built
+  // from, and every app a test file builds takes a database from this same slot. Wiping them made each boot
+  // re-migrate every module it loads — migrate reads information_schema and diffs each table — which is why
+  // a file that boots ten apps with the kernel and a dozen modules on MySQL was timing out at sixty seconds
+  // a test, and why it got slower with every module the tranche converted. The database itself is dropped
+  // once per run (testMysql), so a hash in here cannot outlive the tables it describes.
+  const wipe = tables.filter((t) => t.TABLE_NAME !== 'kernel_migrations');
   const conn = await pool.getConnection();
   try {
     // the tables point at each other, so the order would matter; switching the checks off for the wipe is
@@ -94,12 +101,12 @@ async function empty(pool: Pool, database: string): Promise<void> {
     // an append-only table — audit's three, finance_ledger_entries, wallet_ledger — refuses DELETE unless the
     // session says it is that table's retention purge (docs/10 §6.3). Wiping a database between test files is
     // the one other thing that deletes from one, so it says so, per table, and hands the permission back.
-    for (const t of tables) {
+    for (const t of wipe) {
       await conn.query('SET @marketly_purge = ?', [t.TABLE_NAME]);
       await conn.query(`DELETE FROM \`${t.TABLE_NAME}\``);
     }
     await conn.query('SET @marketly_purge = NULL');
-    for (const t of tables) if ((t.AUTO_INCREMENT ?? 1) > 1) await conn.query(`ALTER TABLE \`${t.TABLE_NAME}\` AUTO_INCREMENT = 1`);
+    for (const t of wipe) if ((t.AUTO_INCREMENT ?? 1) > 1) await conn.query(`ALTER TABLE \`${t.TABLE_NAME}\` AUTO_INCREMENT = 1`);
     await conn.query('SET FOREIGN_KEY_CHECKS = 1');
   } finally {
     conn.release();
