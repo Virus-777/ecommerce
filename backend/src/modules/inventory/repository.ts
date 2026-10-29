@@ -6,11 +6,12 @@ import type { IdTable, ItemFilter, ItemListFilter, Lock, MovementFilter, NewRow,
 import type { InventoryQueries } from './queries.js';
 
 /**
- * Read options both stores honour that `StoreFindOptions` does not name yet: MySQL spells `skip` `offset` and
- * ignores a `skip` without a word, and `nullsLast` is implemented by both tables but is not on the seam. Both
- * are reported as kernel asks; passing both spellings is what keeps one call correct on either store meanwhile.
+ * `nullsLast` — "every row whose column is null sorts after every value" — is implemented by both stores
+ * (`kernel/mongo/table.ts`, `kernel/mysql/table.ts`) with the same meaning, but `StoreFindOptions` does not
+ * name it. It is one read here (`expectations`, undated deliveries last) and two in modules not yet converted
+ * (support, wallet), so it is reported as a kernel ask rather than worked around per store.
  */
-type ReadOptions = StoreFindOptions & { offset?: number; nullsLast?: readonly string[] };
+type ReadOptions = StoreFindOptions & { nullsLast?: readonly string[] };
 
 /**
  * json columns. The service writes some of them as JSON.stringify(…), so a string written to one of these is
@@ -226,10 +227,9 @@ export class InventoryRepository {
     return { ...p, items: p.items.map((r) => ({ id: r.id })) };
   }
 
-  /** Ids for exports and digests, sorted by SKU */
+  /** Ids for exports and digests, sorted by SKU, a page at a time */
   async itemIds(f: ItemListFilter, limit: number, offset: number): Promise<string[]> {
-    const o: ReadOptions = { sort: { sku: 1, id: 1 }, limit, skip: offset, offset };
-    return (await this.#t.items.find(await this.#itemListFilter(f), o)).map((r) => r.id);
+    return (await this.#t.items.find(await this.#itemListFilter(f), { sort: { sku: 1, id: 1 }, limit, offset })).map((r) => r.id);
   }
 
   /* ---------------------------------------------------------------- stock levels */

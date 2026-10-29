@@ -257,6 +257,22 @@ describe('seller stock (own items only)', () => {
     const adminRows = await h.api.exportRows('inventory.admin.stock', { ownerType: 'seller', sellerId: other }, { kind: 'staff' });
     expect(adminRows.rows.map((r) => (r as { sku: string }).sku)).toContain(foreign.sku);
   });
+
+  /**
+   * An export cursor is an offset, and the paged read behind it (`repo.itemIds`) is the module's only one. It
+   * is asserted because an offset that is accepted and ignored answers the *first* page every time, with
+   * nothing in the log and no failing assertion anywhere else: the one export test above asks for a single
+   * page, and the digest's loop only pages past 500 SKUs. Three items and two cursors are enough to catch it.
+   */
+  it('pages the export rows from the cursor, which is an offset', async () => {
+    const sellerId = newId();
+    const prefix = `PAGE-${newId().slice(0, 8)}`;
+    for (const letter of ['A', 'B', 'C']) await sellerItem(h, sellerId, 1, { sku: `${prefix}-${letter}` });
+    const page = async (cursor?: string) => (await h.api.exportRows('inventory.seller.stock', {}, { kind: 'seller', sellerId }, cursor)).rows.map((r) => (r as { sellerSku: string }).sellerSku);
+    expect(await page()).toEqual([`${prefix}-A`, `${prefix}-B`, `${prefix}-C`]);
+    expect(await page('1')).toEqual([`${prefix}-B`, `${prefix}-C`]);
+    expect(await page('2')).toEqual([`${prefix}-C`]);
+  });
 });
 
 describe('company stock items and locations', () => {
