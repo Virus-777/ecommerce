@@ -293,6 +293,13 @@ describe('application', () => {
     expect(row).toMatchObject({ invited: true, applicantName: 'Ana Lopez', checks: { passed: 6, failed: 0 } });
     const targets = res.body.items.map((r: any) => r.deadline.dueAt);
     expect([...targets].sort()).toEqual(targets);
+    // the search box reaches account.storeName, a path inside a JSON document, and ignores case
+    const account = (await kit.svc.core.repo.get('applications', s.id))!.account as { storeName: string };
+    const byName = await kit.call('GET', `${ADMIN}/applications?q=${encodeURIComponent(account.storeName.toLowerCase())}&limit=100`, staff());
+    expect(byName.body.items.map((r: any) => r.id)).toEqual([s.id]);
+    // overdue and not overdue are the two halves of the queue, and this one's target is business days away
+    expect((await kit.call('GET', `${ADMIN}/applications?overdue=false&limit=100`, staff())).body.items.map((r: any) => r.id)).toContain(s.id);
+    expect((await kit.call('GET', `${ADMIN}/applications?overdue=true&limit=100`, staff())).body.items.map((r: any) => r.id)).not.toContain(s.id);
   });
 
   it('webhook results update the check by provider reference and lapse the label of an approved seller', async () => {

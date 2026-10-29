@@ -41,9 +41,41 @@ describe('submitApplication: hashes and duplicate checks', () => {
       subjects: [{ type: 'application', id: second.id }, { type: 'seller', id: first.sellerId }],
       evidence: [{ kind: 'signal', text: expect.stringContaining('tax id') }],
     });
+    // every detail these two share is named, so a signal the query stops asking about shows up here
+    expect(signals.find((s) => s.subjects[1].id === first.sellerId).evidence[0].text).toContain('tax id, bank account, business address, return address');
     // the reviewer sees the matches
     const admin = await kit.call('GET', `${ADMIN}/applications/${second.id}`, staff());
     expect(admin.body.duplicateSignals.join(' ')).toContain(first.application.ref);
+  });
+
+  /**
+   * Each of the four signals is asked for on its own, which the test above cannot say: its two applications
+   * share all of them, so the match is found whichever one of them is asked about. The work email and the
+   * address line are the two compared **ignoring case inside a JSON document** — `lower()` on MongoDB, the
+   * `as_ci` collation on MySQL — so each is matched here against a differently cased copy of itself.
+   */
+  it('a shared work email alone, and a shared address alone, each make a duplicate (either case)', async () => {
+    let n = 20;
+    // a 9-digit EIN and a 12-digit account, both unlike the helper's defaults and unlike each other's
+    const unique = () => ({ taxId: `${++n}-${String(1_000_000 + n)}`, payoutAccount: `000${String(200_000_000 + n)}` });
+    const elsewhere = (line1: string, postalCode: string) => ({ name: 'Northwind Audio LLC', line1, city: 'Bend', region: 'OR', postalCode, country: 'US' });
+
+    const email = `ana.${newId().slice(-6)}@northwind.example.com`;
+    const a = await submitted(kit, { ...unique(), address: elsewhere('12 Juniper Way', '97701'), workEmail: email });
+    const b = await submitted(kit, { ...unique(), address: elsewhere('880 Alder Rd', '97702'), workEmail: email.toUpperCase() });
+    const reasons = (id: string, matchRef: string) =>
+      kit
+        .callsOf('trust.raiseSignal')
+        .map((c) => c[0] as any)
+        .filter((s) => s.subjects[0].id === id && String(s.evidence[0].text).includes(matchRef))
+        .map((s) => String(s.evidence[0].text));
+    expect(reasons(b.id, a.application.ref)).toEqual([expect.stringContaining('Same work email as')]);
+
+    const line1 = `${newId().slice(-4)} Larch Ave`;
+    const c = await submitted(kit, { ...unique(), address: elsewhere(line1, '97703') });
+    const d = await submitted(kit, { ...unique(), address: elsewhere(line1.toUpperCase(), '97703') });
+    // the business address and the return address are the same place here (return_address.sameAsBusiness)
+    expect(reasons(d.id, c.application.ref)).toEqual([expect.stringContaining('Same business address, return address as')]);
   });
 });
 

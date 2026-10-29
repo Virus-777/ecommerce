@@ -335,6 +335,18 @@ describe('admin views', () => {
     expect(list.body.items.find((r: any) => r.id === s.sellerId)).toMatchObject({ status: 'approved', verified: true, openCases: 0 });
     const q = await kit.call('GET', `${ADMIN}/sellers?q=${encodeURIComponent((await kit.svc.getSeller(s.sellerId))!.storeName)}`, staff());
     expect(q.body.items.map((r: any) => r.id)).toEqual([s.sellerId]);
+    // the search box reaches the contact email, which is a path inside a JSON document, and ignores case
+    const contact = (await kit.svc.core.repo.get('sellers', s.sellerId))!.contact as { email: string };
+    const byEmail = await kit.call('GET', `${ADMIN}/sellers?q=${encodeURIComponent(contact.email.toUpperCase())}&limit=100`, staff());
+    expect(byEmail.body.items.map((r: any) => r.id)).toEqual([s.sellerId]);
+    // verified and not verified are the two halves of the list
+    expect((await kit.call('GET', `${ADMIN}/sellers?verified=true&limit=100`, staff())).body.items.map((r: any) => r.id)).toContain(s.sellerId);
+    expect((await kit.call('GET', `${ADMIN}/sellers?verified=false&limit=100`, staff())).body.items.map((r: any) => r.id)).not.toContain(s.sellerId);
+    // the category filter reads the list of ids inside the application's business document
+    const business = (await kit.svc.core.repo.get('applications', s.id))!.business as { categoryIds: string[] };
+    const inCategory = await kit.call('GET', `${ADMIN}/sellers?categoryId=${business.categoryIds[0]}&limit=100`, staff());
+    expect(inCategory.body.items.map((r: any) => r.id)).toEqual([s.sellerId]);
+    expect((await kit.call('GET', `${ADMIN}/sellers?categoryId=${newId()}&limit=100`, staff())).body.items).toEqual([]);
     const stats = await kit.call('GET', `${ADMIN}/sellers/stats`, staff());
     expect(stats.body.byStatus.approved).toBeGreaterThan(0);
     expect(stats.body.balances).toBeNull(); // finance is off in this app
