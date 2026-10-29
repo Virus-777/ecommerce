@@ -262,12 +262,3 @@ ALTER TABLE `notifications_notice_recipients` ADD CONSTRAINT `fk_notifications_n
 ALTER TABLE `notifications_deliveries` ADD CONSTRAINT `fk_notifications_deliveries_notice_id` FOREIGN KEY (`notice_id`) REFERENCES `notifications_notices` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT;
 ALTER TABLE `notifications_delivery_events` ADD CONSTRAINT `fk_notifications_delivery_events_delivery_id` FOREIGN KEY (`delivery_id`) REFERENCES `notifications_deliveries` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT;
 ALTER TABLE `notifications_broadcasts` ADD CONSTRAINT `fk_notifications_broadcasts_template_version_id` FOREIGN KEY (`template_version_id`) REFERENCES `notifications_template_versions` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT;
-
--- views: join shapes, merged into the query that reads them (§9.2)
-CREATE OR REPLACE ALGORITHM=MERGE SQL SECURITY INVOKER VIEW `notifications_v_inbox` AS
-SELECT nr.*,
-  n.topic_key, n.audience, n.address_kind, n.address_id, n.seller_id, n.group_key, n.title, n.body,
-  n.icon, n.tone, n.link, n.linked_ref, n.action_required, n.deadline_at, n.resolved_at,
-  n.created_at AS notice_created_at, n.expires_at, n.expired_at
-FROM notifications_notice_recipients nr
-JOIN notifications_notices n ON n.id = nr.notice_id;

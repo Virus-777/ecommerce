@@ -327,11 +327,22 @@ only intended reader asks, it had no other reader, and it is out of the spec. Th
 statement — `notifications_notices LEFT JOIN notifications_notice_recipients`, four `SUM(<condition>)` over a
 `GROUP BY group_key` — and the rest of §9.2's lesson stands: nine views, all merged.
 
-The general rule this adds: **a view cannot take a parameter**, so a per-caller join belongs in the query. Two
-of the nine (`messaging_v_participant_conversations`, `returns_v_return_items`) join tables whose rows are
-per participant or per return; they are safe because the filter on that column is applied *to the view*, which
-is not the same as needing it *inside* the join. Y2 should check each of the remaining eight against its
-reader's actual filter before trusting it, as this one was not.
+The general rule this adds: **a view cannot take a parameter**, so a per-caller join belongs in the query —
+and **a view built on inner joins answers nothing about rows that may have no match**.
+
+The other nine were audited against their readers on 2026-10-29, by reading the join type rather than guessing
+at nullability:
+
+| View | Verdict |
+|---|---|
+| `finance_v_statement_entries`, `finance_v_lot_entries` | **sound by construction**: both already `LEFT JOIN`, which is right — `ledger_entries.lot_id` is nullable, and an entry with no lot is a real entry |
+| `orders_v_group_rows`, `orders_v_item_rows`, `returns_v_return_items`, `trust_v_report_subjects`, `messaging_v_participant_conversations`, `purchasing_v_receipt_lines` | **sound**: every join key is NOT NULL with a foreign key behind it, so an inner join drops nothing, and each reader asks about the rows the view is keyed by (a group, an item, a return item, a subject, a participant, a receipt line) |
+| `inventory_v_stock_rows` | **sound as a view, and a trap for its reader**: its joins drop nothing, but the stock list starts from *items* and MongoDB's `$lookup` keeps an item with no stock levels (it reads as out of stock). Read through the view with a `LEFT JOIN` from `inventory_stock_items`, which is what tranche B did |
+
+The audit is quick and belongs to whoever owns the spec: `grep -E 'VIEW|JOIN'` over `docs/api/db/*.sql` shows
+every join and its type in one screen. Note also that those readable files are written by `npm run check:ddl`,
+not by `npm run gen`, so `gen:check` does not notice them going stale — a spec change that touches a view or a
+column needs `check:ddl` before the branch is pushed.
 
 Maintainer views (`ops_v_*`, read-only, documented in MAINTAINING.md §6a). **Built 2026-10-28**, in
 `kernel/mysql/ops-views.ts` rather than in a module spec, and created by migrate once every module unit is in:
