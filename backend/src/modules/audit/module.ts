@@ -3,6 +3,8 @@ import { spec } from '../../spec/audit.js';
 import { resolvers } from './graphql/resolvers.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
+import { mongoAuditQueries } from './queries.mongo.js';
+import { mysqlAuditQueries } from './queries.mysql.js';
 import { AuditRepository } from './repository.js';
 import { schemas } from './schema.js';
 import { AuditService } from './service.js';
@@ -18,7 +20,10 @@ export default defineModule({
   version: '2.0.0',
   schemas,
   register(ctx) {
-    const service = new AuditService({ repo: new AuditRepository(ctx.mongo), ctx });
+    // the repository is store-neutral (ctx.store); the one read that is not the same question in both
+    // databases — the summary's actors, named by their newest entry — is the store's own (queries.ts)
+    const queries = ctx.mysql ? mysqlAuditQueries(ctx.mysql) : mongoAuditQueries(ctx.mongo);
+    const service = new AuditService({ repo: new AuditRepository(ctx.store, queries), ctx });
     ctx.provide(service);
     ctx.http.routes(sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

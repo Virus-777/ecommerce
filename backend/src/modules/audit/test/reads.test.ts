@@ -75,10 +75,16 @@ describe('GET /entries', () => {
     [`targetType=order&targetId=${'ORDER'}`, ['itemRefund', 'orderEdit']],
     ['targetType=setting', ['setting']],
     ['q=MK-261002-55410', ['itemRefund', 'orderEdit']],
+    // a reference typed in part: no word of it is a word of an entry, so only the starts-with on target_ref matches
+    ['q=MK-2610', ['itemRefund', 'orderEdit']],
+    // every word, not any word: Morgan recorded four entries and "damaged" is in a fifth, and no entry has both
+    ['q=Morgan%20damaged', []],
     ['q=damaged', ['itemRefund']],
     ['q=Morgan', ['setting', 'hidden', 'otherSeller', 'orderEdit']],
     ['approvalState=pending', ['itemRefund']],
     ['from=2026-10-03T00:00:00Z&to=2026-10-04T23:59:59Z', ['sellerMember', 'restrict']],
+    // a datetime `to` is inclusive (the whole-market-day one of /summary is not): the entry at exactly `to` is in
+    ['from=2026-10-01T00:00:00Z&to=2026-10-03T10:00:00Z', ['restrict', 'itemRefund', 'orderEdit']],
   ])('filters by %s', async (qs, expected) => {
     const q = qs.replace('GRACE', grace.id).replace('SELLER_A', sellerA).replace('ORDER', orderId);
     const p = await list(q.includes('from=') ? q : `${q}&from=2026-10-01T00:00:00Z`);
@@ -250,6 +256,8 @@ describe('approval column (projection of access events)', () => {
     await waitForEvents(app);
     expect(await approval()).toMatchObject({ state: 'partially_approved', approvers: ['Morgan Hale'] });
     expect((await list('approvalState=partially_approved&from=2026-10-01T00:00:00Z')).items.map((i) => i.id)).toEqual([ids.itemRefund]);
+    // one approval of two given is still waiting for a second review, exactly as an untouched request is
+    expect((await admin('/summary?from=2026-10-01&to=2026-10-07')).json().pendingSecondReview).toBe(1);
 
     const decider = staffActor('Dana Ortiz');
     publish('access.approval.decided', {

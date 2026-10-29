@@ -176,7 +176,7 @@ describe('entries deleted behind the app’s back', () => {
       return (await other.inject({ method: 'GET', url: '/api/admin/audit/integrity', headers: auth(callers.staff()) })).json();
     };
     expect(await verify()).toMatchObject({ ok: true });
-    await auditTable(other, 'entries').deleteMany({ at: { $gte: new Date('2026-03-01T08:00:00Z'), $lt: new Date('2026-04-01T07:00:00Z') } });
+    await auditTable(other, 'entries').deleteMany({ and: [{ at: { op: '>=', value: new Date('2026-03-01T08:00:00Z') } }, { at: { op: '<', value: new Date('2026-04-01T07:00:00Z') } }] });
     expect(await auditTable(other, 'entries').count({ id: march })).toBe(0);
     // a fresh walk from the start (the last verified checkpoint would only cover what follows it)
     await auditTable(other, 'integrity_checks').deleteMany({});

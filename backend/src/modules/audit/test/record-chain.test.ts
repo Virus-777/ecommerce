@@ -115,7 +115,7 @@ describe('record', () => {
     const ids = await auditApi(app).recordMany([entry({ actor }), entry({ actor }), entry({ actor })]);
     expect(ids).toHaveLength(3);
     expect(rolesOf).toHaveBeenCalledTimes(1);
-    const rows = await auditTable(app, 'entries').find({ id: { $in: ids } }, { sort: { seq: 1 } });
+    const rows = await auditTable(app, 'entries').find({ id: ids }, { sort: { seq: 1 } });
     expect(rows.map((r) => r.id)).toEqual(ids);
     expect(Buffer.from(rows[1]!.prev_hash).equals(Buffer.from(rows[0]!.hash))).toBe(true);
     expect(Buffer.from(rows[2]!.prev_hash).equals(Buffer.from(rows[1]!.hash))).toBe(true);
@@ -193,7 +193,7 @@ describe('hash chain', () => {
 
   it('detects a removed entry (the next entry no longer links to its predecessor)', async () => {
     const ids = await auditApi(app).recordMany([entry(), entry(), entry()]);
-    const seqs = (await auditTable(app, 'entries').find({ id: { $in: ids } }, { sort: { seq: 1 } })).map((r) => r.seq);
+    const seqs = (await auditTable(app, 'entries').find({ id: ids }, { sort: { seq: 1 } })).map((r) => r.seq);
     await auditTable(app, 'entries').deleteMany({ id: ids[1]! });
     const status = await verify();
     expect(status).toMatchObject({ ok: false, brokenAtSeq: seqs[2] });

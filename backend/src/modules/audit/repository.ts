@@ -1,10 +1,11 @@
 import type { PageRequest } from '../../kernel/lib/pagination.js';
 import { orThrow } from '../../kernel/lib/or-throw.js';
-import { contains, startsWith, type Filter, type ModuleStore } from '../../kernel/mongo/index.js';
+import type { Store, Where, WhereWithOr } from '../../kernel/store/index.js';
 import type { AuditDb, AuditFilters } from '../../spec/audit.js';
 import type { Page, TimelineEvent } from '../../spec/common.js';
 import type { ChainRow, ChainTarget } from './domain/chain.js';
 import { PURGE_ACTION, RETENTION_TARGET, type ApprovalProjection } from './domain/rules.js';
+import type { AuditQueries } from './queries.js';
 import { searchWords } from './text.js';
 
 /** Filters as the repository applies them (dates already resolved to instants). */
@@ -70,6 +71,9 @@ type ApprovalRow = AuditDb['approval_states'];
 type RetentionDbRow = AuditDb['retention'];
 type CheckpointDbRow = AuditDb['checkpoints'];
 type CheckDbRow = AuditDb['integrity_checks'];
+
+/** A filter on entries, in the one vocabulary both stores read (kernel/store/index.ts, docs/10 §10.5a) */
+type EntryFilter = WhereWithOr<EntryRow>;
 
 /** Name of the transaction lock that serializes chain appends (kernel.locks) */
 const CHAIN_LOCK = 'chain';
@@ -161,17 +165,33 @@ function toCheck(r: CheckDbRow): IntegrityCheckRow {
   };
 }
 
-const all = (parts: Filter[]): Filter => (parts.length === 0 ? {} : parts.length === 1 ? parts[0]! : { $and: parts });
+/** All of these conditions: `and` is what one filter object cannot say twice of the same column */
+const all = (parts: readonly EntryFilter[]): EntryFilter => (parts.length === 0 ? {} : parts.length === 1 ? parts[0]! : { and: parts });
+
+/**
+ * One alternative of an `or` that is itself an `and` — the search box's "every one of these words". Both stores
+ * already recurse into a nested `and` with exactly this meaning (`whereFilter` in kernel/mongo/filters.ts,
+ * `whereSql` in kernel/mysql/where.ts); only the type of `or` is narrower than what they read, which is why the
+ * branch says so here. Reported to the kernel as a one-word widening of `WhereWithOr.or`.
+ */
+const branch = (w: EntryFilter): Where<EntryRow> => w as Where<EntryRow>;
 
 /**
  * audit.entries, audit.entry_targets, audit.approval_states, audit.retention, audit.integrity_checks,
- * audit.checkpoints (MongoDB, docs/04-mongodb-migration.md §4). Append-only is this repository's rule: entries and
- * entry_targets are only inserted, and deleted only by purgeEntries (the retention purge); nothing here updates them.
+ * audit.checkpoints — in MySQL or in MongoDB, whichever `MYSQL_MODULES` put this module's data in (docs/10
+ * §10.5a, BUILDING-MODULES §5c). Append-only is this repository's rule: entries and entry_targets are only
+ * inserted, and deleted only by purgeEntries (the retention purge); nothing here updates them.
+ *
+ * The one read that is not the same question in both databases — the summary's actors, each named by their
+ * newest entry — is the queries port (queries.ts).
  */
 export class AuditRepository {
   readonly #t;
 
-  constructor(private readonly store: ModuleStore) {
+  constructor(
+    private readonly store: Store,
+    private readonly queries: AuditQueries,
+  ) {
     this.#t = {
       entries: store.table<EntryRow>('entries'),
       targets: store.table<TargetRow>('entry_targets'),
@@ -184,22 +204,22 @@ export class AuditRepository {
 
   /** Runs fn with a repository bound to one transaction. */
   transaction<T>(fn: (tx: AuditRepository) => Promise<T>): Promise<T> {
-    return this.store.transaction((tx) => fn(new AuditRepository(tx)));
+    return this.store.transaction((tx) => fn(new AuditRepository(tx, this.queries)));
   }
 
   /** Entries where the record is the target, or (includeRelated) one of the related targets (a join is two reads) */
-  async #touches(type: string, id: string, includeRelated: boolean): Promise<Filter> {
+  async #touches(type: string, id: string, includeRelated: boolean): Promise<EntryFilter> {
     const own = { target_type: type, target_id: id };
     if (!includeRelated) return own;
     const related = await this.#t.targets.distinct<string>('entry_id', { target_type: type, target_id: id });
-    return related.length ? { $or: [own, { id: { $in: related } }] } : own;
+    return related.length ? { or: [own, { id: related }] } : own;
   }
 
-  async #filterOf(q: EntryQuery | null): Promise<Filter[]> {
-    const and: Filter[] = [];
+  async #filterOf(q: EntryQuery | null): Promise<EntryFilter[]> {
+    const and: EntryFilter[] = [];
     if (!q) return and;
     if (q.actorId) and.push({ actor_id: q.actorId });
-    if (q.roleKey) and.push({ 'actor_roles.key': q.roleKey }); // any of the actor's roles has this key
+    if (q.roleKey) and.push({ 'actor_roles[].key': q.roleKey }); // any of the actor's roles has this key ([]: an array column, §10.5a)
     if (q.module) and.push({ module: q.module });
     if (q.category) and.push({ category: q.category });
     if (q.action) and.push({ action: q.action });
@@ -207,27 +227,32 @@ export class AuditRepository {
     if (q.targetType && q.targetId) and.push(await this.#touches(q.targetType, q.targetId, true));
     else if (q.targetType) and.push({ target_type: q.targetType });
     else if (q.targetId) and.push({ target_id: q.targetId });
-    if (q.from) and.push({ at: { $gte: q.from } });
-    if (q.to) and.push({ at: { [q.toExclusive ? '$lt' : '$lte']: q.to } });
+    if (q.from) and.push({ at: { op: '>=', value: q.from } });
+    if (q.to) and.push({ at: { op: q.toExclusive ? '<' : '<=', value: q.to } });
     if (q.approvalState) {
       const state = q.approvalState;
       if (state === 'not_required') and.push({ approval_request_id: null });
       else if (state === 'pending') {
-        // referenced and not (yet) projected in any other state
-        const moved = await this.#t.approvals.distinct<string>('approval_request_id', { state: { $ne: 'pending' } });
-        and.push({ approval_request_id: { $nin: [null, ...moved] } });
-      } else and.push({ approval_request_id: { $in: await this.#t.approvals.distinct<string>('approval_request_id', { state }) } });
+        // referenced and not (yet) projected in any other state. `<>` and not `is not`: state is NOT NULL, so
+        // the two read alike here, and `<>` is the reading the spec's conditions are written with
+        const moved = await this.#t.approvals.distinct<string>('approval_request_id', { state: { op: '<>', value: 'pending' } });
+        // $nin: [null, …] was two conditions on one column, so it is two entries here. `not in` of an empty list
+        // filters nothing, which is why "has an approval at all" is pushed separately and not folded into it
+        and.push({ approval_request_id: { op: 'is not', value: null } });
+        and.push({ approval_request_id: { op: 'not in', value: moved } });
+      } else and.push({ approval_request_id: await this.#t.approvals.distinct<string>('approval_request_id', { state }) });
     }
     const text = q.q?.trim();
     if (text) {
       const words = searchWords(text);
       and.push({
-        $or: [
-          // every word of the query (no words: no match)
-          ...(words.length ? [{ search_words: { $all: words } }] : []),
-          { target_ref: startsWith(text) },
+        or: [
+          // every word of the query, one condition on the array column each (no words: no match). $all has no
+          // single neutral spelling and needs none: "all of these" is an `and` of "is an element of" (§10.5a)
+          ...(words.length ? [branch({ and: words.map((w) => ({ 'search_words[]': w })) })] : []),
+          { target_ref: { op: 'starts with', value: text } },
           { target_id: text },
-          { actor_name: contains(text) },
+          { actor_name: { op: 'contains', value: text } },
         ],
       });
     }
@@ -237,7 +262,7 @@ export class AuditRepository {
   async #relatedOf(ids: readonly string[]): Promise<Map<string, ChainTarget[]>> {
     const out = new Map<string, ChainTarget[]>();
     if (!ids.length) return out;
-    for (const r of await this.#t.targets.find({ entry_id: { $in: [...ids] } })) {
+    for (const r of await this.#t.targets.find({ entry_id: [...ids] })) {
       const t = { type: r.target_type, id: r.target_id };
       const list = out.get(r.entry_id);
       if (list) list.push(t);
@@ -251,12 +276,12 @@ export class AuditRepository {
     return rows.map((r) => toChainRow(r, related.get(r.id) ?? []));
   }
 
-  async #pageOfRows(filter: Filter, page: PageRequest): Promise<Page<ChainRow>> {
+  async #pageOfRows(filter: EntryFilter, page: PageRequest): Promise<Page<ChainRow>> {
     const p = await this.#t.entries.page(filter, page, { column: 'at', direction: 'desc' });
     return { ...p, items: await this.#withRelated(p.items) };
   }
 
-  async #one(filter: Filter, sort: Record<string, 1 | -1> = { seq: -1 }): Promise<ChainRow | null> {
+  async #one(filter: EntryFilter, sort: Record<string, 1 | -1> = { seq: -1 }): Promise<ChainRow | null> {
     const r = await this.#t.entries.findOne(filter, { sort });
     return r ? (await this.#withRelated([r]))[0]! : null;
   }
@@ -273,15 +298,20 @@ export class AuditRepository {
     return r ? { seq: Number(r.seq), hash: bytes(r.hash) } : null;
   }
 
-  async insertEntries(rows: readonly NewChainRow[]): Promise<{ id: string; seq: number }[]> {
-    const out: { id: string; seq: number }[] = [];
-    // one after another (seq is numbered in this order); each chunk is one counter update and one insert
+  async insertEntries(rows: readonly NewChainRow[]): Promise<void> {
+    // One chunk at a time, in order: `seq` is this table's identity column and the **store** numbers it, in the
+    // order the rows are inserted (a counter on MongoDB, AUTO_INCREMENT on MySQL, §11.2). It is not part of the
+    // hash (domain/chain.ts) and nothing reads the numbers back, so there is nothing to number them for.
+    //
+    // Taking them here instead cost a *second* connection inside the append's transaction, because a counter is
+    // read on its own connection (§11.2, so its row lock lasts microseconds). Twenty-five concurrent appends then
+    // held every connection in the pool while the one holding `lock('audit:chain')` waited for one more, and the
+    // waiters died on the lock timeout rather than the chain being wrong. MongoDB never showed it: its sessions
+    // are not a pool of eight.
     for (let i = 0; i < rows.length; i += INSERT_CHUNK) {
       const chunk = rows.slice(i, i + INSERT_CHUNK);
-      const seqs = await this.store.nextValues('entries.seq', chunk.length);
-      const docs: Partial<EntryRow>[] = chunk.map((r, j) => ({
+      const docs: Partial<EntryRow>[] = chunk.map((r) => ({
         id: r.id,
-        seq: seqs[j]!,
         at: r.at,
         actor_kind: r.actorKind,
         actor_id: r.actorId,
@@ -315,9 +345,7 @@ export class AuditRepository {
       await this.#t.entries.insertMany(docs);
       const targets = chunk.flatMap((r) => r.relatedTargets.map((x) => ({ entry_id: r.id, target_type: x.type, target_id: x.id, at: r.at })));
       await this.#t.targets.insertMany(targets);
-      out.push(...docs.map((d) => ({ id: d.id!, seq: d.seq! })));
     }
-    return out;
   }
 
   /* ---------------------------------------------------------------- reads */
@@ -341,9 +369,9 @@ export class AuditRepository {
   }
 
   sellerEntries(sellerId: string, q: { from?: Date; to?: Date; targetType?: string }, page: PageRequest): Promise<Page<ChainRow>> {
-    const and: Filter[] = [{ seller_id: sellerId, visible_to_seller: true }];
-    if (q.from) and.push({ at: { $gte: q.from } });
-    if (q.to) and.push({ at: { $lt: q.to } });
+    const and: EntryFilter[] = [{ seller_id: sellerId, visible_to_seller: true }];
+    if (q.from) and.push({ at: { op: '>=', value: q.from } });
+    if (q.to) and.push({ at: { op: '<', value: q.to } });
     if (q.targetType) and.push({ target_type: q.targetType });
     return this.#pageOfRows(all(and), page);
   }
@@ -351,8 +379,8 @@ export class AuditRepository {
   /** Oldest first by seq, after `afterSeq` (exports, verification) */
   async entriesBySeq(q: EntryQuery | null, afterSeq: number | null, limit: number, maxSeq?: number): Promise<ChainRow[]> {
     const and = await this.#filterOf(q);
-    if (afterSeq !== null) and.push({ seq: { $gt: afterSeq } });
-    if (maxSeq !== undefined) and.push({ seq: { $lte: maxSeq } });
+    if (afterSeq !== null) and.push({ seq: { op: '>', value: afterSeq } });
+    if (maxSeq !== undefined) and.push({ seq: { op: '<=', value: maxSeq } });
     return this.#withRelated(await this.#t.entries.find(all(and), { sort: { seq: 1 }, limit }));
   }
 
@@ -366,24 +394,22 @@ export class AuditRepository {
   }
 
   async summary(from: Date, to: Date): Promise<SummaryCounts> {
-    const range = { at: { $gte: from, $lt: to } };
-    const byCategory = new Map(
-      (await this.#t.entries.aggregate<{ _id: string; n: number }>([{ $match: range }, { $group: { _id: '$category', n: { $sum: 1 } } }])).map((r) => [r._id, r.n]),
-    );
+    // two conditions on one column, which a filter object cannot hold: the range is the two of them, ANDed
+    const range: EntryFilter[] = [{ at: { op: '>=', value: from } }, { at: { op: '<', value: to } }];
+    // how many rows per key: the one `$group` both stores answer identically, so the seam carries it (§10.5e)
+    const byCategory = new Map((await this.#t.entries.countBy(['category'], { and: range })).map((r) => [r.category, r.n]));
     const total = [...byCategory.values()].reduce((a, b) => a + b, 0);
-    // entries with an approval that is not decided yet (or not projected yet): two reads instead of not exists
-    const referenced = await this.#t.entries.distinct<string>('approval_request_id', { ...range, approval_request_id: { $ne: null } });
-    const decided = referenced.length ? await this.#t.approvals.distinct<string>('approval_request_id', { approval_request_id: { $in: referenced }, state: { $nin: OPEN_APPROVAL } }) : [];
-    const pendingSecondReview = await this.#t.entries.count({ ...range, approval_request_id: { $nin: [null, ...decided] } });
-    // one row per person (actor kind + id), named by their latest entry (a renamed person counts once)
-    const actors = await this.#t.entries.aggregate<{ id: string | null; name: string | null; n: number }>([
-      { $match: { ...range, actor_kind: 'staff' } },
-      { $sort: { at: -1 } },
-      { $group: { _id: { kind: '$actor_kind', id: '$actor_id' }, name: { $first: '$actor_name' }, n: { $sum: 1 } } },
-      { $sort: { n: -1, '_id.id': 1 } },
-      { $limit: 10 },
-      { $project: { _id: 0, id: '$_id.id', name: 1, n: 1 } },
-    ]);
+    // entries with an approval that is not decided yet (or not projected yet): two reads instead of not exists.
+    // `is not null` here only keeps the list clean and skips the second read when no entry has an approval: a
+    // null in the list is ignored by both stores anyway, which is why no test can tell it was dropped
+    const referenced = await this.#t.entries.distinct<string>('approval_request_id', { and: [...range, { approval_request_id: { op: 'is not', value: null } }] });
+    const decided = referenced.length ? await this.#t.approvals.distinct<string>('approval_request_id', { approval_request_id: referenced, state: { op: 'not in', value: OPEN_APPROVAL } }) : [];
+    const pendingSecondReview = await this.#t.entries.count({
+      and: [...range, { approval_request_id: { op: 'is not', value: null } }, { approval_request_id: { op: 'not in', value: decided } }],
+    });
+    // one row per person (actor kind + id), named by their latest entry (a renamed person counts once): a window
+    // function on SQL and a sorted group on MongoDB, which is why it is the queries port and not the seam
+    const actors = await this.queries.topActors({ from, to, limit: 10 });
     // the summary is keyed by name: two people with the same name stay apart
     const byActor: { name: string; n: number }[] = [];
     for (const a of actors) {
@@ -468,13 +494,13 @@ export class AuditRepository {
 
   /** First seq that is kept when entries before `cutoff` are purged; null when every entry is older */
   async firstSeqAtOrAfter(cutoff: Date): Promise<number | null> {
-    const r = await this.#t.entries.findOne({ at: { $gte: cutoff } }, { sort: { seq: 1 } });
+    const r = await this.#t.entries.findOne({ at: { op: '>=', value: cutoff } }, { sort: { seq: 1 } });
     return r ? Number(r.seq) : null;
   }
 
   /** The last entry with seq < `beforeSeq` (the newest when null): where a purge up to `beforeSeq` stops */
   async lastEntryBefore(beforeSeq: number | null): Promise<{ seq: number; hash: Uint8Array; at: Date } | null> {
-    const r = await this.#t.entries.findOne(beforeSeq !== null ? { seq: { $lt: beforeSeq } } : {}, { sort: { seq: -1 } });
+    const r = await this.#t.entries.findOne(beforeSeq !== null ? { seq: { op: '<', value: beforeSeq } } : {}, { sort: { seq: -1 } });
     return r ? { seq: Number(r.seq), hash: bytes(r.hash), at: r.at } : null;
   }
 
@@ -484,11 +510,15 @@ export class AuditRepository {
    */
   async purgeEntries(beforeSeq: number | null, cutoff: Date): Promise<{ removed: number }> {
     // the only delete of entries: those before the cut-off (indexed at) that come before every kept entry in the chain
-    const doomed: Filter = beforeSeq === null ? { at: { $lt: cutoff } } : { at: { $lt: cutoff }, seq: { $lt: beforeSeq } };
+    const before = { at: { op: '<' as const, value: cutoff } };
+    const doomed: EntryFilter = beforeSeq === null ? before : { ...before, seq: { op: '<', value: beforeSeq } };
     // their related targets carry the entry's at: every target before the cut-off but those of kept (backdated) entries
-    const keptBefore = beforeSeq === null ? [] : await this.#t.entries.distinct<string>('id', { at: { $lt: cutoff }, seq: { $gte: beforeSeq } });
-    await this.#t.targets.deleteMany({ at: { $lt: cutoff }, ...(keptBefore.length ? { entry_id: { $nin: keptBefore } } : {}) });
-    return { removed: await this.#t.entries.deleteMany(doomed) };
+    const keptBefore = beforeSeq === null ? [] : await this.#t.entries.distinct<string>('id', { ...before, seq: { op: '>=', value: beforeSeq } });
+    // entry_id is never null, so `not in` — which skips nulls, as SQL does — is the same set $nin named.
+    // Both deletes go through the port: these two tables are append-only, and on MySQL a delete from one is
+    // refused unless the session says it is the purge (queries.ts, docs/10 §6.3)
+    await this.queries.purgeRows<TargetRow>(this.store, 'entry_targets', { ...before, ...(keptBefore.length ? { entry_id: { op: 'not in', value: keptBefore } } : {}) });
+    return { removed: await this.queries.purgeRows<EntryRow>(this.store, 'entries', doomed) };
   }
 
   /* ---------------------------------------------------------------- integrity checks */
