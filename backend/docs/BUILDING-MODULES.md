@@ -235,6 +235,15 @@ queries.mysql.ts  the SQL. `ReadOptions.and` adds one EXISTS to an ordinary Tabl
 repository takes `(ctx.store, queries)` and passes the port to its transaction clone. `ctx.mysql` is there
 only while the module's data is in MySQL, which is what makes that line the whole switch.
 
+**The detector cannot see a read taken *outside* the transaction that writes it**, and that is where the worst
+of them hide. It watches unlocked reads *inside* a transaction, so a service that reads a row (or a list, or
+"the latest one"), opens a transaction and then writes what it decided from that read gets no warning at all —
+on either database. Every open row of docs/10 Appendix C turned out to be this shape, and so did a fix in each
+of five modules converted in tranche C. The tell is a write whose **value or target row** comes from above the
+`repo.transaction(…)` call: `map.get(id) ?? row.x`, `lines[i].qty + n`, "the newest submission". The answer is
+to re-read it inside the transaction with `{ forUpdate: true }` and decide again there — or, where the whole
+decision is one statement, a guarded `updateMany` whose filter does the checking.
+
 **Lock a row before you write it, even where something else already serialises the writers.** Converting
 media turned seven tests red at once: `attach` and `detach` read an asset's usage row and then write it,
 inside a transaction that had already locked the *asset*. The read-modify-write detector (§11.2 rule 1) was
