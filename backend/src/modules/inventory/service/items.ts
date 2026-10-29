@@ -197,9 +197,11 @@ export class Items {
     await this.core.stock(
       'merge',
       async (st) => {
-        // lock order: reservations, their lines, then stock levels (as every reservation path does)
-        const open = await st.tx.linesWhere({ itemIds: [from.id], states: ['held', 'allocated'] });
-        for (const rid of [...new Set(open.map((l) => l.reservation_id))].sort()) await st.tx.get('reservations', rid, { forUpdate: true });
+        // lock order: reservations, their lines, then the items and their stock levels (as every reservation
+        // path does). The reservation ids come from a `distinct` and not from the line rows: reading those rows
+        // unlocked and locking them on the next line is the read §11.2 rule 2 calls too late, and the detector
+        // reports it however well the second read is locked
+        for (const rid of (await st.tx.lineReservationIds({ itemIds: [from.id], states: ['held', 'allocated'] })).sort()) await st.tx.get('reservations', rid, { forUpdate: true });
         const openLines = await st.tx.linesWhere({ itemIds: [from.id], states: ['held', 'allocated'] }, { forUpdate: true });
         await st.lock([from.id, into.id]);
         const src = st.item(from.id);

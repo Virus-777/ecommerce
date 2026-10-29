@@ -17,10 +17,10 @@ import { fixedClock } from '../../../kernel/lib/clock.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import type * as access from '../../../spec/access.js';
 import type * as audit from '../../../spec/audit.js';
-import { spec, type InventoryPublicApi, type StockItem } from '../../../spec/inventory.js';
+import type { StoreTable } from '../../../kernel/store/index.js';
+import { type InventoryPublicApi, type StockItem } from '../../../spec/inventory.js';
 import type * as reports from '../../../spec/reports.js';
 import { auth, buildTestApp, token } from '../../../testing/app.js';
-import { schemas } from '../schema.js';
 
 export const INVENTORY_EVENTS = [
   'inventory.stock.changed',
@@ -191,8 +191,13 @@ export const quantities = async (h: Harness, id: string) => (await admin(h, 'GET
 
 export const eventsNamed = (h: Harness, name: string) => h.events.filter((e) => e.name === name).map((e) => e.payload);
 
-/** One of inventory's collections, read and written the way the repository does */
-export const table = (h: Harness, name: string) => h.app.kernel.mongo.module('inventory', spec.collections, schemas).table<any>(name);
+/**
+ * One of inventory's tables, read and written the way the repository does, **through the store the app chose**
+ * — MongoDB or MySQL, whichever `MYSQL_MODULES` put this module's data in. A helper that built a MongoDB store
+ * of its own would read an empty database the day the module moved, with nothing in the log to say why
+ * (docs/10 §10.5c: that is how twenty-two of access's tests failed at once).
+ */
+export const table = (h: Harness, name: string): StoreTable<any> => h.app.kernel.boot.stores.get('inventory')!.table<any>(name);
 
 const GROUPS = ['available', 'reserved', 'incoming', 'damaged_held', 'returned'] as const;
 
@@ -220,7 +225,7 @@ export async function ledgerMismatches(h: Harness): Promise<unknown[]> {
 /** Open reservation lines account for every Reserved unit */
 export async function reservedMismatches(h: Harness): Promise<unknown[]> {
   const open = new Map<string, number>();
-  for (const r of await table(h, 'reservation_lines').find({ state: { $in: ['held', 'allocated'] } })) {
+  for (const r of await table(h, 'reservation_lines').find({ state: ['held', 'allocated'] })) {
     const k = `${r.stock_item_id}|${r.location_id}`;
     open.set(k, (open.get(k) ?? 0) + r.quantity - r.fulfilled_qty - r.released_qty);
   }
@@ -232,7 +237,17 @@ export async function reservedMismatches(h: Harness): Promise<unknown[]> {
   return out;
 }
 
-/** Keys inventory claimed in the kernel inbox */
-export async function inboxKeys(h: Harness): Promise<string[]> {
-  return (await h.app.kernel.mongo.kernel('processed_events').find({ module: 'inventory' }).lean()).map((r: any) => r.key);
+/**
+ * Which of these keys inventory has already claimed in the kernel inbox, in the order they were asked for.
+ *
+ * It asks per key instead of listing the inbox, because the inbox is the **kernel's** own table and moves with
+ * `KERNEL_STORE`, not with this module: reading it through `kernel.mongo` answers from an empty MongoDB
+ * collection as soon as the kernel's data is in MySQL. `Store.seen(key)` is the same question either way, and
+ * naming the keys expected is what the one caller was asserting anyway (`arrayContaining`).
+ */
+export async function claimedKeys(h: Harness, keys: string[]): Promise<string[]> {
+  const store = h.app.kernel.boot.stores.get('inventory')!;
+  const out: string[] = [];
+  for (const key of keys) if (await store.seen(key)) out.push(key);
+  return out;
 }

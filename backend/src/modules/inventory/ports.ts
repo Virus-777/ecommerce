@@ -12,7 +12,7 @@ export type Patch<T extends Table> = Partial<Row<T>>;
 export type IdTable = Exclude<Table, 'stock_levels' | 'inbound_lines' | 'transfer_lines' | 'count_lines'>;
 
 export interface Lock {
-  /** Lock the document for this transaction (lock-by-write, kernel/mongo/table.ts): the decision depends on it */
+  /** Lock the row for this transaction (SELECT … FOR UPDATE, or lock-by-write on MongoDB): the decision depends on it */
   forUpdate?: boolean;
 }
 

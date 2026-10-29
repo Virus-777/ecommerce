@@ -1,7 +1,7 @@
 /** Stock items, seller stock management (own items only), company SKUs, locations and low-stock alerts. */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
-import { admin, eventsNamed, harness, ledgerMismatches, officialItem, seller, sellerItem, sku, staffHeaders, warehouse, type Harness } from './helpers.js';
+import { admin, eventsNamed, harness, ledgerMismatches, officialItem, seller, sellerItem, sku, staffHeaders, table, warehouse, type Harness } from './helpers.js';
 
 let h: Harness;
 let reno: { id: string };
@@ -91,6 +91,47 @@ describe('seller stock (own items only)', () => {
     expect(q.items.map((r: { stockItemId: string }) => r.stockItemId)).toEqual([out.id]);
     const summary = (await seller(h, sellerId, 'GET', '/summary')).json();
     expect(summary).toEqual({ inStockSkus: 1, inStockUnits: 22, lowStockSkus: 1, outOfStockSkus: 1, reservedUnits: 0, outOfStockLabels: ['Aurora Speaker, Silver'] });
+  });
+
+  /**
+   * An item with no `stock_levels` row at all. Nothing creates one today — `createStockItem` always calls
+   * `ensureLevel` — so the row is written straight to the table, which is the only way to ask the question.
+   *
+   * It is asked because the stock list's quantity filters are a join, and the two databases join differently:
+   * MongoDB's `$lookup` keeps an item that has no levels (it sums to zero, so the item is out of stock), while
+   * `inventory_v_stock_rows` is an *inner* join, so reading that view on its own would drop exactly the items a
+   * low-stock list exists to show. This assertion fails if the MySQL side is ever written as an inner join —
+   * checked by making it one, when the item disappears from the first two answers below.
+   */
+  it('lists an item with no stock level row at all, as out of stock', async () => {
+    const sellerId = newId();
+    const id = newId();
+    const now = h.clock.now();
+    await table(h, 'stock_items').insert({
+      id,
+      owner_type: 'seller',
+      seller_id: sellerId,
+      sku: sku('NOLVL'),
+      offer_id: newId(),
+      product_id: newId(),
+      variant_id: newId(),
+      condition: 'new',
+      label: 'Aurora Speaker, Unstocked',
+      low_stock_threshold: null,
+      reorder_quantity: null,
+      unit_cost_amount: null,
+      currency: 'USD',
+      primary_bin_code: null,
+      low_since: null,
+      service_location_id: null,
+      archived: false,
+      created_at: now,
+      updated_at: now,
+    });
+    const ids = (res: { json: () => { items: { stockItemId: string }[] } }) => res.json().items.map((r) => r.stockItemId);
+    expect(ids(await seller(h, sellerId, 'GET', '/stock-items'))).toEqual([id]);
+    expect(ids(await seller(h, sellerId, 'GET', '/stock-items?state=out_of_stock'))).toEqual([id]);
+    expect(ids(await seller(h, sellerId, 'GET', '/stock-items?state=in_stock'))).toEqual([]);
   });
 
   it("answers 404 for another seller's item on every route", async () => {

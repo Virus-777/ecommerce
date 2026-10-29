@@ -58,11 +58,20 @@ export class StockTx {
     readonly now: Date,
   ) {}
 
-  /** Loads and locks the items' level rows (in id order, so concurrent work cannot deadlock). Unknown ids are skipped. */
+  /**
+   * Loads and locks the items and their level rows, each set in id order — the items by their primary key, the
+   * levels by `(stock_item_id, location_id)` — so two transactions that hold both never take them in opposite
+   * orders (§11.2 rule 3). Unknown ids are skipped.
+   *
+   * The **item** rows are locked as well as the levels, which is what converting the module changed here:
+   * `finish` reads `low_since` before writing it, `move` reads `updated_at` before writing it and `setArchived`
+   * reads `archived` before writing the opposite, so the item row carries values this transaction works out and
+   * writes back (§11.2 rule 1).
+   */
   async lock(itemIds: string[]): Promise<void> {
     const ids = [...new Set(itemIds)].filter((id) => !this.#levels.has(id)).sort();
     if (!ids.length) return;
-    const items = await this.tx.items({ ids, includeArchived: true });
+    const items = await this.tx.itemsForUpdate(ids);
     for (const it of items) this.items.set(it.id, it);
     const levels = await this.tx.levels(ids, { forUpdate: true });
     for (const id of ids) if (this.items.has(id)) this.#levels.set(id, new Map());

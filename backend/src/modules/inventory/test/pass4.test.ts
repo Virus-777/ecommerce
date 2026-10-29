@@ -4,7 +4,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
-import { admin, harness, inboxKeys, ledgerMismatches, officialItem, quantities, reservedMismatches, table, warehouse, type Harness } from './helpers.js';
+import { admin, claimedKeys, harness, ledgerMismatches, officialItem, quantities, reservedMismatches, table, warehouse, type Harness } from './helpers.js';
 
 let h: Harness;
 let main: { id: string; code: string };
@@ -121,8 +121,8 @@ describe('consumers dedupe through the inbox', () => {
     await h.app.kernel.events.drain();
     expect(await quantities(h, a.id)).toMatchObject({ available: 4, reserved: 1 });
 
-    const keys = await inboxKeys(h);
-    expect(keys).toEqual(expect.arrayContaining([`item-cancelled:${cancellationId}:${o.orderItemId}:${o.reservationId}`, `shipment-dispatched:${shipmentId}`]));
+    const expected = [`item-cancelled:${cancellationId}:${o.orderItemId}:${o.reservationId}`, `shipment-dispatched:${shipmentId}`];
+    expect(await claimedKeys(h, expected)).toEqual(expected);
     await consistent();
   });
 });
